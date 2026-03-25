@@ -144,18 +144,29 @@ function ZoomTracker({ onZoom }: { onZoom: (z: number) => void }) {
   return null;
 }
 
-// ── Smooth map re-centring without remounting the MapContainer ───────────────
-function MapCentre({ lat, lng }: { lat: number; lng: number }) {
+// ── Follow selected vessel: fly on selection, then track position updates ─────
+function FollowVessel({ vessel }: { vessel: { mmsi: string; latitude: number; longitude: number } | null }) {
   const map = useMap();
-  const prev = useRef({ lat, lng });
+  const prevMmsi = useRef<string | null>(null);
+  const prevPos  = useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
-    const d =
-      Math.abs(prev.current.lat - lat) + Math.abs(prev.current.lng - lng);
-    if (d > 0.0005) {
-      map.flyTo([lat, lng], undefined, { duration: 0.7, easeLinearity: 0.5 });
-      prev.current = { lat, lng };
+    if (!vessel) {
+      prevMmsi.current = null;
+      prevPos.current  = null;
+      return;
     }
-  }, [lat, lng, map]);
+    const { mmsi, latitude: lat, longitude: lng } = vessel;
+    const isNewSelection = mmsi !== prevMmsi.current;
+    const posChanged = prevPos.current
+      ? prevPos.current.lat !== lat || prevPos.current.lng !== lng
+      : false;
+
+    if (isNewSelection || posChanged) {
+      map.flyTo([lat, lng], undefined, { duration: 0.6, easeLinearity: 0.5 });
+    }
+    prevMmsi.current = mmsi;
+    prevPos.current  = { lat, lng };
+  }, [vessel?.mmsi, vessel?.latitude, vessel?.longitude, map]);  // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
 
@@ -547,16 +558,6 @@ function App() {
   }, [cpaAlerts]);
 
   const selectedVessel = vessels.find((v) => v.mmsi === selectedMmsi) ?? null;
-  const centerLat =
-    selectedVessel?.latitude ??
-    (vessels.length === 0
-      ? DEFAULT_CENTER.lat
-      : vessels.reduce((s, v) => s + v.latitude, 0) / vessels.length);
-  const centerLng =
-    selectedVessel?.longitude ??
-    (vessels.length === 0
-      ? DEFAULT_CENTER.lng
-      : vessels.reduce((s, v) => s + v.longitude, 0) / vessels.length);
 
   return (
     <div className="app-shell">
@@ -631,7 +632,7 @@ function App() {
         <div className="map-wrap">
         <LayerToggle layers={layers} onChange={key => setLayers(prev => ({ ...prev, [key]: !prev[key] }))} />
         <MapContainer
-          center={[centerLat, centerLng]}
+          center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]}
           zoom={11}
           scrollWheelZoom
           className="map-view"
@@ -640,7 +641,7 @@ function App() {
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
-          <MapCentre lat={centerLat} lng={centerLng} />
+          <FollowVessel vessel={selectedVessel} />
           <ZoomTracker onZoom={setZoom} />
 
           {/* CPA warning lines — rendered below ship icons */}
