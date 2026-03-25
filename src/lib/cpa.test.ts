@@ -61,6 +61,28 @@ test('calcCpa detects head-on encounter with near-zero CPA', () => {
   assert.ok(Math.abs(result.tcpa - 6) < 0.5, `expected ~6 min, got ${result.tcpa} min`);
 });
 
+test('findCpaAlerts annotates head-on encounters with COLREG label and risk score', () => {
+  const a = createVessel({
+    mmsi: '440000016',
+    longitude: 129 - nmToLng(0.8),
+    cog: 90,
+    heading: 90,
+  });
+  const b = createVessel({
+    mmsi: '440000017',
+    longitude: 129 + nmToLng(0.8),
+    cog: 270,
+    heading: 270,
+  });
+
+  const [alert] = findCpaAlerts([a, b]);
+
+  assert.ok(alert);
+  assert.equal(alert.colreg, 'head-on');
+  assert.equal(alert.colregLabel, '정면 마주침');
+  assert.ok(alert.riskScore >= 0 && alert.riskScore <= 100);
+});
+
 test('turn rate changes predicted CPA compared with straight-line motion', () => {
   const a = createVessel({
     mmsi: '440000003',

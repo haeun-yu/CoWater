@@ -326,6 +326,70 @@ p, h1, h2, h3 { margin: 0; }
   gap: 10px;
 }
 
+.list-controls {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search-input {
+  width: 100%;
+  border: 1px solid rgba(100, 180, 220, 0.18);
+  border-radius: 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-input:focus {
+  border-color: rgba(117, 212, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(20, 198, 232, 0.12);
+}
+
+.filter-chip {
+  border: 1px solid rgba(100, 180, 220, 0.18);
+  border-radius: 999px;
+  background: rgba(8, 28, 42, 0.7);
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.filter-chip:hover {
+  border-color: rgba(117, 212, 255, 0.32);
+  color: var(--text-primary);
+}
+
+.filter-chip.active {
+  background: rgba(20, 198, 232, 0.15);
+  border-color: rgba(20, 198, 232, 0.38);
+  color: #9cecff;
+}
+
+.empty-state {
+  padding: 14px 12px;
+  border: 1px dashed rgba(100, 180, 220, 0.18);
+  border-radius: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 0.78rem;
+  background: rgba(7, 24, 36, 0.45);
+}
+
 .ship-list-item {
   display: flex;
   justify-content: space-between;
@@ -389,6 +453,29 @@ p, h1, h2, h3 { margin: 0; }
   align-items: flex-end;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.risk-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+
+.risk-chip.warning {
+  background: rgba(255, 153, 0, 0.12);
+  color: #ffc266;
+  border-color: rgba(255, 153, 0, 0.28);
+}
+
+.risk-chip.danger {
+  background: rgba(255, 60, 60, 0.14);
+  color: #ff8d8d;
+  border-color: rgba(255, 60, 60, 0.28);
 }
 
 .ship-sog-row {
@@ -651,6 +738,22 @@ p, h1, h2, h3 { margin: 0; }
 }
 
 .meta-chip.muted { color: var(--text-muted); }
+
+.meta-chip-button {
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.meta-chip-button.active {
+  color: #9cecff;
+  border-color: rgba(20, 198, 232, 0.35);
+  background: rgba(20, 198, 232, 0.12);
+}
+
+.meta-chip-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 .map-view {
   flex: 1;
@@ -1027,6 +1130,75 @@ p, h1, h2, h3 { margin: 0; }
   color: #ff8080;
   border: 1px solid rgba(255, 45, 45, 0.4);
   animation: alert-flash 1s ease-in-out infinite;
+}
+
+.encounter-list {
+  display: grid;
+  gap: 8px;
+}
+
+.encounter-card {
+  width: 100%;
+  border: 1px solid rgba(100, 180, 220, 0.12);
+  border-radius: 12px;
+  background: var(--bg-row);
+  color: inherit;
+  text-align: left;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.encounter-card:hover {
+  transform: translateY(-1px);
+  background: rgba(14, 44, 66, 0.9);
+}
+
+.encounter-card.warning {
+  border-color: rgba(255, 153, 0, 0.24);
+}
+
+.encounter-card.danger {
+  border-color: rgba(255, 60, 60, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 60, 60, 0.06);
+}
+
+.encounter-header,
+.encounter-meta,
+.encounter-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.encounter-header {
+  margin-bottom: 6px;
+}
+
+.encounter-header strong {
+  display: block;
+  font-size: 0.84rem;
+  margin-bottom: 2px;
+}
+
+.encounter-header span,
+.encounter-meta span,
+.encounter-stats span {
+  min-width: 0;
+}
+
+.encounter-header > div span,
+.encounter-meta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.encounter-stats {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-primary);
 }
 
 /* map-wrap: positions the map relative so the floating LayerToggle can anchor to it */

@@ -70,6 +70,7 @@ const MAX_EVENTS = 40;
 // Busan port centre (for hazard approach detection)
 const BUSAN_PORT = { lat: 35.10, lng: 129.04 };
 const HAZARD_PORT_NM = 2.0; // nm threshold
+type EventSeverityFilter = 'all' | MarineEvent['severity'];
 
 // ---------- layer flags ----------
 
@@ -142,6 +143,24 @@ const MOTH_STATUS_KO: Record<MothConnectionState, string> = {
 
 const MOTH_SUB_URL = import.meta.env.VITE_MOTH_SUB_URL ?? DEFAULT_MOTH_SUB_URL;
 const DEFAULT_CENTER = { lat: 35.08, lng: 129.13 };
+const EVENT_FILTER_LABELS: Record<EventSeverityFilter, string> = {
+  all: '전체',
+  danger: '위험',
+  warning: '주의',
+  info: '정보',
+};
+
+function getCounterpartMmsi(alert: CpaAlert, mmsi: string) {
+  return alert.mmsiA === mmsi ? alert.mmsiB : alert.mmsiA;
+}
+
+function getCounterpartName(alert: CpaAlert, mmsi: string) {
+  return alert.mmsiA === mmsi ? alert.nameB : alert.nameA;
+}
+
+function getCounterpartType(alert: CpaAlert, mmsi: string) {
+  return alert.mmsiA === mmsi ? alert.vesselTypeB : alert.vesselTypeA;
+}
 
 // ── Report zoom level changes to parent ──────────────────────────────────────
 function ZoomTracker({ onZoom }: { onZoom: (z: number) => void }) {
@@ -360,9 +379,14 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
   cpaAlerts: CpaAlert[];
   onSelect: (mmsi: string) => void;
 }) {
+  const [filter, setFilter] = useState<EventSeverityFilter>('all');
   const hasCpa = cpaAlerts.length > 0;
   const hasEvents = events.length > 0;
   if (!hasCpa && !hasEvents) return null;
+
+  const visibleCpaAlerts = cpaAlerts.filter((alert) => filter === 'all' || alert.severity === filter);
+  const visibleEvents = events.filter((event) => filter === 'all' || event.severity === filter);
+  const visibleCount = visibleCpaAlerts.length + visibleEvents.length;
 
   return (
     <section className="event-panel">
@@ -371,12 +395,25 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
           {hasCpa && <span className="event-blink">⚠</span>}
           {' '}이벤트 피드
         </h2>
-        <span className="event-count">{(hasCpa ? cpaAlerts.length : 0) + events.length}</span>
+        <span className="event-count">{visibleCount}</span>
+      </div>
+
+      <div className="filter-row">
+        {(Object.keys(EVENT_FILTER_LABELS) as EventSeverityFilter[]).map((key) => (
+          <button
+            key={key}
+            className={`filter-chip${filter === key ? ' active' : ''}`}
+            type="button"
+            onClick={() => setFilter(key)}
+          >
+            {EVENT_FILTER_LABELS[key]}
+          </button>
+        ))}
       </div>
 
       <div className="event-list">
         {/* Live CPA alerts at top */}
-        {cpaAlerts.map(alert => (
+        {visibleCpaAlerts.map(alert => (
           <div
             key={`live-cpa-${alert.mmsiA}-${alert.mmsiB}`}
             className={`event-item ${alert.severity}`}
@@ -389,14 +426,16 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
               <span className="event-msg">
                 {alert.severity === 'danger' ? '충돌 위험' : '충돌 주의'}: {alert.nameA} ↔ {alert.nameB}
               </span>
-              <span className="event-meta">CPA {alert.cpa.toFixed(2)} nm · TCPA {alert.tcpa.toFixed(1)} min</span>
+              <span className="event-meta">
+                {alert.colregLabel} · Risk {alert.riskScore} · CPA {alert.cpa.toFixed(2)} nm · TCPA {alert.tcpa.toFixed(1)} min
+              </span>
             </div>
             <span className="event-live-badge">LIVE</span>
           </div>
         ))}
 
         {/* Historical events */}
-        {events.map(evt => (
+        {visibleEvents.map(evt => (
           <div
             key={evt.id}
             className={`event-item ${evt.severity}`}
@@ -411,6 +450,12 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
             </div>
           </div>
         ))}
+
+        {visibleCount === 0 && (
+          <div className="empty-state">
+            현재 필터에 해당하는 이벤트가 없습니다.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -424,6 +469,9 @@ function App() {
   const [frames, setFrames] = useState<AisNmeaFrame[]>([]);
   const [tick, setTick] = useState(0);
   const [zoom, setZoom] = useState(11);
+  const [followSelected, setFollowSelected] = useState(true);
+  const [vesselQuery, setVesselQuery] = useState("");
+  const [riskOnly, setRiskOnly] = useState(false);
   const [connectionState, setConnectionState] =
     useState<MothConnectionState>("connecting");
   const tickRef = useRef(0);
@@ -531,6 +579,37 @@ function App() {
     }
     return map;
   }, [cpaAlerts]);
+
+  const vesselAlerts = useMemo(() => {
+    const map = new Map<string, CpaAlert[]>();
+    for (const alert of cpaAlerts) {
+      map.set(alert.mmsiA, [...(map.get(alert.mmsiA) ?? []), alert]);
+      map.set(alert.mmsiB, [...(map.get(alert.mmsiB) ?? []), alert]);
+    }
+    return map;
+  }, [cpaAlerts]);
+
+  const filteredVessels = useMemo(() => {
+    const query = vesselQuery.trim().toLowerCase();
+    return vessels.filter((vessel) => {
+      if (riskOnly && !vesselAlertLevel.has(vessel.mmsi)) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = [
+        vessel.name,
+        vessel.mmsi,
+        vessel.callSign,
+        vessel.destination,
+        vessel.vesselType,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [riskOnly, vesselAlertLevel, vesselQuery, vessels]);
 
   // Update trails whenever vessels changes
   useEffect(() => {
@@ -712,8 +791,9 @@ function App() {
           id: `event-cpa-${a.mmsiA}-${a.mmsiB}`,
           type: 'cpa_danger' as const,
           severity: 'danger' as const,
-          message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
+          message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | ${a.colregLabel} | Risk ${a.riskScore} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
           timestamp: now,
+          mmsi: a.mmsiA,
         }))
         .filter(e => !recentIds.has(e.id));
       if (newEvts.length === 0) return prev;
@@ -722,6 +802,7 @@ function App() {
   }, [cpaAlerts]);
 
   const selectedVessel = vessels.find((v) => v.mmsi === selectedMmsi) ?? null;
+  const selectedEncounters = selectedVessel ? vesselAlerts.get(selectedVessel.mmsi) ?? [] : [];
 
   return (
     <div className="app-shell">
@@ -773,9 +854,21 @@ function App() {
             frame={frames.find((f) => f.mmsi === selectedVessel.mmsi)}
             onBack={() => setSelectedMmsi(null)}
             history={vesselHistory.get(selectedVessel.mmsi) ?? []}
+            encounters={selectedEncounters}
+            onSelectRelated={setSelectedMmsi}
           />
         ) : (
-          <VesselList vessels={vessels} onSelect={setSelectedMmsi} />
+          <VesselList
+            vessels={filteredVessels}
+            totalCount={vessels.length}
+            riskCount={vesselAlertLevel.size}
+            query={vesselQuery}
+            riskOnly={riskOnly}
+            vesselAlertLevel={vesselAlertLevel}
+            onQueryChange={setVesselQuery}
+            onSelect={setSelectedMmsi}
+            onToggleRiskOnly={() => setRiskOnly((value) => !value)}
+          />
         )}
       </aside>
 
@@ -790,7 +883,14 @@ function App() {
             <span className="meta-chip">
               <LiveDot /> moth 중계 구독
             </span>
-            <span className="meta-chip muted">좌측에서 선박 선택</span>
+            <button
+              className={`meta-chip meta-chip-button${followSelected ? ' active' : ''}`}
+              type="button"
+              disabled={!selectedVessel}
+              onClick={() => setFollowSelected((value) => !value)}
+            >
+              {followSelected ? '선택 선박 추적 ON' : '선택 선박 추적 OFF'}
+            </button>
           </div>
         </div>
 
@@ -806,7 +906,7 @@ function App() {
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
-          <FollowVessel vessel={selectedVessel} />
+          <FollowVessel vessel={followSelected ? selectedVessel : null} />
           <ZoomTracker onZoom={setZoom} />
 
           {/* Traffic heatmap — rendered below everything */}
@@ -902,18 +1002,62 @@ function App() {
 
 function VesselList({
   vessels,
+  totalCount,
+  riskCount,
+  query,
+  riskOnly,
+  vesselAlertLevel,
+  onQueryChange,
   onSelect,
+  onToggleRiskOnly,
 }: {
   vessels: Vessel[];
+  totalCount: number;
+  riskCount: number;
+  query: string;
+  riskOnly: boolean;
+  vesselAlertLevel: Map<string, 'warning' | 'danger'>;
+  onQueryChange: (value: string) => void;
   onSelect: (mmsi: string) => void;
+  onToggleRiskOnly: () => void;
 }) {
   return (
     <section className="list-panel">
       <div className="panel-heading panel-heading-sticky">
         <h2>선박 목록</h2>
-        <span>{vessels.length}척 관제 중</span>
+        <span>{vessels.length} / {totalCount}척</span>
+      </div>
+      <div className="list-controls">
+        <input
+          className="search-input"
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="선박명 · MMSI · 목적지 검색"
+        />
+        <div className="filter-row">
+          <button
+            className={`filter-chip${riskOnly ? ' active' : ''}`}
+            type="button"
+            onClick={onToggleRiskOnly}
+          >
+            위험 선박만 {riskCount > 0 ? riskCount : ''}
+          </button>
+          {query && (
+            <button
+              className="filter-chip"
+              type="button"
+              onClick={() => onQueryChange("")}
+            >
+              검색 초기화
+            </button>
+          )}
+        </div>
       </div>
       <div className="ship-list">
+        {vessels.length === 0 && (
+          <div className="empty-state">조건에 맞는 선박이 없습니다.</div>
+        )}
         {vessels.map((vessel) => (
           <button
             className="ship-list-item"
@@ -932,6 +1076,11 @@ function VesselList({
             </div>
             <div className="ship-item-right">
               <NavBadge status={vessel.navigationStatus} />
+              {vesselAlertLevel.has(vessel.mmsi) && (
+                <span className={`risk-chip ${vesselAlertLevel.get(vessel.mmsi)}`}>
+                  {vesselAlertLevel.get(vessel.mmsi) === 'danger' ? 'CPA 위험' : 'CPA 주의'}
+                </span>
+              )}
               <div className="ship-sog-row">
                 <span className="sog-value">{vessel.sog.toFixed(1)} kn</span>
                 <SogBar sog={vessel.sog} />
@@ -954,11 +1103,15 @@ function VesselDetail({
   frame,
   onBack,
   history,
+  encounters,
+  onSelectRelated,
 }: {
   vessel: Vessel;
   frame?: AisNmeaFrame;
   onBack: () => void;
   history: {t: number, sog: number, cog: number}[];
+  encounters: CpaAlert[];
+  onSelectRelated: (mmsi: string) => void;
 }) {
   return (
     <section className="detail-panel">
@@ -1038,6 +1191,47 @@ function VesselDetail({
         <InfoRow label="ETA" value={formatUtc(vessel.etaUtc)} />
       </DetailSection>
 
+      <div className="detail-section">
+        <p className="detail-section-title">관제 경보</p>
+        {encounters.length > 0 ? (
+          <div className="encounter-list">
+            {encounters.map((alert) => {
+              const counterpartMmsi = getCounterpartMmsi(alert, vessel.mmsi);
+              const counterpartName = getCounterpartName(alert, vessel.mmsi);
+              const counterpartType = getCounterpartType(alert, vessel.mmsi);
+              return (
+                <button
+                  key={`${alert.mmsiA}-${alert.mmsiB}`}
+                  className={`encounter-card ${alert.severity}`}
+                  type="button"
+                  onClick={() => onSelectRelated(counterpartMmsi)}
+                >
+                  <div className="encounter-header">
+                    <div>
+                      <strong>{counterpartName}</strong>
+                      <span>{counterpartType}</span>
+                    </div>
+                    <span className={`cpa-sev-badge ${alert.severity}`}>
+                      {alert.severity === 'danger' ? '위험' : '주의'}
+                    </span>
+                  </div>
+                  <div className="encounter-meta">
+                    <span>{alert.colregLabel}</span>
+                    <span>Risk {alert.riskScore}</span>
+                  </div>
+                  <div className="encounter-stats">
+                    <span>CPA {alert.cpa.toFixed(2)} nm</span>
+                    <span>TCPA {alert.tcpa.toFixed(1)} min</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-state">현재 활성 CPA/TCPA 경보가 없습니다.</div>
+        )}
+      </div>
+
       {/* SOG/COG history sparkline */}
       <div className="detail-section">
         <p className="detail-section-title">속도 / 침로 이력</p>
@@ -1084,6 +1278,7 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
               {isDanger ? '⚠ 위험' : '주의'}
             </span>
             <span>{alert.nameA} ↔ {alert.nameB}</span>
+            <span>{alert.colregLabel} · Risk {alert.riskScore}</span>
             <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)}&nbsp;nm</strong>
               &nbsp;·&nbsp;TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)}&nbsp;min</strong>
             </span>
