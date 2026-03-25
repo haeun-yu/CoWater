@@ -16,7 +16,7 @@ import {
   parseFrameBatchPayload,
 } from "./lib/aisStream";
 import L from "leaflet";
-import 'leaflet.heat';
+import './lib/leafletHeat';
 import { calcMetersPerPixel, createShipIcon } from "./lib/shipIcon";
 import { buildDangerZone } from "./lib/dangerZone";
 import { findCpaAlerts, type CpaAlert } from "./lib/cpa";
