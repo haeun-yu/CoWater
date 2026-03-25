@@ -16,6 +16,7 @@ import {
   parseFrameBatchPayload,
 } from "./lib/aisStream";
 import L from "leaflet";
+import 'leaflet.heat';
 import { calcMetersPerPixel, createShipIcon } from "./lib/shipIcon";
 import { buildDangerZone } from "./lib/dangerZone";
 import { findCpaAlerts, type CpaAlert } from "./lib/cpa";
@@ -25,6 +26,10 @@ import type {
   Vessel,
   VesselType,
 } from "./types";
+
+declare module 'leaflet' {
+  function heatLayer(latlngs: [number, number, number][], options?: object): L.Layer;
+}
 
 // ---------- icons ----------
 
@@ -55,7 +60,7 @@ const TRAIL_MAX_MS = 5 * 60 * 1000; // 5 minutes
 
 interface MarineEvent {
   id: string;
-  type: 'cpa_danger' | 'cpa_warning' | 'course_change' | 'status_change' | 'hazard_port';
+  type: 'cpa_danger' | 'cpa_warning' | 'course_change' | 'status_change' | 'hazard_port' | 'ais_silence' | 'anchor_drag';
   severity: 'info' | 'warning' | 'danger';
   message: string;
   timestamp: number;
@@ -68,13 +73,14 @@ const HAZARD_PORT_NM = 2.0; // nm threshold
 
 // ---------- layer flags ----------
 
-interface LayerFlags { dangerZones: boolean; trails: boolean; labels: boolean; cpaLines: boolean; }
+interface LayerFlags { dangerZones: boolean; trails: boolean; labels: boolean; cpaLines: boolean; heatmap: boolean; }
 
 const LAYER_LABELS: Record<keyof LayerFlags, string> = {
   dangerZones: '위험구간',
   trails:      '항적',
   labels:      '선박명',
   cpaLines:    '충돌 경보선',
+  heatmap:     '밀도 히트맵',
 };
 
 function DangerZone({
@@ -258,6 +264,53 @@ function TrailLayer({ vessel, points, visible }: { vessel: Vessel; points: Trail
   );
 }
 
+// ---------- HeatmapLayer component ----------
+
+function HeatmapLayer({ points, visible }: { points: [number, number, number][]; visible: boolean }) {
+  const map = useMap();
+  const layerRef = useRef<L.Layer | null>(null);
+  useEffect(() => {
+    if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null; }
+    if (!visible || points.length === 0) return;
+    layerRef.current = (L as any).heatLayer(points, { radius: 30, blur: 20, max: 5, gradient: { 0.2: '#0ea5e9', 0.5: '#f59e0b', 0.8: '#ef4444' } });
+    layerRef.current!.addTo(map);
+    return () => { if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null; } };
+  }, [points, visible, map]);
+  return null;
+}
+
+// ---------- VesselSparkChart component ----------
+
+function VesselSparkChart({ history }: { history: {t: number, sog: number, cog: number}[] }) {
+  if (history.length < 2) return <p className="chart-empty">데이터 수집 중...</p>;
+  const W = 220, H = 60, PAD = 4;
+  const maxSog = Math.max(...history.map(h => h.sog), 1);
+  const sogPts = history.map((h, i) => {
+    const x = PAD + (i / (history.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - (h.sog / maxSog) * (H - PAD * 2);
+    return `${x},${y}`;
+  }).join(' ');
+  const cogPts = history.map((h, i) => {
+    const x = PAD + (i / (history.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - (h.cog / 360) * (H - PAD * 2);
+    return `${x},${y}`;
+  }).join(' ');
+  const lastSog = history[history.length - 1].sog;
+  const lastCog = history[history.length - 1].cog;
+  return (
+    <div className="spark-chart">
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        <polyline points={sogPts} fill="none" stroke="#14c6e8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
+        <polyline points={cogPts} fill="none" stroke="#f59e0b" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+      </svg>
+      <div className="spark-legend">
+        <span className="spark-sog">SOG {lastSog.toFixed(1)} kn</span>
+        <span className="spark-cog">COG {lastCog.toFixed(0)}°</span>
+      </div>
+    </div>
+  );
+}
+
 // ---------- LayerToggle component ----------
 
 function LayerToggle({ layers, onChange }: {
@@ -298,6 +351,8 @@ const EVENT_ICON: Record<MarineEvent['type'], string> = {
   course_change: '🔄',
   status_change: '🔵',
   hazard_port:   '⚠️',
+  ais_silence:   '📡',
+  anchor_drag:   '⚓',
 };
 
 function EventPanel({ events, cpaAlerts, onSelect }: {
@@ -381,7 +436,22 @@ function App() {
   const prevVesselsRef = useRef<Map<string, Vessel>>(new Map());
 
   // Layer flags state
-  const [layers, setLayers] = useState<LayerFlags>({ dangerZones: true, trails: true, labels: false, cpaLines: true });
+  const [layers, setLayers] = useState<LayerFlags>({ dangerZones: true, trails: true, labels: false, cpaLines: true, heatmap: false });
+
+  // AIS silence detection
+  const lastSeenRef = useRef<Map<string, number>>(new Map());
+  const [silentMmsis, setSilentMmsis] = useState<Set<string>>(new Set());
+  const prevSilentRef = useRef<Set<string>>(new Set());
+
+  // Anchor drag detection
+  const anchorRefMap = useRef<Map<string, {lat: number, lng: number}>>(new Map());
+  const anchorDragCooldown = useRef<Map<string, number>>(new Map());
+
+  // Traffic heatmap
+  const [heatPoints, setHeatPoints] = useState<[number, number, number][]>([]);
+
+  // Vessel SOG/COG history
+  const [vesselHistory, setVesselHistory] = useState<Map<string, {t: number, sog: number, cog: number}[]>>(new Map());
 
   useEffect(() => {
     let mime: string | null = null;
@@ -480,6 +550,68 @@ function App() {
     });
   }, [vessels]);
 
+  // Update lastSeenRef and heatPoints whenever vessels changes
+  useEffect(() => {
+    if (vessels.length === 0) return;
+    const now = Date.now();
+    for (const v of vessels) {
+      lastSeenRef.current.set(v.mmsi, now);
+    }
+    // Update heatPoints (rolling buffer of 2000)
+    setHeatPoints(prev => {
+      const next: [number, number, number][] = [...prev, ...vessels.map(v => [v.latitude, v.longitude, 1] as [number, number, number])];
+      return next.length > 2000 ? next.slice(next.length - 2000) : next;
+    });
+  }, [vessels]);
+
+  // Update vessel SOG/COG history (separate effect)
+  useEffect(() => {
+    if (vessels.length === 0) return;
+    const now = Date.now();
+    setVesselHistory(prev => {
+      const next = new Map(prev);
+      for (const v of vessels) {
+        const existing = next.get(v.mmsi) ?? [];
+        const appended = [...existing, { t: now, sog: v.sog, cog: v.cog }];
+        next.set(v.mmsi, appended.length > 30 ? appended.slice(appended.length - 30) : appended);
+      }
+      return next;
+    });
+  }, [vessels]);
+
+  // AIS silence interval (check every 10s, flag vessels silent > 3min)
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      const SILENCE_MS = 180_000;
+      const newSilent = new Set<string>();
+      lastSeenRef.current.forEach((ts, mmsi) => {
+        if (now - ts >= SILENCE_MS) newSilent.add(mmsi);
+      });
+      setSilentMmsis(prev => {
+        // Find newly silent vessels
+        const newlyQuiet: string[] = [];
+        newSilent.forEach(mmsi => {
+          if (!prevSilentRef.current.has(mmsi)) newlyQuiet.push(mmsi);
+        });
+        if (newlyQuiet.length > 0) {
+          const evts: MarineEvent[] = newlyQuiet.map(mmsi => ({
+            id: `ais-silence-${now}-${mmsi}`,
+            type: 'ais_silence' as const,
+            severity: 'info' as const,
+            message: `MMSI ${mmsi}: AIS 신호 3분 이상 수신 없음`,
+            timestamp: now,
+            mmsi,
+          }));
+          setEvents(p => [...evts, ...p].slice(0, MAX_EVENTS));
+        }
+        prevSilentRef.current = newSilent;
+        return newSilent;
+      });
+    }, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Detect vessel events whenever vessels changes
   useEffect(() => {
     if (vessels.length === 0) return;
@@ -526,6 +658,38 @@ function App() {
             message: `${v.name}: 위험화물 선박 부산항 ${distNm.toFixed(1)}nm 접근`,
             timestamp: now, mmsi: v.mmsi,
           });
+        }
+      }
+
+      // Anchor drag detection
+      const isAnchored = v.navigationStatus === 'At anchor' || v.navigationStatus === 'Moored';
+      const wasAnchored = p.navigationStatus === 'At anchor' || p.navigationStatus === 'Moored';
+      if (isAnchored && !anchorRefMap.current.has(v.mmsi)) {
+        // First time detected as anchored/moored — record reference position
+        anchorRefMap.current.set(v.mmsi, { lat: v.latitude, lng: v.longitude });
+      } else if (!isAnchored && wasAnchored) {
+        // Vessel left anchored state — remove reference
+        anchorRefMap.current.delete(v.mmsi);
+      } else if (isAnchored) {
+        const ref = anchorRefMap.current.get(v.mmsi);
+        if (ref) {
+          const avgLat = (v.latitude + ref.lat) / 2;
+          const distM = Math.hypot(
+            (v.latitude  - ref.lat) * 111320,
+            (v.longitude - ref.lng) * 111320 * Math.cos(avgLat * Math.PI / 180),
+          );
+          if (distM >= 50) {
+            const lastDrag = anchorDragCooldown.current.get(v.mmsi) ?? 0;
+            if (now - lastDrag >= 600_000) {
+              anchorDragCooldown.current.set(v.mmsi, now);
+              newEvts.push({
+                id: `${now}-${v.mmsi}-anchor-drag`,
+                type: 'anchor_drag', severity: 'warning',
+                message: `${v.name}: 앵커 드래그 감지 (기준 위치에서 ${distM.toFixed(0)}m 이탈)`,
+                timestamp: now, mmsi: v.mmsi,
+              });
+            }
+          }
         }
       }
     }
@@ -608,6 +772,7 @@ function App() {
             vessel={selectedVessel}
             frame={frames.find((f) => f.mmsi === selectedVessel.mmsi)}
             onBack={() => setSelectedMmsi(null)}
+            history={vesselHistory.get(selectedVessel.mmsi) ?? []}
           />
         ) : (
           <VesselList vessels={vessels} onSelect={setSelectedMmsi} />
@@ -644,6 +809,9 @@ function App() {
           <FollowVessel vessel={selectedVessel} />
           <ZoomTracker onZoom={setZoom} />
 
+          {/* Traffic heatmap — rendered below everything */}
+          <HeatmapLayer points={heatPoints} visible={layers.heatmap} />
+
           {/* CPA warning lines — rendered below ship icons */}
           {layers.cpaLines && cpaAlerts.map((alert) => (
             <CpaLine key={`cpa-${alert.mmsiA}-${alert.mmsiB}`} alert={alert} />
@@ -669,6 +837,7 @@ function App() {
                   vessel.mmsi === selectedMmsi,
                   calcMetersPerPixel(vessel.latitude, zoom),
                   vesselAlertLevel.get(vessel.mmsi) ?? null,
+                  silentMmsis.has(vessel.mmsi),
                 )}
                 position={[vessel.latitude, vessel.longitude]}
               >
@@ -784,10 +953,12 @@ function VesselDetail({
   vessel,
   frame,
   onBack,
+  history,
 }: {
   vessel: Vessel;
   frame?: AisNmeaFrame;
   onBack: () => void;
+  history: {t: number, sog: number, cog: number}[];
 }) {
   return (
     <section className="detail-panel">
@@ -864,6 +1035,12 @@ function VesselDetail({
         <InfoRow label="목적지" value={vessel.destination} />
         <InfoRow label="ETA" value={formatUtc(vessel.etaUtc)} />
       </DetailSection>
+
+      {/* SOG/COG history sparkline */}
+      <div className="detail-section">
+        <p className="detail-section-title">속도 / 침로 이력</p>
+        <VesselSparkChart history={history} />
+      </div>
 
       {/* NMEA */}
       <div className="nmea-card">

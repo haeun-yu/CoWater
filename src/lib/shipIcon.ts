@@ -47,6 +47,7 @@ export function createShipIcon(
   selected: boolean,
   mpp: number,
   alertLevel: 'warning' | 'danger' | null = null,
+  silent = false,
 ): L.DivIcon {
   const pal = selected ? SEL_PAL : PALETTE[vessel.vesselType];
 
@@ -153,8 +154,13 @@ export function createShipIcon(
   const W = Math.ceil(svgW);
   const H_svg = Math.ceil(svgH);
 
+  const silentOverlay = silent
+    ? `<rect x="${PAD}" y="${PAD}" width="${Math.ceil(Wpx + ISO_X)}" height="${Math.ceil(Lpx + ISO_Y)}" fill="rgba(120,120,120,0.5)" rx="1"/>`
+    : '';
+  const silentOpacityStyle = silent ? ' opacity: 0.45;' : '';
+
   const html = `<svg width="${W}" height="${H_svg}" xmlns="http://www.w3.org/2000/svg"
-  style="overflow:visible;transform:rotate(${vessel.heading}deg);transform-origin:${cx}px ${cy}px;filter:drop-shadow(1px 2px 4px rgba(0,0,0,0.65));">
+  style="overflow:visible;transform:rotate(${vessel.heading}deg);transform-origin:${cx}px ${cy}px;filter:drop-shadow(1px 2px 4px rgba(0,0,0,0.65));${silentOpacityStyle}">
 <defs>
   ${glowDef}
   <linearGradient id="dl${uid}" x1="0" y1="0" x2="0.55" y2="1">
@@ -189,6 +195,7 @@ export function createShipIcon(
 
 ${alertRing}
 ${hazard}
+${silentOverlay}
 </svg>`;
 
   return L.divIcon({

@@ -17,30 +17,148 @@ type RouteState = {
 };
 
 const vesselRoutes: Record<string, RoutePoint[]> = {
+  // ── 기존 4척 ────────────────────────────────────────────────────────────
   '440123456': [
     { latitude: 35.0702, longitude: 129.0798 },
-    { latitude: 35.043, longitude: 129.135 },
-    { latitude: 35.016, longitude: 129.192 },
-    { latitude: 34.993, longitude: 129.252 },
+    { latitude: 35.043,  longitude: 129.135  },
+    { latitude: 35.016,  longitude: 129.192  },
+    { latitude: 34.993,  longitude: 129.252  },
   ],
   '440234567': [
     { latitude: 35.0269, longitude: 129.1351 },
-    { latitude: 35.052, longitude: 129.184 },
-    { latitude: 35.081, longitude: 129.232 },
-    { latitude: 35.118, longitude: 129.286 },
+    { latitude: 35.052,  longitude: 129.184  },
+    { latitude: 35.081,  longitude: 129.232  },
+    { latitude: 35.118,  longitude: 129.286  },
   ],
   '440345678': [
-    { latitude: 35.1068, longitude: 129.0107 },
-    { latitude: 35.128, longitude: 129.055 },
-    { latitude: 35.142, longitude: 129.101 },
-    { latitude: 35.116, longitude: 129.149 },
-    { latitude: 35.084, longitude: 129.12 },
+    { latitude: 35.0168, longitude: 129.1507 },
+    { latitude: 35.038,  longitude: 129.192  },
+    { latitude: 35.062,  longitude: 129.234  },
+    { latitude: 35.038,  longitude: 129.272  },
+    { latitude: 35.016,  longitude: 129.234  },
   ],
   '440456789': [
-    { latitude: 35.1597, longitude: 129.0664 },
-    { latitude: 35.142, longitude: 129.11 },
-    { latitude: 35.118, longitude: 129.153 },
-    { latitude: 35.091, longitude: 129.198 },
+    { latitude: 35.045,  longitude: 129.198  },
+    { latitude: 35.062,  longitude: 129.238  },
+    { latitude: 35.082,  longitude: 129.278  },
+    { latitude: 35.062,  longitude: 129.318  },
+  ],
+
+  // ── 추가 15척 ────────────────────────────────────────────────────────────
+  // 모든 경유점은 대한해협 / 부산 외해 (lat<35.05 or lng>129.20) 열린 바다만 사용
+
+  // MV Korea Express — 동쪽 열린 바다 → 부산 외항 접근수로
+  '440600001': [
+    { latitude: 34.95,  longitude: 129.40 },
+    { latitude: 34.97,  longitude: 129.28 },
+    { latitude: 35.00,  longitude: 129.18 },
+    { latitude: 35.03,  longitude: 129.08 },
+  ],
+
+  // MV Busan Gate — 부산 외항 → 남서향 출항 (중국/대한해협 서수로)
+  '440600002': [
+    { latitude: 35.03,  longitude: 129.08 },
+    { latitude: 34.94,  longitude: 128.97 },
+    { latitude: 34.83,  longitude: 128.84 },
+    { latitude: 34.72,  longitude: 128.72 },
+  ],
+
+  // MT Red Star — 대한해협 서부 → 북향 입항
+  '440600003': [
+    { latitude: 34.76,  longitude: 128.92 },
+    { latitude: 34.85,  longitude: 128.97 },
+    { latitude: 34.94,  longitude: 129.00 },
+    { latitude: 35.02,  longitude: 129.03 },
+  ],
+
+  // MV Pacific Dawn — 동쪽 열린 바다 → 서향 입항
+  '440600004': [
+    { latitude: 35.08,  longitude: 129.45 },
+    { latitude: 35.06,  longitude: 129.33 },
+    { latitude: 35.04,  longitude: 129.22 },
+    { latitude: 35.02,  longitude: 129.12 },
+  ],
+
+  // SV Stella Maris — 부산 외항 → 남서향 제주
+  '440600005': [
+    { latitude: 35.02,  longitude: 129.01 },
+    { latitude: 34.92,  longitude: 128.90 },
+    { latitude: 34.80,  longitude: 128.78 },
+    { latitude: 34.68,  longitude: 128.66 },
+  ],
+
+  // TB Iron Bull — 외항 접근수로 왕복 (lat<35.03 구간만)
+  '440600006': [
+    { latitude: 35.00,  longitude: 129.08 },
+    { latitude: 34.98,  longitude: 129.12 },
+    { latitude: 35.00,  longitude: 129.16 },
+    { latitude: 35.02,  longitude: 129.12 },
+  ],
+
+  // MV Hanjin Pioneer — 대한해협 동수로 → 북향
+  '440600007': [
+    { latitude: 34.82,  longitude: 129.22 },
+    { latitude: 34.92,  longitude: 129.24 },
+    { latitude: 35.02,  longitude: 129.26 },
+    { latitude: 35.12,  longitude: 129.28 },
+  ],
+
+  // MT Ulsan Arrow — 외항 → 북동향 울산 (동쪽 열린 바다)
+  '440600008': [
+    { latitude: 35.03,  longitude: 129.15 },
+    { latitude: 35.14,  longitude: 129.28 },
+    { latitude: 35.26,  longitude: 129.42 },
+    { latitude: 35.38,  longitude: 129.54 },
+  ],
+
+  // SV Geoje Ferry — 부산 외항 → 서향 거제 (대한해협 서수로)
+  '440600009': [
+    { latitude: 35.02,  longitude: 129.00 },
+    { latitude: 34.96,  longitude: 128.90 },
+    { latitude: 34.90,  longitude: 128.78 },
+    { latitude: 34.84,  longitude: 128.66 },
+  ],
+
+  // RV Deep Blue — 대한해협 중부 서베이 루프
+  '440600010': [
+    { latitude: 34.88,  longitude: 129.20 },
+    { latitude: 34.82,  longitude: 129.12 },
+    { latitude: 34.78,  longitude: 129.04 },
+    { latitude: 34.82,  longitude: 128.96 },
+    { latitude: 34.88,  longitude: 129.04 },
+    { latitude: 34.88,  longitude: 129.20 },
+  ],
+
+  // MV Eastern Horizon — 동쪽 먼 바다 → 서향 입항
+  '440600011': [
+    { latitude: 35.05,  longitude: 129.55 },
+    { latitude: 35.04,  longitude: 129.42 },
+    { latitude: 35.03,  longitude: 129.30 },
+    { latitude: 35.02,  longitude: 129.16 },
+  ],
+
+  // MT Dark Whale — 대한해협 남부 → 북향 입항
+  '440600013': [
+    { latitude: 34.68,  longitude: 128.97 },
+    { latitude: 34.78,  longitude: 129.00 },
+    { latitude: 34.88,  longitude: 129.01 },
+    { latitude: 34.98,  longitude: 129.02 },
+  ],
+
+  // SV Tsushima Link — 부산 외항 → 남동향 대마도
+  '440600014': [
+    { latitude: 35.02,  longitude: 129.04 },
+    { latitude: 34.94,  longitude: 129.14 },
+    { latitude: 34.84,  longitude: 129.25 },
+    { latitude: 34.72,  longitude: 129.36 },
+  ],
+
+  // MV Dongbang Pioneer — 동쪽 외해 → 북동향 포항 (열린 바다)
+  '440600015': [
+    { latitude: 35.02,  longitude: 129.22 },
+    { latitude: 35.10,  longitude: 129.28 },
+    { latitude: 35.18,  longitude: 129.34 },
+    { latitude: 35.26,  longitude: 129.40 },
   ],
 };
 
