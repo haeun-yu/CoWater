@@ -1,10 +1,12 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   Marker,
   Polygon,
+  Polyline,
   Popup,
   TileLayer,
+  Tooltip,
   useMap,
   useMapEvents,
 } from "react-leaflet";
@@ -13,8 +15,10 @@ import {
   DEFAULT_MOTH_SUB_URL,
   parseFrameBatchPayload,
 } from "./lib/aisStream";
+import L from "leaflet";
 import { calcMetersPerPixel, createShipIcon } from "./lib/shipIcon";
 import { buildDangerZone } from "./lib/dangerZone";
+import { findCpaAlerts, type CpaAlert } from "./lib/cpa";
 import type {
   AisNmeaFrame,
   NavigationStatus,
@@ -262,6 +266,21 @@ function App() {
     };
   }, []);
 
+  const cpaAlerts = useMemo(() => findCpaAlerts(vessels), [vessels]);
+
+  // Map: mmsi → worst alert severity for that vessel
+  const vesselAlertLevel = useMemo(() => {
+    const map = new Map<string, 'warning' | 'danger'>();
+    for (const alert of cpaAlerts) {
+      const upgrade = (mmsi: string, sev: 'warning' | 'danger') => {
+        if (!map.has(mmsi) || sev === 'danger') map.set(mmsi, sev);
+      };
+      upgrade(alert.mmsiA, alert.severity);
+      upgrade(alert.mmsiB, alert.severity);
+    }
+    return map;
+  }, [cpaAlerts]);
+
   const selectedVessel = vessels.find((v) => v.mmsi === selectedMmsi) ?? null;
   const centerLat =
     selectedVessel?.latitude ??
@@ -310,6 +329,11 @@ function App() {
           </div>
         </div>
 
+        {/* CPA alert panel */}
+        {cpaAlerts.length > 0 && (
+          <CpaAlertPanel alerts={cpaAlerts} onSelect={setSelectedMmsi} />
+        )}
+
         {/* Panels */}
         {selectedVessel ? (
           <VesselDetail
@@ -349,6 +373,12 @@ function App() {
           />
           <MapCentre lat={centerLat} lng={centerLng} />
           <ZoomTracker onZoom={setZoom} />
+
+          {/* CPA warning lines — rendered below ship icons */}
+          {cpaAlerts.map((alert) => (
+            <CpaLine key={`cpa-${alert.mmsiA}-${alert.mmsiB}`} alert={alert} />
+          ))}
+
           {vessels.map((vessel) => (
             <Fragment key={vessel.mmsi}>
               <DangerZone
@@ -361,6 +391,7 @@ function App() {
                   vessel,
                   vessel.mmsi === selectedMmsi,
                   calcMetersPerPixel(vessel.latitude, zoom),
+                  vesselAlertLevel.get(vessel.mmsi) ?? null,
                 )}
                 position={[vessel.latitude, vessel.longitude]}
               >
@@ -562,6 +593,110 @@ function VesselDetail({
           </span>
         </div>
         <code className="nmea-sentence">{frame?.sentence ?? "N/A"}</code>
+      </div>
+    </section>
+  );
+}
+
+// ---------- CPA warning line ----------
+
+function CpaLine({ alert }: { alert: CpaAlert }) {
+  const isDanger = alert.severity === 'danger';
+  const color    = isDanger ? '#ff3535' : '#ff9900';
+
+  return (
+    <Fragment>
+      {/* Connecting line between the two vessels */}
+      <Polyline
+        positions={[alert.posA, alert.posB]}
+        pathOptions={{
+          color,
+          weight:    isDanger ? 2.2 : 1.6,
+          dashArray: isDanger ? '5 4' : '7 5',
+          opacity:   isDanger ? 0.85 : 0.65,
+        }}
+      >
+        <Tooltip sticky className="cpa-tooltip">
+          <div className="cpa-tooltip-inner">
+            <span className={`cpa-sev-badge ${alert.severity}`}>
+              {isDanger ? '⚠ 위험' : '주의'}
+            </span>
+            <span>{alert.nameA} ↔ {alert.nameB}</span>
+            <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)}&nbsp;nm</strong>
+              &nbsp;·&nbsp;TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)}&nbsp;min</strong>
+            </span>
+          </div>
+        </Tooltip>
+      </Polyline>
+
+      {/* Small marker at the predicted CPA point */}
+      <Polyline
+        positions={[alert.cpaPoint, alert.cpaPoint]}
+        pathOptions={{ color, weight: 0, opacity: 0 }}
+      />
+      {/* CPA point diamond */}
+      <Marker
+        position={alert.cpaPoint}
+        icon={cpaPointIcon(color)}
+        interactive={false}
+      />
+    </Fragment>
+  );
+}
+
+function cpaPointIcon(color: string) {
+  return L.divIcon({
+    className: '',
+    html: `<svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg"
+               style="overflow:visible;">
+             <polygon points="6,0 12,6 6,12 0,6"
+               fill="${color}" fill-opacity="0.85"
+               stroke="white" stroke-width="0.8"/>
+           </svg>`,
+    iconSize:   [12, 12],
+    iconAnchor: [6, 6],
+  });
+}
+
+// ---------- CPA alert panel ----------
+
+function CpaAlertPanel({
+  alerts,
+  onSelect,
+}: {
+  alerts: CpaAlert[];
+  onSelect: (mmsi: string) => void;
+}) {
+  return (
+    <section className="alert-panel">
+      <div className="panel-heading">
+        <h2 className="alert-heading">
+          <span className="alert-icon">⚠</span>
+          충돌 경보
+        </h2>
+        <span className="alert-count">{alerts.length}건</span>
+      </div>
+      <div className="alert-list">
+        {alerts.map((alert) => (
+          <div
+            key={`${alert.mmsiA}-${alert.mmsiB}`}
+            className={`alert-item ${alert.severity}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelect(alert.mmsiA)}
+            onKeyDown={(e) => e.key === 'Enter' && onSelect(alert.mmsiA)}
+          >
+            <div className="alert-vessels">
+              <span className="alert-ship-name">{alert.nameA}</span>
+              <span className="alert-sep">↔</span>
+              <span className="alert-ship-name">{alert.nameB}</span>
+            </div>
+            <div className="alert-metrics">
+              <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)} nm</strong></span>
+              <span>TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)} min</strong></span>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );

@@ -758,6 +758,155 @@ p, h1, h2, h3 { margin: 0; }
 /* Ship markers are rendered as inline SVG via shipIcon.ts */
 
 /* ============================================================
+   CPA ALERT RING (on ship icon SVG)
+   ============================================================ */
+
+.cpa-ring {
+  animation: cpa-ring-pulse 1.3s ease-out infinite;
+}
+
+@keyframes cpa-ring-pulse {
+  0%   { transform: scale(1);   opacity: 0.85; }
+  100% { transform: scale(3.2); opacity: 0;    }
+}
+
+/* ============================================================
+   CPA ALERT PANEL (sidebar)
+   ============================================================ */
+
+.alert-panel {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 80, 80, 0.28);
+  border-radius: 16px;
+  background: rgba(32, 6, 6, 0.88);
+  padding: 14px 16px;
+  box-shadow: 0 0 24px rgba(255, 50, 50, 0.1), 0 4px 16px rgba(0,0,0,0.3);
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.alert-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem !important;
+  color: #ff8080 !important;
+}
+
+.alert-icon {
+  font-size: 0.9rem;
+  animation: alert-icon-blink 1s ease-in-out infinite;
+}
+
+@keyframes alert-icon-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.alert-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: rgba(255, 60, 60, 0.2);
+  color: #ff8080;
+  border: 1px solid rgba(255, 60, 60, 0.3);
+}
+
+.alert-list { display: grid; gap: 7px; }
+
+.alert-item {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.alert-item.danger {
+  background: rgba(255, 50, 50, 0.10);
+  border-color: rgba(255, 50, 50, 0.28);
+  animation: alert-flash 1s ease-in-out infinite;
+}
+
+.alert-item.warning {
+  background: rgba(255, 153, 0, 0.08);
+  border-color: rgba(255, 153, 0, 0.22);
+}
+
+.alert-item.danger:hover  { background: rgba(255, 50, 50, 0.18); }
+.alert-item.warning:hover { background: rgba(255, 153, 0, 0.14); }
+
+@keyframes alert-flash {
+  0%, 100% { background: rgba(255, 50, 50, 0.10); }
+  50%       { background: rgba(255, 50, 50, 0.20); }
+}
+
+.alert-vessels {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.alert-ship-name {
+  font-size: 0.80rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.alert-sep { color: rgba(255, 130, 130, 0.5); font-size: 0.78rem; }
+
+.alert-metrics {
+  display: flex;
+  gap: 10px;
+  font-size: 0.73rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.alert-metrics strong { color: var(--text-primary); }
+
+/* ============================================================
+   CPA TOOLTIP (map hover)
+   ============================================================ */
+
+.cpa-tooltip .leaflet-tooltip {
+  background: rgba(4, 18, 28, 0.96) !important;
+  border: 1px solid rgba(255, 100, 100, 0.3) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+  padding: 0 !important;
+}
+
+.cpa-tooltip-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+
+.cpa-sev-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.cpa-sev-badge.danger  { background: rgba(255,50,50,0.2); color: #ff8080; border: 1px solid rgba(255,50,50,0.35); }
+.cpa-sev-badge.warning { background: rgba(255,153,0,0.2); color: #ffb84d; border: 1px solid rgba(255,153,0,0.35); }
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 

@@ -42,7 +42,12 @@ export function calcMetersPerPixel(lat: number, zoom: number): number {
   return (40075016.686 * Math.abs(Math.cos((lat * Math.PI) / 180))) / Math.pow(2, zoom + 8);
 }
 
-export function createShipIcon(vessel: Vessel, selected: boolean, mpp: number): L.DivIcon {
+export function createShipIcon(
+  vessel: Vessel,
+  selected: boolean,
+  mpp: number,
+  alertLevel: 'warning' | 'danger' | null = null,
+): L.DivIcon {
   const pal = selected ? SEL_PAL : PALETTE[vessel.vesselType];
 
   // Convert real vessel dimensions to pixels using current map scale.
@@ -115,6 +120,19 @@ export function createShipIcon(vessel: Vessel, selected: boolean, mpp: number): 
     `L${brX+brW},${brY+brH} Z`,
   ].join(' ');
 
+  // ── CPA alert ring ────────────────────────────────────────────────────────
+  const ringR = Math.max(Lpx, Wpx) * 0.58 + 4;
+  const ringColor = alertLevel === 'danger' ? '#ff3535' : '#ff9900';
+  const ringSpeed = alertLevel === 'danger' ? '0.75s' : '1.3s';
+  const alertRing = alertLevel
+    ? `<circle cx="${cx}" cy="${cy}" r="${ringR.toFixed(1)}"
+         fill="none" stroke="${ringColor}" stroke-width="1.8"
+         class="cpa-ring" style="animation-duration:${ringSpeed};transform-origin:${cx.toFixed(1)}px ${cy.toFixed(1)}px;"/>
+       <circle cx="${cx}" cy="${cy}" r="${ringR.toFixed(1)}"
+         fill="none" stroke="${ringColor}" stroke-width="1.2" opacity="0.55"
+         class="cpa-ring" style="animation-duration:${ringSpeed};animation-delay:${alertLevel === 'danger' ? '0.25s' : '0.45s'};transform-origin:${cx.toFixed(1)}px ${cy.toFixed(1)}px;"/>`
+    : '';
+
   // ── Hazardous cargo indicator ─────────────────────────────────────────────
   const hazard = vessel.hazardousCargo
     ? `<circle cx="${cx}" cy="${by+Lpx*0.84}" r="${clamp(Wpx*0.15,2.2,4.5)}"
@@ -169,6 +187,7 @@ export function createShipIcon(vessel: Vessel, selected: boolean, mpp: number): 
 <!-- bridge top -->
 <path d="${bridgeTop}" fill="${pal.bridge}" stroke="rgba(255,255,255,0.18)" stroke-width="0.5"/>
 
+${alertRing}
 ${hazard}
 </svg>`;
 
