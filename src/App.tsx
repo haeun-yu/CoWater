@@ -46,6 +46,37 @@ const ZONE_COLOR: Record<VesselType, string> = {
   Research: "#a78bfa",
 };
 
+// ---------- trail data model ----------
+
+interface TrailPoint { lat: number; lng: number; sog: number; t: number; }
+const TRAIL_MAX_MS = 5 * 60 * 1000; // 5 minutes
+
+// ---------- event model ----------
+
+interface MarineEvent {
+  id: string;
+  type: 'cpa_danger' | 'cpa_warning' | 'course_change' | 'status_change' | 'hazard_port';
+  severity: 'info' | 'warning' | 'danger';
+  message: string;
+  timestamp: number;
+  mmsi?: string;
+}
+const MAX_EVENTS = 40;
+// Busan port centre (for hazard approach detection)
+const BUSAN_PORT = { lat: 35.10, lng: 129.04 };
+const HAZARD_PORT_NM = 2.0; // nm threshold
+
+// ---------- layer flags ----------
+
+interface LayerFlags { dangerZones: boolean; trails: boolean; labels: boolean; cpaLines: boolean; }
+
+const LAYER_LABELS: Record<keyof LayerFlags, string> = {
+  dangerZones: '위험구간',
+  trails:      '항적',
+  labels:      '선박명',
+  cpaLines:    '충돌 경보선',
+};
+
 function DangerZone({
   vessel,
   selected,
@@ -190,6 +221,135 @@ function DetailSection({
   );
 }
 
+// ---------- TrailLayer component ----------
+
+function TrailLayer({ vessel, points, visible }: { vessel: Vessel; points: TrailPoint[]; visible: boolean }) {
+  if (!visible || points.length < 2) return null;
+  const now = Date.now();
+  const color = vessel.hazardousCargo ? '#ff6b35' : ZONE_COLOR[vessel.vesselType];
+  const bands = [
+    { pts: points.filter(p => now - p.t <= 30_000),                                     opacity: 0.75, weight: 2.2 },
+    { pts: points.filter(p => now - p.t > 30_000  && now - p.t <= 120_000),             opacity: 0.40, weight: 1.8 },
+    { pts: points.filter(p => now - p.t > 120_000),                                     opacity: 0.18, weight: 1.5 },
+  ];
+  return (
+    <>
+      {bands.map((band, i) =>
+        band.pts.length >= 2 ? (
+          <Polyline
+            key={i}
+            positions={band.pts.map(p => [p.lat, p.lng] as [number, number])}
+            pathOptions={{ color, weight: band.weight, opacity: band.opacity, dashArray: '3 6', lineCap: 'round' }}
+          />
+        ) : null
+      )}
+    </>
+  );
+}
+
+// ---------- LayerToggle component ----------
+
+function LayerToggle({ layers, onChange }: {
+  layers: LayerFlags;
+  onChange: (key: keyof LayerFlags) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`layer-toggle${open ? ' layer-toggle--open' : ''}`}>
+      <button className="layer-toggle-header" onClick={() => setOpen(v => !v)}>
+        <span className="layer-toggle-title">레이어</span>
+        <span className="layer-toggle-chevron">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="layer-toggle-body">
+          {(Object.keys(LAYER_LABELS) as (keyof LayerFlags)[]).map(key => (
+            <label key={key} className="layer-toggle-item">
+              <input
+                type="checkbox"
+                checked={layers[key]}
+                onChange={() => onChange(key)}
+                className="layer-checkbox"
+              />
+              <span>{LAYER_LABELS[key]}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- EventPanel component ----------
+
+const EVENT_ICON: Record<MarineEvent['type'], string> = {
+  cpa_danger:    '🔴',
+  cpa_warning:   '🟠',
+  course_change: '🔄',
+  status_change: '🔵',
+  hazard_port:   '⚠️',
+};
+
+function EventPanel({ events, cpaAlerts, onSelect }: {
+  events: MarineEvent[];
+  cpaAlerts: CpaAlert[];
+  onSelect: (mmsi: string) => void;
+}) {
+  const hasCpa = cpaAlerts.length > 0;
+  const hasEvents = events.length > 0;
+  if (!hasCpa && !hasEvents) return null;
+
+  return (
+    <section className="event-panel">
+      <div className="panel-heading">
+        <h2 className="event-heading">
+          {hasCpa && <span className="event-blink">⚠</span>}
+          {' '}이벤트 피드
+        </h2>
+        <span className="event-count">{(hasCpa ? cpaAlerts.length : 0) + events.length}</span>
+      </div>
+
+      <div className="event-list">
+        {/* Live CPA alerts at top */}
+        {cpaAlerts.map(alert => (
+          <div
+            key={`cpa-${alert.mmsiA}-${alert.mmsiB}`}
+            className={`event-item ${alert.severity}`}
+            role="button" tabIndex={0}
+            onClick={() => onSelect(alert.mmsiA)}
+            onKeyDown={e => e.key === 'Enter' && onSelect(alert.mmsiA)}
+          >
+            <span className="event-icon">{alert.severity === 'danger' ? '🔴' : '🟠'}</span>
+            <div className="event-body">
+              <span className="event-msg">
+                {alert.severity === 'danger' ? '충돌 위험' : '충돌 주의'}: {alert.nameA} ↔ {alert.nameB}
+              </span>
+              <span className="event-meta">CPA {alert.cpa.toFixed(2)} nm · TCPA {alert.tcpa.toFixed(1)} min</span>
+            </div>
+            <span className="event-live-badge">LIVE</span>
+          </div>
+        ))}
+
+        {/* Historical events */}
+        {events.map(evt => (
+          <div
+            key={evt.id}
+            className={`event-item ${evt.severity}`}
+            role="button" tabIndex={0}
+            onClick={() => evt.mmsi && onSelect(evt.mmsi)}
+            onKeyDown={e => e.key === 'Enter' && evt.mmsi && onSelect(evt.mmsi)}
+          >
+            <span className="event-icon">{EVENT_ICON[evt.type]}</span>
+            <div className="event-body">
+              <span className="event-msg">{evt.message}</span>
+              <span className="event-meta">{new Date(evt.timestamp).toLocaleTimeString('ko-KR', { timeStyle: 'medium' })}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ---------- main app ----------
 
 function App() {
@@ -201,6 +361,16 @@ function App() {
   const [connectionState, setConnectionState] =
     useState<MothConnectionState>("connecting");
   const tickRef = useRef(0);
+
+  // Trail state
+  const [trails, setTrails] = useState<Map<string, TrailPoint[]>>(new Map());
+
+  // Event state
+  const [events, setEvents] = useState<MarineEvent[]>([]);
+  const prevVesselsRef = useRef<Map<string, Vessel>>(new Map());
+
+  // Layer flags state
+  const [layers, setLayers] = useState<LayerFlags>({ dangerZones: true, trails: true, labels: false, cpaLines: true });
 
   useEffect(() => {
     let mime: string | null = null;
@@ -281,6 +451,101 @@ function App() {
     return map;
   }, [cpaAlerts]);
 
+  // Update trails whenever vessels changes
+  useEffect(() => {
+    if (vessels.length === 0) return;
+    const now = Date.now();
+    const cutoff = now - TRAIL_MAX_MS;
+    setTrails(prev => {
+      const next = new Map(prev);
+      for (const v of vessels) {
+        const existing = next.get(v.mmsi) ?? [];
+        const appended = [...existing, { lat: v.latitude, lng: v.longitude, sog: v.sog, t: now }];
+        // Prune old points
+        const firstKeep = appended.findIndex(p => p.t > cutoff);
+        next.set(v.mmsi, firstKeep > 0 ? appended.slice(firstKeep) : appended);
+      }
+      return next;
+    });
+  }, [vessels]);
+
+  // Detect vessel events whenever vessels changes
+  useEffect(() => {
+    if (vessels.length === 0) return;
+    const now = Date.now();
+    const prev = prevVesselsRef.current;
+    const newEvts: MarineEvent[] = [];
+
+    for (const v of vessels) {
+      const p = prev.get(v.mmsi);
+      if (!p) continue;
+
+      // Navigation status change
+      if (p.navigationStatus !== v.navigationStatus) {
+        newEvts.push({
+          id: `${now}-${v.mmsi}-status`,
+          type: 'status_change', severity: 'info',
+          message: `${v.name}: ${p.navigationStatus} → ${v.navigationStatus}`,
+          timestamp: now, mmsi: v.mmsi,
+        });
+      }
+
+      // Sudden course change: ROT jumps above 12°/min
+      if (Math.abs(v.rateOfTurn) > 12 && Math.abs(p.rateOfTurn) <= 12) {
+        newEvts.push({
+          id: `${now}-${v.mmsi}-rot`,
+          type: 'course_change', severity: 'warning',
+          message: `${v.name}: 급격한 침로 변경 (ROT ${v.rateOfTurn.toFixed(1)}°/min)`,
+          timestamp: now, mmsi: v.mmsi,
+        });
+      }
+
+      // Hazardous cargo vessel approaching port
+      if (v.hazardousCargo && v.navigationStatus === 'Under way') {
+        const dlat = (v.latitude  - BUSAN_PORT.lat) * 111320;
+        const dlng = (v.longitude - BUSAN_PORT.lng) * 111320 * Math.cos(v.latitude * Math.PI / 180);
+        const distNm = Math.hypot(dlat, dlng) / 1852;
+        const prevDlat = (p.latitude  - BUSAN_PORT.lat) * 111320;
+        const prevDlng = (p.longitude - BUSAN_PORT.lng) * 111320 * Math.cos(p.latitude * Math.PI / 180);
+        const prevDistNm = Math.hypot(prevDlat, prevDlng) / 1852;
+        if (distNm < HAZARD_PORT_NM && prevDistNm >= HAZARD_PORT_NM) {
+          newEvts.push({
+            id: `${now}-${v.mmsi}-hazard-port`,
+            type: 'hazard_port', severity: 'danger',
+            message: `${v.name}: 위험화물 선박 부산항 ${distNm.toFixed(1)}nm 접근`,
+            timestamp: now, mmsi: v.mmsi,
+          });
+        }
+      }
+    }
+
+    prevVesselsRef.current = new Map(vessels.map(v => [v.mmsi, v]));
+    if (newEvts.length > 0) {
+      setEvents(prev => [...newEvts, ...prev].slice(0, MAX_EVENTS));
+    }
+  }, [vessels]);
+
+  // Emit events for new CPA danger alerts
+  useEffect(() => {
+    const now = Date.now();
+    const dangerAlerts = cpaAlerts.filter(a => a.severity === 'danger');
+    if (dangerAlerts.length === 0) return;
+    setEvents(prev => {
+      const recentIds = new Set(prev.filter(e => now - e.timestamp < 10_000).map(e => e.id));
+      const newEvts = dangerAlerts
+        .map(a => ({
+          id: `cpa-${a.mmsiA}-${a.mmsiB}`,
+          type: 'cpa_danger' as const,
+          severity: 'danger' as const,
+          message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
+          timestamp: now,
+        }))
+        .filter(e => !recentIds.has(e.id));
+      if (newEvts.length === 0) return prev;
+      return [...newEvts, ...prev].slice(0, MAX_EVENTS);
+    });
+  }, [cpaAlerts]);
+
   const selectedVessel = vessels.find((v) => v.mmsi === selectedMmsi) ?? null;
   const centerLat =
     selectedVessel?.latitude ??
@@ -329,10 +594,12 @@ function App() {
           </div>
         </div>
 
-        {/* CPA alert panel */}
-        {cpaAlerts.length > 0 && (
-          <CpaAlertPanel alerts={cpaAlerts} onSelect={setSelectedMmsi} />
-        )}
+        {/* Event panel (replaces CPA alert panel) */}
+        <EventPanel
+          events={events}
+          cpaAlerts={cpaAlerts}
+          onSelect={setSelectedMmsi}
+        />
 
         {/* Panels */}
         {selectedVessel ? (
@@ -361,6 +628,8 @@ function App() {
           </div>
         </div>
 
+        <div className="map-wrap">
+        <LayerToggle layers={layers} onChange={key => setLayers(prev => ({ ...prev, [key]: !prev[key] }))} />
         <MapContainer
           center={[centerLat, centerLng]}
           zoom={11}
@@ -375,16 +644,23 @@ function App() {
           <ZoomTracker onZoom={setZoom} />
 
           {/* CPA warning lines — rendered below ship icons */}
-          {cpaAlerts.map((alert) => (
+          {layers.cpaLines && cpaAlerts.map((alert) => (
             <CpaLine key={`cpa-${alert.mmsiA}-${alert.mmsiB}`} alert={alert} />
           ))}
 
           {vessels.map((vessel) => (
             <Fragment key={vessel.mmsi}>
-              <DangerZone
+              <TrailLayer
                 vessel={vessel}
-                selected={vessel.mmsi === selectedMmsi}
+                points={trails.get(vessel.mmsi) ?? []}
+                visible={layers.trails}
               />
+              {layers.dangerZones && (
+                <DangerZone
+                  vessel={vessel}
+                  selected={vessel.mmsi === selectedMmsi}
+                />
+              )}
               <Marker
                 eventHandlers={{ click: () => setSelectedMmsi(vessel.mmsi) }}
                 icon={createShipIcon(
@@ -415,10 +691,16 @@ function App() {
                     <p className="popup-hazard">⚠ 위험 화물 탑재</p>
                   )}
                 </Popup>
+                {layers.labels && (
+                  <Tooltip permanent direction="bottom" offset={[0, 8]} className="vessel-label">
+                    {vessel.name}
+                  </Tooltip>
+                )}
               </Marker>
             </Fragment>
           ))}
         </MapContainer>
+        </div>
 
         {/* AIS stream */}
         <section className="stream-panel">
@@ -606,7 +888,7 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
 
   return (
     <Fragment>
-      {/* Connecting line between the two vessels */}
+      {/* Current link between the two vessels */}
       <Polyline
         positions={[alert.posA, alert.posB]}
         pathOptions={{
@@ -629,7 +911,18 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
         </Tooltip>
       </Polyline>
 
-      {/* Small marker at the predicted CPA point */}
+      {/* Predicted closest-approach separation segment */}
+      <Polyline
+        positions={[alert.cpaPosA, alert.cpaPosB]}
+        pathOptions={{
+          color,
+          weight: 1.2,
+          dashArray: '2 5',
+          opacity: isDanger ? 0.9 : 0.7,
+        }}
+      />
+
+      {/* Small marker at the midpoint of the predicted CPA geometry */}
       <Polyline
         positions={[alert.cpaPoint, alert.cpaPoint]}
         pathOptions={{ color, weight: 0, opacity: 0 }}
@@ -656,50 +949,6 @@ function cpaPointIcon(color: string) {
     iconSize:   [12, 12],
     iconAnchor: [6, 6],
   });
-}
-
-// ---------- CPA alert panel ----------
-
-function CpaAlertPanel({
-  alerts,
-  onSelect,
-}: {
-  alerts: CpaAlert[];
-  onSelect: (mmsi: string) => void;
-}) {
-  return (
-    <section className="alert-panel">
-      <div className="panel-heading">
-        <h2 className="alert-heading">
-          <span className="alert-icon">⚠</span>
-          충돌 경보
-        </h2>
-        <span className="alert-count">{alerts.length}건</span>
-      </div>
-      <div className="alert-list">
-        {alerts.map((alert) => (
-          <div
-            key={`${alert.mmsiA}-${alert.mmsiB}`}
-            className={`alert-item ${alert.severity}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => onSelect(alert.mmsiA)}
-            onKeyDown={(e) => e.key === 'Enter' && onSelect(alert.mmsiA)}
-          >
-            <div className="alert-vessels">
-              <span className="alert-ship-name">{alert.nameA}</span>
-              <span className="alert-sep">↔</span>
-              <span className="alert-ship-name">{alert.nameB}</span>
-            </div>
-            <div className="alert-metrics">
-              <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)} nm</strong></span>
-              <span>TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)} min</strong></span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }
 
 export default App;

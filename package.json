@@ -10,6 +10,7 @@
     "dev:moth": "tsx server/moth-bridge.ts",
     "dev:simulator": "tsx server/simulator-publisher.ts",
     "build": "tsc --noEmit && vite build",
+    "test": "node --import tsx --test src/lib/cpa.test.ts",
     "preview": "vite preview --host 0.0.0.0 --port 7001 --strictPort"
   },
   "dependencies": {
