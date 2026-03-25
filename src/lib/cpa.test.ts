@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calcCpa, CPA_DANGER_NM, findCpaAlerts, TCPA_MAX_MIN } from './cpa';
+import { predictRoutePosition } from './routePrediction';
 import type { Vessel } from '../types';
 
 const LAT = 35;
@@ -164,4 +165,44 @@ test('near-threshold future encounter stays warning until it becomes near-term',
   assert.ok(alert);
   assert.ok(alert.cpa < CPA_DANGER_NM);
   assert.equal(alert.severity, 'warning');
+});
+
+test('route-based prediction follows the shared simulator route instead of drifting off by heading', () => {
+  const vessel = createVessel({
+    mmsi: '440123456',
+    latitude: 35.0702,
+    longitude: 129.0798,
+    sog: 12,
+    cog: 40,
+    heading: 210,
+    rateOfTurn: 18,
+  });
+
+  const predicted = predictRoutePosition(vessel, 180);
+
+  assert.ok(predicted);
+  assert.ok(predicted[0] < vessel.latitude, `expected route to move southward, got ${predicted[0]}`);
+  assert.ok(predicted[1] > vessel.longitude, `expected route to move eastward, got ${predicted[1]}`);
+});
+
+test('parallel motion does not create a false CPA alert', () => {
+  const a = createVessel({
+    mmsi: '440000014',
+    latitude: LAT,
+    longitude: 129,
+    sog: 12,
+    cog: 90,
+    heading: 90,
+  });
+  const b = createVessel({
+    mmsi: '440000015',
+    latitude: LAT + nmToLat(0.2),
+    longitude: 129,
+    sog: 12,
+    cog: 90,
+    heading: 90,
+  });
+
+  const alerts = findCpaAlerts([a, b]);
+  assert.equal(alerts.length, 0);
 });

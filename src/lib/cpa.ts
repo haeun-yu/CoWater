@@ -9,6 +9,7 @@
  * result matches the turn-aware danger-zone visuals more closely.
  */
 import type { Vessel } from '../types';
+import { predictRoutePosition } from './routePrediction';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ export const CPA_WARN_NM   = 1.0;   // nm  – show warning (orange)
 export const CPA_DANGER_NM = 0.5;   // nm  – show danger  (red)
 export const TCPA_MAX_MIN  = 12;    // min – ignore approaches too far in future
 export const TCPA_DANGER_MIN = 8;   // min – only near-term risks escalate to red
+export const MIN_CPA_IMPROVEMENT_NM = 0.05; // ignore near-parallel / non-closing pairs
 
 const KNOTS_TO_MS = 0.5144;
 const NM_TO_M     = 1852;
@@ -105,10 +107,19 @@ function advanceState(state: PredictedState, vessel: Vessel, seconds: number): P
 }
 
 function predictState(vessel: Vessel, seconds: number): PredictedState {
+  const routePosition = predictRoutePosition(vessel, seconds);
+  if (routePosition) {
+    return {
+      latitude: routePosition[0],
+      longitude: routePosition[1],
+      heading: vessel.cog,
+    };
+  }
+
   let state: PredictedState = {
     latitude: vessel.latitude,
     longitude: vessel.longitude,
-    heading: Number.isFinite(vessel.heading) ? vessel.heading : vessel.cog,
+    heading: Number.isFinite(vessel.cog) ? vessel.cog : vessel.heading,
   };
 
   let remaining = seconds;
@@ -127,6 +138,7 @@ function predictState(vessel: Vessel, seconds: number): PredictedState {
  * the current danger-zone model.
  */
 export function calcCpa(a: Vessel, b: Vessel): {
+  currentDistance: number;
   cpa: number;
   tcpa: number;
   cpaPosA: [number, number];
@@ -173,6 +185,7 @@ export function calcCpa(a: Vessel, b: Vessel): {
   }
 
   return {
+    currentDistance: positionDistanceNm([a.latitude, a.longitude], [b.latitude, b.longitude]),
     cpa: bestDistanceNm,
     tcpa: bestTimeSec / 60,
     cpaPosA: bestPosA,
@@ -198,10 +211,13 @@ export function findCpaAlerts(vessels: Vessel[]): CpaAlert[] {
       const a = active[i];
       const b = active[j];
 
-      const { cpa, tcpa, cpaPosA, cpaPosB } = calcCpa(a, b);
+      const { currentDistance, cpa, tcpa, cpaPosA, cpaPosB } = calcCpa(a, b);
+      const distanceImprovement = currentDistance - cpa;
 
       if (cpa > CPA_WARN_NM)  continue;   // too far
+      if (tcpa <= 0) continue;            // not actually closing any further
       if (tcpa > TCPA_MAX_MIN) continue;  // too far in future
+      if (distanceImprovement < MIN_CPA_IMPROVEMENT_NM) continue; // near-parallel / same-track
 
       alerts.push({
         mmsiA:    a.mmsi,

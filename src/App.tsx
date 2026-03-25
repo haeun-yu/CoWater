@@ -366,7 +366,7 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
 
   return (
     <section className="event-panel">
-      <div className="panel-heading">
+      <div className="panel-heading panel-heading-sticky">
         <h2 className="event-heading">
           {hasCpa && <span className="event-blink">⚠</span>}
           {' '}이벤트 피드
@@ -378,7 +378,7 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
         {/* Live CPA alerts at top */}
         {cpaAlerts.map(alert => (
           <div
-            key={`cpa-${alert.mmsiA}-${alert.mmsiB}`}
+            key={`live-cpa-${alert.mmsiA}-${alert.mmsiB}`}
             className={`event-item ${alert.severity}`}
             role="button" tabIndex={0}
             onClick={() => onSelect(alert.mmsiA)}
@@ -709,7 +709,7 @@ function App() {
       const recentIds = new Set(prev.filter(e => now - e.timestamp < 10_000).map(e => e.id));
       const newEvts = dangerAlerts
         .map(a => ({
-          id: `cpa-${a.mmsiA}-${a.mmsiB}`,
+          id: `event-cpa-${a.mmsiA}-${a.mmsiB}`,
           type: 'cpa_danger' as const,
           severity: 'danger' as const,
           message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
@@ -874,7 +874,7 @@ function App() {
 
         {/* AIS stream */}
         <section className="stream-panel">
-          <div className="panel-heading">
+          <div className="panel-heading panel-heading-sticky">
             <h3>
               <LiveDot /> 실시간 AIS 스트림
             </h3>
@@ -909,7 +909,7 @@ function VesselList({
 }) {
   return (
     <section className="list-panel">
-      <div className="panel-heading">
+      <div className="panel-heading panel-heading-sticky">
         <h2>선박 목록</h2>
         <span>{vessels.length}척 관제 중</span>
       </div>
@@ -962,22 +962,24 @@ function VesselDetail({
 }) {
   return (
     <section className="detail-panel">
-      <button className="back-button" onClick={onBack} type="button">
-        ← 목록으로
-      </button>
+      <div className="detail-panel-sticky">
+        <button className="back-button" onClick={onBack} type="button">
+          ← 목록으로
+        </button>
 
-      <div className="detail-header">
-        <span className="detail-vessel-icon">
-          {VESSEL_ICONS[vessel.vesselType]}
-        </span>
-        <div>
-          <h2>{vessel.name}</h2>
-          <div className="detail-badges">
-            <NavBadge status={vessel.navigationStatus} />
-            <span className="type-chip">{vessel.vesselType}</span>
-            {vessel.hazardousCargo && (
-              <span className="hazard-chip pulse">⚠ 위험 화물</span>
-            )}
+        <div className="detail-header">
+          <span className="detail-vessel-icon">
+            {VESSEL_ICONS[vessel.vesselType]}
+          </span>
+          <div>
+            <h2>{vessel.name}</h2>
+            <div className="detail-badges">
+              <NavBadge status={vessel.navigationStatus} />
+              <span className="type-chip">{vessel.vesselType}</span>
+              {vessel.hazardousCargo && (
+                <span className="hazard-chip pulse">⚠ 위험 화물</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
