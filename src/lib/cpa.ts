@@ -9,7 +9,7 @@
  * result matches the turn-aware danger-zone visuals more closely.
  */
 import type { Vessel } from '../types';
-import { predictRoutePosition } from './routePrediction';
+import { predictRoutePositionAndHeading } from './routePrediction';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,9 @@ export const TCPA_MAX_MIN  = 5;     // min – 5분 이내 접근만 경보
 export const TCPA_DANGER_MIN = 3;   // min – 3분 이내 + CPA < 0.2nm → 위험(red)
 export const MIN_CPA_IMPROVEMENT_NM = 0.15; // 최솟값 개선량 최소치 — 평행 항주 제거
 /** 현재 거리 / CPA 최소 비율 — 실제로 수렴 중인 경우만 경보 */
-export const MIN_CONVERGENCE_RATIO = 2.0;
+export const MIN_CONVERGENCE_RATIO = 3.0;
+/** CPA 계산 대상 최소 속도 (kn) — 저속/표류 선박 제외 */
+const MIN_SOG_FOR_CPA = 2.0;
 
 const KNOTS_TO_MS = 0.5144;
 const NM_TO_M     = 1852;
@@ -194,12 +196,12 @@ function advanceState(state: PredictedState, vessel: Vessel, seconds: number): P
 }
 
 function predictState(vessel: Vessel, seconds: number): PredictedState {
-  const routePosition = predictRoutePosition(vessel, seconds);
+  const routePosition = predictRoutePositionAndHeading(vessel, seconds);
   if (routePosition) {
     return {
       latitude: routePosition[0],
       longitude: routePosition[1],
-      heading: vessel.cog,
+      heading: routePosition[2],
     };
   }
 
@@ -288,7 +290,8 @@ export function calcCpa(a: Vessel, b: Vessel): {
  */
 export function findCpaAlerts(vessels: Vessel[]): CpaAlert[] {
   const active = vessels.filter(
-    v => v.navigationStatus === 'Under way' || v.navigationStatus === 'Restricted',
+    v => (v.navigationStatus === 'Under way' || v.navigationStatus === 'Restricted')
+      && v.sog >= MIN_SOG_FOR_CPA,
   );
 
   const alerts: CpaAlert[] = [];

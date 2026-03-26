@@ -242,7 +242,7 @@ function LiveDot() {
 function SogBar({ sog, max = 25 }: { sog: number; max?: number }) {
   const pct = Math.min((sog / max) * 100, 100);
   return (
-    <div className="sog-bar-wrap" title={`SOG ${sog.toFixed(1)} kn`}>
+    <div className="sog-bar-wrap" aria-label={`SOG ${sog.toFixed(1)} kn`}>
       <div className="sog-bar-fill" style={{ width: `${pct}%` }} />
     </div>
   );

@@ -283,3 +283,15 @@ export const predictRoutePosition = (vessel: Vessel, seconds: number): [number, 
   const { position } = getRoutePosition(nextState.route, nextState.progressNm, nextState.direction);
   return [position.latitude, position.longitude];
 };
+
+export const predictRoutePositionAndHeading = (vessel: Vessel, seconds: number): [number, number, number] | null => {
+  const routeState = inferRouteState(vessel);
+  if (!routeState) {
+    return null;
+  }
+
+  const distanceToTravelNm = (vessel.sog / 3600) * seconds;
+  const nextState = advanceRoute(routeState, distanceToTravelNm);
+  const { position, heading } = getRoutePosition(nextState.route, nextState.progressNm, nextState.direction);
+  return [position.latitude, position.longitude, heading];
+};

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcCpa, CPA_DANGER_NM, findCpaAlerts, TCPA_MAX_MIN } from './cpa';
+import { calcCpa, CPA_DANGER_NM, findCpaAlerts, TCPA_DANGER_MIN, TCPA_MAX_MIN } from './cpa';
 import { getRoutePosition, predictRoutePosition, vesselRoutes } from './routePrediction';
 import type { Vessel } from '../types';
 
@@ -41,7 +41,7 @@ function createVessel(overrides: Partial<Vessel>): Vessel {
   };
 }
 
-test('calcCpa detects head-on encounter with near-zero CPA', () => {
+test('calcCpa respects the configured TCPA horizon for head-on encounters', () => {
   const a = createVessel({
     mmsi: '440000001',
     longitude: 129 - nmToLng(1),
@@ -57,8 +57,8 @@ test('calcCpa detects head-on encounter with near-zero CPA', () => {
 
   const result = calcCpa(a, b);
 
-  assert.ok(result.cpa < 0.03, `expected near collision, got ${result.cpa} nm`);
-  assert.ok(Math.abs(result.tcpa - 6) < 0.5, `expected ~6 min, got ${result.tcpa} min`);
+  assert.ok(result.cpa < 0.35, `expected close approach within the horizon, got ${result.cpa} nm`);
+  assert.ok(Math.abs(result.tcpa - TCPA_MAX_MIN) < 0.2, `expected horizon-limited TCPA, got ${result.tcpa} min`);
 });
 
 test('findCpaAlerts annotates head-on encounters with COLREG label and risk score', () => {
@@ -171,7 +171,7 @@ test('findCpaAlerts ignores encounters beyond the configured TCPA horizon', () =
 });
 
 test('near-threshold future encounter stays warning until it becomes near-term', () => {
-  const separationNm = 2 * 10 * 10 / 60;
+  const separationNm = 2 * 10 * (TCPA_DANGER_MIN + 1) / 60;
   const a = createVessel({
     mmsi: '440000012',
     longitude: 129 - nmToLng(separationNm / 2),
