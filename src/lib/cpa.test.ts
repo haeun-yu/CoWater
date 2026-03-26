@@ -80,6 +80,8 @@ test('findCpaAlerts annotates head-on encounters with COLREG label and risk scor
   assert.ok(alert);
   assert.equal(alert.colreg, 'head-on');
   assert.equal(alert.colregLabel, '정면 마주침');
+  assert.match(alert.actionTitle, /우현|회피/);
+  assert.ok(alert.actionDetail.length > 0);
   assert.ok(alert.riskScore >= 0 && alert.riskScore <= 100);
 });
 

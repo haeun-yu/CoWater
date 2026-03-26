@@ -20,6 +20,7 @@ import './lib/leafletHeat';
 import { calcMetersPerPixel, createShipIcon } from "./lib/shipIcon";
 import { buildDangerZone } from "./lib/dangerZone";
 import { findCpaAlerts, type CpaAlert } from "./lib/cpa";
+import NLChat from "./components/NLChat";
 import type {
   AisNmeaFrame,
   NavigationStatus,
@@ -143,11 +144,20 @@ const MOTH_STATUS_KO: Record<MothConnectionState, string> = {
 
 const MOTH_SUB_URL = import.meta.env.VITE_MOTH_SUB_URL ?? DEFAULT_MOTH_SUB_URL;
 const DEFAULT_CENTER = { lat: 35.08, lng: 129.13 };
+const CPA_RELEASE_HOLD_MS = 15_000;
+const CPA_DANGER_LATCH_MS = 8_000;
 const EVENT_FILTER_LABELS: Record<EventSeverityFilter, string> = {
   all: '전체',
   danger: '위험',
   warning: '주의',
   info: '정보',
+};
+type DisplayedCpaAlert = CpaAlert & { isHolding?: boolean };
+type AlertStateEntry = {
+  alert: DisplayedCpaAlert;
+  holdUntil: number;
+  dangerUntil: number;
+  isLive: boolean;
 };
 
 function getCounterpartMmsi(alert: CpaAlert, mmsi: string) {
@@ -160,6 +170,19 @@ function getCounterpartName(alert: CpaAlert, mmsi: string) {
 
 function getCounterpartType(alert: CpaAlert, mmsi: string) {
   return alert.mmsiA === mmsi ? alert.vesselTypeB : alert.vesselTypeA;
+}
+
+function getAlertKey(alert: Pick<CpaAlert, 'mmsiA' | 'mmsiB'>) {
+  return `${alert.mmsiA}-${alert.mmsiB}`;
+}
+
+function sortAlerts<T extends DisplayedCpaAlert>(alerts: T[]) {
+  return [...alerts].sort((x, y) => {
+    if (x.severity !== y.severity) return x.severity === 'danger' ? -1 : 1;
+    if ((x.isHolding ?? false) !== (y.isHolding ?? false)) return x.isHolding ? 1 : -1;
+    if (x.tcpa !== y.tcpa) return x.tcpa - y.tcpa;
+    return x.cpa - y.cpa;
+  });
 }
 
 // ── Report zoom level changes to parent ──────────────────────────────────────
@@ -376,7 +399,7 @@ const EVENT_ICON: Record<MarineEvent['type'], string> = {
 
 function EventPanel({ events, cpaAlerts, onSelect }: {
   events: MarineEvent[];
-  cpaAlerts: CpaAlert[];
+  cpaAlerts: DisplayedCpaAlert[];
   onSelect: (mmsi: string) => void;
 }) {
   const [filter, setFilter] = useState<EventSeverityFilter>('all');
@@ -385,7 +408,10 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
   if (!hasCpa && !hasEvents) return null;
 
   const visibleCpaAlerts = cpaAlerts.filter((alert) => filter === 'all' || alert.severity === filter);
-  const visibleEvents = events.filter((event) => filter === 'all' || event.severity === filter);
+  // cpa_danger/cpa_warning 타입은 위 live CPA 섹션에서 이미 표시되므로 이벤트 목록에서 제외
+  const visibleEvents = events.filter(
+    (event) => event.type !== 'cpa_danger' && event.type !== 'cpa_warning' && (filter === 'all' || event.severity === filter)
+  );
   const visibleCount = visibleCpaAlerts.length + visibleEvents.length;
 
   return (
@@ -429,8 +455,9 @@ function EventPanel({ events, cpaAlerts, onSelect }: {
               <span className="event-meta">
                 {alert.colregLabel} · Risk {alert.riskScore} · CPA {alert.cpa.toFixed(2)} nm · TCPA {alert.tcpa.toFixed(1)} min
               </span>
+              <span className="event-meta">{alert.actionTitle}</span>
             </div>
-            <span className="event-live-badge">LIVE</span>
+            <span className="event-live-badge">{alert.isHolding ? 'HOLD' : 'LIVE'}</span>
           </div>
         ))}
 
@@ -482,6 +509,8 @@ function App() {
   // Event state
   const [events, setEvents] = useState<MarineEvent[]>([]);
   const prevVesselsRef = useRef<Map<string, Vessel>>(new Map());
+  const cpaAlertStateRef = useRef<Map<string, AlertStateEntry>>(new Map());
+  const cpaEventCooldownRef = useRef<Map<string, number>>(new Map());
 
   // Layer flags state
   const [layers, setLayers] = useState<LayerFlags>({ dangerZones: true, trails: true, labels: false, cpaLines: true, heatmap: false });
@@ -497,6 +526,7 @@ function App() {
 
   // Traffic heatmap
   const [heatPoints, setHeatPoints] = useState<[number, number, number][]>([]);
+  const heatPointsRef = useRef<[number, number, number][]>([]);
 
   // Vessel SOG/COG history
   const [vesselHistory, setVesselHistory] = useState<Map<string, {t: number, sog: number, cog: number}[]>>(new Map());
@@ -565,7 +595,8 @@ function App() {
     };
   }, []);
 
-  const cpaAlerts = useMemo(() => findCpaAlerts(vessels), [vessels]);
+  const rawCpaAlerts = useMemo(() => findCpaAlerts(vessels), [vessels]);
+  const [cpaAlerts, setCpaAlerts] = useState<DisplayedCpaAlert[]>([]);
 
   // Map: mmsi → worst alert severity for that vessel
   const vesselAlertLevel = useMemo(() => {
@@ -581,7 +612,7 @@ function App() {
   }, [cpaAlerts]);
 
   const vesselAlerts = useMemo(() => {
-    const map = new Map<string, CpaAlert[]>();
+    const map = new Map<string, DisplayedCpaAlert[]>();
     for (const alert of cpaAlerts) {
       map.set(alert.mmsiA, [...(map.get(alert.mmsiA) ?? []), alert]);
       map.set(alert.mmsiB, [...(map.get(alert.mmsiB) ?? []), alert]);
@@ -611,9 +642,77 @@ function App() {
     });
   }, [riskOnly, vesselAlertLevel, vesselQuery, vessels]);
 
+  useEffect(() => {
+    const now = Date.now();
+    const previous = cpaAlertStateRef.current;
+    const next = new Map<string, AlertStateEntry>();
+
+    for (const alert of rawCpaAlerts) {
+      const key = getAlertKey(alert);
+      const prev = previous.get(key);
+      const keepDangerLatched =
+        prev?.alert.severity === 'danger' &&
+        alert.severity === 'warning' &&
+        now < prev.dangerUntil;
+      const mergedAlert: DisplayedCpaAlert = {
+        ...alert,
+        severity: keepDangerLatched ? 'danger' : alert.severity,
+        actionTitle: keepDangerLatched ? prev.alert.actionTitle : alert.actionTitle,
+        actionDetail: keepDangerLatched ? prev.alert.actionDetail : alert.actionDetail,
+        isHolding: false,
+      };
+      next.set(key, {
+        alert: mergedAlert,
+        holdUntil: now + CPA_RELEASE_HOLD_MS,
+        dangerUntil: mergedAlert.severity === 'danger' ? now + CPA_DANGER_LATCH_MS : prev?.dangerUntil ?? 0,
+        isLive: true,
+      });
+    }
+
+    for (const [key, prev] of previous.entries()) {
+      if (next.has(key)) {
+        continue;
+      }
+      if (now < prev.holdUntil) {
+        next.set(key, {
+          ...prev,
+          alert: { ...prev.alert, isHolding: true },
+          isLive: false,
+        });
+      }
+    }
+
+    cpaAlertStateRef.current = next;
+    setCpaAlerts(sortAlerts(Array.from(next.values(), (entry) => entry.alert)));
+  }, [rawCpaAlerts]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const previous = cpaAlertStateRef.current;
+      let changed = false;
+      const next = new Map<string, AlertStateEntry>();
+
+      for (const [key, entry] of previous.entries()) {
+        if (!entry.isLive && now >= entry.holdUntil) {
+          changed = true;
+          continue;
+        }
+        next.set(key, entry);
+      }
+
+      if (changed) {
+        cpaAlertStateRef.current = next;
+        setCpaAlerts(sortAlerts(Array.from(next.values(), (entry) => entry.alert)));
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   // Update trails whenever vessels changes
   useEffect(() => {
-    if (vessels.length === 0) return;
+    if (!layers.trails || vessels.length === 0) return;
     const now = Date.now();
     const cutoff = now - TRAIL_MAX_MS;
     setTrails(prev => {
@@ -627,36 +726,58 @@ function App() {
       }
       return next;
     });
-  }, [vessels]);
+  }, [vessels, layers.trails]);
 
-  // Update lastSeenRef and heatPoints whenever vessels changes
+  // Update lastSeenRef whenever vessels changes
   useEffect(() => {
     if (vessels.length === 0) return;
     const now = Date.now();
     for (const v of vessels) {
       lastSeenRef.current.set(v.mmsi, now);
     }
-    // Update heatPoints (rolling buffer of 2000)
-    setHeatPoints(prev => {
-      const next: [number, number, number][] = [...prev, ...vessels.map(v => [v.latitude, v.longitude, 1] as [number, number, number])];
-      return next.length > 2000 ? next.slice(next.length - 2000) : next;
-    });
   }, [vessels]);
 
-  // Update vessel SOG/COG history (separate effect)
+  // Keep the heatmap buffer off the React render path unless the layer is visible.
   useEffect(() => {
     if (vessels.length === 0) return;
+    const next: [number, number, number][] = [
+      ...heatPointsRef.current,
+      ...vessels.map(v => [v.latitude, v.longitude, 1] as [number, number, number]),
+    ];
+    heatPointsRef.current = next.length > 2000 ? next.slice(next.length - 2000) : next;
+    if (layers.heatmap) {
+      setHeatPoints(heatPointsRef.current);
+    }
+  }, [vessels, layers.heatmap]);
+
+  useEffect(() => {
+    if (layers.heatmap) {
+      setHeatPoints(heatPointsRef.current);
+      return;
+    }
+    setHeatPoints([]);
+  }, [layers.heatmap]);
+
+  // Update vessel SOG/COG history only for the selected vessel detail view.
+  useEffect(() => {
+    if (!selectedMmsi) {
+      setVesselHistory(new Map());
+    }
+  }, [selectedMmsi]);
+
+  useEffect(() => {
+    if (!selectedMmsi || vessels.length === 0) return;
     const now = Date.now();
+    const selected = vessels.find((v) => v.mmsi === selectedMmsi);
+    if (!selected) return;
     setVesselHistory(prev => {
-      const next = new Map(prev);
-      for (const v of vessels) {
-        const existing = next.get(v.mmsi) ?? [];
-        const appended = [...existing, { t: now, sog: v.sog, cog: v.cog }];
-        next.set(v.mmsi, appended.length > 30 ? appended.slice(appended.length - 30) : appended);
-      }
+      const next = new Map<string, {t: number, sog: number, cog: number}[]>();
+      const existing = prev.get(selected.mmsi) ?? [];
+      const appended = [...existing, { t: now, sog: selected.sog, cog: selected.cog }];
+      next.set(selected.mmsi, appended.length > 30 ? appended.slice(appended.length - 30) : appended);
       return next;
     });
-  }, [vessels]);
+  }, [selectedMmsi, vessels]);
 
   // AIS silence interval (check every 10s, flag vessels silent > 3min)
   useEffect(() => {
@@ -782,21 +903,34 @@ function App() {
   // Emit events for new CPA danger alerts
   useEffect(() => {
     const now = Date.now();
-    const dangerAlerts = cpaAlerts.filter(a => a.severity === 'danger');
+    const dangerAlerts = cpaAlerts.filter(a => a.severity === 'danger' && !a.isHolding);
     if (dangerAlerts.length === 0) return;
     setEvents(prev => {
-      const recentIds = new Set(prev.filter(e => now - e.timestamp < 10_000).map(e => e.id));
-      const newEvts = dangerAlerts
-        .map(a => ({
-          id: `event-cpa-${a.mmsiA}-${a.mmsiB}`,
-          type: 'cpa_danger' as const,
-          severity: 'danger' as const,
-          message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | ${a.colregLabel} | Risk ${a.riskScore} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
-          timestamp: now,
-          mmsi: a.mmsiA,
-        }))
-        .filter(e => !recentIds.has(e.id));
+      const nextCooldown = new Map(cpaEventCooldownRef.current);
+      for (const [key, ts] of nextCooldown.entries()) {
+        if (now - ts > 60_000) {
+          nextCooldown.delete(key);
+        }
+      }
+      const newEvts: MarineEvent[] = [];
+      for (const a of dangerAlerts) {
+          const pairKey = getAlertKey(a);
+          const lastSentAt = nextCooldown.get(pairKey) ?? 0;
+          if (now - lastSentAt < 10_000) {
+            continue;
+          }
+          nextCooldown.set(pairKey, now);
+          newEvts.push({
+            id: `event-cpa-${pairKey}-${now}`,
+            type: 'cpa_danger',
+            severity: 'danger',
+            message: `충돌 위험: ${a.nameA} ↔ ${a.nameB} | ${a.colregLabel} | ${a.actionTitle} | Risk ${a.riskScore} | CPA ${a.cpa.toFixed(2)}nm / TCPA ${a.tcpa.toFixed(1)}min`,
+            timestamp: now,
+            mmsi: a.mmsiA,
+          });
+      }
       if (newEvts.length === 0) return prev;
+      cpaEventCooldownRef.current = nextCooldown;
       return [...newEvts, ...prev].slice(0, MAX_EVENTS);
     });
   }, [cpaAlerts]);
@@ -970,6 +1104,9 @@ function App() {
             </Fragment>
           ))}
         </MapContainer>
+
+        {/* AI chat overlay */}
+        <NLChat vessels={vessels} cpaAlerts={cpaAlerts} events={events} />
         </div>
 
         {/* AIS stream */}
@@ -1219,6 +1356,7 @@ function VesselDetail({
                     <span>{alert.colregLabel}</span>
                     <span>Risk {alert.riskScore}</span>
                   </div>
+                  <p className="encounter-action">{alert.actionTitle}</p>
                   <div className="encounter-stats">
                     <span>CPA {alert.cpa.toFixed(2)} nm</span>
                     <span>TCPA {alert.tcpa.toFixed(1)} min</span>
@@ -1279,6 +1417,7 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
             </span>
             <span>{alert.nameA} ↔ {alert.nameB}</span>
             <span>{alert.colregLabel} · Risk {alert.riskScore}</span>
+            <span>{alert.actionTitle}</span>
             <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)}&nbsp;nm</strong>
               &nbsp;·&nbsp;TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)}&nbsp;min</strong>
             </span>

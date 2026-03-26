@@ -50,6 +50,8 @@ export interface CpaAlert {
   cpaPoint: [number, number];
   colreg: ColregEncounter;
   colregLabel: string;
+  actionTitle: string;
+  actionDetail: string;
   riskScore: number;
   severity: AlertSeverity;
 }
@@ -116,6 +118,36 @@ function classifyEncounter(a: Vessel, b: Vessel): { type: ColregEncounter; label
   }
 
   return { type: 'parallel', label: '평행/동향 접근' };
+}
+
+function buildAction(encounter: ColregEncounter, severity: AlertSeverity) {
+  if (encounter === 'head-on') {
+    return severity === 'danger'
+      ? { title: '양측 즉시 우현 회피', detail: '정면 마주침입니다. 조기 우현 변침과 감속 여부를 즉시 확인하세요.' }
+      : { title: '우현 회피 준비', detail: '정면 접근 추세입니다. 양 선박의 우현 회피 가능성을 우선 감시하세요.' };
+  }
+
+  if (encounter === 'crossing-starboard') {
+    return severity === 'danger'
+      ? { title: '자선 우선 회피', detail: '상대선이 우현에서 접근합니다. 조기 감속 또는 우현 변침 판단이 필요합니다.' }
+      : { title: '우현 접근 감시', detail: '우현 횡단 상황입니다. 회피 여유가 줄어드는지 지속 감시하세요.' };
+  }
+
+  if (encounter === 'crossing-port') {
+    return severity === 'danger'
+      ? { title: '상대 회피 미흡 대비', detail: '좌현 횡단이지만 위험도가 높습니다. 상대선 회피 실패 가능성에 대비해 감속을 준비하세요.' }
+      : { title: '진로 유지 우선', detail: '좌현 횡단 상황입니다. 상대선 회피 동작을 우선 확인하되 과도한 변침은 피하세요.' };
+  }
+
+  if (encounter === 'overtaking') {
+    return severity === 'danger'
+      ? { title: '추월 간격 즉시 확보', detail: '추월 상황입니다. 횡방향 분리 확보와 속력 차 관리가 필요합니다.' }
+      : { title: '추월 분리 유지', detail: '추월 접근입니다. 추월선과 피추월선 간 분리 간격을 계속 확인하세요.' };
+  }
+
+  return severity === 'danger'
+    ? { title: '침로 재확인 필요', detail: '평행 접근이지만 위험도는 높습니다. AIS와 레이더로 실제 closing 여부를 재확인하세요.' }
+    : { title: '접근 추세 감시', detail: '평행 또는 동향 접근입니다. 실제 이격이 유지되는지 계속 확인하세요.' };
 }
 
 function scoreRisk(cpa: number, tcpa: number, improvementNm: number) {
@@ -267,6 +299,8 @@ export function findCpaAlerts(vessels: Vessel[]): CpaAlert[] {
       const { currentDistance, cpa, tcpa, cpaPosA, cpaPosB } = calcCpa(a, b);
       const distanceImprovement = currentDistance - cpa;
       const encounter = classifyEncounter(a, b);
+      const severity = cpa < CPA_DANGER_NM && tcpa <= TCPA_DANGER_MIN ? 'danger' : 'warning';
+      const action = buildAction(encounter.type, severity);
 
       if (cpa > CPA_WARN_NM)  continue;   // too far
       if (tcpa <= 0) continue;            // not actually closing any further
@@ -289,8 +323,10 @@ export function findCpaAlerts(vessels: Vessel[]): CpaAlert[] {
         cpaPoint: midpoint(cpaPosA, cpaPosB),
         colreg: encounter.type,
         colregLabel: encounter.label,
+        actionTitle: action.title,
+        actionDetail: action.detail,
         riskScore: scoreRisk(cpa, tcpa, distanceImprovement),
-        severity: cpa < CPA_DANGER_NM && tcpa <= TCPA_DANGER_MIN ? 'danger' : 'warning',
+        severity,
       });
     }
   }
