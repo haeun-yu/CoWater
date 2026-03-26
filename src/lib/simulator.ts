@@ -9,7 +9,11 @@ const moveVessel = (
   tick: number,
   routeState?: RouteState,
 ): { vessel: Vessel; routeState?: RouteState } => {
-  if (vessel.navigationStatus === 'At anchor' || vessel.navigationStatus === 'Moored') {
+  // 앵커 드래그 데모: routeState가 있는 정박 선박은 조류 표류 허용
+  const isDrifting = routeState &&
+    (vessel.navigationStatus === 'At anchor' || vessel.navigationStatus === 'Moored');
+  if (!isDrifting &&
+    (vessel.navigationStatus === 'At anchor' || vessel.navigationStatus === 'Moored')) {
     return {
       vessel: {
         ...vessel,
@@ -42,7 +46,11 @@ const moveVessel = (
 
   const nextRouteState = advanceRoute(routeState, nauticalMiles);
   const previousHeading = vessel.heading;
-  const { position, heading } = getRoutePosition(nextRouteState.route, nextRouteState.progressNm);
+  const { position, heading } = getRoutePosition(
+    nextRouteState.route,
+    nextRouteState.progressNm,
+    nextRouteState.direction,
+  );
   const updatedCog = roundHeading(heading + oscillation * 1.2);
   const updatedHeading = roundHeading(heading + oscillation * 0.8);
   const headingDelta = ((updatedHeading - previousHeading + 540) % 360) - 180;

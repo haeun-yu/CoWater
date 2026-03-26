@@ -6,10 +6,14 @@ import {
   type ModelConfig,
   type WebLLMProgress,
   loadWebLLM,
+  loadTransformers,
+  isBrowserModelLoaded,
+  checkOllamaModel,
+  pullOllamaModel,
   runInference,
 } from '../lib/llm';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatMessage {
   id: string;
@@ -19,11 +23,7 @@ interface ChatMessage {
   model?: string;
 }
 
-interface MarineEvent {
-  severity: string;
-  message: string;
-  type: string;
-}
+interface MarineEvent { severity: string; message: string; type: string; }
 
 interface NLChatProps {
   vessels: Vessel[];
@@ -31,39 +31,23 @@ interface NLChatProps {
   events: MarineEvent[];
 }
 
-// ── Context builder ──────────────────────────────────────────────────────────
+// ── Context builder ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(
-  vessels: Vessel[],
-  cpaAlerts: CpaAlert[],
-  events: MarineEvent[]
-): string {
+function buildSystemPrompt(vessels: Vessel[], cpaAlerts: CpaAlert[], events: MarineEvent[]): string {
   const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-  const vesselLines = vessels
-    .map(v =>
-      `• ${v.name} (${v.vesselType}, ${v.length}m${v.hazardousCargo ? ', ⚠위험물' : ''}): ` +
-      `${v.latitude.toFixed(4)}°N ${v.longitude.toFixed(4)}°E | ` +
-      `SOG ${v.sog.toFixed(1)}kn COG ${v.cog.toFixed(0)}° | ${v.navigationStatus} | →${v.destination}`
-    )
-    .join('\n');
+  const vesselLines = vessels.map(v =>
+    `• ${v.name} (${v.vesselType}, ${v.length}m${v.hazardousCargo ? ', ⚠위험물' : ''}): ` +
+    `${v.latitude.toFixed(4)}°N ${v.longitude.toFixed(4)}°E | ` +
+    `SOG ${v.sog.toFixed(1)}kn COG ${v.cog.toFixed(0)}° | ${v.navigationStatus} | →${v.destination}`
+  ).join('\n');
 
-  const alertLines =
-    cpaAlerts.length > 0
-      ? cpaAlerts
-          .map(
-            a =>
-              `• ${a.nameA} ↔ ${a.nameB}: CPA ${a.cpa.toFixed(2)}해리 TCPA ${a.tcpa.toFixed(1)}분 [${a.severity === 'danger' ? '위험' : '주의'}]`
-          )
-          .join('\n')
-      : '• 현재 충돌 경보 없음';
+  const alertLines = cpaAlerts.length > 0
+    ? cpaAlerts.map(a => `• ${a.nameA} ↔ ${a.nameB}: CPA ${a.cpa.toFixed(2)}해리 TCPA ${a.tcpa.toFixed(1)}분 [${a.severity === 'danger' ? '위험' : '주의'}]`).join('\n')
+    : '• 현재 충돌 경보 없음';
 
-  const eventLines =
-    events.length > 0
-      ? events
-          .slice(0, 8)
-          .map(e => `• [${e.type}] ${e.message}`)
-          .join('\n')
-      : '• 최근 이벤트 없음';
+  const eventLines = events.length > 0
+    ? events.slice(0, 8).map(e => `• [${e.type}] ${e.message}`).join('\n')
+    : '• 최근 이벤트 없음';
 
   return `당신은 해양 관제 AI 어시스턴트입니다.
 현재 관제 시스템의 실시간 데이터를 기반으로 운항 관제사의 질문에 정확하고 간결하게 한국어로 답변하세요.
@@ -82,7 +66,7 @@ ${alertLines}
 ${eventLines}`;
 }
 
-// ── Suggestion chips ─────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
   '위험물 운반 중인 선박은?',
@@ -93,181 +77,295 @@ const SUGGESTIONS = [
   '현재 해역 상황을 요약해줘',
 ];
 
-// ── Sub-components ───────────────────────────────────────────────────────────
+const TIMEOUT_MS = 90_000;
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function ProviderBadge({ model }: { model: ModelConfig }) {
+  // 브라우저 = API 키 불필요, 진짜 무료
+  // isFree API = 무료 할당량 있는 서버 (HF/Groq/Gemini) — 토큰 소진됨
+  // !isFree = 유료 API
   const color =
-    model.kind === 'browser' ? 'nlc-badge--browser' : model.isFree ? 'nlc-badge--free' : 'nlc-badge--paid';
-  const label = model.kind === 'browser' ? '브라우저' : model.isFree ? '무료' : '유료';
-  return <span className={`nlc-badge ${color}`}>{label}</span>;
+    model.kind === 'local'
+      ? 'nlc-badge--local'
+      : model.kind === 'browser'
+      ? 'nlc-badge--browser'
+      : 'nlc-badge--paid';
+  const label =
+    model.kind === 'local' ? 'Ollama' : model.kind === 'browser' ? '브라우저' : '유료';
+  const title =
+    model.kind === 'local'
+      ? 'API 키 불필요 · 로컬 Ollama 실행'
+      : model.kind === 'browser'
+      ? 'API 키 불필요 · 브라우저 로컬 실행'
+      : '유료 API · API 키 필요';
+  return <span className={`nlc-badge ${color}`} title={title}>{label}</span>;
 }
 
-function DownloadWarning({ model, onConfirm, onCancel }: {
+function ModelItem({ m, selected, onSelect }: { m: ModelConfig; selected: string; onSelect: (id: string) => void }) {
+  return (
+    <button className={`nlc-model-item${m.id === selected ? ' selected' : ''}`} onClick={() => onSelect(m.id)}>
+      <div className="nlc-model-item-top">
+        <ProviderBadge model={m} />
+        <span>{m.label}</span>
+        <span className="nlc-license-tag">{m.license}</span>
+      </div>
+      <div className="nlc-model-item-desc">{m.description}</div>
+    </button>
+  );
+}
+
+// ── Download screen (replaces messages area) ───────────────────────────────────
+
+function DownloadScreen({ model, progress, onStart, onCancel }: {
   model: ModelConfig;
-  onConfirm: () => void;
+  progress: WebLLMProgress;
+  onStart: () => void;
   onCancel: () => void;
 }) {
+  const isLoading = progress.status === 'loading';
+  const isChecking = isLoading && progress.msg === '모델 확인 중...';
+  const sizePart = model.description.split('·').find(s => s.includes('GB') || s.includes('MB'))?.trim() ?? model.description.split('·')[0].trim();
+  const hint = model.kind === 'local'
+    ? 'Ollama가 모델을 로컬에 다운로드합니다 (한 번만)'
+    : '다운로드 후 브라우저 IndexedDB에 캐시됩니다';
+
   return (
-    <div className="nlc-download-warn">
-      <p className="nlc-download-title">⬇ 모델 다운로드 필요</p>
-      <p className="nlc-download-desc">
-        <strong>{model.label}</strong> 모델을 브라우저에 다운로드합니다.
-        <br />
-        크기: ~{model.description.split('·')[0].trim()}
-        <br />
-        다운로드 후 IndexedDB에 캐시되어 재사용됩니다.
-      </p>
-      <div className="nlc-download-actions">
-        <button className="nlc-btn nlc-btn-primary" onClick={onConfirm}>다운로드 시작</button>
-        <button className="nlc-btn nlc-btn-ghost" onClick={onCancel}>취소</button>
-      </div>
+    <div className="nlc-download-screen">
+      <div className="nlc-download-icon">⬇</div>
+      <p className="nlc-download-title">{model.label}</p>
+      <p className="nlc-download-meta">{model.license} · {sizePart}</p>
+      <p className="nlc-download-hint">{hint}</p>
+
+      {isChecking && (
+        <div className="nlc-dl-progress">
+          <div className="nlc-dl-bar-track"><div className="nlc-dl-bar-fill" style={{ width: '100%', opacity: 0.4 }} /></div>
+          <div className="nlc-dl-stats"><span className="nlc-dl-msg">설치 여부 확인 중...</span></div>
+        </div>
+      )}
+
+      {!isLoading && progress.status !== 'error' && (
+        <div className="nlc-download-actions">
+          <button className="nlc-btn nlc-btn-primary" onClick={onStart}>다운로드 시작</button>
+          <button className="nlc-btn nlc-btn-ghost" onClick={onCancel}>모델 변경</button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="nlc-dl-progress">
+          <div className="nlc-dl-bar-track">
+            <div className="nlc-dl-bar-fill" style={{ width: `${progress.pct}%` }} />
+          </div>
+          <div className="nlc-dl-stats">
+            <span className="nlc-dl-pct">{progress.pct}%</span>
+            <span className="nlc-dl-msg">{progress.msg}</span>
+          </div>
+        </div>
+      )}
+
+      {progress.status === 'error' && (
+        <div className="nlc-dl-error">
+          <p>⚠ {progress.msg}</p>
+          <div className="nlc-download-actions">
+            <button className="nlc-btn nlc-btn-primary" onClick={onStart}>재시도</button>
+            <button className="nlc-btn nlc-btn-ghost" onClick={onCancel}>모델 변경</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ProgressBar({ progress }: { progress: WebLLMProgress }) {
+// ── Suggestions screen ─────────────────────────────────────────────────────────
+
+function SuggestionsScreen({ onSend, disabled }: { onSend: (s: string) => void; disabled: boolean }) {
   return (
-    <div className="nlc-progress-wrap">
-      <div className="nlc-progress-bar" style={{ width: `${progress.pct}%` }} />
-      <p className="nlc-progress-msg">{progress.msg}</p>
+    <div className="nlc-suggestions">
+      <p className="nlc-suggestions-title">질문 예시를 클릭하거나 직접 입력하세요</p>
+      {SUGGESTIONS.map(s => (
+        <button
+          key={s}
+          className="nlc-suggestion-chip"
+          onClick={() => onSend(s)}
+          disabled={disabled}
+        >
+          {s}
+        </button>
+      ))}
     </div>
   );
 }
 
-// ── Main component ───────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────────
 
 export default function NLChat({ vessels, cpaAlerts, events }: NLChatProps) {
-  const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string>(MODELS[0].id);
-  const [apiKey, setApiKey] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [wllmProgress, setWllmProgress] = useState<WebLLMProgress>({ status: 'idle', pct: 0, msg: '' });
-  const [showDownloadWarn, setShowDownloadWarn] = useState(false);
+  const [open, setOpen]               = useState(false);
+  const [selectedId, setSelectedId]   = useState<string>(MODELS[0].id);
+  const [messages, setMessages]       = useState<ChatMessage[]>([]);
+  const [input, setInput]             = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [elapsed, setElapsed]         = useState(0);
   const [showModelMenu, setShowModelMenu] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [wllmProgress, setWllmProgress]  = useState<WebLLMProgress>({ status: 'idle', pct: 0, msg: '' });
+
+  const messagesEndRef  = useRef<HTMLDivElement>(null);
+  const inputRef        = useRef<HTMLInputElement>(null);
+  const abortRef        = useRef<AbortController | null>(null);
+  const elapsedTimerRef = useRef<number | null>(null);
 
   const model = MODELS.find(m => m.id === selectedId) ?? MODELS[0];
 
-  // Load API key from localStorage when model changes
-  useEffect(() => {
-    if (model.kind === 'api' && model.provider) {
-      const stored = localStorage.getItem(`nlc-key-${model.provider}`);
-      setApiKey(stored ?? '');
-    }
-  }, [model.id, model.kind, model.provider]);
+  // ── 모델 변경 처리 ────────────────────────────────────────────────────────
+  const selectModel = (id: string) => {
+    const newModel = MODELS.find(m => m.id === id) ?? MODELS[0];
+    setSelectedId(id);
+    setShowModelMenu(false);
+    setMessages([]);
 
-  // Scroll to bottom on new message
+    if (newModel.kind === 'browser') {
+      if (isBrowserModelLoaded(newModel)) {
+        setWllmProgress({ status: 'ready', pct: 100, msg: '캐시에서 로드됨' });
+      } else {
+        setWllmProgress({ status: 'idle', pct: 0, msg: '' });
+      }
+    } else if (newModel.kind === 'local' && newModel.ollamaModel) {
+      // Ollama: 설치 여부 비동기 확인
+      setWllmProgress({ status: 'loading', pct: 0, msg: '모델 확인 중...' });
+      checkOllamaModel(newModel.ollamaModel).then(installed => {
+        if (installed) {
+          setWllmProgress({ status: 'ready', pct: 100, msg: '설치됨' });
+        } else {
+          setWllmProgress({ status: 'idle', pct: 0, msg: '' });
+        }
+      });
+    }
+  };
+
+  // 스크롤
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus input when panel opens
+  // 패널 열릴 때 input 포커스
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
 
-  const saveApiKey = (key: string) => {
-    setApiKey(key);
-    if (key) localStorage.setItem(`nlc-key-${model.provider}`, key);
-  };
-
-  const selectModel = (id: string) => {
-    setSelectedId(id);
-    setShowModelMenu(false);
-    setMessages([]);
-    setWllmProgress({ status: 'idle', pct: 0, msg: '' });
-  };
-
-  const historyForInference = messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .slice(-10)
-    .map(m => ({ role: m.role as 'user' | 'assistant', content: m.text }));
-
-  const handleSend = async (text?: string) => {
-    const msg = (text ?? input).trim();
-    if (!msg || loading) return;
-    setInput('');
-
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text: msg };
-    setMessages(prev => [...prev, userMsg]);
-    setLoading(true);
-
-    // Browser model: check if loaded
-    if (model.kind === 'browser' && wllmProgress.status !== 'ready') {
-      setShowDownloadWarn(true);
-      setLoading(false);
-      return;
-    }
-
-    const result = await runInference({
-      model,
-      systemPrompt: buildSystemPrompt(vessels, cpaAlerts, events),
-      history: historyForInference,
-      message: msg,
-      apiKey: model.kind === 'api' ? apiKey : undefined,
-    });
-
-    setLoading(false);
-    if (result.ok) {
-      setMessages(prev => [
-        ...prev,
-        { id: `a-${Date.now()}`, role: 'assistant', text: result.text, ms: result.ms, model: model.label },
-      ]);
-    } else {
-      setMessages(prev => [
-        ...prev,
-        { id: `e-${Date.now()}`, role: 'error', text: result.error },
-      ]);
-    }
-  };
-
+  // ── 다운로드 ───────────────────────────────────────────────────────────────
   const startDownload = async () => {
-    setShowDownloadWarn(false);
     setWllmProgress({ status: 'loading', pct: 0, msg: '초기화 중...' });
     try {
-      await loadWebLLM(model, setWllmProgress);
+      if (model.provider === 'transformers') {
+        await loadTransformers(model, setWllmProgress);
+      } else if (model.provider === 'ollama' && model.ollamaModel) {
+        await pullOllamaModel(model.ollamaModel, setWllmProgress);
+      } else {
+        await loadWebLLM(model, setWllmProgress);
+      }
     } catch (e) {
       setWllmProgress({ status: 'error', pct: 0, msg: e instanceof Error ? e.message : '로드 실패' });
     }
   };
 
-  const needsKey = model.kind === 'api' && !apiKey;
+  const cancelDownload = () => {
+    // Ollama 모델(첫 번째 local 모델)로 전환
+    const fallback = MODELS.find(m => m.kind === 'local') ?? MODELS[0];
+    selectModel(fallback.id);
+  };
 
-  const browserModels = MODELS.filter(m => m.kind === 'browser');
-  const apiModels = MODELS.filter(m => m.kind === 'api');
+  // ── 경과 시간 타이머 ──────────────────────────────────────────────────────
+  const stopLoading = () => {
+    setLoading(false);
+    setElapsed(0);
+    if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
+  };
+
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    stopLoading();
+    setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: 'error', text: '요청을 취소했습니다.' }]);
+  };
+
+  // ── 메시지 전송 ───────────────────────────────────────────────────────────
+  const handleSend = async (text?: string) => {
+    const msg = (text ?? input).trim();
+    if (!msg || loading) return;
+    setInput('');
+
+    // 브라우저 모델이 아직 로드 안됨 → 무시 (다운로드 화면에서 처리)
+    if (model.kind === 'browser' && wllmProgress.status !== 'ready') return;
+
+    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text: msg };
+    setMessages(prev => [...prev, userMsg]);
+    setLoading(true);
+    setElapsed(0);
+
+    const startMs = Date.now();
+    elapsedTimerRef.current = window.setInterval(() => setElapsed(Math.floor((Date.now() - startMs) / 1000)), 500);
+
+    const systemPrompt = buildSystemPrompt(vessels, cpaAlerts, events);
+    const history = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.text }));
+
+    // ── 콘솔 로그: 실제 전달 프롬프트 ──────────────────────────────────────
+    console.group(`%c[AI Prompt] ${model.label}`, 'color:#14c6e8;font-weight:bold');
+    console.log('%cSystem Prompt:', 'color:#f59e0b;font-weight:bold', systemPrompt);
+    if (history.length > 0) console.log('%cHistory:', 'color:#a78bfa', history);
+    console.log('%cUser Message:', 'color:#10b981;font-weight:bold', msg);
+    console.groupEnd();
+
+    const abort = new AbortController();
+    abortRef.current = abort;
+    const timeoutId = window.setTimeout(() => abort.abort(), TIMEOUT_MS);
+
+    const result = await runInference({ model, systemPrompt, history, message: msg, signal: abort.signal });
+
+    clearTimeout(timeoutId);
+    stopLoading();
+
+    if (result.ok) {
+      console.log(`%c[AI Response] ${model.label} — ${result.ms}ms`, 'color:#10b981', result.text);
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: result.text, ms: result.ms, model: model.label }]);
+    } else {
+      const isTimeout = result.error.includes('aborted') || result.error.includes('abort');
+      const errText = isTimeout ? `응답 시간 초과 (${TIMEOUT_MS / 1000}초). API 키를 확인하거나 다른 모델을 시도해보세요.` : result.error;
+      console.error(`%c[AI Error] ${model.label}`, 'color:#ff5c5c', result.error);
+      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: 'error', text: errText }]);
+    }
+  };
+
+  // ── 화면 상태 계산 ─────────────────────────────────────────────────────────
+  // browser: WebGPU 모델 다운로드 필요 / local: Ollama pull 필요
+  const showDownloadScreen = wllmProgress.status !== 'ready';
+  const showSuggestions = !showDownloadScreen && messages.length === 0 && !loading;
+  const canSend = !loading && !showDownloadScreen;
+
+  const browserModels = MODELS.filter(m => m.provider === 'transformers');
+  const webllmModels  = MODELS.filter(m => m.provider === 'webllm');
+  const ollamaModels  = MODELS.filter(m => m.provider === 'ollama');
 
   return (
     <>
-      {/* Floating toggle button */}
-      <button
-        className={`nlc-fab${open ? ' nlc-fab--open' : ''}`}
-        onClick={() => setOpen(v => !v)}
-        title="AI 어시스턴트"
-        aria-label="AI 어시스턴트 열기"
-      >
+      {/* FAB */}
+      <button className={`nlc-fab${open ? ' nlc-fab--open' : ''}`} onClick={() => setOpen(v => !v)} title="AI 어시스턴트">
         {open ? '✕' : '💬'}
       </button>
 
-      {/* Chat panel */}
       {open && (
         <div className="nlc-panel">
-          {/* Header */}
+
+          {/* ── 헤더 ──────────────────────────────────────────────────── */}
           <div className="nlc-header">
             <span className="nlc-title">🤖 해양 AI 어시스턴트</span>
-            <button className="nlc-close" onClick={() => setOpen(false)} aria-label="닫기">✕</button>
+            <button className="nlc-close" onClick={() => setOpen(false)}>✕</button>
           </div>
 
-          {/* Model selector */}
+          {/* ── 모델 선택 ──────────────────────────────────────────────── */}
           <div className="nlc-model-row">
             <div className="nlc-model-trigger-wrap">
-              <button
-                className="nlc-model-trigger"
-                onClick={() => setShowModelMenu(v => !v)}
-              >
+              <button className="nlc-model-trigger" onClick={() => setShowModelMenu(v => !v)}>
                 <ProviderBadge model={model} />
                 <span className="nlc-model-name">{model.label}</span>
                 <span className="nlc-model-desc">{model.description}</span>
@@ -276,112 +374,59 @@ export default function NLChat({ vessels, cpaAlerts, events }: NLChatProps) {
 
               {showModelMenu && (
                 <div className="nlc-model-menu">
-                  <div className="nlc-model-group-label">🌐 브라우저 (무료 · 프라이버시)</div>
-                  {browserModels.map(m => (
-                    <button
-                      key={m.id}
-                      className={`nlc-model-item${m.id === selectedId ? ' selected' : ''}`}
-                      onClick={() => selectModel(m.id)}
-                    >
-                      <div className="nlc-model-item-top">
-                        <ProviderBadge model={m} />
-                        <span>{m.label}</span>
-                      </div>
-                      <div className="nlc-model-item-desc">{m.description}</div>
-                    </button>
-                  ))}
-                  <div className="nlc-model-group-label">☁ 서버 API</div>
-                  {apiModels.map(m => (
-                    <button
-                      key={m.id}
-                      className={`nlc-model-item${m.id === selectedId ? ' selected' : ''}`}
-                      onClick={() => selectModel(m.id)}
-                    >
-                      <div className="nlc-model-item-top">
-                        <ProviderBadge model={m} />
-                        <span>{m.label}</span>
-                      </div>
-                      <div className="nlc-model-item-desc">{m.description}</div>
-                    </button>
-                  ))}
+                  <div className="nlc-model-group-label">🖥 로컬 Ollama (FastAPI 프록시 · API 키 불필요)</div>
+                  {ollamaModels.map(m => <ModelItem key={m.id} m={m} selected={selectedId} onSelect={selectModel} />)}
+                  <div className="nlc-model-group-label">🌐 브라우저 · HuggingFace ONNX (API 키 불필요)</div>
+                  {browserModels.map(m => <ModelItem key={m.id} m={m} selected={selectedId} onSelect={selectModel} />)}
+                  <div className="nlc-model-group-label">🌐 브라우저 · WebLLM MLC (API 키 불필요)</div>
+                  {webllmModels.map(m => <ModelItem key={m.id} m={m} selected={selectedId} onSelect={selectModel} />)}
                 </div>
               )}
             </div>
 
-            {/* API key input */}
-            {model.kind === 'api' && (
-              <div className="nlc-key-row">
-                <div className="nlc-key-input-wrap">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    className="nlc-key-input"
-                    placeholder={model.keyPlaceholder ?? 'API Key'}
-                    value={apiKey}
-                    onChange={e => saveApiKey(e.target.value)}
-                  />
-                  <button
-                    className="nlc-key-eye"
-                    onClick={() => setShowKey(v => !v)}
-                    type="button"
-                    title={showKey ? '숨기기' : '보기'}
-                  >
-                    {showKey ? '🙈' : '👁'}
-                  </button>
-                </div>
-                {model.keyHint && (
-                  <span className="nlc-key-hint">{model.keyLabel} · {model.keyHint}</span>
-                )}
+            {/* Ollama 모델 안내 */}
+            {model.kind === 'local' && (
+              <div className="nlc-key-hint" style={{ padding: '6px 0 2px' }}>
+                FastAPI: localhost:8000 · Ollama: localhost:11434
               </div>
             )}
 
-            {/* WebLLM progress */}
-            {model.kind === 'browser' && wllmProgress.status === 'loading' && (
-              <ProgressBar progress={wllmProgress} />
-            )}
+            {/* 브라우저 모델 로드 완료 표시 */}
             {model.kind === 'browser' && wllmProgress.status === 'ready' && (
-              <div className="nlc-ready-badge">✓ 모델 로드 완료</div>
-            )}
-            {model.kind === 'browser' && wllmProgress.status === 'error' && (
-              <div className="nlc-error-badge">✕ {wllmProgress.msg}</div>
+              <div className="nlc-ready-badge">✓ {wllmProgress.msg}</div>
             )}
           </div>
 
-          {/* Download warning modal */}
-          {showDownloadWarn && (
-            <DownloadWarning
-              model={model}
-              onConfirm={startDownload}
-              onCancel={() => setShowDownloadWarn(false)}
-            />
-          )}
-
-          {/* Messages */}
+          {/* ── 메인 콘텐츠 영역 ─────────────────────────────────────────
+               3가지 상태 중 하나만 표시:
+               1. 다운로드 화면  (browser 모델 + not ready)
+               2. 제안 화면      (메시지 없음 + ready/api)
+               3. 대화 화면      (메시지 있음)
+          ─────────────────────────────────────────────────────────────── */}
           <div className="nlc-messages">
-            {messages.length === 0 && !showDownloadWarn && (
-              <div className="nlc-suggestions">
-                <p className="nlc-suggestions-title">질문 예시</p>
-                {SUGGESTIONS.map(s => (
-                  <button
-                    key={s}
-                    className="nlc-suggestion-chip"
-                    onClick={() => handleSend(s)}
-                    disabled={loading || needsKey}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+
+            {showDownloadScreen && (
+              <DownloadScreen
+                model={model}
+                progress={wllmProgress}
+                onStart={startDownload}
+                onCancel={cancelDownload}
+              />
             )}
 
-            {messages.map(msg => (
+            {showSuggestions && (
+              <SuggestionsScreen onSend={handleSend} disabled={false} />
+            )}
+
+            {!showDownloadScreen && messages.map(msg => (
               <div key={msg.id} className={`nlc-msg nlc-msg--${msg.role}`}>
-                {msg.role === 'user' && <div className="nlc-msg-bubble nlc-msg-bubble--user">{msg.text}</div>}
+                {msg.role === 'user' && (
+                  <div className="nlc-msg-bubble nlc-msg-bubble--user">{msg.text}</div>
+                )}
                 {msg.role === 'assistant' && (
                   <>
                     <div className="nlc-msg-bubble nlc-msg-bubble--assistant">{msg.text}</div>
-                    <div className="nlc-msg-meta">
-                      {msg.model} · {msg.ms != null ? `${(msg.ms / 1000).toFixed(1)}s` : ''}
-                    </div>
+                    <div className="nlc-msg-meta">{msg.model} · {msg.ms != null ? `${(msg.ms / 1000).toFixed(1)}s` : ''}</div>
                   </>
                 )}
                 {msg.role === 'error' && (
@@ -390,10 +435,12 @@ export default function NLChat({ vessels, cpaAlerts, events }: NLChatProps) {
               </div>
             ))}
 
-            {loading && (
+            {loading && !showDownloadScreen && (
               <div className="nlc-msg nlc-msg--assistant">
                 <div className="nlc-msg-bubble nlc-msg-bubble--assistant nlc-thinking">
-                  <span /><span /><span />
+                  <span className="nlc-dot" /><span className="nlc-dot" /><span className="nlc-dot" />
+                  <em className="nlc-thinking-time">{elapsed}s</em>
+                  <button className="nlc-cancel-inline" onClick={handleCancel} title="취소">✕</button>
                 </div>
               </div>
             )}
@@ -401,12 +448,11 @@ export default function NLChat({ vessels, cpaAlerts, events }: NLChatProps) {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input bar */}
+          {/* ── 입력 바 ───────────────────────────────────────────────── */}
           <div className="nlc-input-row">
-            {needsKey && (
-              <div className="nlc-need-key">API 키를 먼저 입력하세요</div>
-            )}
-            {!needsKey && (
+            {showDownloadScreen ? (
+              <div className="nlc-need-key">모델을 먼저 다운로드해주세요</div>
+            ) : (
               <>
                 <input
                   ref={inputRef}
@@ -414,25 +460,14 @@ export default function NLChat({ vessels, cpaAlerts, events }: NLChatProps) {
                   placeholder={loading ? '답변 생성 중...' : '해역 현황에 대해 질문하세요'}
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  disabled={loading}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  disabled={!canSend}
                 />
-                <button
-                  className="nlc-send"
-                  onClick={() => handleSend()}
-                  disabled={loading || !input.trim()}
-                  aria-label="전송"
-                >
-                  ↑
-                </button>
+                <button className="nlc-send" onClick={() => handleSend()} disabled={!canSend || !input.trim()}>↑</button>
               </>
             )}
           </div>
+
         </div>
       )}
     </>

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calcCpa, CPA_DANGER_NM, findCpaAlerts, TCPA_MAX_MIN } from './cpa';
-import { predictRoutePosition } from './routePrediction';
+import { getRoutePosition, predictRoutePosition, vesselRoutes } from './routePrediction';
 import type { Vessel } from '../types';
 
 const LAT = 35;
@@ -229,4 +229,15 @@ test('parallel motion does not create a false CPA alert', () => {
 
   const alerts = findCpaAlerts([a, b]);
   assert.equal(alerts.length, 0);
+});
+
+test('reverse route direction flips the reported heading to match actual travel', () => {
+  const route = vesselRoutes['440123456'];
+  assert.ok(route);
+
+  const forward = getRoutePosition(route, 1.2, 1);
+  const reverse = getRoutePosition(route, 1.2, -1);
+
+  const diff = ((reverse.heading - forward.heading + 540) % 360) - 180;
+  assert.equal(Math.abs(diff), 180);
 });

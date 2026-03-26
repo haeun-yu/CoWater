@@ -13,11 +13,13 @@ import { predictRoutePosition } from './routePrediction';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const CPA_WARN_NM   = 1.0;   // nm  – show warning (orange)
-export const CPA_DANGER_NM = 0.5;   // nm  – show danger  (red)
-export const TCPA_MAX_MIN  = 12;    // min – ignore approaches too far in future
-export const TCPA_DANGER_MIN = 8;   // min – only near-term risks escalate to red
-export const MIN_CPA_IMPROVEMENT_NM = 0.05; // ignore near-parallel / non-closing pairs
+export const CPA_WARN_NM   = 0.4;   // nm  – show warning (orange) ~740m
+export const CPA_DANGER_NM = 0.2;   // nm  – show danger  (red)    ~370m
+export const TCPA_MAX_MIN  = 5;     // min – 5분 이내 접근만 경보
+export const TCPA_DANGER_MIN = 3;   // min – 3분 이내 + CPA < 0.2nm → 위험(red)
+export const MIN_CPA_IMPROVEMENT_NM = 0.15; // 최솟값 개선량 최소치 — 평행 항주 제거
+/** 현재 거리 / CPA 최소 비율 — 실제로 수렴 중인 경우만 경보 */
+export const MIN_CONVERGENCE_RATIO = 2.0;
 
 const KNOTS_TO_MS = 0.5144;
 const NM_TO_M     = 1852;
@@ -302,10 +304,12 @@ export function findCpaAlerts(vessels: Vessel[]): CpaAlert[] {
       const severity = cpa < CPA_DANGER_NM && tcpa <= TCPA_DANGER_MIN ? 'danger' : 'warning';
       const action = buildAction(encounter.type, severity);
 
-      if (cpa > CPA_WARN_NM)  continue;   // too far
-      if (tcpa <= 0) continue;            // not actually closing any further
-      if (tcpa > TCPA_MAX_MIN) continue;  // too far in future
-      if (distanceImprovement < MIN_CPA_IMPROVEMENT_NM) continue; // near-parallel / same-track
+      if (cpa > CPA_WARN_NM)  continue;   // 0.4nm 이상 → 무시
+      if (tcpa <= 0) continue;            // 이미 멀어지는 중
+      if (tcpa > TCPA_MAX_MIN) continue;  // 5분 초과 → 무시
+      if (distanceImprovement < MIN_CPA_IMPROVEMENT_NM) continue; // 평행/동향 → 무시
+      // 현재 거리가 CPA의 MIN_CONVERGENCE_RATIO배 이상이어야 "수렴 중"으로 판단
+      if (currentDistance < cpa * MIN_CONVERGENCE_RATIO) continue;
 
       alerts.push({
         mmsiA:    a.mmsi,

@@ -498,7 +498,6 @@ function App() {
   const [zoom, setZoom] = useState(11);
   const [followSelected, setFollowSelected] = useState(true);
   const [vesselQuery, setVesselQuery] = useState("");
-  const [riskOnly, setRiskOnly] = useState(false);
   const [connectionState, setConnectionState] =
     useState<MothConnectionState>("connecting");
   const tickRef = useRef(0);
@@ -622,13 +621,8 @@ function App() {
 
   const filteredVessels = useMemo(() => {
     const query = vesselQuery.trim().toLowerCase();
+    if (!query) return vessels;
     return vessels.filter((vessel) => {
-      if (riskOnly && !vesselAlertLevel.has(vessel.mmsi)) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
       const haystack = [
         vessel.name,
         vessel.mmsi,
@@ -640,7 +634,7 @@ function App() {
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [riskOnly, vesselAlertLevel, vesselQuery, vessels]);
+  }, [vesselQuery, vessels]);
 
   useEffect(() => {
     const now = Date.now();
@@ -995,13 +989,10 @@ function App() {
           <VesselList
             vessels={filteredVessels}
             totalCount={vessels.length}
-            riskCount={vesselAlertLevel.size}
             query={vesselQuery}
-            riskOnly={riskOnly}
             vesselAlertLevel={vesselAlertLevel}
             onQueryChange={setVesselQuery}
             onSelect={setSelectedMmsi}
-            onToggleRiskOnly={() => setRiskOnly((value) => !value)}
           />
         )}
       </aside>
@@ -1140,56 +1131,32 @@ function App() {
 function VesselList({
   vessels,
   totalCount,
-  riskCount,
   query,
-  riskOnly,
   vesselAlertLevel,
   onQueryChange,
   onSelect,
-  onToggleRiskOnly,
 }: {
   vessels: Vessel[];
   totalCount: number;
-  riskCount: number;
   query: string;
-  riskOnly: boolean;
   vesselAlertLevel: Map<string, 'warning' | 'danger'>;
   onQueryChange: (value: string) => void;
   onSelect: (mmsi: string) => void;
-  onToggleRiskOnly: () => void;
 }) {
   return (
     <section className="list-panel">
-      <div className="panel-heading panel-heading-sticky">
-        <h2>선박 목록</h2>
-        <span>{vessels.length} / {totalCount}척</span>
-      </div>
-      <div className="list-controls">
+      <div className="panel-heading-sticky">
+        <div className="panel-heading">
+          <h2>선박 목록</h2>
+          <span>{vessels.length} / {totalCount}척</span>
+        </div>
         <input
           className="search-input"
           type="search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="선박명 · MMSI · 목적지 검색"
+          placeholder="선박명 · MMSI · 목적지"
         />
-        <div className="filter-row">
-          <button
-            className={`filter-chip${riskOnly ? ' active' : ''}`}
-            type="button"
-            onClick={onToggleRiskOnly}
-          >
-            위험 선박만 {riskCount > 0 ? riskCount : ''}
-          </button>
-          {query && (
-            <button
-              className="filter-chip"
-              type="button"
-              onClick={() => onQueryChange("")}
-            >
-              검색 초기화
-            </button>
-          )}
-        </div>
       </div>
       <div className="ship-list">
         {vessels.length === 0 && (
@@ -1398,9 +1365,12 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
   const isDanger = alert.severity === 'danger';
   const color    = isDanger ? '#ff3535' : '#ff9900';
 
+  const fmtCoord = (pos: [number, number]) =>
+    `${pos[0].toFixed(5)}°N  ${pos[1].toFixed(5)}°E`;
+
   return (
     <Fragment>
-      {/* Current link between the two vessels */}
+      {/* 현재 두 선박 연결선 */}
       <Polyline
         positions={[alert.posA, alert.posB]}
         pathOptions={{
@@ -1425,7 +1395,7 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
         </Tooltip>
       </Polyline>
 
-      {/* Predicted closest-approach separation segment */}
+      {/* TCPA 시점 두 선박 위치 연결선 (예측 최근접 구간) */}
       <Polyline
         positions={[alert.cpaPosA, alert.cpaPosB]}
         pathOptions={{
@@ -1436,17 +1406,54 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
         }}
       />
 
-      {/* Small marker at the midpoint of the predicted CPA geometry */}
-      <Polyline
-        positions={[alert.cpaPoint, alert.cpaPoint]}
-        pathOptions={{ color, weight: 0, opacity: 0 }}
-      />
-      {/* CPA point diamond */}
+      {/* TCPA 시점 선박 A 예측 위치 */}
+      <Marker
+        position={alert.cpaPosA}
+        icon={cpaVesselIcon(color, 'A')}
+      >
+        <Tooltip className="cpa-tooltip">
+          <div className="cpa-tooltip-inner">
+            <span className={`cpa-sev-badge ${alert.severity}`}>TCPA 예측 위치</span>
+            <span><strong>{alert.nameA}</strong></span>
+            <span>{fmtCoord(alert.cpaPosA)}</span>
+            <span>약 {alert.tcpa.toFixed(1)}분 후</span>
+          </div>
+        </Tooltip>
+      </Marker>
+
+      {/* TCPA 시점 선박 B 예측 위치 */}
+      <Marker
+        position={alert.cpaPosB}
+        icon={cpaVesselIcon(color, 'B')}
+      >
+        <Tooltip className="cpa-tooltip">
+          <div className="cpa-tooltip-inner">
+            <span className={`cpa-sev-badge ${alert.severity}`}>TCPA 예측 위치</span>
+            <span><strong>{alert.nameB}</strong></span>
+            <span>{fmtCoord(alert.cpaPosB)}</span>
+            <span>약 {alert.tcpa.toFixed(1)}분 후</span>
+          </div>
+        </Tooltip>
+      </Marker>
+
+      {/* 최근접 중점 다이아몬드 마커 */}
       <Marker
         position={alert.cpaPoint}
         icon={cpaPointIcon(color)}
-        interactive={false}
-      />
+      >
+        <Tooltip className="cpa-tooltip">
+          <div className="cpa-tooltip-inner">
+            <span className={`cpa-sev-badge ${alert.severity}`}>
+              {isDanger ? '⚠ 위험 · 최근접 예측 지점' : '주의 · 최근접 예측 지점'}
+            </span>
+            <span>{alert.nameA} ↔ {alert.nameB}</span>
+            <span>{fmtCoord(alert.cpaPoint)}</span>
+            <span>CPA&nbsp;<strong>{alert.cpa.toFixed(2)}&nbsp;nm</strong>
+              &nbsp;·&nbsp;TCPA&nbsp;<strong>{alert.tcpa.toFixed(1)}&nbsp;min</strong>
+            </span>
+          </div>
+        </Tooltip>
+      </Marker>
     </Fragment>
   );
 }
@@ -1454,14 +1461,27 @@ function CpaLine({ alert }: { alert: CpaAlert }) {
 function cpaPointIcon(color: string) {
   return L.divIcon({
     className: '',
-    html: `<svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg"
-               style="overflow:visible;">
-             <polygon points="6,0 12,6 6,12 0,6"
-               fill="${color}" fill-opacity="0.85"
-               stroke="white" stroke-width="0.8"/>
+    html: `<svg width="14" height="14" viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
+             <polygon points="7,0 14,7 7,14 0,7"
+               fill="${color}" fill-opacity="0.9"
+               stroke="white" stroke-width="1"/>
            </svg>`,
-    iconSize:   [12, 12],
-    iconAnchor: [6, 6],
+    iconSize:   [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
+/** 작은 원형 마커 — TCPA 시점 각 선박의 예측 위치 */
+function cpaVesselIcon(color: string, label: string) {
+  return L.divIcon({
+    className: '',
+    html: `<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
+             <circle cx="9" cy="9" r="7" fill="${color}" fill-opacity="0.25" stroke="${color}" stroke-width="1.5"/>
+             <text x="9" y="13" text-anchor="middle" font-size="8" font-weight="bold"
+               fill="${color}" font-family="monospace">${label}</text>
+           </svg>`,
+    iconSize:   [18, 18],
+    iconAnchor: [9, 9],
   });
 }
 

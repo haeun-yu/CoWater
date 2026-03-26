@@ -22,6 +22,7 @@
 ```bash
 npm install
 npm run start
+ollama serve
 ```
 
 기본 실행 포트는 다음과 같습니다.

@@ -70,7 +70,9 @@ export const initialVessels: Vessel[] = [
 
   // ── 추가 15척 ─────────────────────────────────────────────────────────────
 
-  // 동쪽 열린 바다에서 서향 입항 (대한해협 동수로)
+  // ── 데모 시나리오 1: 🔴 CPA DANGER — MV Korea Express ↔ MT Dark Whale 정면 충돌
+  // Korea Express (COG 270°, 서향) ↔ Dark Whale (COG 90°, 동향)
+  // 초기 거리 ≈ 2nm, TCPA ≈ 4.5분 → CPA_DANGER 즉시 발화
   {
     mmsi: '440600001',
     name: 'MV Korea Express',
@@ -78,9 +80,9 @@ export const initialVessels: Vessel[] = [
     vesselType: 'Cargo', length: 185, beam: 30,
     destination: 'Busan New Port', etaUtc: '2026-03-25T19:30:00Z',
     draft: 9.8, hazardousCargo: false,
-    latitude: 34.95, longitude: 129.40,
+    latitude: 35.02, longitude: 129.18,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 12.5, cog: 278, heading: 278, rateOfTurn: 0.4,
+    sog: 14.0, cog: 270, heading: 270, rateOfTurn: 0.0,
     navigationStatus: 'Under way',
   },
 
@@ -98,7 +100,8 @@ export const initialVessels: Vessel[] = [
     navigationStatus: 'Under way',
   },
 
-  // 대한해협 남쪽에서 북향 입항 탱커
+  // ── 데모 시나리오 2 (파트너): 🟠 CPA WARNING — MT Red Star
+  // Tsushima Link와 교차 (COG 222° SW향)
   {
     mmsi: '440600003',
     name: 'MT Red Star',
@@ -106,9 +109,9 @@ export const initialVessels: Vessel[] = [
     vesselType: 'Tanker', length: 178, beam: 32,
     destination: 'Busan Oil Terminal', etaUtc: '2026-03-25T20:10:00Z',
     draft: 12.1, hazardousCargo: false,
-    latitude: 34.76, longitude: 128.92,
+    latitude: 35.02, longitude: 129.14,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 10.8, cog: 8, heading: 8, rateOfTurn: 0.2,
+    sog: 11.0, cog: 222, heading: 222, rateOfTurn: 0.0,
     navigationStatus: 'Under way',
   },
 
@@ -168,17 +171,18 @@ export const initialVessels: Vessel[] = [
     navigationStatus: 'Under way',
   },
 
-  // 외항에서 북동향 울산 위험물 탱커
+  // ── 데모 시나리오 3: ⚠️ 위험물 항만 접근 — MT Ulsan Arrow
+  // BUSAN_PORT(35.10, 129.04) 남쪽 2.3nm 출발, 북향으로 접근 → 2nm 이내 진입 시 hazard_port 이벤트
   {
     mmsi: '440600008',
     name: 'MT Ulsan Arrow',
     callSign: 'D7UA1', imo: '9756789',
     vesselType: 'Tanker', length: 230, beam: 42,
-    destination: 'Ulsan Petrochemical', etaUtc: '2026-03-26T02:00:00Z',
+    destination: 'Busan Oil Terminal', etaUtc: '2026-03-26T02:00:00Z',
     draft: 13.8, hazardousCargo: true,
-    latitude: 35.03, longitude: 129.15,
+    latitude: 35.062, longitude: 129.04,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 9.5, cog: 42, heading: 42, rateOfTurn: 0.6,
+    sog: 10.0, cog: 2, heading: 2, rateOfTurn: 0.0,
     navigationStatus: 'Under way',
   },
 
@@ -224,7 +228,8 @@ export const initialVessels: Vessel[] = [
     navigationStatus: 'Under way',
   },
 
-  // 외항 정박 예인선
+  // ── 데모 시나리오 4: ⚓ 앵커 드래그 — TB Sea Tiger
+  // 정박 상태이지만 조류에 의해 북쪽으로 서서히 이탈 (50m 이상 → anchor_drag 이벤트)
   {
     mmsi: '440600012',
     name: 'TB Sea Tiger',
@@ -232,27 +237,29 @@ export const initialVessels: Vessel[] = [
     vesselType: 'Tug', length: 38, beam: 11,
     destination: 'Busan Port', etaUtc: '2026-03-25T16:00:00Z',
     draft: 2.6, hazardousCargo: false,
-    latitude: 35.02, longitude: 129.10,
+    latitude: 35.020, longitude: 129.10,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 0.2, cog: 45, heading: 45, rateOfTurn: 0,
+    sog: 1.5, cog: 0, heading: 0, rateOfTurn: 0,
     navigationStatus: 'At anchor',
   },
 
-  // 대한해협 남쪽에서 북향 위험물 탱커
+  // ── 데모 시나리오 1 (파트너): 🔴 CPA DANGER — MT Dark Whale
+  // Korea Express와 정면 충돌 코스 (COG 90°, 동향)
   {
     mmsi: '440600013',
     name: 'MT Dark Whale',
     callSign: 'D7DW2', imo: '9812678',
     vesselType: 'Tanker', length: 188, beam: 32,
-    destination: 'Busan Oil Terminal', etaUtc: '2026-03-25T21:30:00Z',
-    draft: 12.6, hazardousCargo: true,
-    latitude: 34.68, longitude: 128.97,
+    destination: 'Ulsan', etaUtc: '2026-03-25T21:30:00Z',
+    draft: 12.6, hazardousCargo: false,
+    latitude: 35.02, longitude: 129.14,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 11.5, cog: 4, heading: 4, rateOfTurn: 0.2,
+    sog: 12.0, cog: 90, heading: 90, rateOfTurn: 0.0,
     navigationStatus: 'Under way',
   },
 
-  // 외항에서 남동향 대마도행 여객선
+  // ── 데모 시나리오 2: 🟠 CPA WARNING — SV Tsushima Link ↔ MT Red Star 교차
+  // Tsushima (NE 향) ↔ Red Star (NW 향), 약 3분 후 교차 → 경보
   {
     mmsi: '440600014',
     name: 'SV Tsushima Link',
@@ -260,9 +267,9 @@ export const initialVessels: Vessel[] = [
     vesselType: 'Passenger', length: 105, beam: 20,
     destination: 'Tsushima Izuhara', etaUtc: '2026-03-25T20:00:00Z',
     draft: 3.8, hazardousCargo: false,
-    latitude: 35.02, longitude: 129.04,
+    latitude: 34.97, longitude: 129.07,
     utcTime: '2026-03-25T08:00:00Z', positionAccuracy: 'High',
-    sog: 22.0, cog: 148, heading: 148, rateOfTurn: 1.5,
+    sog: 20.0, cog: 48, heading: 48, rateOfTurn: 0.0,
     navigationStatus: 'Under way',
   },
 
