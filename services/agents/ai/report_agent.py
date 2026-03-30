@@ -1,0 +1,111 @@
+"""
+Report Agent — Claude 기반 운항 사건 보고서 자동 생성.
+
+Core API에서 Incident 데이터를 가져와 구조화된 보고서를 생성하고
+다시 Core API에 저장한다.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import anthropic
+import httpx
+import redis.asyncio as aioredis
+
+from base import Agent, PlatformReport
+from config import settings
+
+logger = logging.getLogger(__name__)
+
+
+_SYSTEM_PROMPT = """당신은 해양 운항 사고 분석 전문가입니다.
+제공된 사건 데이터를 기반으로 공식 보고서를 작성하십시오.
+
+보고서 형식:
+# 해양 사건 보고서
+
+## 1. 사건 개요
+## 2. 관련 선박 정보
+## 3. 사건 경위 (시간 순)
+## 4. 원인 분석
+## 5. 조치 사항
+## 6. 재발 방지 권고
+## 7. 결론"""
+
+
+class ReportAgent(Agent):
+    agent_id = "report-agent"
+    name = "Report Agent"
+    description = "사건 종료 후 Claude 기반 운항 보고서 자동 생성"
+    agent_type = "ai"
+
+    def __init__(self, redis: aioredis.Redis) -> None:
+        super().__init__(redis)
+        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+    async def on_platform_report(self, report: PlatformReport) -> None:
+        pass  # 이 에이전트는 직접 보고서 생성 요청에 응답
+
+    async def generate_report(self, incident_id: str) -> str | None:
+        """
+        incident_id에 해당하는 사건 데이터를 Core API에서 조회하여 보고서 생성.
+        외부에서 직접 호출하거나 API 엔드포인트를 통해 트리거.
+        """
+        incident = await self._fetch_incident(incident_id)
+        if not incident:
+            return None
+
+        context = _build_incident_context(incident)
+        try:
+            msg = await self._client.messages.create(
+                model=settings.claude_model,
+                max_tokens=2048,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": context}],
+            )
+            report_text = msg.content[0].text.strip()
+        except Exception:
+            logger.exception("Report generation failed for incident %s", incident_id)
+            return None
+
+        await self._save_report(incident_id, report_text)
+        return report_text
+
+    async def _fetch_incident(self, incident_id: str) -> dict | None:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{settings.core_api_url}/incidents/{incident_id}", timeout=5
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception:
+            logger.exception("Failed to fetch incident %s", incident_id)
+            return None
+
+    async def _save_report(self, incident_id: str, report: str) -> None:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.patch(
+                    f"{settings.core_api_url}/incidents/{incident_id}",
+                    json={"report": report},
+                    timeout=5,
+                )
+        except Exception:
+            logger.exception("Failed to save report for incident %s", incident_id)
+
+
+def _build_incident_context(incident: dict) -> str:
+    timeline = "\n".join(
+        f"  - {e.get('timestamp', '')}: {e.get('description', '')}"
+        for e in incident.get("timeline", [])
+    )
+    return (
+        f"사건 ID: {incident.get('incident_id')}\n"
+        f"사건 유형: {incident.get('incident_type')}\n"
+        f"관련 선박: {', '.join(incident.get('platform_ids', []))}\n"
+        f"해결 여부: {'해결됨' if incident.get('resolved') else '미해결'}\n\n"
+        f"사건 타임라인:\n{timeline}\n\n"
+        f"위 정보를 바탕으로 공식 해양 사건 보고서를 작성하십시오."
+    )

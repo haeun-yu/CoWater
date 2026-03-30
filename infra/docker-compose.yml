@@ -95,6 +95,8 @@ services:
       CORE_API_URL: http://core:8000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       LOG_LEVEL: info
+    ports:
+      - "8001:8001"
     depends_on:
       redis:
         condition: service_healthy
