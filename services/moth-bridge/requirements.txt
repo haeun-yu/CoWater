@@ -1,0 +1,6 @@
+websockets==13.1
+redis[hiredis]==5.1.1
+pyais==2.9.1
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+pyyaml==6.0.2
