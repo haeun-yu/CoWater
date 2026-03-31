@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 
-import anthropic
 import httpx
 import redis.asyncio as aioredis
 
+from ai.llm_client import make_llm_client
 from base import Agent, AlertPayload, PlatformReport
 from config import settings
 
@@ -43,7 +43,7 @@ class DistressAgent(Agent):
 
     def __init__(self, redis: aioredis.Redis) -> None:
         super().__init__(redis)
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._llm = make_llm_client(settings)
         self._handled: set[str] = set()     # 이미 처리된 platform_id
 
     async def on_platform_report(self, report: PlatformReport) -> None:
@@ -113,15 +113,13 @@ class DistressAgent(Agent):
             f"조난 상황에 대한 즉각적인 SAR 대응 지침을 작성하십시오."
         )
         try:
-            msg = await self._client.messages.create(
-                model=settings.claude_model,
-                max_tokens=600,
+            return await self._llm.chat(
                 system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context}],
+                user=context,
+                max_tokens=600,
             )
-            return msg.content[0].text.strip()
         except Exception:
-            logger.exception("Claude API call failed for distress response")
+            logger.exception("LLM call failed for distress response")
             return None
 
     async def _auto_notify(self, report: PlatformReport) -> None:

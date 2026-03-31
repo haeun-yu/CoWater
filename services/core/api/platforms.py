@@ -129,16 +129,22 @@ async def get_track(
     limit: int = 1000,
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
+    # 시간 범위 조건을 먼저 적용한 뒤 최신 N개를 역순으로 가져와 다시 정렬
+    # — limit을 "최근 N개"로 유지하면서 프론트 항적 렌더링은 오름차순(오래된→최신)으로 보장
+    inner = (
         select(PlatformReportModel)
         .where(PlatformReportModel.platform_id == platform_id)
         .order_by(PlatformReportModel.time.desc())
         .limit(limit)
     )
     if from_:
-        stmt = stmt.where(PlatformReportModel.time >= from_)
+        inner = inner.where(PlatformReportModel.time >= from_)
     if to:
-        stmt = stmt.where(PlatformReportModel.time <= to)
+        inner = inner.where(PlatformReportModel.time <= to)
+
+    stmt = select(PlatformReportModel).from_statement(
+        inner.subquery().select().order_by("time")
+    )
 
     result = await db.execute(stmt)
     rows = result.scalars().all()

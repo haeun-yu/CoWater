@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import logging
 
-import anthropic
 import httpx
 import redis.asyncio as aioredis
 
+from ai.llm_client import make_llm_client
 from base import Agent, PlatformReport
 from config import settings
 
@@ -42,7 +42,7 @@ class ReportAgent(Agent):
 
     def __init__(self, redis: aioredis.Redis) -> None:
         super().__init__(redis)
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._llm = make_llm_client(settings)
 
     async def on_platform_report(self, report: PlatformReport) -> None:
         pass  # 이 에이전트는 직접 보고서 생성 요청에 응답
@@ -58,13 +58,11 @@ class ReportAgent(Agent):
 
         context = _build_incident_context(incident)
         try:
-            msg = await self._client.messages.create(
-                model=settings.claude_model,
-                max_tokens=2048,
+            report_text = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context}],
+                user=context,
+                max_tokens=2048,
             )
-            report_text = msg.content[0].text.strip()
         except Exception:
             logger.exception("Report generation failed for incident %s", incident_id)
             return None

@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { usePlatformStore } from "@/stores/platformStore";
-import { useAlertStore } from "@/stores/alertStore";
 import type { PlatformState } from "@/types";
 
 const PLATFORM_COLORS: Record<string, string> = {
@@ -15,19 +14,14 @@ const PLATFORM_COLORS: Record<string, string> = {
   buoy:   "#fbbf24",
 };
 
-const ALERT_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  warning:  "#f59e0b",
-  info:     "#3b82f6",
-};
-
 export default function MaritimeMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const platforms = usePlatformStore((s) => s.platforms);
   const select = usePlatformStore((s) => s.select);
-  const alerts = useAlertStore((s) => s.alerts);
+  // 지도 스타일 로딩 완료 여부 — 이 상태가 변경되면 플랫폼 마커 useEffect가 재실행됨
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // 지도 초기화
   useEffect(() => {
@@ -73,18 +67,21 @@ export default function MaritimeMap() {
 
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "nautical" }), "bottom-left");
+    // 스타일 로딩 완료 시 state 갱신 → 마커 useEffect 재실행 보장
+    map.on("load", () => setMapLoaded(true));
     mapRef.current = map;
 
     return () => {
       map.remove();
       mapRef.current = null;
+      setMapLoaded(false);
     };
   }, []);
 
-  // 플랫폼 마커 동기화
+  // 플랫폼 마커 동기화 — mapLoaded를 의존성에 포함하여 스타일 로드 후 반드시 실행
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !mapLoaded) return;
 
     const currentIds = new Set(Object.keys(platforms));
 
@@ -101,7 +98,7 @@ export default function MaritimeMap() {
       if (platform.lat == null || platform.lon == null) continue;
       updateMarker(map, platform, markersRef.current, select);
     }
-  }, [platforms, select]);
+  }, [platforms, select, mapLoaded]);
 
   return (
     <div className="relative w-full h-full">

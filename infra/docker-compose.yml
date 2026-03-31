@@ -86,8 +86,8 @@ services:
   # ─────────────────────────────────────────────────────
   agents:
     build:
-      context: ../services/agents
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/agents/Dockerfile
     container_name: cowater-agents
     restart: unless-stopped
     environment:

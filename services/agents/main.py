@@ -65,10 +65,39 @@ async def _consume_platform_reports(redis: aioredis.Redis) -> None:
         try:
             data = json.loads(msg["data"])
             report = PlatformReport.from_dict(data)
-            for agent in _registry.enabled():
-                await agent.on_platform_report(report)
+            await _dispatch_report(report)
         except Exception:
             logger.exception("Error dispatching platform report")
+
+
+async def _dispatch_report(report: PlatformReport) -> None:
+    """
+    Rule Agent: 순차 await (빠름, 이벤트 루프 차단 없음)
+    AI Agent:   백그라운드 태스크로 실행 (Claude API 호출이 다음 보고 처리를 블로킹하지 않음)
+    """
+    rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
+    ai_agents   = [a for a in _registry.enabled() if a.agent_type == "ai"]
+
+    # Rule Agent — 직렬 처리 (순서 보장, 빠름)
+    for agent in rule_agents:
+        try:
+            await agent.on_platform_report(report)
+        except Exception:
+            logger.exception("Rule agent error: %s", agent.agent_id)
+
+    # AI Agent — 각각 독립 태스크로 실행 (블로킹 없음)
+    for agent in ai_agents:
+        asyncio.create_task(
+            _safe_ai_dispatch(agent, report),
+            name=f"ai-report-{agent.agent_id}",
+        )
+
+
+async def _safe_ai_dispatch(agent: Agent, report: PlatformReport) -> None:
+    try:
+        await agent.on_platform_report(report)
+    except Exception:
+        logger.exception("AI agent error: %s", agent.agent_id)
 
 
 async def _consume_alerts(redis: aioredis.Redis) -> None:
@@ -81,10 +110,33 @@ async def _consume_alerts(redis: aioredis.Redis) -> None:
             continue
         try:
             alert = json.loads(msg["data"])
-            for agent in _registry.enabled():
-                await agent.on_alert(alert)
+            await _dispatch_alert(alert)
         except Exception:
             logger.exception("Error dispatching alert")
+
+
+async def _dispatch_alert(alert: dict) -> None:
+    rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
+    ai_agents   = [a for a in _registry.enabled() if a.agent_type == "ai"]
+
+    for agent in rule_agents:
+        try:
+            await agent.on_alert(alert)
+        except Exception:
+            logger.exception("Rule agent on_alert error: %s", agent.agent_id)
+
+    for agent in ai_agents:
+        asyncio.create_task(
+            _safe_ai_alert(agent, alert),
+            name=f"ai-alert-{agent.agent_id}",
+        )
+
+
+async def _safe_ai_alert(agent: Agent, alert: dict) -> None:
+    try:
+        await agent.on_alert(alert)
+    except Exception:
+        logger.exception("AI agent on_alert error: %s", agent.agent_id)
 
 
 async def _ais_timeout_loop() -> None:

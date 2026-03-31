@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 
-import anthropic
 import redis.asyncio as aioredis
 
+from ai.llm_client import make_llm_client
 from base import Agent, AlertPayload, PlatformReport
 from config import settings
 
@@ -36,7 +36,7 @@ class AnomalyAIAgent(Agent):
 
     def __init__(self, redis: aioredis.Redis) -> None:
         super().__init__(redis)
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._llm = make_llm_client(settings)
         self._recent: dict[str, PlatformReport] = {}
 
     async def on_platform_report(self, report: PlatformReport) -> None:
@@ -63,15 +63,13 @@ class AnomalyAIAgent(Agent):
         context = _build_context(alert, report)
 
         try:
-            message = await self._client.messages.create(
-                model=settings.claude_model,
-                max_tokens=512,
+            analysis = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context}],
+                user=context,
+                max_tokens=512,
             )
-            analysis = message.content[0].text.strip()
         except Exception:
-            logger.exception("Claude API call failed for anomaly analysis")
+            logger.exception("LLM call failed for anomaly analysis")
             return
 
         await self.emit_alert(AlertPayload(
@@ -80,7 +78,7 @@ class AnomalyAIAgent(Agent):
             message=f"[AI 분석] {alert['message']}",
             platform_ids=platform_ids,
             recommendation=analysis,
-            metadata={"source_alert_id": alert.get("alert_id"), "ai_model": settings.claude_model},
+            metadata={"source_alert_id": alert.get("alert_id"), "ai_model": f"{settings.llm_backend}/{settings.ollama_model if settings.llm_backend == 'ollama' else settings.claude_model}"},
         ))
 
 

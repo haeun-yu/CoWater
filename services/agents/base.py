@@ -20,43 +20,13 @@ from typing import Literal
 
 import redis.asyncio as aioredis
 
+# shared 패키지에서 canonical PlatformReport 임포트
+from shared.schemas.report import PlatformReport  # noqa: F401 (re-exported for sub-modules)
+
 logger = logging.getLogger(__name__)
 
 AgentLevel = Literal["L1", "L2", "L3"]
 AgentType = Literal["rule", "ai"]
-
-
-@dataclass
-class PlatformReport:
-    platform_id: str
-    timestamp: datetime
-    lat: float
-    lon: float
-    depth_m: float | None
-    altitude_m: float | None
-    sog: float | None
-    cog: float | None
-    heading: float | None
-    rot: float | None
-    nav_status: str | None
-    source_protocol: str
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "PlatformReport":
-        return cls(
-            platform_id=d["platform_id"],
-            timestamp=datetime.fromisoformat(d["timestamp"]),
-            lat=d["lat"],
-            lon=d["lon"],
-            depth_m=d.get("depth_m"),
-            altitude_m=d.get("altitude_m"),
-            sog=d.get("sog"),
-            cog=d.get("cog"),
-            heading=d.get("heading"),
-            rot=d.get("rot"),
-            nav_status=d.get("nav_status"),
-            source_protocol=d.get("source_protocol", "custom"),
-        )
 
 
 @dataclass
