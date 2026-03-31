@@ -60,6 +60,8 @@ class DistressAgent(Agent):
 
     async def on_alert(self, alert: dict) -> None:
         """AIS 소실 경보를 조난 가능성으로 에스컬레이션."""
+        if alert.get("generated_by") == self.agent_id:
+            return
         if alert.get("alert_type") != "ais_off":
             return
         if alert.get("severity") != "warning":

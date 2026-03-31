@@ -32,11 +32,11 @@ def encode_position_report(state: VesselState) -> str | None:
             mmsi=mmsi,
             status=int(state.nav_status),
             turn=_clamp_rot(state.rot),
-            speed=round(state.sog * 10),        # 0.1 knots 단위
+            speed=state.sog,
             accuracy=0,
-            lon=round(state.lon * 600000),      # 1/10000 분 단위
-            lat=round(state.lat * 600000),
-            course=round(state.cog * 10),       # 0.1° 단위
+            lon=state.lon,
+            lat=state.lat,
+            course=state.cog,
             heading=round(state.heading) % 360,
             second=0,
             maneuver=0,

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.platforms import router as platforms_router
 from api.alerts import router as alerts_router
+from api.zones import router as zones_router
 from api.ws import router as ws_router
 from redis_client import get_redis, close_redis
 from services.track_consumer import consume_platform_reports
@@ -48,6 +49,7 @@ app.add_middleware(
 
 app.include_router(platforms_router)
 app.include_router(alerts_router)
+app.include_router(zones_router)
 app.include_router(ws_router)
 
 

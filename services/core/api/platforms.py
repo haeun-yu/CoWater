@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
@@ -39,7 +39,21 @@ class PlatformResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    @classmethod
+    def from_model(cls, m: "PlatformModel") -> "PlatformResponse":
+        return cls(
+            platform_id=m.platform_id,
+            platform_type=m.platform_type,
+            name=m.name,
+            source_protocol=m.source_protocol,
+            flag=m.flag,
+            moth_channel=m.moth_channel,
+            capabilities=m.capabilities or [],
+            dimensions=m.dimensions,
+            metadata=m.metadata_ or {},
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+        )
 
 
 class TrackPoint(BaseModel):
@@ -57,7 +71,7 @@ class TrackPoint(BaseModel):
 @router.get("", response_model=list[PlatformResponse])
 async def list_platforms(db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(select(PlatformModel))
-    return result.scalars().all()
+    return [PlatformResponse.from_model(r) for r in result.scalars().all()]
 
 
 @router.get("/{platform_id}", response_model=PlatformResponse)
@@ -65,7 +79,7 @@ async def get_platform(platform_id: str, db: Annotated[AsyncSession, Depends(get
     row = await db.get(PlatformModel, platform_id)
     if row is None:
         raise HTTPException(404, f"Platform '{platform_id}' not found")
-    return row
+    return PlatformResponse.from_model(row)
 
 
 @router.post("", response_model=PlatformResponse, status_code=201)
@@ -84,7 +98,7 @@ async def create_platform(body: PlatformCreate, db: Annotated[AsyncSession, Depe
     db.add(platform)
     await db.commit()
     await db.refresh(platform)
-    return platform
+    return PlatformResponse.from_model(platform)
 
 
 @router.patch("/{platform_id}", response_model=PlatformResponse)
@@ -93,6 +107,7 @@ async def update_platform(
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    from datetime import timezone
     row = await db.get(PlatformModel, platform_id)
     if row is None:
         raise HTTPException(404, f"Platform '{platform_id}' not found")
@@ -100,10 +115,10 @@ async def update_platform(
     for k, v in body.items():
         if k in allowed:
             setattr(row, k, v)
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
-    return row
+    return PlatformResponse.from_model(row)
 
 
 @router.get("/{platform_id}/track", response_model=list[TrackPoint])

@@ -46,6 +46,9 @@ class AnomalyAIAgent(Agent):
         """Rule Agent의 anomaly/ais_off 경보를 받아 AI 분석 수행."""
         if self.level == "L1":
             return
+        # 자신이 생성한 경보에 반응하지 않음 — 무한 루프 방지
+        if alert.get("generated_by") == self.agent_id:
+            return
         if alert.get("alert_type") not in ("anomaly", "ais_off"):
             return
         if alert.get("severity") == "info":

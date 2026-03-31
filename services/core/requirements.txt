@@ -7,3 +7,5 @@ redis[hiredis]==5.1.1
 pydantic==2.9.2
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
+geoalchemy2==0.15.2
+shapely==2.0.6

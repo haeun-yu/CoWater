@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAgentStore } from "@/stores/agentStore";
 import type { AgentInfo, AgentLevel } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+const API_URL = process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:8001";
 
 const LEVEL_COLORS: Record<AgentLevel, string> = {
   L1: "text-blue-400",
