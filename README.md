@@ -89,9 +89,9 @@ docker compose --profile simulation up simulator
 
 | 서비스 | 주소 |
 |--------|------|
-| Frontend | http://localhost:3000 |
-| Core API | http://localhost:8000/docs |
-| Agent Runtime | http://localhost:8001/docs |
+| Frontend | http://localhost:7702 |
+| Core API | http://localhost:7700/docs |
+| Agent Runtime | http://localhost:7701/docs |
 | PostgreSQL | localhost:5432 |
 
 ### 시뮬레이션 시나리오
