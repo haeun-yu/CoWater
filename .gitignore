@@ -1,5 +1,72 @@
-node_modules
-dist
+# ===== Environment =====
 .env
 .env.*
+!.env.local.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+next-env.d.ts
+
+# ===== OS =====
 .DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== Database / Data =====
+*.sqlite
+*.db
+postgres-data/
+timescale-data/
+redis-data/
+
+# ===== Secrets / Certs =====
+*.pem
+*.key
+*.crt
+*.p12
+secrets/

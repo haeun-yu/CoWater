@@ -17,6 +17,10 @@ docker compose up -d
 # 시뮬레이터 포함 실행
 SCENARIO=collision_risk docker compose --profile simulation up -d
 
+# Ollama(로컬 LLM) 포함 실행
+LLM_BACKEND=ollama docker compose --profile ollama up -d
+# 최초 실행 시 ollama-init이 모델(qwen2.5:3b)을 자동 pull (~2GB)
+
 # 서비스별 재빌드
 docker compose build core && docker compose up -d core
 ```

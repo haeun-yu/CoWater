@@ -5,81 +5,82 @@ import maplibregl from "maplibre-gl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import type { PlatformState } from "@/types";
-
-const PLATFORM_COLORS: Record<string, string> = {
-  vessel: "#2e8dd4",
-  usv:    "#22d3ee",
-  rov:    "#a78bfa",
-  auv:    "#818cf8",
-  drone:  "#34d399",
-  buoy:   "#fbbf24",
-};
+import { createShipIcon } from "@/lib/shipIcon";
 
 const PLATFORM_LABELS: Record<string, string> = {
-  vessel: "선박",
-  usv:    "USV",
-  rov:    "ROV",
-  auv:    "AUV",
-  drone:  "드론",
-  buoy:   "부이",
+  vessel: "선박", usv: "USV", rov: "ROV",
+  auv: "AUV", drone: "드론", buoy: "부이",
 };
 
-// 위쪽(북) 방향 화살표 — 캔버스에서 직접 픽셀 그리기, SDF용 흰색
-function createArrowImage(): ImageData {
-  const size = 32;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "white";
-  ctx.beginPath();
-  ctx.moveTo(16, 2);
-  ctx.lineTo(7, 28);
-  ctx.lineTo(16, 21);
-  ctx.lineTo(25, 28);
-  ctx.closePath();
-  ctx.fill();
-  return ctx.getImageData(0, 0, size, size);
-}
+// 항적: 최대 보관 포인트 수 (초당 1건 기준 ~90초)
+const TRAIL_MAX = 90;
+// 항적 3밴드 구분 (포인트 인덱스, 뒤에서부터)
+const TRAIL_RECENT  = 15;  // 마지막 15포인트 → 불투명
+const TRAIL_MID     = 45;  // 그 전 30포인트 → 반투명
 
-function toGeoJSON(
+type LonLat = [number, number];
+
+type TrailFeature = {
+  type: 'Feature';
+  geometry: { type: 'LineString'; coordinates: LonLat[] };
+  properties: { opacity: number; color: string };
+};
+
+/** 항적 GeoJSON FeatureCollection 생성 — 3-opacity 밴드 */
+function buildTrailGeoJSON(
+  trails: Map<string, LonLat[]>,
   platforms: Record<string, PlatformState>,
-  alertPlatformIds: Set<string>,
+  alertIds: Set<string>,
 ) {
-  return {
-    type: "FeatureCollection" as const,
-    features: Object.values(platforms)
-      .filter((p) => p.lat != null && p.lon != null)
-      .map((p) => ({
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
-        properties: {
-          id:       p.platform_id,
-          name:     formatName(p),
-          type:     p.platform_type ?? "vessel",
-          heading:  p.heading ?? p.cog ?? 0,
-          sog:      p.sog ?? 0,
-          color:    PLATFORM_COLORS[p.platform_type ?? "vessel"] ?? "#2e8dd4",
-          alert:    alertPlatformIds.has(p.platform_id) ? 1 : 0,
-        },
-      })),
-  };
-}
+  const features: TrailFeature[] = [];
 
-function formatName(p: PlatformState): string {
-  if (!p.name || p.name === p.platform_id) return p.platform_id.replace(/^MMSI-/, "");
-  return p.name;
+  const TYPE_COLOR: Record<string, string> = {
+    vessel: '#2e8dd4', usv: '#22d3ee', rov: '#a78bfa',
+    auv: '#818cf8', drone: '#34d399', buoy: '#fbbf24',
+  };
+
+  for (const [pid, pts] of trails) {
+    if (pts.length < 2) continue;
+    const p     = platforms[pid];
+    const color = alertIds.has(pid) ? '#ef4444'
+      : (TYPE_COLOR[p?.platform_type ?? 'vessel'] ?? '#2e8dd4');
+
+    const bands: { pts: LonLat[]; opacity: number }[] = [
+      { pts: pts.slice(0, -TRAIL_RECENT),                  opacity: 0.12 },
+      { pts: pts.slice(-TRAIL_MID, -TRAIL_RECENT),         opacity: 0.38 },
+      { pts: pts.slice(-TRAIL_RECENT),                     opacity: 0.82 },
+    ];
+
+    for (const band of bands) {
+      if (band.pts.length < 2) continue;
+      features.push({
+        type: 'Feature' as const,
+        geometry: { type: 'LineString' as const, coordinates: band.pts },
+        properties: { opacity: band.opacity, color },
+      });
+    }
+  }
+  return { type: 'FeatureCollection' as const, features } as maplibregl.GeoJSONSourceSpecification['data'] & object;
 }
 
 export default function MaritimeMap() {
   const mapRef       = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 선박 마커 관리: platform_id → Marker
+  const markersRef   = useRef(new Map<string, maplibregl.Marker>());
+  // 항적 관리: platform_id → [[lon, lat], ...]
+  const trailsRef    = useRef(new Map<string, LonLat[]>());
+  // 직전 위치 기록 (중복 포인트 방지용)
+  const prevPosRef   = useRef(new Map<string, string>()); // pid → "lon,lat"
+  // 현재 zoom
+  const zoomRef      = useRef(8);
   const followRef    = useRef(false);
 
-  const platforms  = usePlatformStore((s) => s.platforms);
-  const select     = usePlatformStore((s) => s.select);
-  const selectedId = usePlatformStore((s) => s.selectedId);
-  const alerts     = useAlertStore((s) => s.alerts);
+  const platforms    = usePlatformStore((s) => s.platforms);
+  const select       = usePlatformStore((s) => s.select);
+  const selectedId   = usePlatformStore((s) => s.selectedId);
+  const alerts       = useAlertStore((s) => s.alerts);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const alertPlatformIds = new Set(
@@ -88,7 +89,77 @@ export default function MaritimeMap() {
       .flatMap((a) => a.platform_ids),
   );
 
-  // ── 지도 초기화 (마운트 1회) ─────────────────────────────────
+  // ── 선박 마커 생성/갱신 ────────────────────────────────────────────────────
+
+  function updateMarker(p: PlatformState, isSelected: boolean, isAlert: boolean) {
+    if (p.lat == null || p.lon == null) return;
+    const { html, anchorX, anchorY } = createShipIcon(
+      p.platform_type ?? 'vessel',
+      p.heading ?? p.cog ?? 0,
+      isSelected,
+      isAlert,
+      zoomRef.current,
+    );
+
+    const existing = markersRef.current.get(p.platform_id);
+    if (existing) {
+      // 기존 마커: HTML 업데이트 + 위치 이동
+      existing.getElement().innerHTML = html;
+      existing.setLngLat([p.lon, p.lat]);
+    } else {
+      // 신규 마커 생성
+      const el = document.createElement('div');
+      el.innerHTML = html;
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', () => {
+        followRef.current = true;
+        select(p.platform_id);
+      });
+
+      const marker = new maplibregl.Marker({
+        element: el,
+        offset: [anchorX, anchorY], // hull center → coordinate
+        anchor: 'top-left',
+      })
+        .setLngLat([p.lon, p.lat])
+        .addTo(mapRef.current!);
+
+      markersRef.current.set(p.platform_id, marker);
+    }
+  }
+
+  function removeStaleMarkers(currentIds: Set<string>) {
+    for (const [pid, marker] of markersRef.current) {
+      if (!currentIds.has(pid)) {
+        marker.remove();
+        markersRef.current.delete(pid);
+        trailsRef.current.delete(pid);
+        prevPosRef.current.delete(pid);
+      }
+    }
+  }
+
+  function updateTrail(p: PlatformState) {
+    if (p.lat == null || p.lon == null) return;
+    const key = `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`;
+    if (prevPosRef.current.get(p.platform_id) === key) return; // 위치 변화 없음
+    prevPosRef.current.set(p.platform_id, key);
+
+    const trail = trailsRef.current.get(p.platform_id) ?? [];
+    trail.push([p.lon, p.lat]);
+    if (trail.length > TRAIL_MAX) trail.shift();
+    trailsRef.current.set(p.platform_id, trail);
+  }
+
+  function flushTrailSource() {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const src = map.getSource('trails') as maplibregl.GeoJSONSource | undefined;
+    src?.setData(buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds));
+  }
+
+  // ── 지도 초기화 (마운트 1회) ──────────────────────────────────────────────
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -98,217 +169,158 @@ export default function MaritimeMap() {
         version: 8,
         sources: {
           osm: {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
             tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
+            attribution: '© OpenStreetMap contributors',
           },
           seamark: {
-            type: "raster",
-            tiles: ["https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"],
+            type: 'raster',
+            tiles: ['https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'],
             tileSize: 256,
-            attribution: "© OpenSeaMap contributors",
+            attribution: '© OpenSeaMap contributors',
           },
         },
         layers: [
-          { id: "osm-layer",     type: "raster", source: "osm",     paint: { "raster-opacity": 0.35 } },
-          { id: "seamark-layer", type: "raster", source: "seamark" },
+          { id: 'osm-layer',     type: 'raster', source: 'osm',     paint: { 'raster-opacity': 0.35 } },
+          { id: 'seamark-layer', type: 'raster', source: 'seamark' },
         ],
-        // 라벨용 글리프 — 없으면 symbol 레이어 전체가 zoom 중 숨겨질 수 있음
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       },
       center: [126.55, 34.75],
       zoom: 8,
       attributionControl: false,
     });
 
-    map.addControl(new maplibregl.NavigationControl(), "bottom-right");
-    map.addControl(new maplibregl.ScaleControl({ unit: "nautical" }), "bottom-left");
+    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+    map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
-    map.on("load", () => {
-      // 화살표 SDF 이미지 (캔버스에서 직접 생성 — 비동기 없음)
-      map.addImage("platform-arrow", createArrowImage(), { sdf: true });
-
-      // ── GeoJSON 소스 ──────────────────────────────────────────
-      map.addSource("platforms", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
+    map.on('load', () => {
+      // ── 항적 소스 + 레이어 ────────────────────────────────────────────
+      map.addSource('trails', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
       });
 
-      // ── LAYER 1: 위험 경보 글로우 (circle) ───────────────────
-      // circle 레이어는 zoom·글리프와 무관하게 항상 렌더링됨
+      // 항적 외곽선 (대비용)
       map.addLayer({
-        id: "platform-alert-glow",
-        type: "circle",
-        source: "platforms",
-        filter: ["==", ["get", "alert"], 1],
+        id: 'trail-casing',
+        type: 'line',
+        source: 'trails',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          "circle-radius": 26,
-          "circle-color": "#ef4444",
-          "circle-opacity": 0.20,
-          "circle-blur": 0.5,
+          'line-color': '#020d1a',
+          'line-width': 3.5,
+          'line-opacity': ['*', ['get', 'opacity'], 0.55],
         },
       });
 
-      // ── LAYER 2: 배경 글로우 (circle) ────────────────────────
+      // 항적 메인
       map.addLayer({
-        id: "platform-glow",
-        type: "circle",
-        source: "platforms",
+        id: 'trail-line',
+        type: 'line',
+        source: 'trails',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          "circle-radius": 13,
-          "circle-color": ["get", "color"],
-          "circle-opacity": 0.18,
+          'line-color': ['get', 'color'],
+          'line-width': 2.0,
+          'line-opacity': ['get', 'opacity'],
         },
       });
-
-      // ── LAYER 3: 실제 위치 도트 (circle) — 항상 표시됨 ──────
-      // symbol 레이어가 zoom 중 사라져도 이 레이어는 반드시 유지됨
-      map.addLayer({
-        id: "platform-dot",
-        type: "circle",
-        source: "platforms",
-        paint: {
-          "circle-radius": [
-            "interpolate", ["linear"], ["zoom"],
-            6, 3,
-            10, 4.5,
-            14, 6,
-          ],
-          "circle-color": ["get", "color"],
-          "circle-opacity": 1,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#0a1628",
-          "circle-stroke-opacity": 0.6,
-        },
-      });
-
-      // ── LAYER 4: 방향 화살표 (symbol) ────────────────────────
-      // zoom 중 잠깐 사라질 수 있지만 도트(3)가 항상 대체함
-      map.addLayer({
-        id: "platform-arrows",
-        type: "symbol",
-        source: "platforms",
-        layout: {
-          "icon-image": "platform-arrow",
-          "icon-size": ["interpolate", ["linear"], ["zoom"], 6, 0.55, 10, 0.80, 14, 1.0],
-          "icon-rotate": ["get", "heading"],
-          "icon-rotation-alignment": "map",
-          "icon-pitch-alignment": "map",
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-        },
-        paint: {
-          "icon-color": ["get", "color"],
-          "icon-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0.0, 8, 1.0],
-        },
-      });
-
-      // ── LAYER 5: 이름 라벨 (symbol) ──────────────────────────
-      map.addLayer({
-        id: "platform-labels",
-        type: "symbol",
-        source: "platforms",
-        minzoom: 9,   // zoom 9 이상에서만 표시
-        layout: {
-          "text-field": ["get", "name"],
-          "text-size": 10,
-          "text-offset": [0, 1.6],
-          "text-anchor": "top",
-          "text-optional": true,         // 라벨 표시 실패해도 아이콘 유지
-          "text-allow-overlap": false,
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-        },
-        paint: {
-          "text-color": ["get", "color"],
-          "text-halo-color": "#020d1a",
-          "text-halo-width": 1.5,
-          "text-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.0, 10, 1.0],
-        },
-      });
-
-      // ── LAYER 6: 선택 강조 링 (circle) ───────────────────────
-      map.addLayer({
-        id: "platform-selected",
-        type: "circle",
-        source: "platforms",
-        filter: ["==", ["get", "id"], ""],
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 12, 10, 16, 14, 20],
-          "circle-color": "transparent",
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-opacity": 0.85,
-        },
-      });
-
-      // ── 클릭 핸들러 ───────────────────────────────────────────
-      // dot 레이어에 걸어야 zoom 중에도 클릭 가능
-      for (const layerId of ["platform-dot", "platform-arrows"]) {
-        map.on("click", layerId, (e) => {
-          const feature = e.features?.[0];
-          if (feature?.properties?.id) {
-            followRef.current = true;
-            select(feature.properties.id as string);
-          }
-        });
-        map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
-        map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
-      }
-
-      // 드래그 시 follow 해제
-      map.on("dragstart", () => { followRef.current = false; });
 
       setMapLoaded(true);
     });
 
+    // zoom 변화 시 모든 마커 아이콘 크기 갱신
+    map.on('zoom', () => {
+      zoomRef.current = map.getZoom();
+      for (const [pid, marker] of markersRef.current) {
+        const p = platforms[pid];
+        if (!p) continue;
+        const { html } = createShipIcon(
+          p.platform_type ?? 'vessel',
+          p.heading ?? p.cog ?? 0,
+          pid === selectedId,
+          alertPlatformIds.has(pid),
+          zoomRef.current,
+        );
+        marker.getElement().innerHTML = html;
+      }
+    });
+
+    map.on('dragstart', () => { followRef.current = false; });
+
     mapRef.current = map;
     return () => {
+      for (const m of markersRef.current.values()) m.remove();
+      markersRef.current.clear();
       map.remove();
       mapRef.current = null;
       setMapLoaded(false);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 플랫폼 데이터 동기화 ─────────────────────────────────────
+  // ── 플랫폼 업데이트 → 마커 + 항적 동기화 ─────────────────────────────────
+
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-    const source = map.getSource("platforms") as maplibregl.GeoJSONSource | undefined;
-    source?.setData(toGeoJSON(platforms, alertPlatformIds));
+    if (!mapLoaded || !mapRef.current) return;
+
+    const ids = new Set(Object.keys(platforms));
+    removeStaleMarkers(ids);
+
+    for (const p of Object.values(platforms)) {
+      updateTrail(p);
+      updateMarker(p, p.platform_id === selectedId, alertPlatformIds.has(p.platform_id));
+    }
+    flushTrailSource();
   }, [platforms, alerts, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 선택 강조 + Follow ───────────────────────────────────────
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
+  // ── 선택 변경 → 마커 재렌더 + Follow ──────────────────────────────────────
 
-    map.setFilter("platform-selected", ["==", ["get", "id"], selectedId ?? ""]);
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+
+    // 이전 선택 해제 (리셋)
+    for (const [pid, marker] of markersRef.current) {
+      const p = platforms[pid];
+      if (!p) continue;
+      const wasSelected = pid === selectedId;
+      const { html } = createShipIcon(
+        p.platform_type ?? 'vessel',
+        p.heading ?? p.cog ?? 0,
+        wasSelected,
+        alertPlatformIds.has(pid),
+        zoomRef.current,
+      );
+      marker.getElement().innerHTML = html;
+    }
 
     if (selectedId) {
       followRef.current = true;
       const p = platforms[selectedId];
       if (p?.lat != null && p?.lon != null) {
-        map.flyTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 11), duration: 800, essential: true });
+        mapRef.current.flyTo({
+          center: [p.lon, p.lat],
+          zoom: Math.max(mapRef.current.getZoom(), 11),
+          duration: 800,
+          essential: true,
+        });
       }
     }
   }, [selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 선택된 선박 실시간 추적 (follow 활성 시) ─────────────────
+  // ── 선택 선박 실시간 추적 ─────────────────────────────────────────────────
+
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded || !selectedId || !followRef.current) return;
+    if (!mapLoaded || !mapRef.current || !selectedId || !followRef.current) return;
     const p = platforms[selectedId];
     if (p?.lat != null && p?.lon != null) {
-      map.easeTo({ center: [p.lon, p.lat], duration: 300 });
+      mapRef.current.easeTo({ center: [p.lon, p.lat], duration: 300 });
     }
   }, [platforms, selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── select 함수 변경 시 클릭 핸들러 갱신 ────────────────────
-  // (useEffect dep 배열에서 select를 빼고 이벤트 위임으로 처리하므로 불필요)
-
   const platformCount = Object.keys(platforms).length;
-  const criticalCount = alerts.filter((a) => a.severity === "critical" && a.status === "new").length;
+  const criticalCount = alerts.filter((a) => a.severity === 'critical' && a.status === 'new').length;
 
   return (
     <div className="relative w-full h-full">
@@ -330,12 +342,18 @@ export default function MaritimeMap() {
 
       {/* 범례 */}
       <div className="absolute bottom-10 right-12 panel p-2.5 rounded text-xs space-y-1.5 pointer-events-none">
-        {Object.entries(PLATFORM_LABELS).map(([type, label]) => (
-          <div key={type} className="flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full" style={{ background: PLATFORM_COLORS[type] }} />
-            <span className="text-ocean-300">{label}</span>
-          </div>
-        ))}
+        {Object.entries(PLATFORM_LABELS).map(([type, label]) => {
+          const colors: Record<string, string> = {
+            vessel: '#2e8dd4', usv: '#22d3ee', rov: '#a78bfa',
+            auv: '#818cf8', drone: '#34d399', buoy: '#fbbf24',
+          };
+          return (
+            <div key={type} className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ background: colors[type] }} />
+              <span className="text-ocean-300">{label}</span>
+            </div>
+          );
+        })}
         <div className="flex items-center gap-2 border-t border-ocean-800 pt-1.5 mt-0.5">
           <span className="inline-block w-2 h-2 rounded-full bg-red-500/60" />
           <span className="text-red-400">위험 경보</span>

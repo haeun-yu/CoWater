@@ -78,10 +78,15 @@ class DistressAgent(Agent):
                 ))
 
     async def _handle_distress(self, report: PlatformReport) -> None:
-        recommendation = None
+        # L1: 기본 권고문 / L2+: LLM 생성 권고문
+        recommendation = (
+            f"{report.platform_id} 위치 ({report.lat:.4f}, {report.lon:.4f}) "
+            f"상태 '{report.nav_status}' 확인. "
+            "VHF Ch.16 교신 시도 및 해양경찰청(122) 통보 검토."
+        )
 
         if self.level in ("L2", "L3"):
-            recommendation = await self._generate_response(report)
+            recommendation = await self._generate_response(report) or recommendation
 
         severity = "critical"
         await self.emit_alert(AlertPayload(

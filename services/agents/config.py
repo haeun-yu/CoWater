@@ -17,11 +17,11 @@ class Settings(BaseSettings):
 
     # Claude 설정 (llm_backend="claude" 일 때 사용)
     anthropic_api_key: str = ""
-    claude_model: str = "claude-sonnet-4-6"
+    claude_model: str = "claude-haiku-4-5-20251001"
 
     # Ollama 설정 (llm_backend="ollama" 일 때 사용)
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3:8b"
+    ollama_model: str = "qwen2.5:3b"
     ollama_think: bool = False   # True: 사고 모드 활성화 / False: 빠른 응답
 
 

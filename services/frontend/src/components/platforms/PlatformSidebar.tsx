@@ -190,7 +190,10 @@ function PlatformDetail({
             <div className="text-sm font-bold text-ocean-100">
               {formatDisplayName(platform)}
             </div>
-            <div className="text-xs text-ocean-500 font-mono">{formatId(platform)}</div>
+            {/* name이 있고 ID와 다를 때만 MMSI를 부제로 표시 */}
+            {platform.name && platform.name !== platform.platform_id && (
+              <div className="text-xs text-ocean-500 font-mono">{formatId(platform)}</div>
+            )}
           </div>
           <span
             className="ml-auto text-xs px-1.5 py-0.5 rounded"

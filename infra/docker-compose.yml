@@ -84,6 +84,56 @@ services:
         condition: service_healthy
 
   # ─────────────────────────────────────────────────────
+  # Ollama (로컬 LLM 서버) — LLM_BACKEND=ollama 시 사용
+  # ─────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cowater-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # Apple Silicon / NVIDIA GPU 자동 감지
+    # Mac M-series: Metal 백엔드 자동 사용 (별도 설정 불필요)
+    # NVIDIA GPU 사용 시 아래 주석 해제:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 모델 자동 pull (최초 1회)
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: cowater-ollama-init
+    profiles:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "
+        ollama serve &
+        sleep 5 &&
+        ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
+        kill %1
+      "
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+    depends_on:
+      - ollama
+
+  # ─────────────────────────────────────────────────────
   # Agent Runtime
   # ─────────────────────────────────────────────────────
   agents:
@@ -95,7 +145,15 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       CORE_API_URL: http://core:8000
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # ── LLM 백엔드 설정 ─────────────────────────────
+      # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
+      # Ollama 사용: LLM_BACKEND=ollama (ollama profile 포함 실행 필요)
+      LLM_BACKEND: ${LLM_BACKEND:-claude}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
       LOG_LEVEL: info
     ports:
       - "7701:8001"
@@ -145,3 +203,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  ollama_data:

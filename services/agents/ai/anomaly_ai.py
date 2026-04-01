@@ -69,8 +69,15 @@ class AnomalyAIAgent(Agent):
                 max_tokens=512,
             )
         except Exception:
-            logger.exception("LLM call failed for anomaly analysis")
-            return
+            logger.exception("LLM call failed for anomaly analysis — using rule-based fallback")
+            analysis = (
+                f"[LLM 호출 실패 — rule 기반 권고]\n\n"
+                f"경보 유형: {alert['alert_type']} / 심각도: {alert['severity']}\n"
+                "권고사항:\n"
+                "1. 해당 선박의 현재 위치 및 상태를 즉시 확인하십시오.\n"
+                "2. VHF Ch.16을 통해 교신을 시도하십시오.\n"
+                "3. 필요 시 해양경찰청(122)에 상황을 통보하십시오."
+            )
 
         await self.emit_alert(AlertPayload(
             alert_type="anomaly",

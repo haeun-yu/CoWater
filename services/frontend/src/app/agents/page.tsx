@@ -426,7 +426,9 @@ function LogCard({ log, expanded, onToggle, getPlatformName }: {
             </div>
           ) : (
             <div className="text-xs text-ocean-500 italic">
-              {isAI ? "AI 권고 없음 (LLM 호출 실패)" : "Rule 에이전트 — 자동 처리"}
+              {isAI
+                ? `AI 권고 없음 — ${meta?.level === "L1" || log.agent_id === "distress-agent" ? "L1 모드 (권고 생성 비활성)" : "LLM 호출 실패"}`
+                : "Rule 에이전트 — 자동 처리"}
             </div>
           )}
 
