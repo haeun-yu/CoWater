@@ -1,15 +1,22 @@
-"""Moth Bridge 진입점 — config.yaml에서 채널 목록을 로드하고 병렬 구독 실행."""
+"""Moth Bridge 진입점 — config.yaml에서 채널 목록을 로드하고 병렬 구독 실행.
+
+추가: FastAPI WebSocket relay 서버를 함께 실행하여
+프론트엔드가 Redis/Core를 거치지 않고 위치 데이터를 직접 수신할 수 있도록 한다.
+"""
 
 import asyncio
 import json
 import logging
 
 import redis.asyncio as aioredis
+import uvicorn
 import yaml
 
 from adapters import ADAPTER_REGISTRY, ParsedReport
 from config import settings
 from moth_client import ChannelConfig, MothChannelClient
+from ws_relay import app as relay_app
+from ws_relay import broadcast
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -39,12 +46,12 @@ def load_channels(path: str) -> list[ChannelConfig]:
     return channels
 
 
-async def main() -> None:
-    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+async def run_moth(redis: aioredis.Redis) -> None:
     channels = load_channels(settings.channels_config)
     logger.info("Loaded %d channel(s)", len(channels))
 
     async def publish_report(report: ParsedReport) -> None:
+        # 1) Redis pub/sub — agents, core 소비용
         channel_key = f"platform.report.{report.platform_id}"
         payload = json.dumps(report.to_redis_payload())
         await redis.publish(channel_key, payload)
@@ -52,6 +59,9 @@ async def main() -> None:
         # 최신 상태 캐시 (TTL 60s)
         cache_key = f"platform:state:{report.platform_id}"
         await redis.set(cache_key, payload, ex=60)
+
+        # 2) WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)
+        await broadcast(report)
 
         logger.debug(
             "Published: platform=%s lat=%.4f lon=%.4f sog=%s",
@@ -68,11 +78,29 @@ async def main() -> None:
         )
         for ch in channels
     ]
-
     logger.info("Moth Bridge started — subscribing to %d channel(s)", len(tasks))
+    await asyncio.gather(*tasks)
 
+
+async def run_relay() -> None:
+    """FastAPI WebSocket relay 서버 실행 (포트 8002)."""
+    config = uvicorn.Config(
+        relay_app,
+        host="0.0.0.0",
+        port=8002,
+        log_level=settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def main() -> None:
+    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        await asyncio.gather(*tasks)
+        await asyncio.gather(
+            run_moth(redis),
+            run_relay(),
+        )
     finally:
         await redis.aclose()
         logger.info("Moth Bridge stopped")

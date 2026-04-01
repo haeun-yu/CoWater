@@ -78,7 +78,8 @@ class AnomalyAIAgent(Agent):
             message=f"[AI 분석] {alert['message']}",
             platform_ids=platform_ids,
             recommendation=analysis,
-            metadata={"source_alert_id": alert.get("alert_id"), "ai_model": f"{settings.llm_backend}/{settings.ollama_model if settings.llm_backend == 'ollama' else settings.claude_model}"},
+            metadata={"source_alert_id": alert.get("alert_id"), "ai_model": self._llm.model_name},
+            dedup_key=f"anomaly_ai:{pid}",
         ))
 
 

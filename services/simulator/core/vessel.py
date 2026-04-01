@@ -90,6 +90,12 @@ class VesselSimulator:
         elif event_type == "set_speed":
             self._target_speed = float(kwargs["speed"])
 
+        elif event_type == "emergency_stop":
+            # 즉각 정지 — 속도 0으로 순간 감속 (속도 이상 감지용, nav_status 유지)
+            logger.info("[%s] Event: emergency_stop (sog: %.1f→0)", self.state.mmsi, self.state.sog)
+            self.state.sog = 0.0
+            self._target_speed = 0.0
+
         elif event_type == "set_waypoint":
             wp = Waypoint(lat=kwargs["lat"], lon=kwargs["lon"],
                           speed_knots=kwargs.get("speed"))

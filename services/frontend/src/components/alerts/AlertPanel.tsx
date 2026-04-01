@@ -13,16 +13,20 @@ const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   info:     "정보",
 };
 
-export default function AlertPanel() {
+export default function AlertPanel({ compact }: { compact?: boolean }) {
   const alerts = useAlertStore((s) => s.alerts);
   const acknowledge = useAlertStore((s) => s.acknowledge);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const select = usePlatformStore((s) => s.select);
 
-  const filtered = alerts.filter(
-    (a) => filter === "all" || a.severity === filter
-  );
+  const newCount = alerts.filter((a) => a.status === "new").length;
+  const criticalCount = alerts.filter((a) => a.severity === "critical" && a.status === "new").length;
+
+  // In compact mode, show only new alerts, prioritize critical
+  const filtered = alerts
+    .filter((a) => filter === "all" || a.severity === filter)
+    .filter((a) => !compact || a.status === "new");
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -30,9 +34,12 @@ export default function AlertPanel() {
       <div className="px-3 py-2 border-b border-ocean-800 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-bold text-ocean-200 tracking-wider">경보 현황</span>
-          <span className="text-xs text-ocean-500">
-            {alerts.filter((a) => a.status === "new").length} 신규
-          </span>
+          <div className="flex gap-2 text-xs">
+            <span className="text-ocean-500">{newCount} 신규</span>
+            {criticalCount > 0 && (
+              <span className="text-red-400 font-bold animate-pulse">{criticalCount} 위험</span>
+            )}
+          </div>
         </div>
         {/* 필터 탭 */}
         <div className="flex gap-1">

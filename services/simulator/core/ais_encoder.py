@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from pyais.encode import encode_msg
+from pyais.messages import MessageType1
 
 from core.vessel import VesselState
 
@@ -27,8 +28,9 @@ def encode_position_report(state: VesselState) -> str | None:
     try:
         mmsi = int(state.mmsi.replace("MMSI-", ""))
 
-        sentences = encode_msg(
+        sentences = encode_msg(MessageType1(
             msg_type=1,
+            repeat=0,
             mmsi=mmsi,
             status=int(state.nav_status),
             turn=_clamp_rot(state.rot),
@@ -40,8 +42,10 @@ def encode_position_report(state: VesselState) -> str | None:
             heading=round(state.heading) % 360,
             second=0,
             maneuver=0,
+            spare_1=0,
             raim=0,
-        )
+            radio=0,
+        ))
         # encode_msg는 리스트 반환 (멀티파트 대비)
         return "\n".join(sentences)
 

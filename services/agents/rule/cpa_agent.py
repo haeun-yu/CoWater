@@ -60,31 +60,33 @@ class CPAAgent(Agent):
         cfg = self.config
         pair = frozenset({r1.platform_id, r2.platform_id})
 
+        # dedup_key: 쌍 기반 (정렬하여 방향 무관)
+        ids = sorted([r1.platform_id, r2.platform_id])
+        dedup_key = f"cpa:{ids[0]}:{ids[1]}"
+
         if cpa < cfg["critical_cpa_nm"] and tcpa < cfg["critical_tcpa_min"]:
-            if pair not in self._alerted_critical:
-                self._alerted_critical.add(pair)
-                self._alerted_warning.discard(pair)
-                rec = None
-                if self.level in ("L2", "L3"):
-                    rec = (
-                        f"{r1.platform_id}와 {r2.platform_id}의 CPA={cpa:.2f}NM, TCPA={tcpa:.1f}분. "
-                        f"COLREGS Rule 16에 따라 피항선은 즉시 변침 또는 감속하십시오."
-                    )
-                await self.emit_alert(AlertPayload(
-                    alert_type="cpa",
-                    severity="critical",
-                    message=(
-                        f"충돌 위험 CRITICAL: {r1.platform_id} ↔ {r2.platform_id} "
-                        f"CPA={cpa:.2f}NM TCPA={tcpa:.1f}분"
-                    ),
-                    platform_ids=[r1.platform_id, r2.platform_id],
-                    recommendation=rec,
-                    metadata={"cpa_nm": cpa, "tcpa_min": tcpa},
-                ))
+            self._alerted_warning.discard(pair)
+            rec = None
+            if self.level in ("L2", "L3"):
+                rec = (
+                    f"{r1.platform_id}와 {r2.platform_id}의 CPA={cpa:.2f}NM, TCPA={tcpa:.1f}분. "
+                    f"COLREGS Rule 16에 따라 피항선은 즉시 변침 또는 감속하십시오."
+                )
+            await self.emit_alert(AlertPayload(
+                alert_type="cpa",
+                severity="critical",
+                message=(
+                    f"충돌 위험 CRITICAL: {r1.platform_id} ↔ {r2.platform_id} "
+                    f"CPA={cpa:.2f}NM TCPA={tcpa:.1f}분"
+                ),
+                platform_ids=[r1.platform_id, r2.platform_id],
+                recommendation=rec,
+                metadata={"cpa_nm": round(cpa, 3), "tcpa_min": round(tcpa, 1)},
+                dedup_key=dedup_key,
+            ))
 
         elif cpa < cfg["warning_cpa_nm"] and tcpa < cfg["warning_tcpa_min"]:
-            if pair not in self._alerted_warning and pair not in self._alerted_critical:
-                self._alerted_warning.add(pair)
+            if pair not in self._alerted_critical:
                 rec = None
                 if self.level in ("L2", "L3"):
                     rec = (
@@ -100,11 +102,12 @@ class CPAAgent(Agent):
                     ),
                     platform_ids=[r1.platform_id, r2.platform_id],
                     recommendation=rec,
-                    metadata={"cpa_nm": cpa, "tcpa_min": tcpa},
+                    metadata={"cpa_nm": round(cpa, 3), "tcpa_min": round(tcpa, 1)},
+                    dedup_key=dedup_key,
                 ))
 
         else:
-            # 위험 해소 시 경보 기록 초기화 (재발 감지 가능하도록)
+            # 위험 해소
             self._alerted_critical.discard(pair)
             self._alerted_warning.discard(pair)
 

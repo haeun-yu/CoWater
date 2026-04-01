@@ -59,6 +59,15 @@ export interface AgentInfo {
 }
 
 // WebSocket 메시지
+type AlertWsFields = {
+  alert_id: string; alert_type: AlertType; severity: AlertSeverity;
+  message: string; platform_ids: string[]; recommendation: string | null;
+  created_at: string; status: AlertStatus; generated_by: string;
+  zone_id: string | null; metadata: Record<string, unknown>;
+  acknowledged_at: string | null; resolved_at: string | null;
+};
+
 export type WsMessage =
-  | { type: "position_update"; platform_id: string; timestamp: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
-  | { type: "alert_created"; alert_id: string; alert_type: AlertType; severity: AlertSeverity; message: string; platform_ids: string[]; recommendation: string | null; created_at: string; status: AlertStatus; generated_by: string; zone_id: string | null; metadata: Record<string, unknown>; acknowledged_at: string | null; resolved_at: string | null };
+  | { type: "position_update"; platform_id: string; platform_type?: PlatformType; name?: string; timestamp: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
+  | ({ type: "alert_created" } & AlertWsFields)
+  | ({ type: "alert_updated" } & AlertWsFields);

@@ -98,6 +98,7 @@ class DistressAgent(Agent):
                 "lat": report.lat, "lon": report.lon,
                 "nav_status": report.nav_status,
             },
+            dedup_key=f"distress:{report.platform_id}",
         ))
 
         # L3: 자동 통보

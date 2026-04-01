@@ -65,17 +65,4 @@ INSERT INTO zones (name, zone_type, geometry, rules) VALUES
     '{"reason": "어업 활동 밀집 구역"}'
 );
 
--- 테스트용 플랫폼 (실제 연결 전 UI 확인용)
-INSERT INTO platforms (platform_id, platform_type, name, flag, source_protocol, capabilities, metadata) VALUES
-('MMSI-441001000', 'vessel', '코리아마루', 'KR', 'ais',
- ARRAY['position','heading'], '{"imo": "IMO9123456", "call_sign": "HLKA"}'),
-
-('MMSI-441002000', 'vessel', '한라호', 'KR', 'ais',
- ARRAY['position','heading'], '{"imo": "IMO9234567", "call_sign": "HLKB"}'),
-
-('USV-ALPHA-001', 'usv', 'USV Alpha', NULL, 'mavlink',
- ARRAY['position','heading','camera'], '{"model": "WAM-V 16"}'),
-
-('ROV-SURVEY-001', 'rov', 'ROV Survey 01', NULL, 'ros',
- ARRAY['position','depth','camera','arm'], '{"max_depth_m": 300}')
-ON CONFLICT (platform_id) DO NOTHING;
+-- 플랫폼은 moth-bridge / 시뮬레이터가 최초 보고 시 자동 등록됨

@@ -28,7 +28,8 @@ class ZoneResponse(BaseModel):
         # geoalchemy2 geometry → GeoJSON dict 변환
         shape = to_shape(m.geometry)
         import json
-        geojson = json.loads(shape.geojson)
+        from shapely.geometry import mapping
+        geojson = json.loads(json.dumps(mapping(shape)))
         return cls(
             zone_id=m.zone_id,
             name=m.name,

@@ -15,9 +15,9 @@ import redis.asyncio as aioredis
 
 from base import Agent, AlertPayload, PlatformReport
 
-_AIS_TIMEOUT_S = 300        # 5분 이상 보고 없으면 경보
+_AIS_TIMEOUT_S = 90         # 90초 이상 보고 없으면 경보 (데모: 빠른 탐지)
 _SPEED_DROP_THRESHOLD = 5.0  # knots — 한 틱에 이 이상 감소 시 의심
-_ROT_THRESHOLD = 20.0        # degrees/min — 이 이상이면 급격한 선회
+_ROT_THRESHOLD = 25.0        # degrees/min — 이 이상이면 급격한 선회
 
 
 class AnomalyRuleAgent(Agent):
@@ -44,6 +44,7 @@ class AnomalyRuleAgent(Agent):
                 severity="info",
                 message=f"{pid} AIS 신호 복구",
                 platform_ids=[pid],
+                dedup_key=f"ais_off:{pid}",
             ))
 
         self._last_seen[pid] = now
@@ -63,6 +64,7 @@ class AnomalyRuleAgent(Agent):
                     platform_ids=[pid],
                     recommendation=rec,
                     metadata={"prev_sog": prev_sog, "current_sog": report.sog},
+                    dedup_key=f"anomaly:speed:{pid}",
                 ))
 
         if report.sog is not None:
@@ -80,6 +82,7 @@ class AnomalyRuleAgent(Agent):
                 platform_ids=[pid],
                 recommendation=rec,
                 metadata={"rot": report.rot},
+                dedup_key=f"anomaly:rot:{pid}",
             ))
 
     async def check_ais_timeout(self) -> None:
@@ -98,4 +101,5 @@ class AnomalyRuleAgent(Agent):
                         f"{pid} AIS 신호 {int(elapsed)}초 미수신. 위치 미상. "
                         f"인접 선박 및 해경에 통보 검토." if self.level in ("L2", "L3") else None
                     ),
+                    dedup_key=f"ais_off:{pid}",
                 ))

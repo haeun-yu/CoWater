@@ -68,6 +68,7 @@ class ZoneMonitorAgent(Agent):
                     platform_ids=[report.platform_id],
                     zone_id=zone_id,
                     recommendation=rec,
+                    dedup_key=f"zone:{report.platform_id}:{zone_id}",
                 ))
 
             elif not inside and prev_inside:

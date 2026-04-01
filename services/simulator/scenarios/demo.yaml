@@ -1,0 +1,253 @@
+# ============================================================
+# CoWater Demo 시나리오 — 에이전트 전체 트리거 검증
+# 한국 남해안 / 목포-여수 해협 — 15척 + 복합 사건
+#
+# 트리거 매핑:
+#   CPAAgent          ← t=060s  알파호↔베타호 교차 항로 (CPA < 0.2nm)
+#   ZoneMonitorAgent  ← t=120s  감마호 목포항 금지구역(126.37-126.39, 34.77-34.79) 진입
+#   AnomalyRuleAgent  ← t=180s  델타호 AIS 침묵 (90s 후 탐지)
+#                     ← t=280s  제타호 emergency_stop (속도급감 5kt+ 한 틱)
+#                     ← t=030s  해경3009 급선회 ROT>25 deg/min (set_waypoint)
+#   AnomalyAIAgent    ← AnomalyRuleAgent 경보 수신 후 자동 실행
+#   DistressAgent     ← t=240s  에코호 engine_stop (not_under_command)
+#   ReportAgent       ← Critical 경보 수신 후 자동 보고서 생성
+# ============================================================
+
+vessels:
+  # ── 일반 화물선 ──────────────────────────────────────────────
+  - mmsi: "441101000"
+    name: "알파호"
+    lat: 34.750
+    lon: 126.300
+    heading: 90
+    speed: 13.0
+    max_speed: 16.0
+    waypoints:
+      - { lat: 34.750, lon: 126.700 }
+      - { lat: 34.750, lon: 126.300 }
+
+  - mmsi: "441102000"
+    name: "베타호"
+    lat: 34.900
+    lon: 126.520
+    heading: 195
+    speed: 11.0
+    max_speed: 14.0
+    waypoints:
+      - { lat: 34.640, lon: 126.480 }   # 알파호 항로와 교차
+      - { lat: 34.900, lon: 126.520 }
+
+  # 감마호 — 목포항 금지구역(126.37-126.39, 34.77-34.79) 직통
+  - mmsi: "441103000"
+    name: "감마호"
+    lat: 34.700
+    lon: 126.280
+    heading: 75
+    speed: 9.5
+    max_speed: 13.0
+    waypoints:
+      - { lat: 34.780, lon: 126.380 }   # 금지구역 내부 좌표
+      - { lat: 34.750, lon: 126.550 }
+      - { lat: 34.700, lon: 126.280 }
+
+  - mmsi: "441104000"
+    name: "델타호"
+    lat: 34.820
+    lon: 126.800
+    heading: 270
+    speed: 14.0
+    max_speed: 18.0
+    waypoints:
+      - { lat: 34.810, lon: 126.500 }
+      - { lat: 34.820, lon: 126.800 }
+
+  - mmsi: "441105000"
+    name: "에코호"
+    lat: 34.600
+    lon: 126.650
+    heading: 15
+    speed: 10.0
+    max_speed: 14.0
+    waypoints:
+      - { lat: 34.780, lon: 126.680 }
+      - { lat: 34.600, lon: 126.650 }
+
+  - mmsi: "441106000"
+    name: "제타호"
+    lat: 34.760
+    lon: 127.100
+    heading: 280
+    speed: 16.0
+    max_speed: 20.0
+    waypoints:
+      - { lat: 34.750, lon: 126.700 }
+      - { lat: 34.760, lon: 127.100 }
+
+  # ── 여객/카페리 ──────────────────────────────────────────────
+  - mmsi: "441107000"
+    name: "제주카페리1"
+    lat: 34.490
+    lon: 126.560
+    heading: 2
+    speed: 20.0
+    max_speed: 24.0
+    waypoints:
+      - { lat: 34.800, lon: 126.545 }
+      - { lat: 34.490, lon: 126.560 }
+
+  - mmsi: "441108000"
+    name: "완도카페리"
+    lat: 34.400
+    lon: 126.700
+    heading: 355
+    speed: 18.0
+    max_speed: 22.0
+    waypoints:
+      - { lat: 34.750, lon: 126.690 }
+      - { lat: 34.400, lon: 126.700 }
+
+  # ── 어선 ─────────────────────────────────────────────────────
+  - mmsi: "441109000"
+    name: "남해어선01"
+    lat: 34.710
+    lon: 126.420
+    heading: 50
+    speed: 5.0
+    max_speed: 8.0
+    waypoints:
+      - { lat: 34.760, lon: 126.500 }
+      - { lat: 34.730, lon: 126.580 }
+      - { lat: 34.710, lon: 126.420 }
+
+  - mmsi: "441110000"
+    name: "거문도어선"
+    lat: 34.550
+    lon: 127.300
+    heading: 130
+    speed: 4.5
+    max_speed: 7.0
+    waypoints:
+      - { lat: 34.490, lon: 127.380 }
+      - { lat: 34.550, lon: 127.300 }
+
+  - mmsi: "441111000"
+    name: "추자도어선"
+    lat: 34.420
+    lon: 126.300
+    heading: 315
+    speed: 4.0
+    max_speed: 6.0
+    waypoints:
+      - { lat: 34.480, lon: 126.220 }
+      - { lat: 34.420, lon: 126.300 }
+
+  # ── 탱커 / 벌크선 ────────────────────────────────────────────
+  - mmsi: "441112000"
+    name: "여수탱커"
+    lat: 34.740
+    lon: 127.700
+    heading: 262
+    speed: 11.0
+    max_speed: 14.0
+    waypoints:
+      - { lat: 34.720, lon: 127.200 }
+      - { lat: 34.740, lon: 127.700 }
+
+  - mmsi: "441113000"
+    name: "광양벌크"
+    lat: 34.920
+    lon: 127.600
+    heading: 240
+    speed: 9.0
+    max_speed: 12.0
+    waypoints:
+      - { lat: 34.800, lon: 127.300 }
+      - { lat: 34.920, lon: 127.600 }
+
+  # ── 해경 순시선 (max_rot: 30 — 급선회 ROT 이상 탐지용) ───────
+  - mmsi: "441114000"
+    name: "해경3009"
+    lat: 34.770
+    lon: 126.580
+    heading: 180
+    speed: 22.0
+    max_speed: 28.0
+    max_rot: 30.0                        # ← ROT 임계값(25) 초과 유발
+    waypoints:
+      - { lat: 34.620, lon: 126.600 }
+      - { lat: 34.770, lon: 126.560 }
+
+  - mmsi: "441115000"
+    name: "목포해경"
+    lat: 34.850
+    lon: 126.350
+    heading: 120
+    speed: 18.0
+    max_speed: 26.0
+    waypoints:
+      - { lat: 34.750, lon: 126.500 }
+      - { lat: 34.850, lon: 126.350 }
+
+events:
+  # ── t=030s: 해경3009 급방향 전환 → ROT > 25 deg/min (AnomalyRuleAgent ROT) ─
+  - at: 30
+    mmsi: "441114000"
+    type: set_waypoint
+    lat: 34.920
+    lon: 126.200   # 현재 남향에서 북서방향으로 약 160° 전환
+
+  # ── t=060s: 알파호 가속 → 베타호와 CPA 위험 심화 (CPAAgent) ──────────────
+  - at: 60
+    mmsi: "441101000"
+    type: set_speed
+    speed: 16.0
+
+  # ── t=180s: 델타호 AIS 침묵 (AnomalyRuleAgent: 90초 후 ais_off 경보) ────
+  - at: 180
+    mmsi: "441104000"
+    type: ais_silence
+
+  # ── t=240s: 에코호 기관 고장 → NOT_UNDER_COMMAND (DistressAgent) ─────────
+  - at: 240
+    mmsi: "441105000"
+    type: engine_stop
+
+  # ── t=280s: 제타호 긴급 정지 → SOG 16→0 순간 (AnomalyRuleAgent 속도급감) ─
+  - at: 280
+    mmsi: "441106000"
+    type: emergency_stop
+
+  # ── t=300s: 델타호 AIS 복구 ──────────────────────────────────────────────
+  - at: 300
+    mmsi: "441104000"
+    type: ais_restore
+
+  # ── t=360s: 해경3009 정상 항로 복귀 + 에코호 방향 급파 ──────────────────
+  - at: 360
+    mmsi: "441114000"
+    type: set_waypoint
+    lat: 34.610
+    lon: 126.660   # 에코호 조난 위치 방향
+
+  - at: 360
+    mmsi: "441114000"
+    type: set_speed
+    speed: 28.0
+
+  # ── t=420s: 에코호 기관 복구 ─────────────────────────────────────────────
+  - at: 420
+    mmsi: "441105000"
+    type: engine_restore
+    speed: 5.0
+
+  # ── t=480s: 제타호 재출발 ─────────────────────────────────────────────────
+  - at: 480
+    mmsi: "441106000"
+    type: set_speed
+    speed: 12.0
+
+  # ── t=540s: 알파호 감속 (충돌 회피) ──────────────────────────────────────
+  - at: 540
+    mmsi: "441101000"
+    type: set_speed
+    speed: 7.0

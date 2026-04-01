@@ -140,9 +140,9 @@ async def _safe_ai_alert(agent: Agent, alert: dict) -> None:
 
 
 async def _ais_timeout_loop() -> None:
-    """60초마다 AIS 타임아웃 체크."""
+    """20초마다 AIS 타임아웃 체크 (빠른 탐지)."""
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(20)
         for agent in _registry.enabled():
             if isinstance(agent, AnomalyRuleAgent):
                 await agent.check_ais_timeout()

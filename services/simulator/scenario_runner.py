@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+import httpx
 import yaml
 
 from config import settings
@@ -79,7 +80,37 @@ class ScenarioRunner:
         self._events.sort(key=lambda e: e.at_s)
         logger.info("Loaded %d vessel(s), %d event(s)", len(self._vessels), len(self._events))
 
+    async def register_platforms(self) -> None:
+        """시나리오 선박을 Core API에 등록 (이름·유형 설정). 이미 있으면 이름만 업데이트."""
+        async with httpx.AsyncClient(base_url=settings.core_api_url, timeout=10) as client:
+            for mmsi_key, sim in self._vessels.items():
+                name = sim.state.name
+                try:
+                    # 존재 확인
+                    resp = await client.get(f"/platforms/{mmsi_key}")
+                    if resp.status_code == 404:
+                        await client.post("/platforms", json={
+                            "platform_id": mmsi_key,
+                            "platform_type": "vessel",
+                            "name": name,
+                            "source_protocol": "ais",
+                            "capabilities": ["position", "heading"],
+                            "metadata": {},
+                        })
+                        logger.info("Registered platform: %s (%s)", name, mmsi_key)
+                    elif resp.status_code == 200:
+                        await client.patch(f"/platforms/{mmsi_key}", json={"name": name})
+                        logger.info("Updated platform name: %s (%s)", name, mmsi_key)
+                except Exception:
+                    logger.warning("Failed to register platform %s — Core API unavailable", mmsi_key)
+
     async def run(self) -> None:
+        # Core API에 플랫폼 등록 시도 (실패해도 시뮬레이션 계속)
+        try:
+            await self.register_platforms()
+        except Exception:
+            logger.warning("Platform registration skipped")
+
         tick_interval = 1.0 / settings.tick_rate_hz
         real_interval = tick_interval / settings.time_scale
         dt_sim = tick_interval  # 시뮬레이션 내 경과 시간

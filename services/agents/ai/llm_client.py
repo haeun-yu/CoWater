@@ -2,11 +2,7 @@
 LLM 클라이언트 추상화 레이어.
 
 config.llm_backend 값에 따라 Claude(Anthropic) 또는 Ollama(OpenAI 호환) 중 하나를
-반환한다. 에이전트 코드는 LLMClient.chat()만 호출하면 된다.
-
-지원 백엔드:
-  claude  — Anthropic API (기본값, claude-sonnet-4-6 등)
-  ollama  — Ollama 로컬 서버 (qwen3, llama3 등 OpenAI 호환 엔드포인트 사용)
+반환한다. API key가 없으면 FallbackClient가 반환되어 rule 기반 권고문을 생성한다.
 """
 
 from __future__ import annotations
@@ -17,7 +13,6 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
-# <think>...</think> 블록 제거 — Qwen3 등 사고 모드 모델 출력 정제용
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
@@ -26,24 +21,29 @@ def _strip_thinking(text: str) -> str:
 
 
 class LLMClient(ABC):
-    """에이전트가 사용하는 LLM 호출 인터페이스."""
-
     @abstractmethod
-    async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
-        """system 프롬프트와 user 메시지를 받아 모델 응답 텍스트를 반환한다."""
-        ...
+    async def chat(self, *, system: str, user: str, max_tokens: int) -> str: ...
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    @property
+    def model_name(self) -> str:
+        return "unknown"
 
 
 class ClaudeClient(LLMClient):
-    """Anthropic Claude API 클라이언트."""
-
     def __init__(self, api_key: str, model: str) -> None:
         import anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
 
+    @property
+    def model_name(self) -> str:
+        return f"claude/{self._model}"
+
     async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
-        import anthropic
         msg = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
@@ -54,27 +54,23 @@ class ClaudeClient(LLMClient):
 
 
 class OllamaClient(LLMClient):
-    """Ollama OpenAI 호환 엔드포인트 클라이언트.
-
-    Qwen3처럼 <think> 블록을 출력하는 모델은 자동으로 사고 영역을 제거한다.
-    think=False 옵션으로 사고 모드 자체를 비활성화할 수도 있다.
-    """
-
     def __init__(self, base_url: str, model: str, think: bool = False) -> None:
         from openai import AsyncOpenAI
         self._client = AsyncOpenAI(
             base_url=f"{base_url.rstrip('/')}/v1",
-            api_key="ollama",   # Ollama는 인증 불필요, 임의 값
+            api_key="ollama",
         )
         self._model = model
         self._think = think
 
+    @property
+    def model_name(self) -> str:
+        return f"ollama/{self._model}"
+
     async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
         kwargs: dict = {}
         if not self._think:
-            # Ollama Qwen3 사고 모드 비활성화
             kwargs["extra_body"] = {"think": False}
-
         resp = await self._client.chat.completions.create(
             model=self._model,
             max_tokens=max_tokens,
@@ -85,32 +81,51 @@ class OllamaClient(LLMClient):
             **kwargs,
         )
         text = resp.choices[0].message.content or ""
-        # 사고 모드가 활성화된 경우에도 <think> 태그가 포함될 수 있으므로 정제
         return _strip_thinking(text)
 
 
+class FallbackClient(LLMClient):
+    """API key 미설정 시 사용. rule 기반 권고문을 반환."""
+
+    @property
+    def is_available(self) -> bool:
+        return False
+
+    @property
+    def model_name(self) -> str:
+        return "fallback/rule-based"
+
+    async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
+        # user 메시지에서 핵심 정보 추출해 간단한 권고문 생성
+        lines = [l.strip() for l in user.splitlines() if l.strip()]
+        summary = " | ".join(lines[:4])
+        return (
+            f"[AI 분석 불가 — ANTHROPIC_API_KEY 미설정]\n\n"
+            f"상황 요약: {summary}\n\n"
+            "권고사항:\n"
+            "1. 해당 선박의 현재 위치 및 상태를 즉시 확인하십시오.\n"
+            "2. 인접 선박 및 VHF Ch.16을 통해 교신을 시도하십시오.\n"
+            "3. 필요 시 해양경찰청에 상황을 통보하십시오.\n\n"
+            "AI 분석을 활성화하려면 ANTHROPIC_API_KEY 환경변수를 설정하세요."
+        )
+
+
 def make_llm_client(settings) -> LLMClient:
-    """settings.llm_backend 값에 따라 적절한 LLMClient를 반환한다."""
     backend = settings.llm_backend.lower()
 
     if backend == "ollama":
-        logger.info(
-            "LLM backend: Ollama — url=%s model=%s think=%s",
-            settings.ollama_url, settings.ollama_model, settings.ollama_think,
-        )
-        return OllamaClient(
-            base_url=settings.ollama_url,
-            model=settings.ollama_model,
-            think=settings.ollama_think,
-        )
+        logger.info("LLM backend: Ollama — url=%s model=%s", settings.ollama_url, settings.ollama_model)
+        return OllamaClient(base_url=settings.ollama_url, model=settings.ollama_model, think=settings.ollama_think)
 
     if backend == "claude":
+        if not settings.anthropic_api_key:
+            logger.warning(
+                "ANTHROPIC_API_KEY가 설정되지 않았습니다. "
+                "AI 에이전트는 rule 기반 fallback 권고문을 사용합니다. "
+                "환경변수 ANTHROPIC_API_KEY를 설정하면 Claude AI 분석이 활성화됩니다."
+            )
+            return FallbackClient()
         logger.info("LLM backend: Claude — model=%s", settings.claude_model)
-        return ClaudeClient(
-            api_key=settings.anthropic_api_key,
-            model=settings.claude_model,
-        )
+        return ClaudeClient(api_key=settings.anthropic_api_key, model=settings.claude_model)
 
-    raise ValueError(
-        f"Unknown llm_backend: {backend!r}. Choose 'claude' or 'ollama'."
-    )
+    raise ValueError(f"Unknown llm_backend: {backend!r}. Choose 'claude' or 'ollama'.")

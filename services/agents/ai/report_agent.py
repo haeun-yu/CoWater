@@ -13,7 +13,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from ai.llm_client import make_llm_client
-from base import Agent, PlatformReport
+from base import Agent, AlertPayload, PlatformReport
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,53 @@ class ReportAgent(Agent):
         self._llm = make_llm_client(settings)
 
     async def on_platform_report(self, report: PlatformReport) -> None:
-        pass  # 이 에이전트는 직접 보고서 생성 요청에 응답
+        pass
+
+    async def on_alert(self, alert: dict) -> None:
+        """Critical 경보 수신 시 상황 보고서 자동 생성."""
+        if alert.get("generated_by") == self.agent_id:
+            return
+        if self.level == "L1":
+            return
+        if alert.get("severity") != "critical":
+            return
+        if alert.get("alert_type") not in ("distress", "cpa", "zone_intrusion"):
+            return
+
+        context = self._build_alert_context(alert)
+        try:
+            report_text = await self._llm.chat(
+                system=_SYSTEM_PROMPT,
+                user=context,
+                max_tokens=1024,
+            )
+        except Exception:
+            logger.exception("Auto report generation failed for alert %s", alert.get("alert_id"))
+            return
+
+        await self.emit_alert(AlertPayload(
+            alert_type="compliance",
+            severity="info",
+            message=f"[상황 보고서] {alert.get('message', '')[:80]}",
+            platform_ids=alert.get("platform_ids", []),
+            recommendation=report_text,
+            metadata={
+                "source_alert_type": alert.get("alert_type"),
+                "source_alert_id": alert.get("alert_id"),
+                "auto_report": True,
+            },
+        ))
+
+    def _build_alert_context(self, alert: dict) -> str:
+        return (
+            f"경보 유형: {alert.get('alert_type')}\n"
+            f"심각도: {alert.get('severity')}\n"
+            f"발생 시각: {alert.get('created_at', '미상')}\n"
+            f"관련 선박: {', '.join(alert.get('platform_ids', []))}\n"
+            f"경보 내용: {alert.get('message')}\n"
+            f"발생 에이전트: {alert.get('generated_by')}\n"
+            "\n위 해양 사건에 대한 운항 보고서를 작성하십시오."
+        )
 
     async def generate_report(self, incident_id: str) -> str | None:
         """

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 
@@ -10,7 +11,14 @@ export default function TopBar() {
     (a) => a.severity === "critical" && a.status === "new"
   ).length;
 
-  const now = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const [now, setNow] = useState("");
+  useEffect(() => {
+    const fmt = () =>
+      setNow(new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC");
+    fmt();
+    const id = setInterval(fmt, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <header className="h-10 flex items-center justify-between px-4 border-b border-ocean-800 bg-ocean-900 flex-shrink-0">

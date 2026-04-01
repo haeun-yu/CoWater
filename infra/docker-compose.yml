@@ -77,6 +77,8 @@ services:
       MOTH_SERVER_URL: wss://cobot.center:8287
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+    ports:
+      - "7703:8002"    # WebSocket relay — 프론트엔드 직접 연결
     depends_on:
       redis:
         condition: service_healthy
@@ -116,7 +118,9 @@ services:
       - simulation
     environment:
       MOTH_SERVER_URL: wss://cobot.center:8287
-      SCENARIO: ${SCENARIO:-default}
+      CORE_API_URL: http://core:8000
+      SCENARIO: ${SCENARIO:-demo}
+      TIME_SCALE: "3.0"
       LOG_LEVEL: info
 
   # ─────────────────────────────────────────────────────
@@ -126,12 +130,13 @@ services:
     build:
       context: ../services/frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:7700
+        NEXT_PUBLIC_WS_URL: ws://localhost:7700
+        NEXT_PUBLIC_AGENTS_URL: http://localhost:7701
+        NEXT_PUBLIC_POSITION_WS_URL: ws://localhost:7703
     container_name: cowater-frontend
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:7700
-      NEXT_PUBLIC_WS_URL: ws://localhost:7700
-      NEXT_PUBLIC_AGENTS_URL: http://localhost:7701
     ports:
       - "7702:3000"
     depends_on:

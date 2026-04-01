@@ -38,12 +38,17 @@ class AlertPayload:
     zone_id: str | None = None
     recommendation: str | None = None
     metadata: dict = field(default_factory=dict)
+    # 중복 방지 키 — 같은 문제면 동일값, 없으면 매번 새 경보
+    dedup_key: str | None = None
 
     alert_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_by: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
+        meta = dict(self.metadata)
+        if self.dedup_key:
+            meta["dedup_key"] = self.dedup_key
         return {
             "alert_id": self.alert_id,
             "alert_type": self.alert_type,
@@ -54,8 +59,9 @@ class AlertPayload:
             "generated_by": self.generated_by,
             "message": self.message,
             "recommendation": self.recommendation,
-            "metadata": self.metadata,
+            "metadata": meta,
             "created_at": self.created_at,
+            "dedup_key": self.dedup_key,
         }
 
 
