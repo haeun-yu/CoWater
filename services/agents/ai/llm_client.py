@@ -84,6 +84,37 @@ class OllamaClient(LLMClient):
         return _strip_thinking(text)
 
 
+class VllmClient(LLMClient):
+    """vLLM 서버 클라이언트 (OpenAI 호환 API).
+
+    vLLM은 OpenAI 호환 엔드포인트를 제공하므로 OllamaClient와 구조가 동일하되,
+    think 파라미터 등 Ollama 전용 옵션을 제거한 순수 OpenAI 호환 구현이다.
+    """
+
+    def __init__(self, base_url: str, model: str) -> None:
+        from openai import AsyncOpenAI
+        self._client = AsyncOpenAI(
+            base_url=f"{base_url.rstrip('/')}/v1",
+            api_key="vllm",  # vLLM은 API key 불필요 — 더미값
+        )
+        self._model = model
+
+    @property
+    def model_name(self) -> str:
+        return f"vllm/{self._model}"
+
+    async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
+        resp = await self._client.chat.completions.create(
+            model=self._model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+
 class FallbackClient(LLMClient):
     """API key 미설정 시 사용. rule 기반 권고문을 반환."""
 
@@ -128,4 +159,8 @@ def make_llm_client(settings) -> LLMClient:
         logger.info("LLM backend: Claude — model=%s", settings.claude_model)
         return ClaudeClient(api_key=settings.anthropic_api_key, model=settings.claude_model)
 
-    raise ValueError(f"Unknown llm_backend: {backend!r}. Choose 'claude' or 'ollama'.")
+    if backend == "vllm":
+        logger.info("LLM backend: vLLM — url=%s model=%s", settings.vllm_url, settings.vllm_model)
+        return VllmClient(base_url=settings.vllm_url, model=settings.vllm_model)
+
+    raise ValueError(f"Unknown llm_backend: {backend!r}. Choose 'claude', 'ollama', or 'vllm'.")

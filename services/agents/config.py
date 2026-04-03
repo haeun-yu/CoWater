@@ -12,8 +12,9 @@ class Settings(BaseSettings):
 
     # ── LLM 백엔드 선택 ──────────────────────────────────────────────────────
     # "claude"  : Anthropic API 사용 (기본값)
-    # "ollama"  : 로컬 Ollama 서버 사용 (Qwen3, LLaMA 등)
-    llm_backend: Literal["claude", "ollama"] = "claude"
+    # "ollama"  : 로컬 Ollama 서버 사용 (Apple Silicon Metal 백엔드)
+    # "vllm"    : vLLM 서버 사용 (NVIDIA GPU / Apple Silicon MPS)
+    llm_backend: Literal["claude", "ollama", "vllm"] = "claude"
 
     # Claude 설정 (llm_backend="claude" 일 때 사용)
     anthropic_api_key: str = ""
@@ -23,6 +24,10 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
     ollama_think: bool = False   # True: 사고 모드 활성화 / False: 빠른 응답
+
+    # vLLM 설정 (llm_backend="vllm" 일 때 사용)
+    vllm_url: str = "http://localhost:8000"
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
 
 
 settings = Settings()

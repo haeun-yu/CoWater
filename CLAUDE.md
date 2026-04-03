@@ -21,6 +21,11 @@ SCENARIO=collision_risk docker compose --profile simulation up -d
 LLM_BACKEND=ollama docker compose --profile ollama up -d
 # 최초 실행 시 ollama-init이 모델(qwen2.5:3b)을 자동 pull (~2GB)
 
+# vLLM(고성능 로컬 LLM) 포함 실행
+LLM_BACKEND=vllm docker compose --profile vllm up -d
+# 최초 실행 시 HuggingFace에서 모델 자동 다운로드 (~2GB)
+# Apple Silicon: MPS 백엔드 (실험적), NVIDIA: deploy.resources 주석 해제 필요
+
 # 전체 실행
 LLM_BACKEND=ollama SCENARIO=demo docker compose --profile ollama --profile simulation up -d
 

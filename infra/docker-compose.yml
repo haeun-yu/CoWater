@@ -134,6 +134,52 @@ services:
       - ollama
 
   # ─────────────────────────────────────────────────────
+  # vLLM (고성능 로컬 LLM 서버) — LLM_BACKEND=vllm 시 사용
+  #
+  # Apple Silicon (MPS):
+  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
+  #
+  # NVIDIA GPU:
+  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
+  #   → deploy.resources 섹션 주석 해제 필요
+  # ─────────────────────────────────────────────────────
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: cowater-vllm
+    restart: unless-stopped
+    profiles:
+      - vllm
+    environment:
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      --dtype ${VLLM_DTYPE:-auto}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
+      --gpu-memory-utilization ${VLLM_GPU_MEM:-0.85}
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - vllm_data:/root/.cache/huggingface
+    ports:
+      - "8001:8000"
+    # ── Apple Silicon (MPS) ──────────────────────────
+    # vLLM MPS 지원은 실험적. 현재 CPU fallback으로 동작할 수 있음.
+    # ── NVIDIA GPU ───────────────────────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ─────────────────────────────────────────────────────
   # Agent Runtime
   # ─────────────────────────────────────────────────────
   agents:
@@ -147,13 +193,16 @@ services:
       CORE_API_URL: http://core:8000
       # ── LLM 백엔드 설정 ─────────────────────────────
       # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
-      # Ollama 사용: LLM_BACKEND=ollama (ollama profile 포함 실행 필요)
+      # Ollama 사용: LLM_BACKEND=ollama (--profile ollama 포함 실행 필요)
+      # vLLM  사용: LLM_BACKEND=vllm   (--profile vllm  포함 실행 필요)
       LLM_BACKEND: ${LLM_BACKEND:-claude}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: info
     ports:
       - "7701:8001"
@@ -204,3 +253,4 @@ volumes:
   postgres_data:
   redis_data:
   ollama_data:
+  vllm_data:
