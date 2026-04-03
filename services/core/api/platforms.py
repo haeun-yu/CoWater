@@ -142,12 +142,11 @@ async def get_track(
     if to:
         inner = inner.where(PlatformReportModel.time <= to)
 
-    stmt = select(PlatformReportModel).from_statement(
-        inner.subquery().select().order_by("time")
-    )
+    subq = inner.subquery()
+    stmt = select(subq).order_by(subq.c.time.asc())
 
     result = await db.execute(stmt)
-    rows = result.scalars().all()
+    rows = result.all()
     return [
         TrackPoint(
             time=r.time,

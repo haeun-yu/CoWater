@@ -21,6 +21,10 @@ SCENARIO=collision_risk docker compose --profile simulation up -d
 LLM_BACKEND=ollama docker compose --profile ollama up -d
 # 최초 실행 시 ollama-init이 모델(qwen2.5:3b)을 자동 pull (~2GB)
 
+# 전체 실행
+LLM_BACKEND=ollama SCENARIO=demo docker compose --profile ollama --profile simulation up -d
+
+
 # 서비스별 재빌드
 docker compose build core && docker compose up -d core
 ```
@@ -80,13 +84,13 @@ Moth Server (wss://cobot.center:8287)
 
 ### 서비스별 역할
 
-| 서비스 | 포트 | 역할 |
-|--------|------|------|
-| `moth-bridge` | — | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행 |
-| `core` | 7700 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`) |
-| `agents` | 7701 | Rule/AI 에이전트 실행환경, 에이전트 제어 API |
-| `simulator` | — | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시 |
-| `frontend` | 7702 | Next.js 15 해양 관제 대시보드 |
+| 서비스        | 포트 | 역할                                                                       |
+| ------------- | ---- | -------------------------------------------------------------------------- |
+| `moth-bridge` | —    | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행                      |
+| `core`        | 7700 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`) |
+| `agents`      | 7701 | Rule/AI 에이전트 실행환경, 에이전트 제어 API                               |
+| `simulator`   | —    | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시                          |
+| `frontend`    | 7702 | Next.js 15 해양 관제 대시보드                                              |
 
 ### 공유 타입 (`shared/`)
 
@@ -98,12 +102,12 @@ Moth Server (wss://cobot.center:8287)
 
 ### Redis 채널 규칙
 
-| 패턴 | 발행자 | 구독자 |
-|------|--------|--------|
-| `platform.report.{platform_id}` | moth-bridge | core, agents |
-| `alert.created.{severity}` | agents | core, agents |
-| `agent.command.{agent_id}` | (예약) | agents |
-| `platform:state:{platform_id}` | moth-bridge | (키-값 캐시, TTL 60s) |
+| 패턴                            | 발행자      | 구독자                |
+| ------------------------------- | ----------- | --------------------- |
+| `platform.report.{platform_id}` | moth-bridge | core, agents          |
+| `alert.created.{severity}`      | agents      | core, agents          |
+| `agent.command.{agent_id}`      | (예약)      | agents                |
+| `platform:state:{platform_id}`  | moth-bridge | (키-값 캐시, TTL 60s) |
 
 ### Agent Runtime 구조
 
