@@ -7,6 +7,18 @@ import type { Alert, AlertSeverity, AlertStatus } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
+
+async function apiDeleteAlerts(alertIds: string[]) {
+  const res = await fetch(`${API_URL}/alerts`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alert_ids: alertIds }),
+  });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  return res.json() as Promise<{ deleted: number }>;
+}
+
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험", warning: "주의", info: "정보",
 };
@@ -26,13 +38,16 @@ const STATUS_LABEL: Record<AlertStatus, string> = {
 type TimeFilter = "all" | "1h" | "6h" | "24h";
 
 export default function AlertsPage() {
-  const alerts = useAlertStore((s) => s.alerts);
+  const alerts      = useAlertStore((s) => s.alerts);
   const acknowledge = useAlertStore((s) => s.acknowledge);
-  const platforms = usePlatformStore((s) => s.platforms);
+  const removeAlerts = useAlertStore((s) => s.removeAlerts);
+  const platforms   = usePlatformStore((s) => s.platforms);
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">("all");
   const [statusFilter, setStatusFilter]     = useState<"new" | "acknowledged" | "all">("all");
   const [timeFilter, setTimeFilter]         = useState<TimeFilter>("all");
   const [expanded, setExpanded]             = useState<string | null>(null);
+  const [selected, setSelected]             = useState<Set<string>>(new Set());
+  const [deleting, setDeleting]             = useState(false);
 
   // 시간 필터
   const now = new Date();
@@ -57,6 +72,41 @@ export default function AlertsPage() {
   const active = filtered.filter((a) => a.status === "new");
   const past   = filtered.filter((a) => a.status !== "new");
 
+  const allFilteredIds = filtered.map((a) => a.alert_id);
+  const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0;
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(allFilteredIds));
+    }
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function handleDelete() {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      const ids = Array.from(selected);
+      await apiDeleteAlerts(ids);
+      removeAlerts(ids);
+      setSelected(new Set());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function getPlatformName(id: string) {
     const p = platforms[id];
     if (!p) return id.replace(/^MMSI-/, "");
@@ -69,7 +119,18 @@ export default function AlertsPage() {
       <div className="flex-shrink-0 px-5 py-3 border-b border-ocean-800">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-bold text-ocean-200 tracking-wider">경보 현황</h1>
-          <div className="text-xs text-ocean-500">전체 {alerts.length}건</div>
+          <div className="flex items-center gap-3">
+            {someSelected && (
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-red-500/50 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+              >
+                {deleting ? "삭제 중…" : `선택 삭제 (${selected.size}건)`}
+              </button>
+            )}
+            <div className="text-xs text-ocean-500">전체 {alerts.length}건</div>
+          </div>
         </div>
 
         {/* 통계 카드 */}
@@ -127,6 +188,19 @@ export default function AlertsPage() {
               </button>
             ))}
           </div>
+
+          {/* 전체 선택 */}
+          {filtered.length > 0 && (
+            <label className="flex items-center gap-1.5 cursor-pointer ml-2 select-none">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+              />
+              <span className="text-xs text-ocean-500">전체 선택</span>
+            </label>
+          )}
         </div>
       </div>
 
@@ -154,6 +228,8 @@ export default function AlertsPage() {
                     onAck={() => acknowledge(a.alert_id)}
                     getPlatformName={getPlatformName}
                     isActive
+                    checked={selected.has(a.alert_id)}
+                    onCheck={() => toggleOne(a.alert_id)}
                   />
                 ))}
               </div>
@@ -178,6 +254,8 @@ export default function AlertsPage() {
                   onAck={() => acknowledge(a.alert_id)}
                   getPlatformName={getPlatformName}
                   isActive={false}
+                  checked={selected.has(a.alert_id)}
+                  onCheck={() => toggleOne(a.alert_id)}
                 />
               ))}
             </div>
@@ -204,7 +282,7 @@ function StatCard({ label, value, color, urgent }: { label: string; value: numbe
 }
 
 function AlertRow({
-  alert, expanded, onToggle, onAck, getPlatformName, isActive,
+  alert, expanded, onToggle, onAck, getPlatformName, isActive, checked, onCheck,
 }: {
   alert: Alert;
   expanded: boolean;
@@ -212,13 +290,25 @@ function AlertRow({
   onAck: () => void;
   getPlatformName: (id: string) => string;
   isActive: boolean;
+  checked: boolean;
+  onCheck: () => void;
 }) {
   const s = SEVERITY_STYLE[alert.severity];
 
   return (
-    <div className={`rounded border transition-all ${s.border} ${isActive ? s.bg : "bg-transparent opacity-55"}`}>
+    <div className={`rounded border transition-all ${s.border} ${isActive ? s.bg : "bg-transparent opacity-55"} ${checked ? "ring-1 ring-red-500/40" : ""}`}>
       {/* 요약 행 */}
-      <div className="px-3 py-2.5 cursor-pointer flex items-start gap-3" onClick={onToggle}>
+      <div className="px-3 py-2.5 flex items-start gap-3">
+        {/* 체크박스 */}
+        <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={onCheck}
+            className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+          />
+        </div>
+        <div className="flex-1 cursor-pointer flex items-start gap-3" onClick={onToggle}>
         {/* 심각도 */}
         <div className="flex-shrink-0 pt-0.5 flex flex-col items-center gap-1">
           <span className={`text-xs font-bold ${s.text}`}>{SEVERITY_LABEL[alert.severity]}</span>
@@ -250,6 +340,7 @@ function AlertRow({
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
 

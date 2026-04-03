@@ -10,6 +10,7 @@ interface AlertStore {
   acknowledge: (alertId: string) => void;
   resolve: (alertId: string) => void;
   setAll: (alerts: Alert[]) => void;
+  removeAlerts: (alertIds: string[]) => void;
 }
 
 export const useAlertStore = create<AlertStore>((set) => ({
@@ -51,5 +52,12 @@ export const useAlertStore = create<AlertStore>((set) => ({
     set({
       alerts,
       unreadCount: alerts.filter((a) => a.status === "new").length,
+    }),
+
+  removeAlerts: (alertIds) =>
+    set((state) => {
+      const ids = new Set(alertIds);
+      const next = state.alerts.filter((a) => !ids.has(a.alert_id));
+      return { alerts: next, unreadCount: next.filter((a) => a.status === "new").length };
     }),
 }));

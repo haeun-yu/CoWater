@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
@@ -96,3 +96,19 @@ async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_d
     await db.commit()
     await db.refresh(row)
     return AlertResponse.from_model(row)
+
+
+class DeleteAlertsBody(BaseModel):
+    alert_ids: list[str]
+
+
+@router.delete("", status_code=200)
+async def delete_alerts(body: DeleteAlertsBody, db: Annotated[AsyncSession, Depends(get_db)]):
+    """지정한 alert_ids를 DB에서 삭제한다. 빈 리스트이면 아무것도 하지 않는다."""
+    if not body.alert_ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(AlertModel).where(AlertModel.alert_id.in_(body.alert_ids))
+    )
+    await db.commit()
+    return {"deleted": result.rowcount}
