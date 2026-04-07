@@ -4,6 +4,7 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useInitialData } from "@/hooks/useInitialData";
 import NavBar from "@/components/layout/NavBar";
 import ToastOverlay from "@/components/ui/ToastOverlay";
+import ChatDrawer from "@/components/chat/ChatDrawer";
 
 export default function AppProvider({ children }: { children: React.ReactNode }) {
   useWebSocket();
@@ -15,6 +16,7 @@ export default function AppProvider({ children }: { children: React.ReactNode })
         {children}
       </main>
       <ToastOverlay />
+      <ChatDrawer />
     </>
   );
 }

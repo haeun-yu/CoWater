@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ai.anomaly_ai import AnomalyAIAgent
+from ai.chat_agent import ChatAgent
 from ai.distress_agent import DistressAgent
 from ai.llm_client import make_llm_client
 from ai.report_agent import ReportAgent
@@ -60,6 +61,7 @@ def _setup_agents(redis: aioredis.Redis) -> None:
         AnomalyAIAgent(redis),
         DistressAgent(redis),
         ReportAgent(redis),
+        ChatAgent(redis),
     ]
     for agent in agents:
         _registry.register(agent)
@@ -452,6 +454,33 @@ async def run_agent(agent_id: str, body: ManualRunBody):
             "platform": has_platform,
             "alert": has_alert,
         },
+    }
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] | None = None          # [{"role": "user"|"assistant", "content": "..."}, ...]
+    focus_platform_ids: list[str] | None = None  # 현재 주목 중인 선박 ID 목록
+
+
+@app.post("/chat")
+async def chat(body: ChatRequest):
+    """운항자 메시지를 받아 AI 보좌관 응답을 반환한다."""
+    agent = _registry.get("chat-agent")
+    if not agent or not isinstance(agent, ChatAgent):
+        raise HTTPException(404, "Chat agent not available")
+    if not agent.enabled:
+        raise HTTPException(400, "Chat agent is disabled")
+
+    response = await agent.chat(
+        message=body.message,
+        history=body.history,
+        focus_platform_ids=body.focus_platform_ids,
+    )
+    return {
+        "response": response,
+        "model": agent._llm.model_name,
+        "agent_id": agent.agent_id,
     }
 
 
