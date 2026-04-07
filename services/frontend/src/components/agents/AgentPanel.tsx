@@ -118,9 +118,9 @@ export default function AgentPanel() {
 
       <div className="flex-1 overflow-y-auto">
         {agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-16 text-ocean-600 text-xs gap-1">
+          <div className="flex flex-col items-center justify-center h-16 text-ocean-400 text-xs gap-1">
             <span>Agent Runtime 연결 대기 중...</span>
-            <span className="text-ocean-700">:{API_URL.split(":").pop()}</span>
+            <span className="text-ocean-500">:{API_URL.split(":").pop()}</span>
           </div>
         ) : (
           <>
@@ -153,7 +153,7 @@ function StatCell({ label, value, color }: { label: string; value: string; color
   return (
     <div className="text-center">
       <div className={`text-sm font-mono font-bold ${color ?? "text-ocean-200"}`}>{value}</div>
-      <div className="text-xs text-ocean-600">{label}</div>
+      <div className="text-xs text-ocean-400">{label}</div>
     </div>
   );
 }
@@ -180,7 +180,7 @@ function AgentGroup({
     <div>
       <div className="px-3 py-1.5 bg-ocean-900 border-b border-ocean-800">
         <div className="text-xs text-ocean-400 uppercase tracking-wider font-bold">{label}</div>
-        <div className="text-xs text-ocean-700">{sublabel}</div>
+        <div className="text-xs text-ocean-500">{sublabel}</div>
       </div>
       {agents.map((agent) => (
         <AgentRow
@@ -232,11 +232,11 @@ function AgentRow({
 
         {/* 이름 + 역할 */}
         <button className="flex-1 min-w-0 text-left" onClick={onExpand}>
-          <div className={`text-xs truncate ${agent.enabled ? "text-ocean-200" : "text-ocean-600"}`}>
+          <div className={`text-xs truncate ${agent.enabled ? "text-ocean-200" : "text-ocean-400"}`}>
             {agent.name}
           </div>
           {desc && (
-            <div className="text-xs text-ocean-600 truncate">{desc.role}</div>
+            <div className="text-xs text-ocean-400 truncate">{desc.role}</div>
           )}
         </button>
 
@@ -251,7 +251,7 @@ function AgentRow({
                 className={`text-xs px-1 py-0.5 rounded transition-colors ${
                   agent.level === lvl
                     ? `${LEVEL_COLORS[lvl]} bg-ocean-800 font-bold`
-                    : "text-ocean-600 hover:text-ocean-400"
+                    : "text-ocean-400 hover:text-ocean-400"
                 }`}
               >
                 {lvl}
@@ -273,7 +273,7 @@ function AgentRow({
                 className={`text-xs px-1.5 py-0.5 rounded border ${
                   agent.level === lvl
                     ? `${LEVEL_COLORS[lvl]} border-current bg-ocean-800`
-                    : "text-ocean-700 border-ocean-800"
+                    : "text-ocean-500 border-ocean-800"
                 }`}
               >
                 {lvl}: {LEVEL_DESC[lvl]}
@@ -291,7 +291,7 @@ function FlowRow({ icon, label, value, color }: { icon: string; label: string; v
     <div className="flex items-start gap-1.5 text-xs">
       <span className={`${color} flex-shrink-0 mt-0.5`}>{icon}</span>
       <div>
-        <span className="text-ocean-600">{label}: </span>
+        <span className="text-ocean-400">{label}: </span>
         <span className="text-ocean-300">{value}</span>
       </div>
     </div>

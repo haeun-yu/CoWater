@@ -124,9 +124,9 @@ function PlatformList({
   return (
     <div className="flex-1 overflow-y-auto">
       {sorted.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-24 text-ocean-600 text-xs gap-1">
+        <div className="flex flex-col items-center justify-center h-24 text-ocean-400 text-xs gap-1">
           <span>수신 대기 중...</span>
-          <span className="text-ocean-700">시뮬레이터 또는 실제 데이터 필요</span>
+          <span className="text-ocean-500">시뮬레이터 또는 실제 데이터 필요</span>
         </div>
       ) : (
         sorted.map((p) => {
@@ -151,7 +151,7 @@ function PlatformList({
                     <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0 animate-pulse" />
                   )}
                 </div>
-                <div className="text-xs text-ocean-600 font-mono flex gap-2">
+                <div className="text-xs text-ocean-400 font-mono flex gap-2">
                   <span>{p.sog != null ? `${p.sog.toFixed(1)}kt` : "--"}</span>
                   <span>{p.cog != null ? `${p.cog.toFixed(0)}°` : ""}</span>
                   {p.nav_status && p.nav_status !== "underway_engine" && (
@@ -234,7 +234,7 @@ function PlatformDetail({
           )}
         </div>
         {platform.last_seen && (
-          <div className="text-xs text-ocean-600 mt-2">
+          <div className="text-xs text-ocean-400 mt-2">
             최근 수신 {new Date(platform.last_seen).toLocaleTimeString("ko-KR")}
           </div>
         )}

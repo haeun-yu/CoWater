@@ -80,7 +80,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
       <div className="h-full flex flex-col items-center justify-center gap-4 text-ocean-500">
         <div className="text-4xl opacity-20">▲</div>
         <div className="text-sm">플랫폼 데이터 없음</div>
-        <div className="text-xs text-ocean-600">{platformId}</div>
+        <div className="text-xs text-ocean-400">{platformId}</div>
         <button onClick={() => router.back()} className="text-xs px-3 py-1.5 bg-ocean-800 rounded hover:bg-ocean-700 text-ocean-300 transition-colors">
           ← 목록으로
         </button>
@@ -141,7 +141,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
               {NAV_STATUS_KR[p.nav_status ?? ""] ?? p.nav_status ?? "미상"}
             </div>
             {p.last_seen && (
-              <div className="text-xs text-ocean-600 mt-1">
+              <div className="text-xs text-ocean-400 mt-1">
                 최근 수신 {formatDistanceToNow(new Date(p.last_seen), { addSuffix: true, locale: ko })}
               </div>
             )}
@@ -186,7 +186,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                         <div className="text-xs text-ocean-200 truncate">
                           {np.name && np.name !== np.platform_id ? np.name : formatId(np.platform_id)}
                         </div>
-                        <div className="text-xs text-ocean-600 font-mono">
+                        <div className="text-xs text-ocean-400 font-mono">
                           {np.sog != null ? `${np.sog.toFixed(1)}kt` : "—"}
                         </div>
                       </div>
@@ -213,7 +213,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                     <div key={a.alert_id} className={`text-xs px-2.5 py-1.5 rounded border opacity-60 ${s.border} ${s.bg}`}>
                       <div className={`font-medium ${s.text}`}>{ALERT_TYPE_KR[a.alert_type]}</div>
                       <div className="text-ocean-400 line-clamp-1">{a.message}</div>
-                      <div className="text-ocean-600 mt-0.5">
+                      <div className="text-ocean-400 mt-0.5">
                         {a.status === "acknowledged" ? "확인됨" : "해결됨"} ·{" "}
                         {format(new Date(a.created_at), "MM/dd HH:mm")}
                       </div>
@@ -259,7 +259,7 @@ function AlertCard({ alert, onAck }: { alert: Alert; onAck: () => void }) {
     <div className={`rounded border p-2.5 ${s.border} ${s.bg}`}>
       <div className="flex items-center gap-2 mb-1">
         <span className={`text-xs font-bold ${s.text}`}>{ALERT_TYPE_KR[alert.alert_type]}</span>
-        <span className="text-ocean-600 text-xs ml-auto">
+        <span className="text-ocean-400 text-xs ml-auto">
           {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
         </span>
       </div>

@@ -12,6 +12,7 @@ export interface ActivityLogEntry {
   recommendation: string | null;  // AI 권고 (AI 에이전트만)
   platform_ids: string[];
   model: string | null;     // AI 모델명 (AI만)
+  metadata: Record<string, unknown>; // 원시 메타데이터 (cpa_nm, tcpa_min 등)
 }
 
 // 하위 호환 alias

@@ -3,6 +3,7 @@
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useInitialData } from "@/hooks/useInitialData";
 import NavBar from "@/components/layout/NavBar";
+import ToastOverlay from "@/components/ui/ToastOverlay";
 
 export default function AppProvider({ children }: { children: React.ReactNode }) {
   useWebSocket();
@@ -13,6 +14,7 @@ export default function AppProvider({ children }: { children: React.ReactNode })
       <main className="flex-1 overflow-hidden">
         {children}
       </main>
+      <ToastOverlay />
     </>
   );
 }

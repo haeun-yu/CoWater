@@ -153,7 +153,7 @@ export default function AlertsPage() {
                   className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                     severityFilter === f
                       ? f === "all" ? "bg-ocean-700 text-ocean-100 border-ocean-600" : `${s!.pill} border-current`
-                      : "text-ocean-600 border-ocean-800 hover:border-ocean-600"
+                      : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
                   }`}>
                   {f === "all" ? "전체" : SEVERITY_LABEL[f]}
                 </button>
@@ -168,7 +168,7 @@ export default function AlertsPage() {
                 className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                   statusFilter === f
                     ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-600 border-ocean-800 hover:border-ocean-600"
+                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
                 }`}>
                 {f === "all" ? "전체 상태" : STATUS_LABEL[f as AlertStatus]}
               </button>
@@ -182,7 +182,7 @@ export default function AlertsPage() {
                 className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                   timeFilter === f
                     ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-600 border-ocean-800 hover:border-ocean-600"
+                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
                 }`}>
                 {f === "all" ? "전체 시간" : `최근 ${f}`}
               </button>
@@ -241,7 +241,7 @@ export default function AlertsPage() {
         {statusFilter !== "new" && past.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
-              <div className="text-xs font-bold text-ocean-600 tracking-wider uppercase">확인 / 해결된 경보</div>
+              <div className="text-xs font-bold text-ocean-400 tracking-wider uppercase">확인 / 해결된 경보</div>
               <span className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-500 rounded">{past.length}</span>
             </div>
             <div className="space-y-1">
@@ -263,7 +263,7 @@ export default function AlertsPage() {
         )}
 
         {filtered.length === 0 && (
-          <div className="flex items-center justify-center h-40 text-ocean-600 text-sm">
+          <div className="flex items-center justify-center h-40 text-ocean-400 text-sm">
             조건에 맞는 경보 없음
           </div>
         )}
@@ -324,8 +324,8 @@ function AlertRow({
             <span className={`text-xs px-1.5 py-0.5 rounded border ${s.pill}`}>
               {STATUS_LABEL[alert.status]}
             </span>
-            <span className="text-xs text-ocean-600">{alert.generated_by}</span>
-            <span className="text-xs text-ocean-600 ml-auto">
+            <span className="text-xs text-ocean-400">{alert.generated_by}</span>
+            <span className="text-xs text-ocean-400 ml-auto">
               {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
             </span>
           </div>
@@ -376,7 +376,7 @@ function AlertRow({
               <div className="text-xs text-ocean-300 leading-relaxed whitespace-pre-wrap">{alert.recommendation}</div>
             </div>
           ) : (
-            <div className="text-xs text-ocean-700">AI 권고 없음 (Rule 에이전트 생성)</div>
+            <div className="text-xs text-ocean-500">AI 권고 없음 (Rule 에이전트 생성)</div>
           )}
 
           {/* 액션 */}

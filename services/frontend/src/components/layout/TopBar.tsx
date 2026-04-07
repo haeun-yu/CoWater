@@ -27,7 +27,7 @@ export default function TopBar() {
         <span className="text-ocean-400 font-bold tracking-widest text-sm">
           CO<span className="text-ocean-200">WATER</span>
         </span>
-        <span className="text-ocean-700 text-xs">연안 해양 통합 관제</span>
+        <span className="text-ocean-500 text-xs">연안 해양 통합 관제</span>
       </div>
 
       {/* 상태 요약 */}

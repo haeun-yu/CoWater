@@ -64,7 +64,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
       {/* 경보 목록 */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-ocean-600 text-xs">
+          <div className="flex items-center justify-center h-32 text-ocean-400 text-xs">
             경보 없음
           </div>
         ) : (
@@ -117,7 +117,7 @@ function AlertRow({
           <div className="text-xs text-ocean-200 leading-snug line-clamp-2">
             {alert.message}
           </div>
-          <div className="text-xs text-ocean-600 mt-0.5">
+          <div className="text-xs text-ocean-400 mt-0.5">
             {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
             {" · "}
             <span className="text-ocean-500">{alert.generated_by}</span>

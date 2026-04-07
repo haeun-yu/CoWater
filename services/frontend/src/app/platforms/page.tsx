@@ -109,7 +109,7 @@ export default function PlatformsPage() {
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-ocean-600">
+                <td colSpan={9} className="py-16 text-center text-ocean-400">
                   수신된 플랫폼 없음 — 시뮬레이터를 시작하세요
                 </td>
               </tr>
@@ -135,7 +135,7 @@ export default function PlatformsPage() {
                     </td>
                     <td className="py-2.5 pr-3">
                       <div className="font-medium text-ocean-200">{formatName(p)}</div>
-                      <div className="text-ocean-600 font-mono">{formatId(p)}</div>
+                      <div className="text-ocean-400 font-mono">{formatId(p)}</div>
                     </td>
                     <td className="py-2.5 pr-3 font-mono text-ocean-400">
                       {p.lat != null && p.lon != null
@@ -155,7 +155,7 @@ export default function PlatformsPage() {
                       </span>
                     </td>
                     <td className="py-2.5 pr-3 text-ocean-500">{p.flag ?? "—"}</td>
-                    <td className="py-2.5 pr-3 text-ocean-600 font-mono">
+                    <td className="py-2.5 pr-3 text-ocean-400 font-mono">
                       {p.last_seen
                         ? formatDistanceToNow(new Date(p.last_seen), { addSuffix: true, locale: ko })
                         : "—"}
@@ -170,7 +170,7 @@ export default function PlatformsPage() {
                           {alertInfo.count}
                         </span>
                       ) : (
-                        <span className="text-ocean-700">—</span>
+                        <span className="text-ocean-500">—</span>
                       )}
                     </td>
                   </tr>

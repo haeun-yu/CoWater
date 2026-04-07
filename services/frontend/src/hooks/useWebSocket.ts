@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAILogStore, isAIAgent, type ActivityLogEntry } from "@/stores/aiLogStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { WsMessage, PlatformType } from "@/types";
 
 const POSITION_WS_URL = process.env.NEXT_PUBLIC_POSITION_WS_URL ?? "ws://localhost:7703";
@@ -44,6 +45,7 @@ export function useWebSocket() {
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const addLog      = useAILogStore((s) => s.addLog);
   const updateLog   = useAILogStore((s) => s.updateLog);
+  const toastPush   = useToastStore((s) => s.push);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -97,7 +99,7 @@ export function useWebSocket() {
       }
 
       // 모든 에이전트 활동 로그 (Rule + AI 모두)
-      const meta = msg.metadata as Record<string, string> | null ?? {};
+      const meta = (msg.metadata ?? {}) as Record<string, unknown>;
       const logEntry: ActivityLogEntry = {
         id:           msg.alert_id,
         timestamp:    msg.created_at,
@@ -109,14 +111,23 @@ export function useWebSocket() {
         message:      msg.message,
         recommendation: msg.recommendation ?? null,
         platform_ids: msg.platform_ids,
-        model:        meta.ai_model ?? null,
+        model:        (meta.ai_model as string) ?? null,
+        metadata:     meta,
       };
 
       if (msg.type === "alert_created") {
         addLog(logEntry);
+        // 신규 경보 toast 알림
+        toastPush({
+          severity:    msg.severity as "critical" | "warning" | "info",
+          agentName:   AGENT_NAMES[msg.generated_by] ?? msg.generated_by,
+          alertType:   msg.alert_type,
+          message:     msg.message,
+          platformIds: msg.platform_ids,
+        });
       } else {
         updateLog(logEntry);
       }
     });
-  }, [upsert, addAlert, updateAlert, addLog, updateLog]);
+  }, [upsert, addAlert, updateAlert, addLog, updateLog, toastPush]);
 }

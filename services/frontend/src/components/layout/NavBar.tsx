@@ -40,7 +40,7 @@ export default function NavBar() {
         <span className="text-ocean-400 font-bold tracking-widest text-sm">
           CO<span className="text-ocean-200">WATER</span>
         </span>
-        <span className="text-ocean-700 text-xs hidden md:block">연안 해양 통합 관제</span>
+        <span className="text-ocean-500 text-xs hidden md:block">연안 해양 통합 관제</span>
       </div>
 
       {/* 네비게이션 */}
@@ -90,7 +90,7 @@ export default function NavBar() {
           <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           <span className="text-ocean-400">LIVE</span>
         </div>
-        <span className="text-ocean-600 font-mono hidden lg:block">{now}</span>
+        <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
       </div>
     </header>
   );

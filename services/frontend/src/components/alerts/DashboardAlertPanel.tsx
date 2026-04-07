@@ -93,7 +93,7 @@ export default function DashboardAlertPanel() {
       {/* 경보 목록 */}
       <div className="flex-1 overflow-y-auto">
         {displayed.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2 text-ocean-600">
+          <div className="flex flex-col items-center justify-center h-32 gap-2 text-ocean-400">
             <span className="text-lg">✓</span>
             <span className="text-xs">미확인 경보 없음</span>
           </div>
@@ -113,14 +113,14 @@ export default function DashboardAlertPanel() {
                         <span className={`text-xs font-bold ${SEVERITY_TEXT[alert.severity]}`}>
                           {SEVERITY_LABEL[alert.severity]}
                         </span>
-                        <span className="text-xs text-ocean-600">
+                        <span className="text-xs text-ocean-400">
                           {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
                         </span>
                       </div>
                       <div className="text-xs text-ocean-300 leading-snug line-clamp-2">
                         {alert.message}
                       </div>
-                      <div className="text-xs text-ocean-600 mt-0.5">
+                      <div className="text-xs text-ocean-400 mt-0.5">
                         {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
                       </div>
                     </div>

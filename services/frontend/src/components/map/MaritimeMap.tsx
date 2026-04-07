@@ -95,7 +95,8 @@ export default function MaritimeMap() {
   const select       = usePlatformStore((s) => s.select);
   const selectedId   = usePlatformStore((s) => s.selectedId);
   const alerts       = useAlertStore((s) => s.alerts);
-  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapLoaded, setMapLoaded]         = useState(false);
+  const [seamarkVisible, setSeamarkVisible] = useState(true);
 
   const alertPlatformIds = new Set(
     alerts
@@ -344,6 +345,17 @@ export default function MaritimeMap() {
     }
   }, [platforms, selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 해도 심볼(OpenSeaMap) 레이어 표시/숨김 ────────────────────────────────
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.setLayoutProperty(
+      'seamark-layer',
+      'visibility',
+      seamarkVisible ? 'visible' : 'none',
+    );
+  }, [seamarkVisible, mapLoaded]);
+
   const platformCount = Object.keys(platforms).length;
   const criticalCount = alerts.filter((a) => a.severity === 'critical' && a.status === 'new').length;
 
@@ -363,6 +375,28 @@ export default function MaritimeMap() {
             <span className="font-mono font-bold">위험 {criticalCount}건</span>
           </div>
         )}
+      </div>
+
+      {/* 해도 심볼 토글 */}
+      <div className="absolute top-3 right-12 z-10">
+        <button
+          onClick={() => setSeamarkVisible((v) => !v)}
+          title="OpenSeaMap 해도 심볼 (등대·부표·침선 등 실제 항로표지)"
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            seamarkVisible
+              ? 'panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500'
+              : 'bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400'
+          }`}
+        >
+          {/* 등대 아이콘 (SVG) */}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+            <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor" opacity="0.8"/>
+            <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5"/>
+            <rect x="3" y="10" width="6" height="2" rx="0.5" fill="currentColor"/>
+          </svg>
+          해도 심볼
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? 'bg-cyan-400' : 'bg-ocean-700'}`} />
+        </button>
       </div>
 
       {/* 범례 */}
