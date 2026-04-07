@@ -8,21 +8,25 @@ import type { PlatformState } from "@/types";
 import { createShipIcon } from "@/lib/shipIcon";
 
 const PLATFORM_LABELS: Record<string, string> = {
-  vessel: "선박", usv: "USV", rov: "ROV",
-  auv: "AUV", drone: "드론", buoy: "부이",
+  vessel: "선박",
+  usv: "USV",
+  rov: "ROV",
+  auv: "AUV",
+  drone: "드론",
+  buoy: "부이",
 };
 
 // 항적: 최대 보관 포인트 수 (초당 1건 기준 ~90초)
 const TRAIL_MAX = 90;
 // 항적 3밴드 구분 (포인트 인덱스, 뒤에서부터)
-const TRAIL_RECENT  = 15;  // 마지막 15포인트 → 불투명
-const TRAIL_MID     = 45;  // 그 전 30포인트 → 반투명
+const TRAIL_RECENT = 15; // 마지막 15포인트 → 불투명
+const TRAIL_MID = 45; // 그 전 30포인트 → 반투명
 
 type LonLat = [number, number];
 
 type TrailFeature = {
-  type: 'Feature';
-  geometry: { type: 'LineString'; coordinates: LonLat[] };
+  type: "Feature";
+  geometry: { type: "LineString"; coordinates: LonLat[] };
   properties: { opacity: number; color: string };
 };
 
@@ -43,59 +47,67 @@ function buildTrailGeoJSON(
   const features: TrailFeature[] = [];
 
   const TYPE_COLOR: Record<string, string> = {
-    vessel: '#2e8dd4', usv: '#22d3ee', rov: '#a78bfa',
-    auv: '#818cf8', drone: '#34d399', buoy: '#fbbf24',
+    vessel: "#2e8dd4",
+    usv: "#22d3ee",
+    rov: "#a78bfa",
+    auv: "#818cf8",
+    drone: "#34d399",
+    buoy: "#fbbf24",
   };
 
   for (const [pid, pts] of trails) {
     if (pts.length < 2) continue;
-    const p     = platforms[pid];
-    const color = alertIds.has(pid) ? '#ef4444'
-      : (TYPE_COLOR[p?.platform_type ?? 'vessel'] ?? '#2e8dd4');
+    const p = platforms[pid];
+    const color = alertIds.has(pid)
+      ? "#ef4444"
+      : (TYPE_COLOR[p?.platform_type ?? "vessel"] ?? "#2e8dd4");
 
-    const len     = pts.length;
+    const len = pts.length;
     // 경계 인덱스 (clamp to valid range)
-    const midEnd  = Math.max(0, len - TRAIL_RECENT);  // recent 시작점
-    const oldEnd  = Math.max(0, len - TRAIL_MID);     // mid 시작점
+    const midEnd = Math.max(0, len - TRAIL_RECENT); // recent 시작점
+    const oldEnd = Math.max(0, len - TRAIL_MID); // mid 시작점
 
     // 경계점을 1개씩 포함해 밴드 간 끊김 방지
     const bands: { pts: LonLat[]; opacity: number }[] = [
-      { pts: pts.slice(0, oldEnd + 1),              opacity: 0.12 },  // oldest
-      { pts: pts.slice(oldEnd, midEnd + 1),          opacity: 0.38 },  // mid
-      { pts: pts.slice(midEnd),                      opacity: 0.82 },  // recent
+      { pts: pts.slice(0, oldEnd + 1), opacity: 0.12 }, // oldest
+      { pts: pts.slice(oldEnd, midEnd + 1), opacity: 0.38 }, // mid
+      { pts: pts.slice(midEnd), opacity: 0.82 }, // recent
     ];
 
     for (const band of bands) {
       if (band.pts.length < 2) continue;
       features.push({
-        type: 'Feature' as const,
-        geometry: { type: 'LineString' as const, coordinates: band.pts },
+        type: "Feature" as const,
+        geometry: { type: "LineString" as const, coordinates: band.pts },
         properties: { opacity: band.opacity, color },
       });
     }
   }
-  return { type: 'FeatureCollection' as const, features } as maplibregl.GeoJSONSourceSpecification['data'] & object;
+  return {
+    type: "FeatureCollection" as const,
+    features,
+  } as maplibregl.GeoJSONSourceSpecification["data"] & object;
 }
 
 export default function MaritimeMap() {
-  const mapRef       = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 선박 마커 관리: platform_id → Marker
-  const markersRef   = useRef(new Map<string, maplibregl.Marker>());
+  const markersRef = useRef(new Map<string, maplibregl.Marker>());
   // 항적 관리: platform_id → [[lon, lat], ...]
-  const trailsRef    = useRef(new Map<string, LonLat[]>());
+  const trailsRef = useRef(new Map<string, LonLat[]>());
   // 직전 위치 기록 (중복 포인트 방지용)
-  const prevPosRef   = useRef(new Map<string, string>()); // pid → "lon,lat"
+  const prevPosRef = useRef(new Map<string, string>()); // pid → "lon,lat"
   // 현재 zoom
-  const zoomRef      = useRef(8);
-  const followRef    = useRef(false);
+  const zoomRef = useRef(8);
+  const followRef = useRef(false);
 
-  const platforms    = usePlatformStore((s) => s.platforms);
-  const select       = usePlatformStore((s) => s.select);
-  const selectedId   = usePlatformStore((s) => s.selectedId);
-  const alerts       = useAlertStore((s) => s.alerts);
-  const [mapLoaded, setMapLoaded]         = useState(false);
+  const platforms = usePlatformStore((s) => s.platforms);
+  const select = usePlatformStore((s) => s.select);
+  const selectedId = usePlatformStore((s) => s.selectedId);
+  const alerts = useAlertStore((s) => s.alerts);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [seamarkVisible, setSeamarkVisible] = useState(true);
 
   const alertPlatformIds = new Set(
@@ -107,19 +119,23 @@ export default function MaritimeMap() {
   // zoom 핸들러는 마운트 1회짜리 useEffect 클로저 안에 있어서
   // platforms / selectedId / alertPlatformIds를 직접 참조하면 초기값에 고정된다.
   // ref를 통해 항상 최신 값을 읽도록 동기화한다.
-  const platformsRef      = useRef(platforms);
-  const selectedIdRef     = useRef(selectedId);
-  const alertIdsRef       = useRef(alertPlatformIds);
-  platformsRef.current    = platforms;
-  selectedIdRef.current   = selectedId;
-  alertIdsRef.current     = alertPlatformIds;
+  const platformsRef = useRef(platforms);
+  const selectedIdRef = useRef(selectedId);
+  const alertIdsRef = useRef(alertPlatformIds);
+  platformsRef.current = platforms;
+  selectedIdRef.current = selectedId;
+  alertIdsRef.current = alertPlatformIds;
 
   // ── 선박 마커 생성/갱신 ────────────────────────────────────────────────────
 
-  function updateMarker(p: PlatformState, isSelected: boolean, isAlert: boolean) {
+  function updateMarker(
+    p: PlatformState,
+    isSelected: boolean,
+    isAlert: boolean,
+  ) {
     if (p.lat == null || p.lon == null) return;
     const { html, anchorX, anchorY } = createShipIcon(
-      p.platform_type ?? 'vessel',
+      p.platform_type ?? "vessel",
       p.heading ?? p.cog ?? 0,
       isSelected,
       isAlert,
@@ -133,18 +149,18 @@ export default function MaritimeMap() {
       existing.setLngLat([p.lon, p.lat]);
     } else {
       // 신규 마커 생성
-      const el = document.createElement('div');
+      const el = document.createElement("div");
       el.innerHTML = html;
-      el.style.cursor = 'pointer';
-      el.addEventListener('click', () => {
+      el.style.cursor = "pointer";
+      el.addEventListener("click", () => {
         followRef.current = true;
         select(p.platform_id);
       });
 
       const marker = new maplibregl.Marker({
         element: el,
-        offset: [anchorX, anchorY], // hull center → coordinate
-        anchor: 'top-left',
+        offset: [-anchorX, -anchorY], // hull center → coordinate
+        anchor: "top-left",
       })
         .setLngLat([p.lon, p.lat])
         .addTo(mapRef.current!);
@@ -179,8 +195,10 @@ export default function MaritimeMap() {
   function flushTrailSource() {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const src = map.getSource('trails') as maplibregl.GeoJSONSource | undefined;
-    src?.setData(buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds));
+    const src = map.getSource("trails") as maplibregl.GeoJSONSource | undefined;
+    src?.setData(
+      buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds),
+    );
   }
 
   // ── 지도 초기화 (마운트 1회) ──────────────────────────────────────────────
@@ -194,62 +212,70 @@ export default function MaritimeMap() {
         version: 8,
         sources: {
           osm: {
-            type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
             tileSize: 256,
-            attribution: '© OpenStreetMap contributors',
+            attribution: "© OpenStreetMap contributors",
           },
           seamark: {
-            type: 'raster',
-            tiles: ['https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'],
+            type: "raster",
+            tiles: ["https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"],
             tileSize: 256,
-            attribution: '© OpenSeaMap contributors',
+            attribution: "© OpenSeaMap contributors",
           },
         },
         layers: [
-          { id: 'osm-layer',     type: 'raster', source: 'osm',     paint: { 'raster-opacity': 0.35 } },
-          { id: 'seamark-layer', type: 'raster', source: 'seamark' },
+          {
+            id: "osm-layer",
+            type: "raster",
+            source: "osm",
+            paint: { "raster-opacity": 0.35 },
+          },
+          { id: "seamark-layer", type: "raster", source: "seamark" },
         ],
-        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       },
       center: [126.55, 34.75],
       zoom: 8,
       attributionControl: false,
     });
 
-    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
-    map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
+    map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: "nautical" }),
+      "bottom-left",
+    );
 
-    map.on('load', () => {
+    map.on("load", () => {
       // ── 항적 소스 + 레이어 ────────────────────────────────────────────
-      map.addSource('trails', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
+      map.addSource("trails", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
       });
 
       // 항적 외곽선 (대비용)
       map.addLayer({
-        id: 'trail-casing',
-        type: 'line',
-        source: 'trails',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        id: "trail-casing",
+        type: "line",
+        source: "trails",
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          'line-color': '#020d1a',
-          'line-width': 3.5,
-          'line-opacity': ['*', ['get', 'opacity'], 0.55],
+          "line-color": "#020d1a",
+          "line-width": 3.5,
+          "line-opacity": ["*", ["get", "opacity"], 0.55],
         },
       });
 
       // 항적 메인
       map.addLayer({
-        id: 'trail-line',
-        type: 'line',
-        source: 'trails',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        id: "trail-line",
+        type: "line",
+        source: "trails",
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          'line-color': ['get', 'color'],
-          'line-width': 2.0,
-          'line-opacity': ['get', 'opacity'],
+          "line-color": ["get", "color"],
+          "line-width": 2.0,
+          "line-opacity": ["get", "opacity"],
         },
       });
 
@@ -258,13 +284,13 @@ export default function MaritimeMap() {
 
     // zoom 변화 시 모든 마커 아이콘 크기 갱신
     // ref를 통해 최신 platforms / selectedId / alertIds를 읽는다 (클로저 stale 방지)
-    map.on('zoom', () => {
+    map.on("zoom", () => {
       zoomRef.current = map.getZoom();
       for (const [pid, marker] of markersRef.current) {
         const p = platformsRef.current[pid];
         if (!p) continue;
         const { html } = createShipIcon(
-          p.platform_type ?? 'vessel',
+          p.platform_type ?? "vessel",
           p.heading ?? p.cog ?? 0,
           pid === selectedIdRef.current,
           alertIdsRef.current.has(pid),
@@ -274,7 +300,9 @@ export default function MaritimeMap() {
       }
     });
 
-    map.on('dragstart', () => { followRef.current = false; });
+    map.on("dragstart", () => {
+      followRef.current = false;
+    });
 
     mapRef.current = map;
     return () => {
@@ -296,7 +324,11 @@ export default function MaritimeMap() {
 
     for (const p of Object.values(platforms)) {
       updateTrail(p);
-      updateMarker(p, p.platform_id === selectedId, alertPlatformIds.has(p.platform_id));
+      updateMarker(
+        p,
+        p.platform_id === selectedId,
+        alertPlatformIds.has(p.platform_id),
+      );
     }
     flushTrailSource();
   }, [platforms, alerts, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -312,7 +344,7 @@ export default function MaritimeMap() {
       if (!p) continue;
       const wasSelected = pid === selectedId;
       const { html } = createShipIcon(
-        p.platform_type ?? 'vessel',
+        p.platform_type ?? "vessel",
         p.heading ?? p.cog ?? 0,
         wasSelected,
         alertPlatformIds.has(pid),
@@ -338,7 +370,8 @@ export default function MaritimeMap() {
   // ── 선택 선박 실시간 추적 ─────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!mapLoaded || !mapRef.current || !selectedId || !followRef.current) return;
+    if (!mapLoaded || !mapRef.current || !selectedId || !followRef.current)
+      return;
     const p = platforms[selectedId];
     if (p?.lat != null && p?.lon != null) {
       mapRef.current.easeTo({ center: [p.lon, p.lat], duration: 300 });
@@ -350,14 +383,16 @@ export default function MaritimeMap() {
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
     mapRef.current.setLayoutProperty(
-      'seamark-layer',
-      'visibility',
-      seamarkVisible ? 'visible' : 'none',
+      "seamark-layer",
+      "visibility",
+      seamarkVisible ? "visible" : "none",
     );
   }, [seamarkVisible, mapLoaded]);
 
   const platformCount = Object.keys(platforms).length;
-  const criticalCount = alerts.filter((a) => a.severity === 'critical' && a.status === 'new').length;
+  const criticalCount = alerts.filter(
+    (a) => a.severity === "critical" && a.status === "new",
+  ).length;
 
   return (
     <div className="relative w-full h-full">
@@ -384,18 +419,41 @@ export default function MaritimeMap() {
           title="OpenSeaMap 해도 심볼 (등대·부표·침선 등 실제 항로표지)"
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             seamarkVisible
-              ? 'panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500'
-              : 'bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400'
+              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400"
           }`}
         >
           {/* 등대 아이콘 (SVG) */}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
-            <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor" opacity="0.8"/>
-            <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5"/>
-            <rect x="3" y="10" width="6" height="2" rx="0.5" fill="currentColor"/>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            className="flex-shrink-0"
+          >
+            <rect
+              x="4.5"
+              y="0"
+              width="3"
+              height="2"
+              rx="0.5"
+              fill="currentColor"
+              opacity="0.8"
+            />
+            <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5" />
+            <rect
+              x="3"
+              y="10"
+              width="6"
+              height="2"
+              rx="0.5"
+              fill="currentColor"
+            />
           </svg>
           해도 심볼
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? 'bg-cyan-400' : 'bg-ocean-700'}`} />
+          <span
+            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
+          />
         </button>
       </div>
 
@@ -403,12 +461,19 @@ export default function MaritimeMap() {
       <div className="absolute bottom-10 right-12 panel p-2.5 rounded text-xs space-y-1.5 pointer-events-none">
         {Object.entries(PLATFORM_LABELS).map(([type, label]) => {
           const colors: Record<string, string> = {
-            vessel: '#2e8dd4', usv: '#22d3ee', rov: '#a78bfa',
-            auv: '#818cf8', drone: '#34d399', buoy: '#fbbf24',
+            vessel: "#2e8dd4",
+            usv: "#22d3ee",
+            rov: "#a78bfa",
+            auv: "#818cf8",
+            drone: "#34d399",
+            buoy: "#fbbf24",
           };
           return (
             <div key={type} className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full" style={{ background: colors[type] }} />
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ background: colors[type] }}
+              />
               <span className="text-ocean-300">{label}</span>
             </div>
           );

@@ -29,5 +29,11 @@ class Settings(BaseSettings):
     vllm_url: str = "http://localhost:8000"
     vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
 
+    # AI 호출 게이팅
+    # 동일 대상(alert_type+platform)에 대한 AI 재호출 쿨다운(초)
+    ai_alert_cooldown_sec: int = 120
+    # AI 분석 최소 심각도 ("warning" 또는 "critical")
+    ai_min_severity: Literal["warning", "critical"] = "warning"
+
 
 settings = Settings()

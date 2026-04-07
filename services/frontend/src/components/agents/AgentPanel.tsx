@@ -15,7 +15,10 @@ const LEVEL_COLORS: Record<AgentLevel, string> = {
 };
 
 // 각 에이전트의 역할 설명 (input → output)
-const AGENT_DESC: Record<string, { role: string; input: string; output: string }> = {
+const AGENT_DESC: Record<
+  string,
+  { role: string; input: string; output: string }
+> = {
   "cpa-agent": {
     role: "충돌 위험 감지",
     input: "모든 선박 위치·속도",
@@ -54,6 +57,12 @@ const LEVEL_DESC: Record<AgentLevel, string> = {
   L3: "자동 실행",
 };
 
+const LEVEL_LONG_DESC: Record<AgentLevel, string> = {
+  L1: "규칙 감지와 경보 발행만 수행합니다. 외부 자동 조치는 실행하지 않습니다.",
+  L2: "L1 + AI 분석/권고를 생성합니다. 운영자 확인 후 조치하는 반자동 모드입니다.",
+  L3: "L2 + 자동 실행(예: 자동 통보/자동 처리)을 수행합니다. 운영 정책 검증 후 사용 권장.",
+};
+
 export default function AgentPanel() {
   const agents = useAgentStore((s) => s.agents);
   const setAll = useAgentStore((s) => s.setAll);
@@ -61,9 +70,12 @@ export default function AgentPanel() {
   const setLevel = useAgentStore((s) => s.setLevel);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [manualPlatformId, setManualPlatformId] = useState("");
+  const [runningId, setRunningId] = useState<string | null>(null);
 
   const platforms = usePlatformStore((s) => s.platforms);
   const alerts = useAlertStore((s) => s.alerts);
+  const selectedPlatformId = usePlatformStore((s) => s.selectedId);
 
   useEffect(() => {
     fetch(`${API_URL}/agents`)
@@ -76,7 +88,9 @@ export default function AgentPanel() {
     const endpoint = agent.enabled ? "disable" : "enable";
     setLoading(true);
     try {
-      await fetch(`${API_URL}/agents/${agent.agent_id}/${endpoint}`, { method: "PATCH" });
+      await fetch(`${API_URL}/agents/${agent.agent_id}/${endpoint}`, {
+        method: "PATCH",
+      });
       setEnabled(agent.agent_id, !agent.enabled);
     } finally {
       setLoading(false);
@@ -102,18 +116,75 @@ export default function AgentPanel() {
   const newAlerts = alerts.filter((a) => a.status === "new").length;
   const enabledAgents = agents.filter((a) => a.enabled).length;
 
+  async function runManually(agent: AgentInfo) {
+    const platformId = (manualPlatformId || selectedPlatformId || "").trim();
+    setRunningId(agent.agent_id);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (platformId) payload.platform_id = platformId;
+
+      if (agent.agent_id === "report-agent") {
+        const newestCritical = alerts.find(
+          (a) => a.severity === "critical" && a.status === "new",
+        );
+        if (newestCritical) {
+          payload.alert = {
+            alert_id: newestCritical.alert_id,
+            alert_type: newestCritical.alert_type,
+            severity: newestCritical.severity,
+            generated_by: newestCritical.generated_by,
+            message: newestCritical.message,
+            platform_ids: newestCritical.platform_ids,
+            created_at: newestCritical.created_at,
+          };
+        }
+      }
+
+      await fetch(`${API_URL}/agents/${agent.agent_id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } finally {
+      setRunningId(null);
+    }
+  }
+
   return (
     <div className="flex flex-col overflow-hidden" style={{ maxHeight: "55%" }}>
       {/* 헤더 */}
       <div className="px-3 py-2 border-b border-ocean-800 flex-shrink-0">
-        <span className="text-xs font-bold text-ocean-200 tracking-wider">에이전트</span>
+        <span className="text-xs font-bold text-ocean-200 tracking-wider">
+          에이전트
+        </span>
       </div>
 
       {/* 시스템 요약 */}
       <div className="px-3 py-2 border-b border-ocean-900 grid grid-cols-3 gap-2 flex-shrink-0">
         <StatCell label="관제 중" value={`${activePlatforms}척`} />
-        <StatCell label="미확인 경보" value={`${newAlerts}건`} color={newAlerts > 0 ? "text-yellow-400" : undefined} />
-        <StatCell label="활성 에이전트" value={`${enabledAgents}/${agents.length}`} />
+        <StatCell
+          label="미확인 경보"
+          value={`${newAlerts}건`}
+          color={newAlerts > 0 ? "text-yellow-400" : undefined}
+        />
+        <StatCell
+          label="활성 에이전트"
+          value={`${enabledAgents}/${agents.length}`}
+        />
+      </div>
+
+      <div className="px-3 py-2 border-b border-ocean-900 flex items-center gap-2">
+        <input
+          value={manualPlatformId}
+          onChange={(e) => setManualPlatformId(e.target.value)}
+          placeholder={
+            selectedPlatformId
+              ? `기본: ${selectedPlatformId}`
+              : "platform_id (선택)"
+          }
+          className="flex-1 text-xs px-2 py-1 rounded border border-ocean-700 bg-ocean-950 text-ocean-200"
+        />
+        <span className="text-xs text-ocean-500">수동 실행 대상</span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -132,6 +203,8 @@ export default function AgentPanel() {
               onExpand={setExpandedId}
               onToggle={toggleAgent}
               onLevel={changeLevel}
+              onRun={runManually}
+              runningId={runningId}
             />
             <AgentGroup
               label="AI 에이전트"
@@ -141,6 +214,8 @@ export default function AgentPanel() {
               onExpand={setExpandedId}
               onToggle={toggleAgent}
               onLevel={changeLevel}
+              onRun={runManually}
+              runningId={runningId}
             />
           </>
         )}
@@ -149,10 +224,22 @@ export default function AgentPanel() {
   );
 }
 
-function StatCell({ label, value, color }: { label: string; value: string; color?: string }) {
+function StatCell({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
   return (
     <div className="text-center">
-      <div className={`text-sm font-mono font-bold ${color ?? "text-ocean-200"}`}>{value}</div>
+      <div
+        className={`text-sm font-mono font-bold ${color ?? "text-ocean-200"}`}
+      >
+        {value}
+      </div>
       <div className="text-xs text-ocean-400">{label}</div>
     </div>
   );
@@ -166,6 +253,8 @@ function AgentGroup({
   onExpand,
   onToggle,
   onLevel,
+  onRun,
+  runningId,
 }: {
   label: string;
   sublabel: string;
@@ -174,12 +263,16 @@ function AgentGroup({
   onExpand: (id: string | null) => void;
   onToggle: (a: AgentInfo) => void;
   onLevel: (a: AgentInfo, level: AgentLevel) => void;
+  onRun: (a: AgentInfo) => void;
+  runningId: string | null;
 }) {
   if (agents.length === 0) return null;
   return (
     <div>
       <div className="px-3 py-1.5 bg-ocean-900 border-b border-ocean-800">
-        <div className="text-xs text-ocean-400 uppercase tracking-wider font-bold">{label}</div>
+        <div className="text-xs text-ocean-400 uppercase tracking-wider font-bold">
+          {label}
+        </div>
         <div className="text-xs text-ocean-500">{sublabel}</div>
       </div>
       {agents.map((agent) => (
@@ -187,9 +280,13 @@ function AgentGroup({
           key={agent.agent_id}
           agent={agent}
           expanded={expandedId === agent.agent_id}
-          onExpand={() => onExpand(expandedId === agent.agent_id ? null : agent.agent_id)}
+          onExpand={() =>
+            onExpand(expandedId === agent.agent_id ? null : agent.agent_id)
+          }
           onToggle={onToggle}
           onLevel={onLevel}
+          onRun={onRun}
+          running={runningId === agent.agent_id}
         />
       ))}
     </div>
@@ -202,17 +299,23 @@ function AgentRow({
   onExpand,
   onToggle,
   onLevel,
+  onRun,
+  running,
 }: {
   agent: AgentInfo;
   expanded: boolean;
   onExpand: () => void;
   onToggle: (a: AgentInfo) => void;
   onLevel: (a: AgentInfo, level: AgentLevel) => void;
+  onRun: (a: AgentInfo) => void;
+  running: boolean;
 }) {
   const desc = AGENT_DESC[agent.agent_id];
 
   return (
-    <div className={`border-b border-ocean-900 ${!agent.enabled ? "opacity-50" : ""}`}>
+    <div
+      className={`border-b border-ocean-900 ${!agent.enabled ? "opacity-50" : ""}`}
+    >
       {/* 메인 행 */}
       <div className="px-3 py-2 flex items-center gap-2">
         {/* 토글 */}
@@ -232,7 +335,9 @@ function AgentRow({
 
         {/* 이름 + 역할 */}
         <button className="flex-1 min-w-0 text-left" onClick={onExpand}>
-          <div className={`text-xs truncate ${agent.enabled ? "text-ocean-200" : "text-ocean-400"}`}>
+          <div
+            className={`text-xs truncate ${agent.enabled ? "text-ocean-200" : "text-ocean-400"}`}
+          >
             {agent.name}
           </div>
           {desc && (
@@ -264,8 +369,18 @@ function AgentRow({
       {/* 확장: input → output 설명 */}
       {expanded && desc && (
         <div className="px-3 pb-2.5 space-y-1.5 bg-ocean-900/40">
-          <FlowRow icon="→" label="입력" value={desc.input} color="text-ocean-400" />
-          <FlowRow icon="⬡" label="출력" value={desc.output} color="text-green-400" />
+          <FlowRow
+            icon="→"
+            label="입력"
+            value={desc.input}
+            color="text-ocean-400"
+          />
+          <FlowRow
+            icon="⬡"
+            label="출력"
+            value={desc.output}
+            color="text-green-400"
+          />
           <div className="flex gap-1 pt-0.5">
             {(["L1", "L2", "L3"] as AgentLevel[]).map((lvl) => (
               <span
@@ -280,13 +395,33 @@ function AgentRow({
               </span>
             ))}
           </div>
+          <div className="text-xs text-ocean-500 leading-relaxed">
+            {LEVEL_LONG_DESC[agent.level]}
+          </div>
+          <button
+            onClick={() => onRun(agent)}
+            disabled={running || !agent.enabled}
+            className="text-xs px-2.5 py-1 rounded border border-cyan-600/50 text-cyan-300 disabled:opacity-40"
+          >
+            {running ? "실행 중..." : "현재 데이터로 수동 실행"}
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function FlowRow({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
+function FlowRow({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  color: string;
+}) {
   return (
     <div className="flex items-start gap-1.5 text-xs">
       <span className={`${color} flex-shrink-0 mt-0.5`}>{icon}</span>

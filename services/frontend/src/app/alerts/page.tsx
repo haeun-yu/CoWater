@@ -19,35 +19,78 @@ async function apiDeleteAlerts(alertIds: string[]) {
   return res.json() as Promise<{ deleted: number }>;
 }
 
+async function apiRunAlertAction(alertId: string, action: string) {
+  const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  if (!res.ok) throw new Error(`Action failed: ${res.status}`);
+  return res.json() as Promise<Alert>;
+}
+
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
-  critical: "위험", warning: "주의", info: "정보",
+  critical: "위험",
+  warning: "주의",
+  info: "정보",
 };
-const SEVERITY_STYLE: Record<AlertSeverity, { border: string; bg: string; text: string; pill: string }> = {
-  critical: { border: "border-red-500/50",    bg: "bg-red-500/8",     text: "text-red-400",    pill: "bg-red-500/20 text-red-300 border-red-500/40" },
-  warning:  { border: "border-yellow-500/50", bg: "bg-yellow-500/8",  text: "text-yellow-400", pill: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40" },
-  info:     { border: "border-blue-500/40",   bg: "bg-blue-500/6",    text: "text-blue-400",   pill: "bg-blue-500/20 text-blue-300 border-blue-500/40" },
+const SEVERITY_STYLE: Record<
+  AlertSeverity,
+  { border: string; bg: string; text: string; pill: string }
+> = {
+  critical: {
+    border: "border-red-500/50",
+    bg: "bg-red-500/8",
+    text: "text-red-400",
+    pill: "bg-red-500/20 text-red-300 border-red-500/40",
+  },
+  warning: {
+    border: "border-yellow-500/50",
+    bg: "bg-yellow-500/8",
+    text: "text-yellow-400",
+    pill: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
+  },
+  info: {
+    border: "border-blue-500/40",
+    bg: "bg-blue-500/6",
+    text: "text-blue-400",
+    pill: "bg-blue-500/20 text-blue-300 border-blue-500/40",
+  },
 };
 const ALERT_TYPE_KR: Record<string, string> = {
-  cpa: "충돌 위험", zone_intrusion: "구역 침입", anomaly: "이상 행동",
-  ais_off: "AIS 소실", distress: "조난", compliance: "상황 보고", traffic: "교통 혼잡",
+  cpa: "충돌 위험",
+  zone_intrusion: "구역 침입",
+  anomaly: "이상 행동",
+  ais_off: "AIS 소실",
+  distress: "조난",
+  compliance: "상황 보고",
+  traffic: "교통 혼잡",
 };
 const STATUS_LABEL: Record<AlertStatus, string> = {
-  new: "미확인", acknowledged: "확인됨", resolved: "해결됨",
+  new: "미확인",
+  acknowledged: "확인됨",
+  resolved: "해결됨",
 };
 
 type TimeFilter = "all" | "1h" | "6h" | "24h";
 
 export default function AlertsPage() {
-  const alerts      = useAlertStore((s) => s.alerts);
-  const acknowledge = useAlertStore((s) => s.acknowledge);
+  const alerts = useAlertStore((s) => s.alerts);
+  const updateAlert = useAlertStore((s) => s.updateAlert);
   const removeAlerts = useAlertStore((s) => s.removeAlerts);
-  const platforms   = usePlatformStore((s) => s.platforms);
-  const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">("all");
-  const [statusFilter, setStatusFilter]     = useState<"new" | "acknowledged" | "all">("all");
-  const [timeFilter, setTimeFilter]         = useState<TimeFilter>("all");
-  const [expanded, setExpanded]             = useState<string | null>(null);
-  const [selected, setSelected]             = useState<Set<string>>(new Set());
-  const [deleting, setDeleting]             = useState(false);
+  const platforms = usePlatformStore((s) => s.platforms);
+  const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">(
+    "all",
+  );
+  const [statusFilter, setStatusFilter] = useState<
+    "new" | "acknowledged" | "all"
+  >("all");
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [modalAlertId, setModalAlertId] = useState<string | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   // 시간 필터
   const now = new Date();
@@ -62,18 +105,21 @@ export default function AlertsPage() {
     .filter((a) => statusFilter === "all" || a.status === statusFilter);
 
   // 요약 통계
-  const newAlerts       = alerts.filter((a) => a.status === "new");
-  const criticalNew     = newAlerts.filter((a) => a.severity === "critical").length;
-  const warningNew      = newAlerts.filter((a) => a.severity === "warning").length;
-  const infoNew         = newAlerts.filter((a) => a.severity === "info").length;
-  const acknowledgedAll = alerts.filter((a) => a.status === "acknowledged").length;
+  const newAlerts = alerts.filter((a) => a.status === "new");
+  const criticalNew = newAlerts.filter((a) => a.severity === "critical").length;
+  const warningNew = newAlerts.filter((a) => a.severity === "warning").length;
+  const infoNew = newAlerts.filter((a) => a.severity === "info").length;
+  const acknowledgedAll = alerts.filter(
+    (a) => a.status === "acknowledged",
+  ).length;
 
   // 활성(미확인) / 과거(확인+해결) 분리
   const active = filtered.filter((a) => a.status === "new");
-  const past   = filtered.filter((a) => a.status !== "new");
+  const past = filtered.filter((a) => a.status !== "new");
 
   const allFilteredIds = filtered.map((a) => a.alert_id);
-  const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
+  const allSelected =
+    allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
   const someSelected = selected.size > 0;
 
   function toggleAll() {
@@ -110,15 +156,35 @@ export default function AlertsPage() {
   function getPlatformName(id: string) {
     const p = platforms[id];
     if (!p) return id.replace(/^MMSI-/, "");
-    return p.name && p.name !== p.platform_id ? p.name : id.replace(/^MMSI-/, "");
+    return p.name && p.name !== p.platform_id
+      ? p.name
+      : id.replace(/^MMSI-/, "");
   }
+
+  async function runAction(alertId: string, action: string) {
+    setActing(`${alertId}:${action}`);
+    try {
+      const updated = await apiRunAlertAction(alertId, action);
+      updateAlert(updated);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setActing(null);
+    }
+  }
+
+  const modalAlert = modalAlertId
+    ? (alerts.find((a) => a.alert_id === modalAlertId) ?? null)
+    : null;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* 상단 요약 바 */}
       <div className="flex-shrink-0 px-5 py-3 border-b border-ocean-800">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-base font-bold text-ocean-200 tracking-wider">경보 현황</h1>
+          <h1 className="text-base font-bold text-ocean-200 tracking-wider">
+            경보 현황
+          </h1>
           <div className="flex items-center gap-3">
             {someSelected && (
               <button
@@ -135,11 +201,28 @@ export default function AlertsPage() {
 
         {/* 통계 카드 */}
         <div className="grid grid-cols-5 gap-2 mb-3">
-          <StatCard label="미확인 위험" value={criticalNew} color="text-red-400" urgent={criticalNew > 0} />
-          <StatCard label="미확인 주의" value={warningNew}  color="text-yellow-400" />
-          <StatCard label="미확인 정보" value={infoNew}     color="text-blue-400" />
-          <StatCard label="확인 완료"   value={acknowledgedAll} color="text-ocean-400" />
-          <StatCard label="전체 미확인" value={newAlerts.length} color="text-ocean-200" />
+          <StatCard
+            label="미확인 위험"
+            value={criticalNew}
+            color="text-red-400"
+            urgent={criticalNew > 0}
+          />
+          <StatCard
+            label="미확인 주의"
+            value={warningNew}
+            color="text-yellow-400"
+          />
+          <StatCard label="미확인 정보" value={infoNew} color="text-blue-400" />
+          <StatCard
+            label="확인 완료"
+            value={acknowledgedAll}
+            color="text-ocean-400"
+          />
+          <StatCard
+            label="전체 미확인"
+            value={newAlerts.length}
+            color="text-ocean-200"
+          />
         </div>
 
         {/* 필터 */}
@@ -149,12 +232,17 @@ export default function AlertsPage() {
             {(["all", "critical", "warning", "info"] as const).map((f) => {
               const s = f !== "all" ? SEVERITY_STYLE[f] : null;
               return (
-                <button key={f} onClick={() => setSeverityFilter(f)}
+                <button
+                  key={f}
+                  onClick={() => setSeverityFilter(f)}
                   className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                     severityFilter === f
-                      ? f === "all" ? "bg-ocean-700 text-ocean-100 border-ocean-600" : `${s!.pill} border-current`
+                      ? f === "all"
+                        ? "bg-ocean-700 text-ocean-100 border-ocean-600"
+                        : `${s!.pill} border-current`
                       : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                  }`}>
+                  }`}
+                >
                   {f === "all" ? "전체" : SEVERITY_LABEL[f]}
                 </button>
               );
@@ -164,12 +252,15 @@ export default function AlertsPage() {
           {/* 상태 */}
           <div className="flex gap-1">
             {(["all", "new", "acknowledged"] as const).map((f) => (
-              <button key={f} onClick={() => setStatusFilter(f)}
+              <button
+                key={f}
+                onClick={() => setStatusFilter(f)}
                 className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                   statusFilter === f
                     ? "bg-ocean-700 text-ocean-100 border-ocean-600"
                     : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}>
+                }`}
+              >
                 {f === "all" ? "전체 상태" : STATUS_LABEL[f as AlertStatus]}
               </button>
             ))}
@@ -178,12 +269,15 @@ export default function AlertsPage() {
           {/* 시간 */}
           <div className="flex gap-1 ml-auto">
             {(["all", "1h", "6h", "24h"] as const).map((f) => (
-              <button key={f} onClick={() => setTimeFilter(f)}
+              <button
+                key={f}
+                onClick={() => setTimeFilter(f)}
                 className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                   timeFilter === f
                     ? "bg-ocean-700 text-ocean-100 border-ocean-600"
                     : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}>
+                }`}
+              >
                 {f === "all" ? "전체 시간" : `최근 ${f}`}
               </button>
             ))}
@@ -210,13 +304,19 @@ export default function AlertsPage() {
         {statusFilter !== "acknowledged" && (
           <section>
             <div className="flex items-center gap-2 mb-2">
-              <div className="text-xs font-bold text-ocean-300 tracking-wider uppercase">미확인 경보</div>
+              <div className="text-xs font-bold text-ocean-300 tracking-wider uppercase">
+                미확인 경보
+              </div>
               {active.length > 0 && (
-                <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded font-bold">{active.length}</span>
+                <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded font-bold">
+                  {active.length}
+                </span>
               )}
             </div>
             {active.length === 0 ? (
-              <div className="text-xs text-green-400 py-4">미확인 경보 없음 ✓</div>
+              <div className="text-xs text-green-400 py-4">
+                미확인 경보 없음 ✓
+              </div>
             ) : (
               <div className="space-y-1.5">
                 {active.map((a) => (
@@ -224,12 +324,17 @@ export default function AlertsPage() {
                     key={a.alert_id}
                     alert={a}
                     expanded={expanded === a.alert_id}
-                    onToggle={() => setExpanded(expanded === a.alert_id ? null : a.alert_id)}
-                    onAck={() => acknowledge(a.alert_id)}
+                    onToggle={() =>
+                      setExpanded(expanded === a.alert_id ? null : a.alert_id)
+                    }
+                    onAck={() => runAction(a.alert_id, "acknowledge")}
                     getPlatformName={getPlatformName}
                     isActive
                     checked={selected.has(a.alert_id)}
                     onCheck={() => toggleOne(a.alert_id)}
+                    onOpenModal={() => setModalAlertId(a.alert_id)}
+                    onAction={runAction}
+                    acting={acting}
                   />
                 ))}
               </div>
@@ -241,8 +346,12 @@ export default function AlertsPage() {
         {statusFilter !== "new" && past.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
-              <div className="text-xs font-bold text-ocean-400 tracking-wider uppercase">확인 / 해결된 경보</div>
-              <span className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-500 rounded">{past.length}</span>
+              <div className="text-xs font-bold text-ocean-400 tracking-wider uppercase">
+                확인 / 해결된 경보
+              </div>
+              <span className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-500 rounded">
+                {past.length}
+              </span>
             </div>
             <div className="space-y-1">
               {past.map((a) => (
@@ -250,12 +359,17 @@ export default function AlertsPage() {
                   key={a.alert_id}
                   alert={a}
                   expanded={expanded === a.alert_id}
-                  onToggle={() => setExpanded(expanded === a.alert_id ? null : a.alert_id)}
-                  onAck={() => acknowledge(a.alert_id)}
+                  onToggle={() =>
+                    setExpanded(expanded === a.alert_id ? null : a.alert_id)
+                  }
+                  onAck={() => runAction(a.alert_id, "acknowledge")}
                   getPlatformName={getPlatformName}
                   isActive={false}
                   checked={selected.has(a.alert_id)}
                   onCheck={() => toggleOne(a.alert_id)}
+                  onOpenModal={() => setModalAlertId(a.alert_id)}
+                  onAction={runAction}
+                  acting={acting}
                 />
               ))}
             </div>
@@ -268,21 +382,57 @@ export default function AlertsPage() {
           </div>
         )}
       </div>
+
+      {modalAlert && (
+        <AlertActionModal
+          alert={modalAlert}
+          onClose={() => setModalAlertId(null)}
+          onAction={runAction}
+          acting={acting}
+          getPlatformName={getPlatformName}
+        />
+      )}
     </div>
   );
 }
 
-function StatCard({ label, value, color, urgent }: { label: string; value: number; color: string; urgent?: boolean }) {
+function StatCard({
+  label,
+  value,
+  color,
+  urgent,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  urgent?: boolean;
+}) {
   return (
-    <div className={`rounded border px-3 py-2 ${urgent ? "border-red-500/40 bg-red-500/5" : "border-ocean-800 bg-ocean-900/40"}`}>
-      <div className={`text-lg font-bold font-mono ${color} ${urgent ? "animate-pulse" : ""}`}>{value}</div>
+    <div
+      className={`rounded border px-3 py-2 ${urgent ? "border-red-500/40 bg-red-500/5" : "border-ocean-800 bg-ocean-900/40"}`}
+    >
+      <div
+        className={`text-lg font-bold font-mono ${color} ${urgent ? "animate-pulse" : ""}`}
+      >
+        {value}
+      </div>
       <div className="text-xs text-ocean-500 mt-0.5">{label}</div>
     </div>
   );
 }
 
 function AlertRow({
-  alert, expanded, onToggle, onAck, getPlatformName, isActive, checked, onCheck,
+  alert,
+  expanded,
+  onToggle,
+  onAck,
+  getPlatformName,
+  isActive,
+  checked,
+  onCheck,
+  onOpenModal,
+  onAction,
+  acting,
 }: {
   alert: Alert;
   expanded: boolean;
@@ -292,15 +442,24 @@ function AlertRow({
   isActive: boolean;
   checked: boolean;
   onCheck: () => void;
+  onOpenModal: () => void;
+  onAction: (alertId: string, action: string) => void;
+  acting: string | null;
 }) {
   const s = SEVERITY_STYLE[alert.severity];
+  const fallback = Boolean(alert.metadata?.llm_fallback);
 
   return (
-    <div className={`rounded border transition-all ${s.border} ${isActive ? s.bg : "bg-transparent opacity-55"} ${checked ? "ring-1 ring-red-500/40" : ""}`}>
+    <div
+      className={`rounded border transition-all ${s.border} ${isActive ? s.bg : "bg-transparent opacity-55"} ${checked ? "ring-1 ring-red-500/40" : ""}`}
+    >
       {/* 요약 행 */}
       <div className="px-3 py-2.5 flex items-start gap-3">
         {/* 체크박스 */}
-        <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="flex-shrink-0 pt-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           <input
             type="checkbox"
             checked={checked}
@@ -308,39 +467,66 @@ function AlertRow({
             className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
           />
         </div>
-        <div className="flex-1 cursor-pointer flex items-start gap-3" onClick={onToggle}>
-        {/* 심각도 */}
-        <div className="flex-shrink-0 pt-0.5 flex flex-col items-center gap-1">
-          <span className={`text-xs font-bold ${s.text}`}>{SEVERITY_LABEL[alert.severity]}</span>
-          {isActive && <span className={`w-1.5 h-1.5 rounded-full ${s.text.replace("text-", "bg-")} ${alert.severity === "critical" ? "animate-pulse" : ""}`} />}
-        </div>
-
-        {/* 내용 */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="text-xs px-1.5 py-0.5 bg-ocean-800/80 text-ocean-400 rounded">
-              {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
+        <div
+          className="flex-1 cursor-pointer flex items-start gap-3"
+          onClick={onToggle}
+        >
+          {/* 심각도 */}
+          <div className="flex-shrink-0 pt-0.5 flex flex-col items-center gap-1">
+            <span className={`text-xs font-bold ${s.text}`}>
+              {SEVERITY_LABEL[alert.severity]}
             </span>
-            <span className={`text-xs px-1.5 py-0.5 rounded border ${s.pill}`}>
-              {STATUS_LABEL[alert.status]}
-            </span>
-            <span className="text-xs text-ocean-400">{alert.generated_by}</span>
-            <span className="text-xs text-ocean-400 ml-auto">
-              {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
-            </span>
+            {isActive && (
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${s.text.replace("text-", "bg-")} ${alert.severity === "critical" ? "animate-pulse" : ""}`}
+              />
+            )}
           </div>
-          <div className="text-xs text-ocean-200 leading-snug">{alert.message}</div>
 
-          {alert.platform_ids.length > 0 && (
-            <div className="flex gap-1 mt-1 flex-wrap">
-              {alert.platform_ids.map((id) => (
-                <span key={id} className="text-xs px-1.5 py-0.5 bg-ocean-800/70 text-ocean-400 rounded font-mono">
-                  {getPlatformName(id)}
-                </span>
-              ))}
+          {/* 내용 */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+              <span className="text-xs px-1.5 py-0.5 bg-ocean-800/80 text-ocean-400 rounded">
+                {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
+              </span>
+              <span
+                className={`text-xs px-1.5 py-0.5 rounded border ${s.pill}`}
+              >
+                {STATUS_LABEL[alert.status]}
+              </span>
+              <span className="text-xs text-ocean-400">
+                {alert.generated_by}
+              </span>
+              <span className="text-xs text-ocean-400 ml-auto">
+                {formatDistanceToNow(new Date(alert.created_at), {
+                  addSuffix: true,
+                  locale: ko,
+                })}
+              </span>
             </div>
-          )}
-        </div>
+            <div className="text-xs text-ocean-200 leading-snug">
+              {alert.message}
+            </div>
+
+            {fallback && (
+              <div className="mt-1 inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300">
+                LLM 실패 fallback 적용
+              </div>
+            )}
+
+            {alert.platform_ids.length > 0 && (
+              <div className="flex gap-1 mt-1 flex-wrap">
+                {alert.platform_ids.map((id) => (
+                  <span
+                    key={id}
+                    className="text-xs px-1.5 py-0.5 bg-ocean-800/70 text-ocean-400 rounded font-mono"
+                  >
+                    {getPlatformName(id)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -351,18 +537,24 @@ function AlertRow({
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div>
               <div className="text-ocean-500 mb-0.5">발생</div>
-              <div className="text-ocean-300 font-mono">{format(new Date(alert.created_at), "MM/dd HH:mm:ss")}</div>
+              <div className="text-ocean-300 font-mono">
+                {format(new Date(alert.created_at), "MM/dd HH:mm:ss")}
+              </div>
             </div>
             {alert.acknowledged_at && (
               <div>
                 <div className="text-ocean-500 mb-0.5">확인</div>
-                <div className="text-ocean-300 font-mono">{format(new Date(alert.acknowledged_at), "MM/dd HH:mm:ss")}</div>
+                <div className="text-ocean-300 font-mono">
+                  {format(new Date(alert.acknowledged_at), "MM/dd HH:mm:ss")}
+                </div>
               </div>
             )}
             {alert.resolved_at && (
               <div>
                 <div className="text-ocean-500 mb-0.5">해결</div>
-                <div className="text-ocean-300 font-mono">{format(new Date(alert.resolved_at), "MM/dd HH:mm:ss")}</div>
+                <div className="text-ocean-300 font-mono">
+                  {format(new Date(alert.resolved_at), "MM/dd HH:mm:ss")}
+                </div>
               </div>
             )}
           </div>
@@ -371,25 +563,165 @@ function AlertRow({
           {alert.recommendation ? (
             <div className="bg-ocean-900/70 rounded p-2.5 border border-ocean-800">
               <div className="text-xs text-ocean-500 mb-1.5 flex items-center gap-1.5">
-                <span>⬡</span><span>AI 분석 · 권고사항</span>
+                <span>⬡</span>
+                <span>AI 분석 · 권고사항</span>
               </div>
-              <div className="text-xs text-ocean-300 leading-relaxed whitespace-pre-wrap">{alert.recommendation}</div>
+              <div className="text-xs text-ocean-300 leading-relaxed whitespace-pre-wrap">
+                {alert.recommendation}
+              </div>
             </div>
           ) : (
-            <div className="text-xs text-ocean-500">AI 권고 없음 (Rule 에이전트 생성)</div>
+            <div className="text-xs text-ocean-500">
+              AI 권고 없음 (Rule 에이전트 생성)
+            </div>
           )}
 
           {/* 액션 */}
           {isActive && (
-            <button
-              onClick={onAck}
-              className="text-xs px-3 py-1.5 bg-ocean-700 hover:bg-ocean-600 text-ocean-100 rounded transition-colors"
-            >
-              인지 처리
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={onAck}
+                className="text-xs px-3 py-1.5 bg-ocean-700 hover:bg-ocean-600 text-ocean-100 rounded transition-colors"
+              >
+                인지 처리
+              </button>
+              {alert.alert_type === "cpa" && (
+                <button
+                  onClick={() =>
+                    onAction(alert.alert_id, "request_course_change")
+                  }
+                  disabled={
+                    acting === `${alert.alert_id}:request_course_change`
+                  }
+                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
+                >
+                  변침 요청 자동처리
+                </button>
+              )}
+              {alert.alert_type === "zone_intrusion" && (
+                <button
+                  onClick={() => onAction(alert.alert_id, "request_zone_exit")}
+                  disabled={acting === `${alert.alert_id}:request_zone_exit`}
+                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
+                >
+                  구역 이탈 요청
+                </button>
+              )}
+              {(alert.alert_type === "distress" ||
+                alert.alert_type === "ais_off") && (
+                <button
+                  onClick={() => onAction(alert.alert_id, "notify_guard")}
+                  disabled={acting === `${alert.alert_id}:notify_guard`}
+                  className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
+                >
+                  관계기관 통보
+                </button>
+              )}
+              <button
+                onClick={onOpenModal}
+                className="text-xs px-3 py-1.5 rounded border border-ocean-700 text-ocean-300"
+              >
+                상세 모달
+              </button>
+            </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function AlertActionModal({
+  alert,
+  onClose,
+  onAction,
+  acting,
+  getPlatformName,
+}: {
+  alert: Alert;
+  onClose: () => void;
+  onAction: (alertId: string, action: string) => void;
+  acting: string | null;
+  getPlatformName: (id: string) => string;
+}) {
+  const fallback = Boolean(alert.metadata?.llm_fallback);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl rounded-xl border border-ocean-700 bg-ocean-950 p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-sm text-ocean-100 font-bold">
+              경보 상세 및 자동 처리
+            </div>
+            <div className="text-xs text-ocean-500 mt-0.5">
+              {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type} ·{" "}
+              {alert.generated_by}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-xs px-2 py-1 rounded border border-ocean-700 text-ocean-300"
+          >
+            닫기
+          </button>
+        </div>
+
+        <div className="text-xs text-ocean-200 leading-relaxed mb-2">
+          {alert.message}
+        </div>
+        <div className="flex flex-wrap gap-1 mb-3">
+          {alert.platform_ids.map((id) => (
+            <span
+              key={id}
+              className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded font-mono"
+            >
+              {getPlatformName(id)}
+            </span>
+          ))}
+        </div>
+
+        {alert.recommendation && (
+          <div className="rounded border border-ocean-800 bg-ocean-900/50 p-2.5 text-xs text-ocean-300 whitespace-pre-wrap">
+            {fallback && (
+              <div className="mb-1.5 text-amber-300">
+                LLM 실패로 Rule 기반 fallback 권고가 표시됩니다.
+              </div>
+            )}
+            {alert.recommendation}
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => onAction(alert.alert_id, "acknowledge")}
+            disabled={acting === `${alert.alert_id}:acknowledge`}
+            className="text-xs px-3 py-1.5 rounded border border-ocean-600 text-ocean-200 disabled:opacity-40"
+          >
+            인지 처리
+          </button>
+          <button
+            onClick={() => onAction(alert.alert_id, "resolve")}
+            disabled={acting === `${alert.alert_id}:resolve`}
+            className="text-xs px-3 py-1.5 rounded border border-green-500/40 text-green-300 disabled:opacity-40"
+          >
+            해결 처리
+          </button>
+          <button
+            onClick={() => onAction(alert.alert_id, "notify_guard")}
+            disabled={acting === `${alert.alert_id}:notify_guard`}
+            className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
+          >
+            관계기관 통보
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

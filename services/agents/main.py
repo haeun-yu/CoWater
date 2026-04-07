@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from ai.anomaly_ai import AnomalyAIAgent
 from ai.distress_agent import DistressAgent
+from ai.llm_client import make_llm_client
 from ai.report_agent import ReportAgent
 from base import Agent, PlatformReport
 from config import settings
@@ -299,6 +300,17 @@ class LevelBody(BaseModel):
     level: str
 
 
+class LLMConfigBody(BaseModel):
+    backend: str | None = None
+    model: str | None = None
+
+
+class ManualRunBody(BaseModel):
+    platform_id: str | None = None
+    alert: dict | None = None
+    dry_run: bool = False
+
+
 @app.patch("/agents/{agent_id}/level")
 async def set_level(agent_id: str, body: LevelBody):
     if body.level not in ("L1", "L2", "L3"):
@@ -313,6 +325,138 @@ async def set_config(agent_id: str, body: dict):
     if not _registry.set_config(agent_id, body):
         raise HTTPException(404)
     return {"agent_id": agent_id, "config": body}
+
+
+def _current_model_for_backend(backend: str) -> str:
+    if backend == "claude":
+        return settings.claude_model
+    if backend == "ollama":
+        return settings.ollama_model
+    if backend == "vllm":
+        return settings.vllm_model
+    raise HTTPException(400, "backend must be claude, ollama, or vllm")
+
+
+def _set_model_for_backend(backend: str, model: str) -> None:
+    if backend == "claude":
+        settings.claude_model = model
+        return
+    if backend == "ollama":
+        settings.ollama_model = model
+        return
+    if backend == "vllm":
+        settings.vllm_model = model
+        return
+    raise HTTPException(400, "backend must be claude, ollama, or vllm")
+
+
+def _refresh_ai_llm_clients() -> int:
+    refreshed = 0
+    for agent in _registry.all():
+        if getattr(agent, "agent_type", None) != "ai":
+            continue
+        if hasattr(agent, "_llm"):
+            setattr(agent, "_llm", make_llm_client(settings))
+            refreshed += 1
+    return refreshed
+
+
+@app.get("/llm")
+async def get_llm_config():
+    backend = settings.llm_backend
+    return {
+        "backend": backend,
+        "model": _current_model_for_backend(backend),
+        "claude_model": settings.claude_model,
+        "ollama_model": settings.ollama_model,
+        "vllm_model": settings.vllm_model,
+    }
+
+
+@app.patch("/llm")
+async def set_llm_config(body: LLMConfigBody):
+    if body.backend is not None:
+        if body.backend not in ("claude", "ollama", "vllm"):
+            raise HTTPException(400, "backend must be claude, ollama, or vllm")
+        settings.llm_backend = body.backend
+
+    backend = settings.llm_backend
+    if body.model:
+        _set_model_for_backend(backend, body.model)
+
+    refreshed = _refresh_ai_llm_clients()
+    return {
+        "backend": backend,
+        "model": _current_model_for_backend(backend),
+        "refreshed_ai_agents": refreshed,
+    }
+
+
+async def _latest_report_from_redis(platform_id: str) -> PlatformReport | None:
+    if _redis is None:
+        return None
+    raw = await _redis.get(f"platform:state:{platform_id}")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        return PlatformReport.from_dict(data)
+    except Exception:
+        logger.exception("Failed to deserialize latest platform state for %s", platform_id)
+        return None
+
+
+@app.post("/agents/{agent_id}/run")
+async def run_agent(agent_id: str, body: ManualRunBody):
+    agent = _registry.get(agent_id)
+    if not agent:
+        raise HTTPException(404, "agent not found")
+    if not agent.enabled:
+        raise HTTPException(400, "agent is disabled")
+
+    has_platform = bool(body.platform_id)
+    has_alert = body.alert is not None
+    if not has_platform and not has_alert:
+        raise HTTPException(400, "platform_id or alert is required")
+
+    if body.dry_run:
+        return {
+            "agent_id": agent_id,
+            "dry_run": True,
+            "will_run_on_platform": has_platform,
+            "will_run_on_alert": has_alert,
+        }
+
+    if has_platform:
+        report = await _latest_report_from_redis(body.platform_id)
+        if report is None:
+            raise HTTPException(404, f"latest platform state not found for {body.platform_id}")
+
+        if agent.agent_type == "ai":
+            _track_task(
+                _safe_ai_dispatch(agent, report),
+                name=f"manual-ai-report-{agent.agent_id}",
+            )
+        else:
+            await agent.on_platform_report(report)
+
+    if has_alert:
+        if agent.agent_type == "ai":
+            _track_task(
+                _safe_ai_alert(agent, body.alert or {}),
+                name=f"manual-ai-alert-{agent.agent_id}",
+            )
+        else:
+            await agent.on_alert(body.alert or {})
+
+    return {
+        "agent_id": agent_id,
+        "queued": True,
+        "mode": {
+            "platform": has_platform,
+            "alert": has_alert,
+        },
+    }
 
 
 @app.post("/agents/report-agent/generate/{incident_id}")

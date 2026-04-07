@@ -59,6 +59,7 @@ class ReportAgent(Agent):
             return
 
         context = self._build_alert_context(alert)
+        llm_fallback = False
         try:
             report_text = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
@@ -67,7 +68,22 @@ class ReportAgent(Agent):
             )
         except Exception:
             logger.exception("Auto report generation failed for alert %s", alert.get("alert_id"))
-            return
+            llm_fallback = True
+            report_text = (
+                "# 해양 사건 보고서 (Fallback)\n\n"
+                "## 1. 사건 개요\n"
+                f"- 유형: {alert.get('alert_type')}\n"
+                f"- 심각도: {alert.get('severity')}\n"
+                f"- 시각: {alert.get('created_at')}\n\n"
+                "## 2. 관련 선박 정보\n"
+                f"- {', '.join(alert.get('platform_ids', []))}\n\n"
+                "## 3. 사건 경위\n"
+                f"- 경보 메시지: {alert.get('message')}\n\n"
+                "## 4. 원인 분석\n"
+                "- LLM 분석 실패로 Rule 기반 요약만 제공됨\n\n"
+                "## 5. 조치 사항\n"
+                "- 운영자가 수동 검토 후 후속 조치 필요\n"
+            )
 
         await self.emit_alert(AlertPayload(
             alert_type="compliance",
@@ -79,6 +95,8 @@ class ReportAgent(Agent):
                 "source_alert_type": alert.get("alert_type"),
                 "source_alert_id": alert.get("alert_id"),
                 "auto_report": True,
+                "llm_fallback": llm_fallback,
+                "fallback_reason": "llm_call_failed" if llm_fallback else None,
             },
         ))
 

@@ -8,52 +8,67 @@ import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import Link from "next/link";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
+
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
-  warning:  "주의",
-  info:     "정보",
+  warning: "주의",
+  info: "정보",
 };
 
 const SEVERITY_DOT: Record<AlertSeverity, string> = {
   critical: "bg-red-400",
-  warning:  "bg-yellow-400",
-  info:     "bg-blue-400",
+  warning: "bg-yellow-400",
+  info: "bg-blue-400",
 };
 
 const SEVERITY_TEXT: Record<AlertSeverity, string> = {
   critical: "text-red-400",
-  warning:  "text-yellow-400",
-  info:     "text-blue-400",
+  warning: "text-yellow-400",
+  info: "text-blue-400",
 };
 
 const ALERT_TYPE_KR: Record<string, string> = {
-  cpa:           "충돌 위험",
-  zone_intrusion:"구역 침입",
-  anomaly:       "이상 행동",
-  ais_off:       "AIS 소실",
-  distress:      "조난",
-  compliance:    "상황 보고",
-  traffic:       "교통 혼잡",
+  cpa: "충돌 위험",
+  zone_intrusion: "구역 침입",
+  anomaly: "이상 행동",
+  ais_off: "AIS 소실",
+  distress: "조난",
+  compliance: "상황 보고",
+  traffic: "교통 혼잡",
 };
 
 export default function DashboardAlertPanel() {
   const alerts = useAlertStore((s) => s.alerts);
-  const acknowledge = useAlertStore((s) => s.acknowledge);
+  const updateAlert = useAlertStore((s) => s.updateAlert);
   const platforms = usePlatformStore((s) => s.platforms);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const newAlerts = alerts.filter((a) => a.status === "new");
   const critical = newAlerts.filter((a) => a.severity === "critical").length;
-  const warning  = newAlerts.filter((a) => a.severity === "warning").length;
-  const info     = newAlerts.filter((a) => a.severity === "info").length;
+  const warning = newAlerts.filter((a) => a.severity === "warning").length;
+  const info = newAlerts.filter((a) => a.severity === "info").length;
 
   // 대시보드: 미확인만, 최신 30건
   const displayed = newAlerts.slice(0, 30);
 
+  async function acknowledge(alertId: string) {
+    const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acknowledge" }),
+    });
+    if (!res.ok) return;
+    const updated = (await res.json()) as Alert;
+    updateAlert(updated);
+  }
+
   function getPlatformName(id: string) {
     const p = platforms[id];
     if (!p) return id.replace(/^MMSI-/, "");
-    return p.name && p.name !== p.platform_id ? p.name : id.replace(/^MMSI-/, "");
+    return p.name && p.name !== p.platform_id
+      ? p.name
+      : id.replace(/^MMSI-/, "");
   }
 
   return (
@@ -61,8 +76,13 @@ export default function DashboardAlertPanel() {
       {/* 헤더 */}
       <div className="flex-shrink-0 px-3 py-2.5 border-b border-ocean-800">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-ocean-200 tracking-wider">실시간 경보</span>
-          <Link href="/alerts" className="text-xs text-ocean-500 hover:text-ocean-300 transition-colors">
+          <span className="text-xs font-bold text-ocean-200 tracking-wider">
+            실시간 경보
+          </span>
+          <Link
+            href="/alerts"
+            className="text-xs text-ocean-500 hover:text-ocean-300 transition-colors"
+          >
             전체 보기 →
           </Link>
         </div>
@@ -101,16 +121,25 @@ export default function DashboardAlertPanel() {
           displayed.map((alert) => {
             const isExpanded = expanded === alert.alert_id;
             return (
-              <div key={alert.alert_id} className="border-b border-ocean-900/80">
+              <div
+                key={alert.alert_id}
+                className="border-b border-ocean-900/80"
+              >
                 <button
                   className="w-full text-left px-3 py-2.5 hover:bg-ocean-800/30 transition-colors"
-                  onClick={() => setExpanded(isExpanded ? null : alert.alert_id)}
+                  onClick={() =>
+                    setExpanded(isExpanded ? null : alert.alert_id)
+                  }
                 >
                   <div className="flex items-start gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1 ${SEVERITY_DOT[alert.severity]} ${alert.severity === "critical" ? "animate-pulse" : ""}`} />
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1 ${SEVERITY_DOT[alert.severity]} ${alert.severity === "critical" ? "animate-pulse" : ""}`}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className={`text-xs font-bold ${SEVERITY_TEXT[alert.severity]}`}>
+                        <span
+                          className={`text-xs font-bold ${SEVERITY_TEXT[alert.severity]}`}
+                        >
                           {SEVERITY_LABEL[alert.severity]}
                         </span>
                         <span className="text-xs text-ocean-400">
@@ -121,7 +150,10 @@ export default function DashboardAlertPanel() {
                         {alert.message}
                       </div>
                       <div className="text-xs text-ocean-400 mt-0.5">
-                        {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
+                        {formatDistanceToNow(new Date(alert.created_at), {
+                          addSuffix: true,
+                          locale: ko,
+                        })}
                       </div>
                     </div>
                   </div>
@@ -132,7 +164,10 @@ export default function DashboardAlertPanel() {
                     {alert.platform_ids.length > 0 && (
                       <div className="flex gap-1 flex-wrap">
                         {alert.platform_ids.map((id) => (
-                          <span key={id} className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded font-mono">
+                          <span
+                            key={id}
+                            className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded font-mono"
+                          >
                             {getPlatformName(id)}
                           </span>
                         ))}
@@ -140,6 +175,14 @@ export default function DashboardAlertPanel() {
                     )}
                     {alert.recommendation && (
                       <div className="text-xs text-ocean-300 bg-ocean-900/60 rounded p-2 leading-relaxed border border-ocean-800 line-clamp-4">
+                        {Boolean(
+                          (alert.metadata as Record<string, unknown> | null)
+                            ?.llm_fallback,
+                        ) && (
+                          <div className="mb-1 text-amber-300">
+                            LLM 실패 fallback
+                          </div>
+                        )}
                         {alert.recommendation}
                       </div>
                     )}

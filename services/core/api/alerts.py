@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
 from models import AlertModel
+from ws_hub import hub
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -83,6 +84,8 @@ async def acknowledge_alert(alert_id: str, db: Annotated[AsyncSession, Depends(g
     row.acknowledged_at = datetime.utcnow()
     await db.commit()
     await db.refresh(row)
+    payload = AlertResponse.from_model(row).model_dump(mode="json")
+    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
     return AlertResponse.from_model(row)
 
 
@@ -95,6 +98,8 @@ async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_d
     row.resolved_at = datetime.utcnow()
     await db.commit()
     await db.refresh(row)
+    payload = AlertResponse.from_model(row).model_dump(mode="json")
+    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
     return AlertResponse.from_model(row)
 
 
@@ -119,3 +124,62 @@ async def delete_alerts(body: DeleteAlertsBody, db: Annotated[AsyncSession, Depe
     )
     await db.commit()
     return {"deleted": result.rowcount}
+
+
+class AlertActionBody(BaseModel):
+    action: str
+
+
+@router.post("/{alert_id}/action", response_model=AlertResponse)
+async def run_alert_action(
+    alert_id: str,
+    body: AlertActionBody,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """경보 권고에 대한 자동 처리 액션 실행.
+
+    지원 액션:
+    - acknowledge
+    - resolve
+    - notify_guard
+    - request_course_change
+    - request_speed_reduction
+    - request_zone_exit
+    """
+    allowed = {
+        "acknowledge",
+        "resolve",
+        "notify_guard",
+        "request_course_change",
+        "request_speed_reduction",
+        "request_zone_exit",
+    }
+    if body.action not in allowed:
+        raise HTTPException(400, f"Unsupported action: {body.action}")
+
+    row = await db.get(AlertModel, alert_id)
+    if row is None:
+        raise HTTPException(404, f"Alert '{alert_id}' not found")
+
+    meta = dict(row.metadata_ or {})
+    actions = list(meta.get("actions", []))
+    actions.append({
+        "action": body.action,
+        "executed_at": datetime.utcnow().isoformat(),
+        "executor": "operator-ui",
+    })
+    meta["actions"] = actions
+    row.metadata_ = meta
+
+    if body.action == "acknowledge" and row.status == "new":
+        row.status = "acknowledged"
+        row.acknowledged_at = datetime.utcnow()
+    elif body.action == "resolve":
+        row.status = "resolved"
+        row.resolved_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(row)
+    payload = AlertResponse.from_model(row).model_dump(mode="json")
+    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
+    return AlertResponse.from_model(row)

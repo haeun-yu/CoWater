@@ -84,9 +84,14 @@ class DistressAgent(Agent):
             f"상태 '{report.nav_status}' 확인. "
             "VHF Ch.16 교신 시도 및 해양경찰청(122) 통보 검토."
         )
+        llm_fallback = False
 
         if self.level in ("L2", "L3"):
-            recommendation = await self._generate_response(report) or recommendation
+            generated = await self._generate_response(report)
+            if generated:
+                recommendation = generated
+            else:
+                llm_fallback = True
 
         severity = "critical"
         await self.emit_alert(AlertPayload(
@@ -102,6 +107,8 @@ class DistressAgent(Agent):
             metadata={
                 "lat": report.lat, "lon": report.lon,
                 "nav_status": report.nav_status,
+                "llm_fallback": llm_fallback,
+                "fallback_reason": "llm_call_failed" if llm_fallback else None,
             },
             dedup_key=f"distress:{report.platform_id}",
         ))

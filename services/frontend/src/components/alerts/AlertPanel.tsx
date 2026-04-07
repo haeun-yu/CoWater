@@ -7,37 +7,56 @@ import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
+
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
-  warning:  "주의",
-  info:     "정보",
+  warning: "주의",
+  info: "정보",
 };
 
 export default function AlertPanel({ compact }: { compact?: boolean }) {
   const alerts = useAlertStore((s) => s.alerts);
-  const acknowledge = useAlertStore((s) => s.acknowledge);
+  const updateAlert = useAlertStore((s) => s.updateAlert);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const select = usePlatformStore((s) => s.select);
 
   const newCount = alerts.filter((a) => a.status === "new").length;
-  const criticalCount = alerts.filter((a) => a.severity === "critical" && a.status === "new").length;
+  const criticalCount = alerts.filter(
+    (a) => a.severity === "critical" && a.status === "new",
+  ).length;
 
   // In compact mode, show only new alerts, prioritize critical
   const filtered = alerts
     .filter((a) => filter === "all" || a.severity === filter)
     .filter((a) => !compact || a.status === "new");
 
+  async function acknowledge(alertId: string) {
+    const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acknowledge" }),
+    });
+    if (!res.ok) return;
+    const updated = (await res.json()) as Alert;
+    updateAlert(updated);
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* 헤더 */}
       <div className="px-3 py-2 border-b border-ocean-800 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-ocean-200 tracking-wider">경보 현황</span>
+          <span className="text-xs font-bold text-ocean-200 tracking-wider">
+            경보 현황
+          </span>
           <div className="flex gap-2 text-xs">
             <span className="text-ocean-500">{newCount} 신규</span>
             {criticalCount > 0 && (
-              <span className="text-red-400 font-bold animate-pulse">{criticalCount} 위험</span>
+              <span className="text-red-400 font-bold animate-pulse">
+                {criticalCount} 위험
+              </span>
             )}
           </div>
         </div>
@@ -110,7 +129,9 @@ function AlertRow({
         className="px-3 py-2 cursor-pointer flex items-start gap-2"
         onClick={onToggle}
       >
-        <span className={`text-xs font-bold mt-0.5 severity-${alert.severity} flex-shrink-0`}>
+        <span
+          className={`text-xs font-bold mt-0.5 severity-${alert.severity} flex-shrink-0`}
+        >
           {SEVERITY_LABEL[alert.severity]}
         </span>
         <div className="flex-1 min-w-0">
@@ -118,7 +139,10 @@ function AlertRow({
             {alert.message}
           </div>
           <div className="text-xs text-ocean-400 mt-0.5">
-            {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: ko })}
+            {formatDistanceToNow(new Date(alert.created_at), {
+              addSuffix: true,
+              locale: ko,
+            })}
             {" · "}
             <span className="text-ocean-500">{alert.generated_by}</span>
           </div>
@@ -150,6 +174,14 @@ function AlertRow({
           {alert.recommendation && (
             <div className="text-xs text-ocean-300 bg-ocean-900 rounded p-2 leading-relaxed border border-ocean-700">
               <span className="text-ocean-500 text-xs block mb-1">AI 권고</span>
+              {Boolean(
+                (alert.metadata as Record<string, unknown> | null)
+                  ?.llm_fallback,
+              ) && (
+                <span className="text-amber-300 text-xs block mb-1">
+                  LLM 실패 fallback
+                </span>
+              )}
               {alert.recommendation}
             </div>
           )}
