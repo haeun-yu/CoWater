@@ -75,14 +75,20 @@ export default function ChatDrawer() {
     setInput("");
     setIsLoading(true);
 
+    // 어시스턴트 메시지 플레이스홀더 먼저 추가 (스트리밍 중 내용 채워짐)
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+    ]);
+
     try {
-      // 최근 대화 이력 (API에 전달)
       const history = messages.slice(-10).map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      const res = await fetch(`${AGENTS_URL}/chat`, {
+      const res = await fetch(`${AGENTS_URL}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -92,31 +98,57 @@ export default function ChatDrawer() {
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.response,
-          model: data.model,
-          timestamp: new Date(),
-        },
-      ]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let model: string | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.chunk) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: m.content + data.chunk }
+                    : m,
+                ),
+              );
+            }
+            if (data.done) {
+              model = data.model;
+            }
+          } catch {
+            // 파싱 실패한 청크 무시
+          }
+        }
+      }
+
+      // 모델명 업데이트
+      if (model) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, model } : m)),
+        );
+      }
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content:
-            "에이전트 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하십시오.",
-          timestamp: new Date(),
-          error: true,
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: "에이전트 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하십시오.",
+                error: true,
+              }
+            : m,
+        ),
+      );
     } finally {
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);

@@ -23,6 +23,45 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _make_chat_llm_client():
+    """채팅 전용 LLM 클라이언트 생성.
+
+    CHAT_OLLAMA_MODEL / CHAT_CLAUDE_MODEL 환경변수가 설정되어 있으면
+    해당 모델을 사용하고, 없으면 기본 에이전트 모델과 동일하다.
+    """
+    from copy import copy
+    import pydantic_settings
+
+    # 채팅 전용 모델이 설정되지 않았으면 기본 클라이언트 사용
+    backend = settings.llm_backend.lower()
+    if backend == "ollama" and settings.chat_ollama_model:
+        # 채팅 전용 Ollama 모델로 오버라이드
+        from ai.llm_client import OllamaClient
+        model = settings.chat_ollama_model
+        logger.info("Chat agent using dedicated Ollama model: %s", model)
+        return OllamaClient(
+            base_url=settings.ollama_url,
+            model=model,
+            think=False,  # 채팅은 항상 빠른 모드
+            timeout=settings.local_llm_timeout_sec,
+            max_attempts=settings.local_llm_max_attempts,
+            base_delay=settings.local_llm_base_delay_sec,
+        )
+    if backend == "claude" and settings.chat_claude_model:
+        from ai.llm_client import ClaudeClient
+        model = settings.chat_claude_model
+        logger.info("Chat agent using dedicated Claude model: %s", model)
+        return ClaudeClient(
+            api_key=settings.anthropic_api_key,
+            model=model,
+            timeout=settings.claude_timeout_sec,
+            max_attempts=settings.claude_max_attempts,
+            base_delay=settings.claude_base_delay_sec,
+        )
+    return make_llm_client(settings)
+
+
 _SYSTEM_PROMPT = """당신은 해양 통합 관제 플랫폼 CoWater의 AI 운항 보좌관입니다.
 
 현재 시스템에서 실시간으로 수집 중인 선박 위치·경보 데이터를 기반으로
@@ -44,7 +83,7 @@ class ChatAgent(Agent):
 
     def __init__(self, redis: aioredis.Redis) -> None:
         super().__init__(redis)
-        self._llm = make_llm_client(settings)
+        self._llm = _make_chat_llm_client()
         # 최신 선박 상태 캐시 (컨텍스트 구성용)
         self._recent_reports: dict[str, PlatformReport] = {}
         # 최근 경보 (최대 30건)
@@ -61,6 +100,27 @@ class ChatAgent(Agent):
         self._recent_alerts = [alert, *self._recent_alerts[:29]]
 
     # ── 챗봇 핵심 메서드 ────────────────────────────────────────────────────────
+
+    async def chat_stream(
+        self,
+        message: str,
+        history: list[dict] | None = None,
+        focus_platform_ids: list[str] | None = None,
+    ):
+        """스트리밍 응답 — 청크 단위로 텍스트를 yield한다."""
+        context_block = self._build_situation_context(focus_platform_ids)
+        system = _SYSTEM_PROMPT + "\n\n" + context_block
+        user_prompt = _serialize_history(history or []) + message
+        try:
+            async for chunk in self._llm.chat_stream(
+                system=system,
+                user=user_prompt,
+                max_tokens=settings.chat_agent_max_tokens,
+            ):
+                yield chunk
+        except Exception:
+            logger.exception("Chat agent stream failed")
+            yield "[응답 실패] LLM 서버에 일시적으로 연결할 수 없습니다."
 
     async def chat(
         self,

@@ -50,6 +50,10 @@ class LLMClient(ABC):
     @abstractmethod
     async def chat(self, *, system: str, user: str, max_tokens: int) -> str: ...
 
+    async def chat_stream(self, *, system: str, user: str, max_tokens: int):
+        """청크 단위로 텍스트를 yield하는 스트리밍 채팅. 기본 구현은 전체 응답을 한 번에 반환."""
+        yield await self.chat(system=system, user=user, max_tokens=max_tokens)
+
     @property
     def is_available(self) -> bool:
         return True
@@ -86,6 +90,18 @@ class ClaudeClient(LLMClient):
         return await _retry_chat(
             _call, max_attempts=self._MAX_ATTEMPTS, base_delay=self._BASE_DELAY
         )
+
+    async def chat_stream(self, *, system: str, user: str, max_tokens: int):
+        """Claude 스트리밍 API — 청크 단위로 텍스트를 yield한다."""
+        async with asyncio.timeout(self._TIMEOUT):
+            async with self._client.messages.stream(
+                model=self._model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            ) as stream:
+                async for chunk in stream.text_stream:
+                    yield chunk
 
 
 class OllamaClient(LLMClient):
@@ -127,6 +143,28 @@ class OllamaClient(LLMClient):
         return await _retry_chat(
             _call, max_attempts=self._MAX_ATTEMPTS, base_delay=self._BASE_DELAY
         )
+
+    async def chat_stream(self, *, system: str, user: str, max_tokens: int):
+        """Ollama 스트리밍 API — 청크 단위로 텍스트를 yield한다."""
+        kwargs: dict = {}
+        if not self._think:
+            kwargs["extra_body"] = {"think": False}
+
+        async with asyncio.timeout(self._TIMEOUT):
+            stream = await self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                stream=True,
+                **kwargs,
+            )
+            async for chunk in stream:
+                text = chunk.choices[0].delta.content if chunk.choices else None
+                if text:
+                    yield _strip_thinking(text)
 
 
 class VllmClient(LLMClient):

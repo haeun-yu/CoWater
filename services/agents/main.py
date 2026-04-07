@@ -19,6 +19,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ai.anomaly_ai import AnomalyAIAgent
@@ -482,6 +483,41 @@ async def chat(body: ChatRequest):
         "model": agent._llm.model_name,
         "agent_id": agent.agent_id,
     }
+
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatRequest):
+    """SSE 스트리밍으로 AI 보좌관 응답을 반환한다 (실시간 타이핑 효과)."""
+    agent = _registry.get("chat-agent")
+    if not agent or not isinstance(agent, ChatAgent):
+        raise HTTPException(404, "Chat agent not available")
+    if not agent.enabled:
+        raise HTTPException(400, "Chat agent is disabled")
+
+    model_name = agent._llm.model_name
+
+    async def generate():
+        try:
+            async for chunk in agent.chat_stream(
+                message=body.message,
+                history=body.history,
+                focus_platform_ids=body.focus_platform_ids,
+            ):
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        except Exception:
+            logger.exception("Chat stream error")
+            yield f"data: {json.dumps({'chunk': '[응답 오류]'})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'done': True, 'model': model_name})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/agents/report-agent/generate/{incident_id}")

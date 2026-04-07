@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
     ollama_think: bool = False   # True: 사고 모드 활성화 / False: 빠른 응답
+    # 챗봇 전용 모델 (비어있으면 ollama_model / claude_model 과 동일)
+    # 예: CHAT_OLLAMA_MODEL=qwen2.5:0.5b 로 챗봇만 경량 모델 사용
+    chat_ollama_model: str = ""
+    chat_claude_model: str = ""
 
     # vLLM 설정 (llm_backend="vllm" 일 때 사용)
     vllm_url: str = "http://localhost:8000"
