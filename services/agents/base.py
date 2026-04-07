@@ -77,6 +77,8 @@ class Agent(ABC):
         self.enabled: bool = True
         self.config: dict = {}
         self._log = logging.getLogger(f"agent.{self.agent_id}")
+        self._failure_count: int = 0
+        self._last_error: str | None = None
 
     # ── 서브클래스 구현 ────────────────────────────────────────────────────
 
@@ -98,6 +100,11 @@ class Agent(ABC):
         self.level = level
         self._log.info("Level set to %s", level)
 
+    def _record_error(self, message: str) -> None:
+        """오류 발생 시 카운터 증가 및 마지막 오류 메시지 기록."""
+        self._failure_count += 1
+        self._last_error = message
+
     def health(self) -> dict:
         return {
             "agent_id": self.agent_id,
@@ -105,4 +112,6 @@ class Agent(ABC):
             "type": self.agent_type,
             "level": self.level,
             "enabled": self.enabled,
+            "failure_count": self._failure_count,
+            "last_error": self._last_error,
         }

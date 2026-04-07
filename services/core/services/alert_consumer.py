@@ -2,6 +2,9 @@
 
 dedup_key가 있으면 동일 문제의 활성(status=new) 경보를 찾아 UPDATE.
 없거나 찾지 못하면 INSERT.
+
+Race Condition 방지: SELECT ... FOR UPDATE로 행 잠금 후 UPDATE/INSERT 결정.
+동일 dedup_key를 가진 두 경보가 동시에 도착해도 중복 삽입되지 않는다.
 """
 
 import json
@@ -35,68 +38,75 @@ async def consume_alerts(redis: aioredis.Redis) -> None:
 async def _handle_alert(data: dict) -> None:
     dedup_key: str | None = data.get("dedup_key") or data.get("metadata", {}).get("dedup_key")
 
+    updated_alert: AlertModel | None = None
+    new_alert: AlertModel | None = None
+
     async with AsyncSessionLocal() as session:
-        existing: AlertModel | None = None
+        # SELECT FOR UPDATE로 트랜잭션 내 행 잠금 → 동시 요청 간 race condition 방지
+        async with session.begin():
+            existing: AlertModel | None = None
 
-        if dedup_key:
-            # 같은 dedup_key + 같은 에이전트의 활성 경보 조회
-            result = await session.execute(
-                select(AlertModel).where(
-                    AlertModel.status == "new",
-                    AlertModel.generated_by == data["generated_by"],
-                    AlertModel.metadata_["dedup_key"].astext == dedup_key,
-                ).order_by(AlertModel.created_at.desc()).limit(1)
-            )
-            existing = result.scalar_one_or_none()
+            if dedup_key:
+                # 같은 dedup_key + 같은 에이전트의 활성 경보 조회 (잠금 획득)
+                result = await session.execute(
+                    select(AlertModel).where(
+                        AlertModel.status == "new",
+                        AlertModel.generated_by == data["generated_by"],
+                        AlertModel.metadata_["dedup_key"].astext == dedup_key,
+                    ).order_by(AlertModel.created_at.desc()).limit(1)
+                    .with_for_update()
+                )
+                existing = result.scalar_one_or_none()
 
-        if existing:
-            # 내용 업데이트 (같은 문제, 정보 변경)
-            changed = False
-            if existing.message != data["message"]:
-                existing.message = data["message"]
-                changed = True
-            if existing.severity != data["severity"]:
-                existing.severity = data["severity"]
-                changed = True
-            if existing.recommendation != data.get("recommendation"):
-                existing.recommendation = data.get("recommendation")
-                changed = True
-            new_meta = data.get("metadata", {})
-            if existing.metadata_ != new_meta:
-                existing.metadata_ = new_meta
-                changed = True
+            if existing:
+                # 내용 업데이트 (같은 문제, 정보 변경)
+                changed = False
+                if existing.message != data["message"]:
+                    existing.message = data["message"]
+                    changed = True
+                if existing.severity != data["severity"]:
+                    existing.severity = data["severity"]
+                    changed = True
+                if existing.recommendation != data.get("recommendation"):
+                    existing.recommendation = data.get("recommendation")
+                    changed = True
+                new_meta = data.get("metadata", {})
+                if existing.metadata_ != new_meta:
+                    existing.metadata_ = new_meta
+                    changed = True
 
-            if not changed:
-                # 변경 없으면 DB/WS 작업 스킵
-                logger.debug("Alert dedup: no change for key=%s", dedup_key)
-                return
+                if changed:
+                    updated_alert = existing
+                else:
+                    # 변경 없으면 DB/WS 작업 스킵 (트랜잭션은 정상 커밋)
+                    logger.debug("Alert dedup: no change for key=%s", dedup_key)
 
-            await session.commit()
-            await session.refresh(existing)
+            else:
+                # 신규 삽입
+                alert = AlertModel(
+                    alert_id=data["alert_id"],
+                    alert_type=data["alert_type"],
+                    severity=data["severity"],
+                    status=data.get("status", "new"),
+                    platform_ids=data.get("platform_ids", []),
+                    zone_id=data.get("zone_id"),
+                    generated_by=data["generated_by"],
+                    message=data["message"],
+                    recommendation=data.get("recommendation"),
+                    metadata_=data.get("metadata", {}),
+                )
+                session.add(alert)
+                new_alert = alert
+        # session.begin().__aexit__ → 자동 커밋
 
-            # WS: 업데이트 이벤트 (기존 alert_id 유지)
-            ws_payload = _to_ws_dict(existing)
+        # 커밋 이후 refresh 및 WS 브로드캐스트
+        if updated_alert:
+            await session.refresh(updated_alert)
+            ws_payload = _to_ws_dict(updated_alert)
             ws_payload["type"] = "alert_updated"
             await hub.broadcast("alerts", ws_payload)
-            logger.info("Alert updated: id=%s key=%s", existing.alert_id, dedup_key)
-
-        else:
-            # 신규 삽입
-            alert = AlertModel(
-                alert_id=data["alert_id"],
-                alert_type=data["alert_type"],
-                severity=data["severity"],
-                status=data.get("status", "new"),
-                platform_ids=data.get("platform_ids", []),
-                zone_id=data.get("zone_id"),
-                generated_by=data["generated_by"],
-                message=data["message"],
-                recommendation=data.get("recommendation"),
-                metadata_=data.get("metadata", {}),
-            )
-            session.add(alert)
-            await session.commit()
-
+            logger.info("Alert updated: id=%s key=%s", updated_alert.alert_id, dedup_key)
+        elif new_alert:
             ws_payload = {**data, "type": "alert_created"}
             await hub.broadcast("alerts", ws_payload)
             logger.info("Alert created: id=%s key=%s", data["alert_id"], dedup_key)

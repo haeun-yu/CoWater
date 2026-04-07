@@ -4,13 +4,17 @@ Agent Runtime 진입점.
 - Redis pub/sub 구독 (platform.report.*, alert.created.*)
 - 등록된 Agent들에 이벤트 전달
 - FastAPI로 Agent 토글/레벨 제어 API 제공
-- AIS Timeout 주기 체크 (60초마다)
+- AIS Timeout 주기 체크 (20초마다)
+- AI 에이전트 태스크 추적 + 타임아웃 + 우아한 종료
+- 컨슈머 크래시 시 지수 백오프 자동 재연결
 """
 
 import asyncio
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from contextlib import asynccontextmanager
+from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
@@ -36,6 +40,18 @@ logger = logging.getLogger(__name__)
 _registry = AgentRegistry()
 _redis: aioredis.Redis | None = None
 
+# AI 에이전트 백그라운드 태스크 추적 집합
+_pending_ai_tasks: set[asyncio.Task] = set()
+
+# AI 에이전트 단일 호출 최대 허용 시간 (초)
+_AI_TASK_TIMEOUT = 120.0
+
+# 컨슈머 재연결 최대 대기 시간 (초)
+_RECONNECT_MAX_DELAY = 60.0
+
+# 종료 시 진행 중인 AI 태스크 drain 대기 시간 (초)
+_SHUTDOWN_DRAIN_TIMEOUT = 15.0
+
 
 # ── 초기화 ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +66,16 @@ def _setup_agents(redis: aioredis.Redis) -> None:
     ]
     for agent in agents:
         _registry.register(agent)
+
+
+# ── AI 태스크 헬퍼 ──────────────────────────────────────────────────────────
+
+def _track_task(coro, *, name: str) -> asyncio.Task:
+    """태스크를 생성하고 _pending_ai_tasks에 등록. 완료 시 자동 제거."""
+    task = asyncio.create_task(coro, name=name)
+    _pending_ai_tasks.add(task)
+    task.add_done_callback(_pending_ai_tasks.discard)
+    return task
 
 
 # ── Redis 컨슈머 ─────────────────────────────────────────────────────────────
@@ -85,9 +111,9 @@ async def _dispatch_report(report: PlatformReport) -> None:
         except Exception:
             logger.exception("Rule agent error: %s", agent.agent_id)
 
-    # AI Agent — 각각 독립 태스크로 실행 (블로킹 없음)
+    # AI Agent — 각각 독립 태스크로 실행 (블로킹 없음), 추적 집합에 등록
     for agent in ai_agents:
-        asyncio.create_task(
+        _track_task(
             _safe_ai_dispatch(agent, report),
             name=f"ai-report-{agent.agent_id}",
         )
@@ -95,9 +121,15 @@ async def _dispatch_report(report: PlatformReport) -> None:
 
 async def _safe_ai_dispatch(agent: Agent, report: PlatformReport) -> None:
     try:
-        await agent.on_platform_report(report)
-    except Exception:
+        async with asyncio.timeout(_AI_TASK_TIMEOUT):
+            await agent.on_platform_report(report)
+    except TimeoutError:
+        msg = f"AI dispatch timeout after {_AI_TASK_TIMEOUT}s"
+        logger.warning("AI agent timed out: %s", agent.agent_id)
+        agent._record_error(msg)
+    except Exception as exc:
         logger.exception("AI agent error: %s", agent.agent_id)
+        agent._record_error(str(exc))
 
 
 async def _consume_alerts(redis: aioredis.Redis) -> None:
@@ -126,7 +158,7 @@ async def _dispatch_alert(alert: dict) -> None:
             logger.exception("Rule agent on_alert error: %s", agent.agent_id)
 
     for agent in ai_agents:
-        asyncio.create_task(
+        _track_task(
             _safe_ai_alert(agent, alert),
             name=f"ai-alert-{agent.agent_id}",
         )
@@ -134,9 +166,15 @@ async def _dispatch_alert(alert: dict) -> None:
 
 async def _safe_ai_alert(agent: Agent, alert: dict) -> None:
     try:
-        await agent.on_alert(alert)
-    except Exception:
+        async with asyncio.timeout(_AI_TASK_TIMEOUT):
+            await agent.on_alert(alert)
+    except TimeoutError:
+        msg = f"AI on_alert timeout after {_AI_TASK_TIMEOUT}s"
+        logger.warning("AI agent on_alert timed out: %s", agent.agent_id)
+        agent._record_error(msg)
+    except Exception as exc:
         logger.exception("AI agent on_alert error: %s", agent.agent_id)
+        agent._record_error(str(exc))
 
 
 async def _ais_timeout_loop() -> None:
@@ -160,6 +198,27 @@ async def _zone_reload_loop(redis: aioredis.Redis) -> None:
                 await agent.load_zones()
 
 
+async def _run_with_reconnect(
+    coro_factory: Callable[[aioredis.Redis], Coroutine[Any, Any, None]],
+    name: str,
+    redis: aioredis.Redis,
+) -> None:
+    """컨슈머가 예외로 종료될 경우 지수 백오프로 자동 재연결."""
+    delay = 1.0
+    while True:
+        try:
+            await coro_factory(redis)
+            logger.warning("%s returned unexpectedly, restarting", name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("%s crashed — reconnecting in %.1fs", name, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, _RECONNECT_MAX_DELAY)
+        else:
+            delay = 1.0
+
+
 # ── FastAPI ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -169,16 +228,36 @@ async def lifespan(app: FastAPI):
     _setup_agents(_redis)
 
     tasks = [
-        asyncio.create_task(_consume_platform_reports(_redis)),
-        asyncio.create_task(_consume_alerts(_redis)),
-        asyncio.create_task(_ais_timeout_loop()),
-        asyncio.create_task(_zone_reload_loop(_redis)),
+        asyncio.create_task(
+            _run_with_reconnect(_consume_platform_reports, "platform-consumer", _redis),
+            name="platform-consumer",
+        ),
+        asyncio.create_task(
+            _run_with_reconnect(_consume_alerts, "alert-consumer", _redis),
+            name="alert-consumer",
+        ),
+        asyncio.create_task(_ais_timeout_loop(), name="ais-timeout"),
+        asyncio.create_task(_zone_reload_loop(_redis), name="zone-reload"),
     ]
     logger.info("Agent Runtime started with %d agent(s)", len(_registry.all()))
     yield
 
+    # 메인 루프 태스크 취소
     for t in tasks:
         t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 진행 중인 AI 태스크 drain (최대 _SHUTDOWN_DRAIN_TIMEOUT초)
+    if _pending_ai_tasks:
+        logger.info("Waiting for %d pending AI task(s) to finish...", len(_pending_ai_tasks))
+        done, pending = await asyncio.wait(
+            _pending_ai_tasks, timeout=_SHUTDOWN_DRAIN_TIMEOUT
+        )
+        for t in pending:
+            t.cancel()
+        if pending:
+            logger.warning("%d AI task(s) cancelled at shutdown", len(pending))
+
     await _redis.aclose()
     logger.info("Agent Runtime stopped")
 

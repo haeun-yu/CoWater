@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,7 +52,7 @@ class AlertResponse(BaseModel):
 async def list_alerts(
     status: Annotated[str | None, Query()] = None,
     severity: Annotated[str | None, Query()] = None,
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(AlertModel).order_by(AlertModel.created_at.desc()).limit(limit)
@@ -100,6 +100,13 @@ async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_d
 
 class DeleteAlertsBody(BaseModel):
     alert_ids: list[str]
+
+    @field_validator("alert_ids")
+    @classmethod
+    def validate_count(cls, v: list[str]) -> list[str]:
+        if len(v) > 500:
+            raise ValueError("한 번에 최대 500개의 alert_id만 삭제할 수 있습니다")
+        return v
 
 
 @router.delete("", status_code=200)

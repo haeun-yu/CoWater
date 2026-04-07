@@ -1,4 +1,9 @@
-"""Redis에서 PlatformReport 이벤트를 구독하여 DB에 저장하고 WS로 브로드캐스트."""
+"""Redis에서 PlatformReport 이벤트를 구독하여 DB에 저장하고 WS로 브로드캐스트.
+
+플랫폼 메타데이터(type, name)는 인메모리 캐시(_platform_meta)로 관리한다.
+플랫폼당 최초 1회만 DB 조회 후 캐시에 저장 → 초당 수천 건 처리 시 N+1 쿼리 방지.
+플랫폼 정보가 외부에서 변경될 경우 clear_platform_cache()로 캐시를 무효화할 수 있다.
+"""
 
 import json
 import logging
@@ -12,6 +17,18 @@ from models import PlatformModel, PlatformReportModel
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
+
+# platform_id → (platform_type, name)
+# 프로세스 생존 기간 동안 유지. 플랫폼 메타가 드물게 변경되므로 TTL 불필요.
+_platform_meta: dict[str, tuple[str, str]] = {}
+
+
+def clear_platform_cache(platform_id: str | None = None) -> None:
+    """플랫폼 메타 캐시 무효화. platform_id 생략 시 전체 삭제."""
+    if platform_id is None:
+        _platform_meta.clear()
+    else:
+        _platform_meta.pop(platform_id, None)
 
 
 async def consume_platform_reports(redis: aioredis.Redis) -> None:
@@ -65,11 +82,16 @@ async def _handle_report(data: dict) -> None:
         session.add(report)
         await session.commit()
 
-        # 플랫폼 메타 조회 (프론트엔드에 type/name 전달용)
-        platform_row = await session.get(PlatformModel, platform_id)
+        # 캐시 미스 시에만 DB 조회 — 플랫폼당 최초 1회
+        if platform_id not in _platform_meta:
+            platform_row = await session.get(PlatformModel, platform_id)
+            if platform_row:
+                _platform_meta[platform_id] = (
+                    platform_row.platform_type,
+                    platform_row.name or platform_id,
+                )
 
-    platform_type = platform_row.platform_type if platform_row else "vessel"
-    platform_name = (platform_row.name if platform_row else None) or platform_id
+    platform_type, platform_name = _platform_meta.get(platform_id, ("vessel", platform_id))
 
     # WebSocket 브로드캐스트
     await hub.broadcast("platforms", {

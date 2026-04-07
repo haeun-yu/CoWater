@@ -3,10 +3,15 @@ LLM 클라이언트 추상화 레이어.
 
 config.llm_backend 값에 따라 Claude(Anthropic) 또는 Ollama(OpenAI 호환) 중 하나를
 반환한다. API key가 없으면 FallbackClient가 반환되어 rule 기반 권고문을 생성한다.
+
+각 클라이언트는 타임아웃과 지수 백오프 재시도를 내장한다:
+- Claude: timeout=60s, 최대 3회 재시도 (네트워크 오류/타임아웃에 한함)
+- Ollama/vLLM: timeout=120s, 최대 2회 재시도 (로컬 서버 응답 지연 고려)
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -18,6 +23,27 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 def _strip_thinking(text: str) -> str:
     return _THINK_RE.sub("", text).strip()
+
+
+async def _retry_chat(call, *, max_attempts: int, base_delay: float) -> str:
+    """네트워크 오류/타임아웃에 한해 지수 백오프 재시도.
+
+    비즈니스 오류(잘못된 요청 등)는 재시도하지 않고 즉시 전파한다.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            return await call()
+        except (TimeoutError, OSError, ConnectionError) as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                wait = base_delay * (2 ** attempt)
+                logger.warning(
+                    "LLM call failed (%s), retrying in %.1fs (attempt %d/%d)",
+                    type(exc).__name__, wait, attempt + 1, max_attempts,
+                )
+                await asyncio.sleep(wait)
+    raise last_exc  # type: ignore[misc]
 
 
 class LLMClient(ABC):
@@ -34,6 +60,10 @@ class LLMClient(ABC):
 
 
 class ClaudeClient(LLMClient):
+    _TIMEOUT = 60.0    # Anthropic API 응답 타임아웃 (초)
+    _MAX_ATTEMPTS = 3  # 최대 재시도 횟수
+    _BASE_DELAY = 1.0  # 초기 재시도 대기 (초), 이후 2배씩 증가
+
     def __init__(self, api_key: str, model: str) -> None:
         import anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -44,16 +74,26 @@ class ClaudeClient(LLMClient):
         return f"claude/{self._model}"
 
     async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
-        msg = await self._client.messages.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        async def _call() -> str:
+            async with asyncio.timeout(self._TIMEOUT):
+                msg = await self._client.messages.create(
+                    model=self._model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=[{"role": "user", "content": user}],
+                )
+            return msg.content[0].text.strip()
+
+        return await _retry_chat(
+            _call, max_attempts=self._MAX_ATTEMPTS, base_delay=self._BASE_DELAY
         )
-        return msg.content[0].text.strip()
 
 
 class OllamaClient(LLMClient):
+    _TIMEOUT = 120.0   # 로컬 모델 추론 타임아웃 (초)
+    _MAX_ATTEMPTS = 2
+    _BASE_DELAY = 2.0
+
     def __init__(self, base_url: str, model: str, think: bool = False) -> None:
         from openai import AsyncOpenAI
         self._client = AsyncOpenAI(
@@ -71,17 +111,24 @@ class OllamaClient(LLMClient):
         kwargs: dict = {}
         if not self._think:
             kwargs["extra_body"] = {"think": False}
-        resp = await self._client.chat.completions.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            **kwargs,
+
+        async def _call() -> str:
+            async with asyncio.timeout(self._TIMEOUT):
+                resp = await self._client.chat.completions.create(
+                    model=self._model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    **kwargs,
+                )
+            text = resp.choices[0].message.content or ""
+            return _strip_thinking(text)
+
+        return await _retry_chat(
+            _call, max_attempts=self._MAX_ATTEMPTS, base_delay=self._BASE_DELAY
         )
-        text = resp.choices[0].message.content or ""
-        return _strip_thinking(text)
 
 
 class VllmClient(LLMClient):
@@ -90,6 +137,10 @@ class VllmClient(LLMClient):
     vLLM은 OpenAI 호환 엔드포인트를 제공하므로 OllamaClient와 구조가 동일하되,
     think 파라미터 등 Ollama 전용 옵션을 제거한 순수 OpenAI 호환 구현이다.
     """
+
+    _TIMEOUT = 120.0
+    _MAX_ATTEMPTS = 2
+    _BASE_DELAY = 2.0
 
     def __init__(self, base_url: str, model: str) -> None:
         from openai import AsyncOpenAI
@@ -104,15 +155,21 @@ class VllmClient(LLMClient):
         return f"vllm/{self._model}"
 
     async def chat(self, *, system: str, user: str, max_tokens: int) -> str:
-        resp = await self._client.chat.completions.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        async def _call() -> str:
+            async with asyncio.timeout(self._TIMEOUT):
+                resp = await self._client.chat.completions.create(
+                    model=self._model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                )
+            return (resp.choices[0].message.content or "").strip()
+
+        return await _retry_chat(
+            _call, max_attempts=self._MAX_ATTEMPTS, base_delay=self._BASE_DELAY
         )
-        return (resp.choices[0].message.content or "").strip()
 
 
 class FallbackClient(LLMClient):

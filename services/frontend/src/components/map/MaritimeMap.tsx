@@ -26,7 +26,15 @@ type TrailFeature = {
   properties: { opacity: number; color: string };
 };
 
-/** 항적 GeoJSON FeatureCollection 생성 — 3-opacity 밴드 */
+/** 항적 GeoJSON FeatureCollection 생성 — 3-opacity 밴드
+ *
+ *  구간 구분 (뒤에서부터):
+ *   recent  : 마지막 TRAIL_RECENT개  → opacity 0.82 (불투명)
+ *   mid     : 그 이전 구간까지       → opacity 0.38 (반투명)
+ *   old     : 나머지 전체            → opacity 0.12 (흐림)
+ *
+ *  각 밴드 경계에 연결점 1개씩 포함시켜 선이 끊기지 않게 한다.
+ */
 function buildTrailGeoJSON(
   trails: Map<string, LonLat[]>,
   platforms: Record<string, PlatformState>,
@@ -45,10 +53,16 @@ function buildTrailGeoJSON(
     const color = alertIds.has(pid) ? '#ef4444'
       : (TYPE_COLOR[p?.platform_type ?? 'vessel'] ?? '#2e8dd4');
 
+    const len     = pts.length;
+    // 경계 인덱스 (clamp to valid range)
+    const midEnd  = Math.max(0, len - TRAIL_RECENT);  // recent 시작점
+    const oldEnd  = Math.max(0, len - TRAIL_MID);     // mid 시작점
+
+    // 경계점을 1개씩 포함해 밴드 간 끊김 방지
     const bands: { pts: LonLat[]; opacity: number }[] = [
-      { pts: pts.slice(0, -TRAIL_RECENT),                  opacity: 0.12 },
-      { pts: pts.slice(-TRAIL_MID, -TRAIL_RECENT),         opacity: 0.38 },
-      { pts: pts.slice(-TRAIL_RECENT),                     opacity: 0.82 },
+      { pts: pts.slice(0, oldEnd + 1),              opacity: 0.12 },  // oldest
+      { pts: pts.slice(oldEnd, midEnd + 1),          opacity: 0.38 },  // mid
+      { pts: pts.slice(midEnd),                      opacity: 0.82 },  // recent
     ];
 
     for (const band of bands) {
@@ -88,6 +102,16 @@ export default function MaritimeMap() {
       .filter((a) => a.status === "new" && a.severity === "critical")
       .flatMap((a) => a.platform_ids),
   );
+
+  // zoom 핸들러는 마운트 1회짜리 useEffect 클로저 안에 있어서
+  // platforms / selectedId / alertPlatformIds를 직접 참조하면 초기값에 고정된다.
+  // ref를 통해 항상 최신 값을 읽도록 동기화한다.
+  const platformsRef      = useRef(platforms);
+  const selectedIdRef     = useRef(selectedId);
+  const alertIdsRef       = useRef(alertPlatformIds);
+  platformsRef.current    = platforms;
+  selectedIdRef.current   = selectedId;
+  alertIdsRef.current     = alertPlatformIds;
 
   // ── 선박 마커 생성/갱신 ────────────────────────────────────────────────────
 
@@ -232,16 +256,17 @@ export default function MaritimeMap() {
     });
 
     // zoom 변화 시 모든 마커 아이콘 크기 갱신
+    // ref를 통해 최신 platforms / selectedId / alertIds를 읽는다 (클로저 stale 방지)
     map.on('zoom', () => {
       zoomRef.current = map.getZoom();
       for (const [pid, marker] of markersRef.current) {
-        const p = platforms[pid];
+        const p = platformsRef.current[pid];
         if (!p) continue;
         const { html } = createShipIcon(
           p.platform_type ?? 'vessel',
           p.heading ?? p.cog ?? 0,
-          pid === selectedId,
-          alertPlatformIds.has(pid),
+          pid === selectedIdRef.current,
+          alertIdsRef.current.has(pid),
           zoomRef.current,
         );
         marker.getElement().innerHTML = html;
