@@ -83,7 +83,7 @@ class AnomalyAIAgent(Agent):
             analysis = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
                 user=context,
-                max_tokens=512,
+                max_tokens=settings.anomaly_ai_max_tokens,
             )
         except Exception:
             logger.exception("LLM call failed for anomaly analysis — using rule-based fallback")

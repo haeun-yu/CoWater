@@ -44,14 +44,10 @@ _redis: aioredis.Redis | None = None
 # AI 에이전트 백그라운드 태스크 추적 집합
 _pending_ai_tasks: set[asyncio.Task] = set()
 
-# AI 에이전트 단일 호출 최대 허용 시간 (초)
-_AI_TASK_TIMEOUT = 120.0
-
-# 컨슈머 재연결 최대 대기 시간 (초)
-_RECONNECT_MAX_DELAY = 60.0
-
-# 종료 시 진행 중인 AI 태스크 drain 대기 시간 (초)
-_SHUTDOWN_DRAIN_TIMEOUT = 15.0
+# 런타임 타이밍 상수 — settings에서 읽어 모듈 초기화 시 고정
+_AI_TASK_TIMEOUT      = settings.ai_task_timeout_sec
+_RECONNECT_MAX_DELAY  = settings.reconnect_max_delay_sec
+_SHUTDOWN_DRAIN_TIMEOUT = settings.shutdown_drain_timeout_sec
 
 
 # ── 초기화 ──────────────────────────────────────────────────────────────────
@@ -179,21 +175,21 @@ async def _safe_ai_alert(agent: Agent, alert: dict) -> None:
 
 
 async def _ais_timeout_loop() -> None:
-    """20초마다 AIS 타임아웃 체크 (빠른 탐지)."""
+    """AIS 타임아웃 체크 (주기: ais_check_interval_sec)."""
     while True:
-        await asyncio.sleep(20)
+        await asyncio.sleep(settings.ais_check_interval_sec)
         for agent in _registry.enabled():
             if isinstance(agent, AnomalyRuleAgent):
                 await agent.check_ais_timeout()
 
 
 async def _zone_reload_loop(redis: aioredis.Redis) -> None:
-    """5분마다 Zone 목록 재로드."""
+    """Zone 목록 주기적 재로드 (주기: zone_reload_interval_sec)."""
     for agent in _registry.all():
         if isinstance(agent, ZoneMonitorAgent):
             await agent.load_zones()
     while True:
-        await asyncio.sleep(300)
+        await asyncio.sleep(settings.zone_reload_interval_sec)
         for agent in _registry.enabled():
             if isinstance(agent, ZoneMonitorAgent):
                 await agent.load_zones()

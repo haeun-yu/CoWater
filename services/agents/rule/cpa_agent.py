@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import redis.asyncio as aioredis
 
 from base import Agent, AlertPayload, PlatformReport
+from config import settings
 
 
 class CPAAgent(Agent):
@@ -23,17 +24,15 @@ class CPAAgent(Agent):
     description = "선박 간 최근접거리(CPA)와 최근접시간(TCPA)을 계산하여 충돌 위험 경보 생성"
     agent_type = "rule"
 
-    # 기본 임계값 (config로 오버라이드 가능)
-    _DEFAULT_CONFIG = {
-        "warning_cpa_nm": 0.5,
-        "warning_tcpa_min": 30,
-        "critical_cpa_nm": 0.2,
-        "critical_tcpa_min": 10,
-    }
-
     def __init__(self, redis: aioredis.Redis) -> None:
         super().__init__(redis)
-        self.config = dict(self._DEFAULT_CONFIG)
+        # 기본 임계값은 settings에서 읽음 (PATCH /agents/cpa-agent/config 로 런타임 변경 가능)
+        self.config = {
+            "warning_cpa_nm":  settings.cpa_warning_nm,
+            "warning_tcpa_min": settings.cpa_warning_tcpa_min,
+            "critical_cpa_nm": settings.cpa_critical_nm,
+            "critical_tcpa_min": settings.cpa_critical_tcpa_min,
+        }
         # platform_id → 최근 보고 캐시
         self._reports: dict[str, PlatformReport] = {}
         # 이미 경보된 쌍 (중복 방지) — key: frozenset({id1, id2})

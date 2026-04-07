@@ -6,6 +6,25 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import type { PlatformState } from "@/types";
 import { createShipIcon } from "@/lib/shipIcon";
+import {
+  MAP_CENTER,
+  MAP_ZOOM,
+  MAP_OSM_OPACITY,
+  MAP_SELECT_MIN_ZOOM,
+  MAP_SELECT_FLY_DURATION,
+  MAP_TRACK_EASE_DURATION,
+  TRAIL_MAX,
+  TRAIL_RECENT,
+  TRAIL_MID,
+  TRAIL_OPACITY,
+  TRAIL_LINE_WIDTH,
+  TRAIL_CASING_WIDTH,
+  TRAIL_CASING_COLOR,
+  TRAIL_CASING_OPACITY_FACTOR,
+  ALERT_HIGHLIGHT_SEVERITY,
+  ALERT_TRAIL_COLOR,
+  PLATFORM_COLORS,
+} from "@/config";
 
 const PLATFORM_LABELS: Record<string, string> = {
   vessel: "선박",
@@ -15,12 +34,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   drone: "드론",
   buoy: "부이",
 };
-
-// 항적: 최대 보관 포인트 수 (초당 1건 기준 ~90초)
-const TRAIL_MAX = 90;
-// 항적 3밴드 구분 (포인트 인덱스, 뒤에서부터)
-const TRAIL_RECENT = 15; // 마지막 15포인트 → 불투명
-const TRAIL_MID = 45; // 그 전 30포인트 → 반투명
 
 type LonLat = [number, number];
 
@@ -46,21 +59,11 @@ function buildTrailGeoJSON(
 ) {
   const features: TrailFeature[] = [];
 
-  const TYPE_COLOR: Record<string, string> = {
-    vessel: "#2e8dd4",
-    usv: "#22d3ee",
-    rov: "#a78bfa",
-    auv: "#818cf8",
-    drone: "#34d399",
-    buoy: "#fbbf24",
-  };
-
   for (const [pid, pts] of trails) {
     if (pts.length < 2) continue;
     const p = platforms[pid];
-    const color = alertIds.has(pid)
-      ? "#ef4444"
-      : (TYPE_COLOR[p?.platform_type ?? "vessel"] ?? "#2e8dd4");
+    const typeColor = PLATFORM_COLORS[p?.platform_type ?? "vessel"]?.top ?? PLATFORM_COLORS.vessel.top;
+    const color = alertIds.has(pid) ? ALERT_TRAIL_COLOR : typeColor;
 
     const len = pts.length;
     // 경계 인덱스 (clamp to valid range)
@@ -69,9 +72,9 @@ function buildTrailGeoJSON(
 
     // 경계점을 1개씩 포함해 밴드 간 끊김 방지
     const bands: { pts: LonLat[]; opacity: number }[] = [
-      { pts: pts.slice(0, oldEnd + 1), opacity: 0.12 }, // oldest
-      { pts: pts.slice(oldEnd, midEnd + 1), opacity: 0.38 }, // mid
-      { pts: pts.slice(midEnd), opacity: 0.82 }, // recent
+      { pts: pts.slice(0, oldEnd + 1), opacity: TRAIL_OPACITY.old },
+      { pts: pts.slice(oldEnd, midEnd + 1), opacity: TRAIL_OPACITY.mid },
+      { pts: pts.slice(midEnd), opacity: TRAIL_OPACITY.recent },
     ];
 
     for (const band of bands) {
@@ -112,7 +115,7 @@ export default function MaritimeMap() {
 
   const alertPlatformIds = new Set(
     alerts
-      .filter((a) => a.status === "new" && a.severity === "critical")
+      .filter((a) => a.status === "new" && a.severity === ALERT_HIGHLIGHT_SEVERITY)
       .flatMap((a) => a.platform_ids),
   );
 
@@ -229,14 +232,14 @@ export default function MaritimeMap() {
             id: "osm-layer",
             type: "raster",
             source: "osm",
-            paint: { "raster-opacity": 0.35 },
+            paint: { "raster-opacity": MAP_OSM_OPACITY },
           },
           { id: "seamark-layer", type: "raster", source: "seamark" },
         ],
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       },
-      center: [126.55, 34.75],
-      zoom: 8,
+      center: MAP_CENTER,
+      zoom: MAP_ZOOM,
       attributionControl: false,
     });
 
@@ -260,9 +263,9 @@ export default function MaritimeMap() {
         source: "trails",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#020d1a",
-          "line-width": 3.5,
-          "line-opacity": ["*", ["get", "opacity"], 0.55],
+          "line-color": TRAIL_CASING_COLOR,
+          "line-width": TRAIL_CASING_WIDTH,
+          "line-opacity": ["*", ["get", "opacity"], TRAIL_CASING_OPACITY_FACTOR],
         },
       });
 
@@ -274,7 +277,7 @@ export default function MaritimeMap() {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": ["get", "color"],
-          "line-width": 2.0,
+          "line-width": TRAIL_LINE_WIDTH,
           "line-opacity": ["get", "opacity"],
         },
       });
@@ -359,8 +362,8 @@ export default function MaritimeMap() {
       if (p?.lat != null && p?.lon != null) {
         mapRef.current.flyTo({
           center: [p.lon, p.lat],
-          zoom: Math.max(mapRef.current.getZoom(), 11),
-          duration: 800,
+          zoom: Math.max(mapRef.current.getZoom(), MAP_SELECT_MIN_ZOOM),
+          duration: MAP_SELECT_FLY_DURATION,
           essential: true,
         });
       }
@@ -374,7 +377,7 @@ export default function MaritimeMap() {
       return;
     const p = platforms[selectedId];
     if (p?.lat != null && p?.lon != null) {
-      mapRef.current.easeTo({ center: [p.lon, p.lat], duration: 300 });
+      mapRef.current.easeTo({ center: [p.lon, p.lat], duration: MAP_TRACK_EASE_DURATION });
     }
   }, [platforms, selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 

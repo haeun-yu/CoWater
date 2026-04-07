@@ -60,14 +60,13 @@ class LLMClient(ABC):
 
 
 class ClaudeClient(LLMClient):
-    _TIMEOUT = 60.0    # Anthropic API 응답 타임아웃 (초)
-    _MAX_ATTEMPTS = 3  # 최대 재시도 횟수
-    _BASE_DELAY = 1.0  # 초기 재시도 대기 (초), 이후 2배씩 증가
-
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, *, timeout: float = 60.0, max_attempts: int = 3, base_delay: float = 1.0) -> None:
         import anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
+        self._TIMEOUT = timeout
+        self._MAX_ATTEMPTS = max_attempts
+        self._BASE_DELAY = base_delay
 
     @property
     def model_name(self) -> str:
@@ -90,11 +89,10 @@ class ClaudeClient(LLMClient):
 
 
 class OllamaClient(LLMClient):
-    _TIMEOUT = 120.0   # 로컬 모델 추론 타임아웃 (초)
-    _MAX_ATTEMPTS = 2
-    _BASE_DELAY = 2.0
-
-    def __init__(self, base_url: str, model: str, think: bool = False) -> None:
+    def __init__(self, base_url: str, model: str, think: bool = False, *, timeout: float = 120.0, max_attempts: int = 2, base_delay: float = 2.0) -> None:
+        self._TIMEOUT = timeout
+        self._MAX_ATTEMPTS = max_attempts
+        self._BASE_DELAY = base_delay
         from openai import AsyncOpenAI
         self._client = AsyncOpenAI(
             base_url=f"{base_url.rstrip('/')}/v1",
@@ -138,11 +136,10 @@ class VllmClient(LLMClient):
     think 파라미터 등 Ollama 전용 옵션을 제거한 순수 OpenAI 호환 구현이다.
     """
 
-    _TIMEOUT = 120.0
-    _MAX_ATTEMPTS = 2
-    _BASE_DELAY = 2.0
-
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, *, timeout: float = 120.0, max_attempts: int = 2, base_delay: float = 2.0) -> None:
+        self._TIMEOUT = timeout
+        self._MAX_ATTEMPTS = max_attempts
+        self._BASE_DELAY = base_delay
         from openai import AsyncOpenAI
         self._client = AsyncOpenAI(
             base_url=f"{base_url.rstrip('/')}/v1",
@@ -203,7 +200,14 @@ def make_llm_client(settings) -> LLMClient:
 
     if backend == "ollama":
         logger.info("LLM backend: Ollama — url=%s model=%s", settings.ollama_url, settings.ollama_model)
-        return OllamaClient(base_url=settings.ollama_url, model=settings.ollama_model, think=settings.ollama_think)
+        return OllamaClient(
+            base_url=settings.ollama_url,
+            model=settings.ollama_model,
+            think=settings.ollama_think,
+            timeout=settings.local_llm_timeout_sec,
+            max_attempts=settings.local_llm_max_attempts,
+            base_delay=settings.local_llm_base_delay_sec,
+        )
 
     if backend == "claude":
         if not settings.anthropic_api_key:
@@ -214,10 +218,22 @@ def make_llm_client(settings) -> LLMClient:
             )
             return FallbackClient()
         logger.info("LLM backend: Claude — model=%s", settings.claude_model)
-        return ClaudeClient(api_key=settings.anthropic_api_key, model=settings.claude_model)
+        return ClaudeClient(
+            api_key=settings.anthropic_api_key,
+            model=settings.claude_model,
+            timeout=settings.claude_timeout_sec,
+            max_attempts=settings.claude_max_attempts,
+            base_delay=settings.claude_base_delay_sec,
+        )
 
     if backend == "vllm":
         logger.info("LLM backend: vLLM — url=%s model=%s", settings.vllm_url, settings.vllm_model)
-        return VllmClient(base_url=settings.vllm_url, model=settings.vllm_model)
+        return VllmClient(
+            base_url=settings.vllm_url,
+            model=settings.vllm_model,
+            timeout=settings.local_llm_timeout_sec,
+            max_attempts=settings.local_llm_max_attempts,
+            base_delay=settings.local_llm_base_delay_sec,
+        )
 
     raise ValueError(f"Unknown llm_backend: {backend!r}. Choose 'claude', 'ollama', or 'vllm'.")

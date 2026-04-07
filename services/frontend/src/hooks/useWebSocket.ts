@@ -6,11 +6,10 @@ import { useAlertStore } from "@/stores/alertStore";
 import { useAILogStore, isAIAgent, type ActivityLogEntry } from "@/stores/aiLogStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { WsMessage, PlatformType } from "@/types";
+import { WS_RECONNECT_DELAY_MS, WS_PING_INTERVAL_MS } from "@/config";
 
 const POSITION_WS_URL = process.env.NEXT_PUBLIC_POSITION_WS_URL ?? "ws://localhost:7703";
 const CORE_WS_URL     = process.env.NEXT_PUBLIC_WS_URL           ?? "ws://localhost:7700";
-
-const RECONNECT_DELAY_MS = 3000;
 
 const AGENT_NAMES: Record<string, string> = {
   "cpa-agent":      "CPA/TCPA Agent",
@@ -26,7 +25,7 @@ function createWs(url: string, onMessage: (data: unknown) => void) {
   ws.onopen  = () => console.log(`[WS] connected: ${url}`);
   ws.onclose = () => {
     console.warn(`[WS] disconnected: ${url}, reconnecting...`);
-    setTimeout(() => createWs(url, onMessage), RECONNECT_DELAY_MS);
+    setTimeout(() => createWs(url, onMessage), WS_RECONNECT_DELAY_MS);
   };
   ws.onerror   = (e) => console.error(`[WS] error: ${url}`, e);
   ws.onmessage = (e) => {
@@ -34,7 +33,7 @@ function createWs(url: string, onMessage: (data: unknown) => void) {
   };
   const ping = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send("ping");
-  }, 20_000);
+  }, WS_PING_INTERVAL_MS);
   ws.addEventListener("close", () => clearInterval(ping));
   return ws;
 }

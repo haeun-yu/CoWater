@@ -12,35 +12,28 @@
  * SVG 전체가 heading 각도로 선수 방향 회전.
  */
 
-// ── 타입별 색상 팔레트 ────────────────────────────────────────────────────────
+import {
+  PLATFORM_COLORS,
+  PLATFORM_SELECTED_COLOR,
+  PLATFORM_DIMS,
+  ZOOM_SCALE_BASE,
+  ZOOM_SCALE_REF,
+  ICON_MIN_LENGTH,
+  ICON_PAD,
+  ALERT_RING_COLOR,
+} from "@/config";
+
+// ── 로컬 타입 alias ──────────────────────────────────────────────────────────
 
 type Pal = { top: string; side: string; stern: string; bridge: string };
 
-const PALETTE: Record<string, Pal> = {
-  vessel:  { top: '#2e8dd4', side: '#1c5f8a', stern: '#0f3b57', bridge: '#4aadee' },
-  usv:     { top: '#22d3ee', side: '#0e9baf', stern: '#077282', bridge: '#40eeff' },
-  rov:     { top: '#a78bfa', side: '#7c5bcf', stern: '#5330a0', bridge: '#c4a8ff' },
-  auv:     { top: '#818cf8', side: '#5960cc', stern: '#3540a0', bridge: '#a0a8ff' },
-  drone:   { top: '#34d399', side: '#1e9e70', stern: '#10704e', bridge: '#50efb4' },
-  buoy:    { top: '#fbbf24', side: '#c48a0a', stern: '#8f6000', bridge: '#ffdb4a' },
-};
-const SELECTED_PAL: Pal = { top: '#f5a623', side: '#c47d08', stern: '#8a5200', bridge: '#ffc142' };
-
-// ── 타입별 기본 치수 (px, zoom 9 기준) ───────────────────────────────────────
-
-const BASE_DIMS: Record<string, { L: number; W: number }> = {
-  vessel: { L: 28, W:  9 },
-  usv:    { L: 18, W:  5 },
-  rov:    { L: 14, W: 10 },
-  auv:    { L: 16, W:  5 },
-  drone:  { L: 12, W: 11 },
-  buoy:   { L: 12, W: 12 },
-};
+const PALETTE: Record<string, Pal> = PLATFORM_COLORS as Record<string, Pal>;
+const SELECTED_PAL: Pal = PLATFORM_SELECTED_COLOR;
+const BASE_DIMS = PLATFORM_DIMS;
 
 /** zoom 레벨에 따른 스케일 배율 */
 function zoomScale(zoom: number): number {
-  // zoom 8 → 0.7, zoom 9 → 1.0, zoom 11 → 2.0, zoom 13 → 4.0
-  return Math.pow(1.42, Math.max(0, zoom - 9));
+  return Math.pow(ZOOM_SCALE_BASE, Math.max(0, zoom - ZOOM_SCALE_REF));
 }
 
 export interface ShipIconResult {
@@ -62,8 +55,7 @@ export function createShipIcon(
   const base  = BASE_DIMS[platformType] ?? BASE_DIMS.vessel;
   const scale = zoomScale(zoom);
 
-  const MIN_L = 8;
-  const Lpx  = Math.max(MIN_L, base.L * scale);
+  const Lpx  = Math.max(ICON_MIN_LENGTH, base.L * scale);
   const Wpx  = Math.max(3, base.W * scale);
   const H    = Math.max(1.5, Wpx * 0.36);   // 3D 돌출 깊이
 
@@ -71,7 +63,7 @@ export function createShipIcon(
   const ISO_X = H * 0.866;
   const ISO_Y = H * 0.5;
 
-  const PAD  = 4;
+  const PAD  = ICON_PAD;
   const svgW = Wpx + ISO_X + PAD * 2;
   const svgH = Lpx + ISO_Y + PAD * 2;
 
@@ -125,7 +117,7 @@ export function createShipIcon(
   // ── CPA 경보 링 ────────────────────────────────────────────────────────────
 
   const ringR    = Math.max(Lpx, Wpx) * 0.60 + 4;
-  const ringColor = '#ef4444';
+  const ringColor = ALERT_RING_COLOR;
   const alertRing = isAlert
     ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${ringR.toFixed(1)}"
          fill="none" stroke="${ringColor}" stroke-width="1.8"

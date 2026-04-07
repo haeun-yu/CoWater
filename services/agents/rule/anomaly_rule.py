@@ -14,10 +14,7 @@ from datetime import datetime, timezone
 import redis.asyncio as aioredis
 
 from base import Agent, AlertPayload, PlatformReport
-
-_AIS_TIMEOUT_S = 90         # 90초 이상 보고 없으면 경보 (데모: 빠른 탐지)
-_SPEED_DROP_THRESHOLD = 5.0  # knots — 한 틱에 이 이상 감소 시 의심
-_ROT_THRESHOLD = 25.0        # degrees/min — 이 이상이면 급격한 선회
+from config import settings
 
 
 class AnomalyRuleAgent(Agent):
@@ -53,7 +50,7 @@ class AnomalyRuleAgent(Agent):
         prev_sog = self._last_sog.get(pid)
         if prev_sog is not None and report.sog is not None:
             drop = prev_sog - report.sog
-            if drop >= _SPEED_DROP_THRESHOLD:
+            if drop >= settings.speed_drop_threshold:
                 rec = None
                 if self.level in ("L2", "L3"):
                     rec = f"{pid} 속도 급감 감지 ({prev_sog:.1f}→{report.sog:.1f}kts). 표류 또는 기관 이상 의심."
@@ -71,7 +68,7 @@ class AnomalyRuleAgent(Agent):
             self._last_sog[pid] = report.sog
 
         # 비정상 선회
-        if report.rot is not None and abs(report.rot) > _ROT_THRESHOLD:
+        if report.rot is not None and abs(report.rot) > settings.rot_threshold:
             rec = None
             if self.level in ("L2", "L3"):
                 rec = f"{pid} 비정상 선회율({report.rot:.1f}°/min) 감지. 항로 이탈 또는 기관 이상 확인 요망."
@@ -90,7 +87,7 @@ class AnomalyRuleAgent(Agent):
         now = datetime.now(tz=timezone.utc)
         for pid, last in list(self._last_seen.items()):
             elapsed = (now - last).total_seconds()
-            if elapsed > _AIS_TIMEOUT_S and pid not in self._ais_lost:
+            if elapsed > settings.ais_timeout_sec and pid not in self._ais_lost:
                 self._ais_lost.add(pid)
                 await self.emit_alert(AlertPayload(
                     alert_type="ais_off",

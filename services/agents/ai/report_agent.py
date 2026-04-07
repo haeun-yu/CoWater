@@ -64,7 +64,7 @@ class ReportAgent(Agent):
             report_text = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
                 user=context,
-                max_tokens=1024,
+                max_tokens=settings.report_alert_max_tokens,
             )
         except Exception:
             logger.exception("Auto report generation failed for alert %s", alert.get("alert_id"))
@@ -125,7 +125,7 @@ class ReportAgent(Agent):
             report_text = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
                 user=context,
-                max_tokens=2048,
+                max_tokens=settings.report_incident_max_tokens,
             )
         except Exception:
             logger.exception("Report generation failed for incident %s", incident_id)

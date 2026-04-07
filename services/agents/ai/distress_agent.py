@@ -129,7 +129,7 @@ class DistressAgent(Agent):
             return await self._llm.chat(
                 system=_SYSTEM_PROMPT,
                 user=context,
-                max_tokens=600,
+                max_tokens=settings.distress_agent_max_tokens,
             )
         except Exception:
             logger.exception("LLM call failed for distress response")
