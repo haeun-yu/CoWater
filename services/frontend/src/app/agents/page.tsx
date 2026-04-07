@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   useAILogStore,
   isAIAgent,
@@ -21,6 +21,8 @@ interface PipelineStepDef {
   title: string;
   sub: string;
   tone?: "idle" | "active" | "alert";
+  /** 이 단계가 활성화되는 레벨 조건 (예: "L2+", "L3") */
+  level?: string;
 }
 
 interface AgentMeta {
@@ -34,6 +36,8 @@ interface AgentMeta {
   input: string;
   triggeredBy?: string;
   pipeline: PipelineStepDef[];
+  /** 분기 경로가 있을 때 (Report Agent 등) */
+  routes?: { label: string; steps: PipelineStepDef[] }[];
   subProcess?: { from: string; to: string } | null;
 }
 
@@ -114,14 +118,39 @@ const AGENT_META: Record<string, AgentMeta> = {
     color: "#f87171",
     role: "조난 상황 대응",
     trigger: "nav_status: not_under_command/aground 또는 ais_off warning (anomaly-rule 경유)",
-    output: "SAR 대응 지침 생성",
+    output: "distress 경보 + (L2) SAR 권고 + (L3) 자동 통보",
     input: "조난 신호·AIS 소실 경보 + 선박 마지막 위치·상태",
     triggeredBy: "platform_report / anomaly-rule",
     pipeline: [
-      { icon: "◈", title: "조난 감지", sub: "nav_status 직접 or ais_off 경보" },
-      { icon: "⊕", title: "상황 판단", sub: "not_under_command · aground · ais_소실", tone: "active" },
-      { icon: "◉", title: "SAR 대응 생성", sub: "L2+ LLM 권고문 생성" },
-      { icon: "◎", title: "경보 발행", sub: "distress Alert (critical)" },
+      {
+        icon: "◈",
+        title: "조난 감지",
+        sub: "nav_status 직접 수신\nor ais_off 경보 경유",
+      },
+      {
+        icon: "⊕",
+        title: "조난 여부 판단",
+        sub: "not_under_command\naground · AIS 소실",
+        tone: "active",
+      },
+      {
+        icon: "◉",
+        title: "SAR 권고 생성",
+        sub: "LLM 대응 지침 작성",
+        level: "L2+",
+      },
+      {
+        icon: "◈",
+        title: "자동 통보",
+        sub: "Core API → 관계기관",
+        tone: "active",
+        level: "L3",
+      },
+      {
+        icon: "◎",
+        title: "경보 발행",
+        sub: "distress Alert\n(critical / warning)",
+      },
     ],
     subProcess: { from: "Distress (critical)", to: "ReportAgent (LLM)" },
   },
@@ -131,15 +160,56 @@ const AGENT_META: Record<string, AgentMeta> = {
     level: "L2",
     color: "#34d399",
     role: "사건 보고서 생성",
-    trigger: "critical 경보 수신 (cpa / zone_intrusion / distress)",
-    output: "AI 종합 사건 보고서",
-    input: "경보 데이터 + 관련 선박 이력 + 구역 정보",
+    trigger: "① critical 경보 자동 수신  ② 수동 incident_id 요청",
+    output: "AI 종합 사건 보고서 (compliance Info)",
+    input: "경보 데이터 또는 Incident ID → Core API 조회",
     triggeredBy: "cpa-agent / zone-monitor / distress-agent",
+    // 기본 pipeline은 자동 경로
     pipeline: [
-      { icon: "◈", title: "Critical 수신", sub: "cpa · distress · zone_intrusion" },
-      { icon: "⊕", title: "데이터 수집", sub: "경보 + 선박 이력", tone: "active" },
-      { icon: "◉", title: "보고서 생성", sub: "Claude / Ollama LLM" },
-      { icon: "◎", title: "보고서 발행", sub: "compliance Info" },
+      { icon: "◈", title: "Critical 경보 수신", sub: "cpa · distress · zone_intrusion" },
+      { icon: "⊕", title: "LLM 보고서 생성", sub: "Claude / Ollama 추론", tone: "active" },
+      { icon: "◎", title: "보고서 발행", sub: "compliance Info Alert" },
+    ],
+    routes: [
+      {
+        label: "자동 (경보 수신)",
+        steps: [
+          { icon: "◈", title: "Critical 경보 수신", sub: "cpa · distress · zone_intrusion" },
+          { icon: "⊕", title: "LLM 보고서 생성", sub: "Claude / Ollama 추론", tone: "active" },
+          { icon: "◎", title: "보고서 발행", sub: "compliance Info Alert" },
+        ],
+      },
+      {
+        label: "수동 (Incident ID)",
+        steps: [
+          { icon: "◈", title: "Incident ID 수신", sub: "POST /report-agent/generate/{id}" },
+          { icon: "⊕", title: "Core API 조회", sub: "사건·경보·선박 이력 fetch", tone: "active" },
+          { icon: "◉", title: "LLM 보고서 생성", sub: "Claude / Ollama 추론" },
+          { icon: "◎", title: "Core API 저장", sub: "보고서 DB 기록" },
+        ],
+      },
+    ],
+    subProcess: null,
+  },
+  "chat-agent": {
+    name: "AI 보좌관",
+    type: "ai",
+    level: "L2",
+    color: "#38bdf8",
+    role: "운항자와 실시간 대화",
+    trigger: "운항자의 직접 질문 (REST POST /chat)",
+    output: "상황 요약·위험 분석·대처 방법 등 자연어 답변",
+    input: "사용자 메시지 + 현재 선박 상태 캐시 + 활성 경보 목록",
+    pipeline: [
+      { icon: "◈", title: "메시지 수신", sub: "운항자 질문 입력" },
+      {
+        icon: "⊕",
+        title: "컨텍스트 구성",
+        sub: "선박 상태·경보·대화 이력",
+        tone: "active",
+      },
+      { icon: "◉", title: "LLM 추론", sub: "Claude / Ollama 응답 생성" },
+      { icon: "◎", title: "답변 반환", sub: "운항자에게 실시간 전달" },
     ],
     subProcess: null,
   },
@@ -294,8 +364,8 @@ export default function AgentsPage() {
       {/* 헤더 */}
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-sm font-bold tracking-wide text-white">통합 에이전트 관제</h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">
+          <h1 className="text-base font-bold tracking-wide text-white">통합 에이전트 관제</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
             Rule 동기 처리 → AI 비동기 처리 파이프라인
           </p>
         </div>
@@ -317,11 +387,11 @@ export default function AgentsPage() {
         {/* ── 왼쪽: 에이전트 목록 + 컨트롤 ───────────────────────────────────── */}
         <section className="border-r border-slate-800 flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+            <span className="text-xs text-slate-400 uppercase tracking-widest font-bold">
               Agent Orchestrator
             </span>
             {apiStatus !== "unknown" && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+              <span className={`text-xs px-1.5 py-0.5 rounded border ${
                 apiStatus === "ok"
                   ? "text-green-400 border-green-700/40 bg-green-950/30"
                   : "text-amber-400 border-amber-700/40 bg-amber-950/30"
@@ -335,10 +405,10 @@ export default function AgentsPage() {
             {/* Rule 에이전트 */}
             <div className="px-3 pt-3 pb-1">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">
+                <span className="text-xs text-blue-400 font-bold uppercase tracking-wider">
                   Rule Based
                 </span>
-                <span className="text-[10px] text-slate-600">
+                <span className="text-xs text-slate-500">
                   {ruleAgents.filter((a) => a.enabled).length}/{ruleAgents.length} 활성
                 </span>
               </div>
@@ -368,10 +438,10 @@ export default function AgentsPage() {
             {/* AI 에이전트 */}
             <div className="px-3 pb-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-violet-400 font-bold uppercase tracking-wider">
+                <span className="text-xs text-violet-400 font-bold uppercase tracking-wider">
                   AI Based
                 </span>
-                <span className="text-[10px] text-slate-600">
+                <span className="text-xs text-slate-500">
                   {aiAgents.filter((a) => a.enabled).length}/{aiAgents.length} 준비
                 </span>
               </div>
@@ -424,7 +494,7 @@ export default function AgentsPage() {
             </div>
             {/* 선택된 에이전트 실제 상태 */}
             {focusStatus && (
-              <div className="flex items-center gap-2 text-[10px]">
+              <div className="flex items-center gap-2 text-xs">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   focusStatus.enabled ? "bg-green-400" : "bg-slate-600"
                 }`} />
@@ -447,9 +517,11 @@ export default function AgentsPage() {
           <div className="flex-1 overflow-auto p-4 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
             <HorizontalPipeline
               steps={focusMeta.pipeline}
+              routes={focusMeta.routes}
               criticalCount={criticalCount}
               warningCount={warningCount}
               active={logs.length > 0}
+              agentLevel={focusStatus?.level ?? focusMeta.level}
             />
           </div>
 
@@ -457,11 +529,11 @@ export default function AgentsPage() {
           <div className="border-t border-slate-800 bg-slate-900/30 px-5 py-4 flex gap-6">
             {/* Sub-Process Trigger */}
             <div className="flex-none min-w-0">
-              <div className="text-[10px] text-slate-500 font-bold uppercase mb-2">
+              <div className="text-xs text-slate-500 font-bold uppercase mb-2">
                 Sub-Process Trigger
               </div>
               {focusMeta.subProcess ? (
-                <div className="flex items-center gap-2 text-[11px] font-mono">
+                <div className="flex items-center gap-2 text-sm font-mono">
                   <span className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-300">
                     {focusMeta.subProcess.from}
                   </span>
@@ -471,13 +543,13 @@ export default function AgentsPage() {
                   </span>
                 </div>
               ) : (
-                <div className="text-[11px] text-slate-600 italic font-mono">독립 실행 에이전트</div>
+                <div className="text-sm text-slate-600 italic font-mono">독립 실행 에이전트</div>
               )}
             </div>
 
             {/* 에이전트별 이벤트 빈도 미니 차트 */}
             <div className="flex-1 min-w-0">
-              <div className="text-[10px] text-slate-500 font-bold uppercase mb-2">
+              <div className="text-xs text-slate-500 font-bold uppercase mb-2">
                 이벤트 처리 현황
               </div>
               <div className="flex items-end gap-1.5 h-10">
@@ -497,7 +569,7 @@ export default function AgentsPage() {
                       title={`${meta?.name ?? a.agent_id}: ${count}건`}
                       className="flex-1 flex flex-col items-center gap-0.5 group"
                     >
-                      <div className="text-[9px] font-mono text-slate-500 group-hover:text-slate-300">
+                      <div className="text-xs font-mono text-slate-500 group-hover:text-slate-300">
                         {count > 0 ? count : ""}
                       </div>
                       <div className="w-full relative" style={{ height: 24 }}>
@@ -512,7 +584,7 @@ export default function AgentsPage() {
                         />
                       </div>
                       <div
-                        className="text-[8px] truncate w-full text-center"
+                        className="text-xs truncate w-full text-center"
                         style={{ color: a.enabled ? color : "#4a5568", opacity: 0.8 }}
                       >
                         {meta?.name?.split(" ")[0] ?? a.agent_id}
@@ -534,11 +606,11 @@ export default function AgentsPage() {
                 <h3 className="text-sm font-bold text-white truncate">
                   {focusMeta.name}
                 </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">{focusMeta.role}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{focusMeta.role}</p>
               </div>
               <button
                 onClick={clearLogs}
-                className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-400 hover:border-red-500/60 hover:text-red-300 flex-shrink-0"
+                className="text-xs px-2 py-1 rounded border border-slate-700 text-slate-400 hover:border-red-500/60 hover:text-red-300 flex-shrink-0"
               >
                 로그 초기화
               </button>
@@ -573,7 +645,7 @@ export default function AgentsPage() {
 
             {/* 마지막 오류 */}
             {focusStatus?.last_error && (
-              <div className="px-2.5 py-2 bg-red-950/30 border border-red-800/40 rounded text-[11px] text-red-300 font-mono leading-snug line-clamp-2">
+              <div className="px-2.5 py-2 bg-red-950/30 border border-red-800/40 rounded text-xs text-red-300 font-mono leading-snug line-clamp-2">
                 {focusStatus.last_error}
               </div>
             )}
@@ -598,7 +670,7 @@ export default function AgentsPage() {
                 <button
                   key={t}
                   onClick={() => setTypeFilter(t)}
-                  className={`text-[11px] px-2.5 py-1 rounded border transition-colors ${
+                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                     typeFilter === t
                       ? "bg-ocean-800 text-white border-ocean-600"
                       : "border-slate-700 text-slate-400 hover:border-slate-500"
@@ -607,7 +679,7 @@ export default function AgentsPage() {
                   {t === "all" ? "전체" : t.toUpperCase()}
                 </button>
               ))}
-              <span className="ml-auto text-[10px] text-slate-600">
+              <span className="ml-auto text-xs text-slate-600">
                 {filteredLogs.length}건
               </span>
             </div>
@@ -692,7 +764,7 @@ function AgentControlRow({
 
         {/* 이름 (클릭 → 필터) */}
         <button
-          className="flex-1 min-w-0 text-left text-xs font-semibold truncate"
+          className="flex-1 min-w-0 text-left text-sm font-semibold truncate"
           style={{ color: agent.enabled ? color : "#64748b" }}
           onClick={onSelect}
         >
@@ -701,7 +773,7 @@ function AgentControlRow({
 
         {/* 이벤트 수 */}
         {count > 0 && (
-          <span className="text-[10px] font-mono text-slate-500 flex-shrink-0">
+          <span className="text-xs font-mono text-slate-400 flex-shrink-0">
             {count}
           </span>
         )}
@@ -713,14 +785,14 @@ function AgentControlRow({
             onChange={(e) => onLevel(agent.agent_id, e.target.value)}
             disabled={isUpdating || !agent.enabled}
             onClick={(e) => e.stopPropagation()}
-            className="text-[10px] bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 flex-shrink-0 disabled:opacity-40 cursor-pointer"
+            className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 flex-shrink-0 disabled:opacity-40 cursor-pointer"
           >
             <option value="L1">L1</option>
             <option value="L2">L2</option>
             <option value="L3">L3</option>
           </select>
         ) : (
-          <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">
+          <span className="text-xs text-slate-400 font-mono flex-shrink-0">
             {agent.level}
           </span>
         )}
@@ -753,7 +825,7 @@ function AgentControlRow({
 
       {/* 오류 표시 */}
       {(agent.failure_count ?? 0) > 0 && (
-        <div className="px-2.5 pb-2 text-[10px] text-red-400">
+        <div className="px-2.5 pb-2 text-xs text-red-400">
           ⚠ 오류 {agent.failure_count}회
         </div>
       )}
@@ -765,32 +837,124 @@ function AgentControlRow({
 
 function HorizontalPipeline({
   steps,
+  routes,
   criticalCount,
   warningCount,
   active,
+  agentLevel,
+}: {
+  steps: PipelineStepDef[];
+  routes?: { label: string; steps: PipelineStepDef[] }[];
+  criticalCount: number;
+  warningCount: number;
+  active: boolean;
+  agentLevel?: string;
+}) {
+  const [activeRoute, setActiveRoute] = useState(0);
+
+  // routes가 있으면 탭 분기 뷰
+  if (routes && routes.length > 0) {
+    const current = routes[activeRoute];
+    return (
+      <div className="flex flex-col gap-4 w-full max-w-4xl mx-auto">
+        {/* 경로 탭 */}
+        <div className="flex gap-2 justify-center">
+          {routes.map((r, i) => (
+            <button
+              key={i}
+              onClick={() => setActiveRoute(i)}
+              className={`text-xs px-3 py-1.5 rounded border font-semibold transition-colors ${
+                activeRoute === i
+                  ? "bg-blue-600/20 border-blue-500/60 text-blue-300"
+                  : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {i === 0 ? "① " : "② "}{r.label}
+            </button>
+          ))}
+        </div>
+        <PipelineRow
+          steps={current.steps}
+          criticalCount={criticalCount}
+          warningCount={warningCount}
+          active={active}
+          agentLevel={agentLevel}
+        />
+      </div>
+    );
+  }
+
+  // 단일 경로
+  return (
+    <PipelineRow
+      steps={steps}
+      criticalCount={criticalCount}
+      warningCount={warningCount}
+      active={active}
+      agentLevel={agentLevel}
+    />
+  );
+}
+
+/** 단계 목록을 가로로 렌더링하는 실제 행 */
+function PipelineRow({
+  steps,
+  criticalCount,
+  warningCount,
+  active,
+  agentLevel,
 }: {
   steps: PipelineStepDef[];
   criticalCount: number;
   warningCount: number;
   active: boolean;
+  agentLevel?: string;
 }) {
   const hit = criticalCount > 0 || warningCount > 0;
   const nodes: React.ReactNode[] = [];
+
   steps.forEach((step, i) => {
     const isLast = i === steps.length - 1;
-    const tone: "idle" | "active" | "alert" =
+
+    // 레벨 조건 파싱: "L2+" → 현재 레벨이 L2 이상인지, "L3" → L3인지
+    const levelReq = step.level;
+    const levelNum = agentLevel ? parseInt(agentLevel.replace("L", "")) : 0;
+    let levelSatisfied = true;
+    if (levelReq) {
+      if (levelReq.endsWith("+")) {
+        const req = parseInt(levelReq.replace("L", "").replace("+", ""));
+        levelSatisfied = levelNum >= req;
+      } else {
+        const req = parseInt(levelReq.replace("L", ""));
+        levelSatisfied = levelNum >= req;
+      }
+    }
+
+    const baseTone: "idle" | "active" | "alert" =
       step.tone ?? (isLast ? (hit ? "alert" : "active") : i === 0 ? "idle" : "active");
     const resolvedTone: "idle" | "active" | "alert" =
-      (isLast || i === steps.length - 2) && hit ? "alert" : tone;
+      (isLast || i === steps.length - 2) && hit ? "alert" : baseTone;
+
     nodes.push(
-      <PipelineStep key={`step-${i}`} icon={step.icon} title={step.title} sub={step.sub} tone={resolvedTone} />,
+      <PipelineStep
+        key={`step-${i}`}
+        icon={step.icon}
+        title={step.title}
+        sub={step.sub}
+        tone={levelSatisfied ? resolvedTone : "idle"}
+        levelLabel={levelReq}
+        levelSatisfied={levelSatisfied}
+      />,
     );
     if (!isLast) {
-      nodes.push(<PipelineRail key={`rail-${i}`} pulse={active} />);
+      nodes.push(
+        <PipelineRail key={`rail-${i}`} pulse={active && levelSatisfied} />,
+      );
     }
   });
+
   return (
-    <div className="flex items-center w-full max-w-4xl mx-auto justify-between relative px-2 py-10">
+    <div className="flex items-center w-full max-w-4xl mx-auto justify-between relative px-2 py-6">
       {nodes}
     </div>
   );
@@ -801,7 +965,9 @@ function PipelineRail({ pulse }: { pulse: boolean }) {
     <div
       className="flex-1 h-[2px] mx-3 relative"
       style={{
-        backgroundImage: "linear-gradient(90deg, #3b82f6 50%, transparent 50%)",
+        backgroundImage: pulse
+          ? "linear-gradient(90deg, #3b82f6 50%, transparent 50%)"
+          : "linear-gradient(90deg, #334155 50%, transparent 50%)",
         backgroundSize: "8px 1px",
       }}
     >
@@ -813,12 +979,14 @@ function PipelineRail({ pulse }: { pulse: boolean }) {
 }
 
 function PipelineStep({
-  icon, title, sub, tone,
+  icon, title, sub, tone, levelLabel, levelSatisfied,
 }: {
   icon: string;
   title: string;
   sub: string;
   tone: "idle" | "active" | "alert";
+  levelLabel?: string;
+  levelSatisfied?: boolean;
 }) {
   const toneClass =
     tone === "alert"
@@ -827,16 +995,28 @@ function PipelineStep({
         ? "bg-blue-600/10 border-blue-500 text-blue-400"
         : "bg-slate-900 border-slate-700 text-slate-300";
 
+  const dimmed = levelLabel && !levelSatisfied;
+
   return (
-    <div className="z-10 flex flex-col items-center gap-3">
+    <div className={`z-10 flex flex-col items-center gap-2 ${dimmed ? "opacity-35" : ""}`}>
       <div
         className={`w-16 h-16 rounded-xl border-2 flex items-center justify-center shadow-2xl ${toneClass} ${tone === "alert" ? "animate-pulse" : ""}`}
       >
         <span className="text-3xl">{icon}</span>
       </div>
       <div className="text-center">
-        <div className="text-[11px] font-bold text-white">{title}</div>
-        <div className="text-[9px] text-slate-500">{sub}</div>
+        <div className="text-sm font-bold text-white whitespace-pre-line leading-tight">{title}</div>
+        <div className="text-xs text-slate-500 whitespace-pre-line leading-tight mt-0.5">{sub}</div>
+        {/* 레벨 조건 뱃지 */}
+        {levelLabel && (
+          <span className={`inline-block mt-1 text-xs px-1.5 py-0.5 rounded border font-mono ${
+            levelSatisfied
+              ? "text-green-400 border-green-700/50 bg-green-950/30"
+              : "text-slate-600 border-slate-700 bg-slate-900"
+          }`}>
+            {levelLabel}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -870,11 +1050,11 @@ function LogCard({
         onClick={onToggle}
       >
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-bold flex-shrink-0" style={{ color }}>
+          <span className="text-sm font-bold flex-shrink-0" style={{ color }}>
             {meta?.name ?? log.agent_id}
           </span>
           <span
-            className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 border ${
+            className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 border ${
               isAI
                 ? "bg-violet-900/40 text-violet-300 border-violet-800/50"
                 : "bg-slate-800/60 text-slate-400 border-slate-700/40"
@@ -882,19 +1062,19 @@ function LogCard({
           >
             {isAI ? "AI" : "Rule"}
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/40 flex-shrink-0">
+          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/40 flex-shrink-0">
             {ALERT_TYPE_KR[log.alert_type] ?? log.alert_type}
           </span>
-          <span className={`text-[10px] font-bold flex-shrink-0 px-1.5 py-0.5 rounded ${sev.badge}`}>
+          <span className={`text-xs font-bold flex-shrink-0 px-1.5 py-0.5 rounded ${sev.badge}`}>
             {sev.label}
           </span>
           {isFallback && (
-            <span className="text-[10px] text-amber-400/60 flex-shrink-0">fallback</span>
+            <span className="text-xs text-amber-400/60 flex-shrink-0">fallback</span>
           )}
-          <span className="ml-auto text-[10px] text-slate-500 flex-shrink-0">
+          <span className="ml-auto text-xs text-slate-500 flex-shrink-0">
             {formatDistanceToNow(new Date(log.timestamp), { addSuffix: true, locale: ko })}
           </span>
-          <span className={`text-slate-400 text-[10px] transition-transform flex-shrink-0 ${expanded ? "rotate-90" : ""}`}>
+          <span className={`text-slate-400 text-xs transition-transform flex-shrink-0 ${expanded ? "rotate-90" : ""}`}>
             ▶
           </span>
         </div>
@@ -921,16 +1101,16 @@ function LogCard({
           </div>
         ) : (
           <>
-            <p className="mt-1.5 text-xs text-slate-300 leading-snug line-clamp-1">{log.message}</p>
+            <p className="mt-1.5 text-sm text-slate-300 leading-snug line-clamp-1">{log.message}</p>
             {log.platform_ids.length > 0 && (
               <div className="flex gap-1 mt-1.5 flex-wrap">
                 {log.platform_ids.slice(0, 4).map((id) => (
-                  <span key={id} className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono border border-slate-700/30">
+                  <span key={id} className="text-xs px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono border border-slate-700/30">
                     {getPlatformName(id)}
                   </span>
                 ))}
                 {log.platform_ids.length > 4 && (
-                  <span className="text-[10px] text-slate-400">+{log.platform_ids.length - 4}</span>
+                  <span className="text-xs text-slate-400">+{log.platform_ids.length - 4}</span>
                 )}
               </div>
             )}
@@ -1047,8 +1227,8 @@ function InfoCell({
 }) {
   return (
     <div className="bg-slate-900/50 border border-slate-800 p-2 rounded">
-      <div className="text-[9px] text-slate-500 uppercase font-bold mb-0.5">{label}</div>
-      <div className={`text-[11px] font-mono font-bold ${color ?? "text-slate-300"}`}>{value}</div>
+      <div className="text-xs text-slate-500 uppercase font-bold mb-0.5">{label}</div>
+      <div className={`text-sm font-mono font-bold ${color ?? "text-slate-300"}`}>{value}</div>
     </div>
   );
 }
@@ -1062,7 +1242,7 @@ function FlowRow({
   color: string;
 }) {
   return (
-    <div className="flex items-start gap-1.5 text-[11px]">
+    <div className="flex items-start gap-1.5 text-sm">
       <span className={`${color} flex-shrink-0 mt-0.5`}>{icon}</span>
       <div>
         <span className="text-slate-500">{label}: </span>
@@ -1083,7 +1263,7 @@ function DetailSection({
   const accentColor = { ocean: "text-slate-400", cyan: "text-cyan-400", amber: "text-amber-400" }[accent];
   return (
     <div className="px-4 py-2.5 border-t border-slate-800/30">
-      <div className={`flex items-center gap-1.5 text-xs font-semibold mb-2 ${accentColor}`}>
+      <div className={`flex items-center gap-1.5 text-sm font-semibold mb-2 ${accentColor}`}>
         <span>{icon}</span>
         <span>{title}</span>
       </div>
@@ -1094,7 +1274,7 @@ function DetailSection({
 
 function DataRow({ label, value, highlight }: { label: string; value: string; highlight?: string }) {
   return (
-    <div className="flex items-start gap-2 text-xs">
+    <div className="flex items-start gap-2 text-sm">
       <span className="text-slate-500 flex-shrink-0 w-24">{label}</span>
       <span className="text-slate-300 leading-snug" style={highlight ? { color: highlight } : undefined}>
         {value}
@@ -1113,7 +1293,7 @@ function MetricBadge({ label, value, sev }: { label: string; value: string; sev:
   return (
     <div className={`rounded px-2.5 py-1.5 border ${color} text-center`}>
       <div className="text-xs opacity-60">{label}</div>
-      <div className="text-sm font-mono font-bold">{value}</div>
+      <div className="text-base font-mono font-bold">{value}</div>
     </div>
   );
 }
