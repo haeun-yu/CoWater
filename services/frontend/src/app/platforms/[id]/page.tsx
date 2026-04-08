@@ -1,11 +1,12 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
-import type { Alert, AlertSeverity } from "@/types";
+import { getCoreApiUrl } from "@/lib/publicUrl";
+import type { Alert, AlertSeverity, PlatformSpatialContext, PlatformZoneDwell } from "@/types";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
 
@@ -55,25 +56,68 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
   const select = usePlatformStore((s) => s.select);
   const alerts = useAlertStore((s) => s.alerts);
   const acknowledge = useAlertStore((s) => s.acknowledge);
+  const [spatialContext, setSpatialContext] = useState<PlatformSpatialContext | null>(null);
+  const [zoneDwell, setZoneDwell] = useState<PlatformZoneDwell | null>(null);
+  const [spatialLoading, setSpatialLoading] = useState(false);
 
   const p = platforms[platformId];
   const allAlerts = alerts.filter((a) => a.platform_ids.includes(platformId));
   const activeAlerts = allAlerts.filter((a) => a.status === "new");
   const pastAlerts = allAlerts.filter((a) => a.status !== "new");
 
-  // 주변 선박 (5nm 이내 — 간단히 좌표 차이로 근사)
-  const nearbyPlatforms = p ? Object.values(platforms).filter((other) => {
-    if (other.platform_id === platformId) return false;
-    if (other.lat == null || other.lon == null || p.lat == null || p.lon == null) return false;
-    const dlat = Math.abs(other.lat - p.lat);
-    const dlon = Math.abs(other.lon - p.lon);
-    return dlat < 0.08 && dlon < 0.08; // ~5nm 근사
-  }).slice(0, 8) : [];
+  useEffect(() => {
+    if (!p) return;
+    const timer = window.setTimeout(() => select(platformId), 100);
+    return () => window.clearTimeout(timer);
+  }, [p, platformId, select]);
 
-  // 지도에서 이 선박 선택
-  if (p) {
-    setTimeout(() => select(platformId), 100);
-  }
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSpatialContext = async () => {
+      setSpatialLoading(true);
+      try {
+        const [contextResponse, dwellResponse] = await Promise.all([
+          fetch(
+            `${getCoreApiUrl()}/platforms/${encodeURIComponent(platformId)}/spatial-context?radius_nm=5&platform_limit=8&zone_limit=8`,
+          ),
+          fetch(
+            `${getCoreApiUrl()}/platforms/${encodeURIComponent(platformId)}/zone-dwell?limit=5`,
+          ),
+        ]);
+        if (!contextResponse.ok) {
+          throw new Error(`spatial context request failed (${contextResponse.status})`);
+        }
+        const [contextPayload, dwellPayload] = await Promise.all([
+          contextResponse.json() as Promise<PlatformSpatialContext>,
+          dwellResponse.ok ? dwellResponse.json() as Promise<PlatformZoneDwell> : Promise.resolve(null),
+        ]);
+        if (!cancelled) {
+          setSpatialContext(contextPayload);
+          setZoneDwell(dwellPayload);
+        }
+      } catch {
+        if (!cancelled) {
+          setSpatialContext(null);
+          setZoneDwell(null);
+        }
+      } finally {
+        if (!cancelled) setSpatialLoading(false);
+      }
+    };
+
+    void loadSpatialContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [platformId, p?.last_seen]);
+
+  const nearbyPlatforms = spatialContext?.nearby_platforms ?? [];
+  const nearbyZones = spatialContext?.nearby_zones ?? [];
+  const nearestFairway = spatialContext?.nearest_fairway ?? null;
+  const activeZoneSessions = zoneDwell?.active_sessions ?? [];
+  const recentZoneSessions = zoneDwell?.recent_sessions ?? [];
 
   if (!p) {
     return (
@@ -167,35 +211,115 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
           </section>
 
           {/* 주변 선박 */}
-          {nearbyPlatforms.length > 0 && (
+          {(spatialLoading || nearbyPlatforms.length > 0) && (
             <section className="px-4 py-3 border-b border-ocean-900">
-              <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">주변 선박 (~5nm)</div>
-              <div className="space-y-1.5">
-                {nearbyPlatforms.map((np) => {
-                  const ntype = np.platform_type ?? "vessel";
-                  const ncolor = TYPE_COLOR[ntype] ?? "#2e8dd4";
-                  const nAlerts = alerts.filter((a) => a.status === "new" && a.platform_ids.includes(np.platform_id)).length;
-                  return (
-                    <button
-                      key={np.platform_id}
-                      onClick={() => router.push(`/platforms/${encodeURIComponent(np.platform_id)}`)}
-                      className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-ocean-800/50 transition-colors"
-                    >
-                      <span style={{ color: ncolor }} className="text-sm flex-shrink-0">{TYPE_ICON[ntype]}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-ocean-200 truncate">
-                          {np.name && np.name !== np.platform_id ? np.name : formatId(np.platform_id)}
+              <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">주변 선박 (PostGIS · 5nm)</div>
+              {spatialLoading ? (
+                <div className="text-xs text-ocean-500">공간 컨텍스트 계산 중…</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {nearbyPlatforms.map((np) => {
+                    const ntype = np.platform_type ?? "vessel";
+                    const ncolor = TYPE_COLOR[ntype] ?? "#2e8dd4";
+                    const nAlerts = alerts.filter((a) => a.status === "new" && a.platform_ids.includes(np.platform_id)).length;
+                    return (
+                      <button
+                        key={np.platform_id}
+                        onClick={() => router.push(`/platforms/${encodeURIComponent(np.platform_id)}`)}
+                        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-ocean-800/50 transition-colors"
+                      >
+                        <span style={{ color: ncolor }} className="text-sm flex-shrink-0">{TYPE_ICON[ntype]}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-ocean-200 truncate">
+                            {np.name && np.name !== np.platform_id ? np.name : formatId(np.platform_id)}
+                          </div>
+                          <div className="text-xs text-ocean-400 font-mono">
+                            {np.distance_nm.toFixed(2)}nm · {np.sog != null ? `${np.sog.toFixed(1)}kt` : "—"}
+                          </div>
                         </div>
-                        <div className="text-xs text-ocean-400 font-mono">
-                          {np.sog != null ? `${np.sog.toFixed(1)}kt` : "—"}
-                        </div>
+                        {nAlerts > 0 && (
+                          <span className="text-xs text-red-400 font-bold">{nAlerts}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* 공간 컨텍스트 */}
+          {(spatialLoading || nearbyZones.length > 0 || nearestFairway) && (
+            <section className="px-4 py-3 border-b border-ocean-900">
+              <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">공간 컨텍스트</div>
+              {spatialContext && (
+                <div className="mb-2 rounded border border-ocean-800 bg-ocean-900/60 px-2.5 py-2 text-xs space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-ocean-500">항로 상태</span>
+                    <span className={spatialContext.in_fairway ? "text-green-400 font-medium" : "text-yellow-300 font-medium"}>
+                      {spatialContext.in_fairway ? "fairway/TSS 내" : "fairway 이탈"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-ocean-500">항로 이탈 거리</span>
+                    <span className="text-ocean-200 font-mono">
+                      {spatialContext.route_deviation_nm != null ? `${spatialContext.route_deviation_nm.toFixed(2)}nm` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-ocean-500">최근 fairway</span>
+                    <span className="text-ocean-200 truncate max-w-[10rem] text-right">
+                      {nearestFairway ? `${nearestFairway.name} (${nearestFairway.distance_nm.toFixed(2)}nm)` : "—"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {spatialLoading ? (
+                <div className="text-xs text-ocean-500">구역/항로 거리 계산 중…</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {nearbyZones.map((zone) => (
+                    <div key={zone.zone_id} className="rounded border border-ocean-800 bg-ocean-900/50 px-2.5 py-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-ocean-200 truncate">{zone.name}</div>
+                        <span className={zone.contains_platform ? "text-red-300 font-medium" : "text-ocean-400 font-mono"}>
+                          {zone.contains_platform ? "내부" : `${zone.distance_nm.toFixed(2)}nm`}
+                        </span>
                       </div>
-                      {nAlerts > 0 && (
-                        <span className="text-xs text-red-400 font-bold">{nAlerts}</span>
-                      )}
-                    </button>
-                  );
-                })}
+                      <div className="mt-0.5 text-ocean-500 uppercase tracking-wider">{zone.zone_type}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* 구역 체류 이력 */}
+          {(activeZoneSessions.length > 0 || recentZoneSessions.length > 0) && (
+            <section className="px-4 py-3 border-b border-ocean-900">
+              <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">구역 체류 이력</div>
+              <div className="space-y-1.5">
+                {activeZoneSessions.map((session) => (
+                  <div key={`${session.zone_id}-${session.entered_at}`} className="rounded border border-red-500/30 bg-red-500/8 px-2.5 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-red-300 font-medium truncate">{session.zone_name}</span>
+                      <span className="text-red-200 font-mono">{session.dwell_minutes?.toFixed(1)}분</span>
+                    </div>
+                    <div className="mt-0.5 text-red-200/80 uppercase tracking-wider">진입 중 · {session.zone_type ?? "zone"}</div>
+                  </div>
+                ))}
+                {recentZoneSessions.map((session) => (
+                  <div key={`${session.zone_id}-${session.entered_at}`} className="rounded border border-ocean-800 bg-ocean-900/50 px-2.5 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-ocean-200 truncate">{session.zone_name}</span>
+                      <span className="text-ocean-400 font-mono">{session.dwell_minutes?.toFixed(1)}분</span>
+                    </div>
+                    <div className="mt-0.5 text-ocean-500">
+                      {format(new Date(session.entered_at), "MM/dd HH:mm")} → {session.exited_at ? format(new Date(session.exited_at), "MM/dd HH:mm") : "진입 중"}
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           )}

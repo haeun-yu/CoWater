@@ -2,6 +2,14 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
+import {
+  buffer as turfBuffer,
+  destination as turfDestination,
+  lineString as turfLineString,
+  point as turfPoint,
+  sector as turfSector,
+  simplify as turfSimplify,
+} from "@turf/turf";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useSystemStore } from "@/stores/systemStore";
@@ -20,10 +28,15 @@ import {
   MAP_OSM_OPACITY,
   MAP_OSM_TILE_URL,
   MAP_SELECT_FLY_DURATION,
+  MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG,
+  MAP_SELECTED_HEADING_SECTOR_RADIUS_NM,
   MAP_SELECT_MIN_ZOOM,
+  MAP_SELECTED_PREDICTION_MINUTES,
+  MAP_SELECTED_SAFETY_BUFFER_NM,
   MAP_SHIP_LAYER_MIN_ZOOM,
   MAP_TRACK_EASE_DURATION,
   MAP_ZOOM,
+  MAP_HISTORY_SIMPLIFY_TOLERANCE_KM,
   OVERPASS_API_URL,
   PLATFORM_COLORS,
   PLATFORM_RENDER_METERS,
@@ -125,6 +138,14 @@ function toFeatureCollection(features: Array<PointFeature | PolygonFeature>) {
   return { type: "FeatureCollection" as const, features };
 }
 
+function emptyFeatureCollection() {
+  return { type: "FeatureCollection" as const, features: [] };
+}
+
+function nmToKm(value: number) {
+  return value * 1.852;
+}
+
 function metersToLon(meters: number, latitude: number) {
   const latRad = (latitude * Math.PI) / 180;
   const metersPerDegreeLon = 111_320 * Math.cos(latRad);
@@ -194,6 +215,58 @@ function buildBridgePolygon(platform: PlatformState, heading: number) {
       platform.lat + metersToLat(dyMeters),
     ] as LonLat;
   });
+}
+
+function buildSelectedSpatialData(platform: PlatformState | null) {
+  if (!platform || platform.lat == null || platform.lon == null) {
+    return {
+      safetyBuffer: emptyFeatureCollection(),
+      headingSector: emptyFeatureCollection(),
+      predictedPath: emptyFeatureCollection(),
+    };
+  }
+
+  const center = turfPoint([platform.lon, platform.lat], { platform_id: platform.platform_id });
+  const heading = platform.heading ?? platform.cog;
+
+  const safetyBuffer = turfBuffer(center, nmToKm(MAP_SELECTED_SAFETY_BUFFER_NM), { units: "kilometers" });
+
+  const headingSector = heading == null
+    ? emptyFeatureCollection()
+    : turfSector(
+        center,
+        nmToKm(MAP_SELECTED_HEADING_SECTOR_RADIUS_NM),
+        heading - MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2,
+        heading + MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2,
+        { units: "kilometers" },
+      );
+
+  const predictedPath = heading == null || !platform.sog || platform.sog <= 0
+    ? emptyFeatureCollection()
+    : turfLineString([
+        [platform.lon, platform.lat],
+        turfDestination(
+          center,
+          nmToKm(platform.sog * (MAP_SELECTED_PREDICTION_MINUTES / 60)),
+          heading,
+          { units: "kilometers" },
+        ).geometry.coordinates as LonLat,
+      ]);
+
+  return {
+    safetyBuffer: safetyBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
+    headingSector: headingSector as maplibregl.GeoJSONSourceSpecification["data"] & object,
+    predictedPath: predictedPath as maplibregl.GeoJSONSourceSpecification["data"] & object,
+  };
+}
+
+function simplifyHistoryLine(points: Array<{ lon: number; lat: number }>) {
+  if (points.length < 3) return points.map((p) => [p.lon, p.lat] as LonLat);
+  const simplified = turfSimplify(
+    turfLineString(points.map((p) => [p.lon, p.lat] as LonLat)),
+    { tolerance: MAP_HISTORY_SIMPLIFY_TOLERANCE_KM, highQuality: false },
+  );
+  return simplified.geometry.coordinates as LonLat[];
 }
 
 function buildPlatformSources(
@@ -341,6 +414,9 @@ function MaritimeMap() {
   const [navAidVisible, setNavAidVisible] = useState(true);
   const [fairwayVisible, setFairwayVisible] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
+  const [safetyBufferVisible, setSafetyBufferVisible] = useState(true);
+  const [headingSectorVisible, setHeadingSectorVisible] = useState(true);
+  const [predictionVisible, setPredictionVisible] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
 
@@ -420,6 +496,18 @@ function MaritimeMap() {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
+          "selected-safety-buffer": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "selected-heading-sector": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "selected-prediction": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
         },
         layers: [
           {
@@ -472,6 +560,62 @@ function MaritimeMap() {
           "line-width": 2,
           "line-opacity": 0.65,
           "line-dasharray": [3, 2],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-safety-buffer-fill",
+        type: "fill",
+        source: "selected-safety-buffer",
+        paint: {
+          "fill-color": "#38bdf8",
+          "fill-opacity": 0.08,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-safety-buffer-line",
+        type: "line",
+        source: "selected-safety-buffer",
+        paint: {
+          "line-color": "#38bdf8",
+          "line-width": 1.4,
+          "line-opacity": 0.55,
+          "line-dasharray": [3, 2],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-heading-sector-fill",
+        type: "fill",
+        source: "selected-heading-sector",
+        paint: {
+          "fill-color": "#f59e0b",
+          "fill-opacity": 0.12,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-heading-sector-line",
+        type: "line",
+        source: "selected-heading-sector",
+        paint: {
+          "line-color": "#fbbf24",
+          "line-width": 1.2,
+          "line-opacity": 0.65,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-prediction-line",
+        type: "line",
+        source: "selected-prediction",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#22c55e",
+          "line-width": 2,
+          "line-opacity": 0.7,
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -891,6 +1035,15 @@ function MaritimeMap() {
     }
   }, [platforms, selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const selectedPlatform = selectedId ? (platforms[selectedId] ?? null) : null;
+    const spatialData = buildSelectedSpatialData(selectedPlatform);
+    (mapRef.current.getSource("selected-safety-buffer") as GeoJSONSource | undefined)?.setData(spatialData.safetyBuffer);
+    (mapRef.current.getSource("selected-heading-sector") as GeoJSONSource | undefined)?.setData(spatialData.headingSector);
+    (mapRef.current.getSource("selected-prediction") as GeoJSONSource | undefined)?.setData(spatialData.predictedPath);
+  }, [platforms, selectedId, mapLoaded]);
+
   // ── 선택 선박 역사적 항적 (DB 조회) ──────────────────────────────────────
 
   useEffect(() => {
@@ -916,6 +1069,7 @@ function MaritimeMap() {
           src.setData({ type: "FeatureCollection", features: [] });
           return;
         }
+        const simplifiedCoordinates = simplifyHistoryLine(points);
         src.setData({
           type: "FeatureCollection",
           features: [
@@ -923,7 +1077,7 @@ function MaritimeMap() {
               type: "Feature",
               geometry: {
                 type: "LineString",
-                coordinates: points.map((p) => [p.lon, p.lat]),
+                coordinates: simplifiedCoordinates,
               },
               properties: {},
             },
@@ -985,11 +1139,37 @@ function MaritimeMap() {
     }
   }, [zoneVisible, mapLoaded]);
 
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const vis = safetyBufferVisible ? "visible" : "none";
+    for (const id of ["selected-safety-buffer-fill", "selected-safety-buffer-line"]) {
+      mapRef.current.setLayoutProperty(id, "visibility", vis);
+    }
+  }, [safetyBufferVisible, mapLoaded]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const vis = headingSectorVisible ? "visible" : "none";
+    for (const id of ["selected-heading-sector-fill", "selected-heading-sector-line"]) {
+      mapRef.current.setLayoutProperty(id, "visibility", vis);
+    }
+  }, [headingSectorVisible, mapLoaded]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.setLayoutProperty(
+      "selected-prediction-line",
+      "visibility",
+      predictionVisible ? "visible" : "none",
+    );
+  }, [predictionVisible, mapLoaded]);
+
   const platformCount = Object.keys(platforms).length;
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
   const activeNauticalLayerCount = Number(navAidVisible) + Number(fairwayVisible) + Number(seamarkVisible);
+  const activeSelectedOverlayCount = Number(safetyBufferVisible) + Number(headingSectorVisible) + Number(predictionVisible);
 
   return (
     <div className="relative w-full h-full">
@@ -1105,6 +1285,48 @@ function MaritimeMap() {
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
             />
           </button>
+
+          <button
+            onClick={() => setSafetyBufferVisible((v) => !v)}
+            title="선택 선박 안전 반경 표시"
+            aria-pressed={safetyBufferVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              safetyBufferVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${safetyBufferVisible ? "bg-sky-300" : "bg-ocean-700"}`} />
+            안전 반경
+          </button>
+
+          <button
+            onClick={() => setHeadingSectorVisible((v) => !v)}
+            title="선택 선박 진행 방향 sector 표시"
+            aria-pressed={headingSectorVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              headingSectorVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${headingSectorVisible ? "bg-amber-300" : "bg-ocean-700"}`} />
+            Heading sector
+          </button>
+
+          <button
+            onClick={() => setPredictionVisible((v) => !v)}
+            title="선택 선박 예상 진행선 표시"
+            aria-pressed={predictionVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              predictionVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${predictionVisible ? "bg-green-300" : "bg-ocean-700"}`} />
+            예측 경로
+          </button>
         </div>
 
         <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
@@ -1114,6 +1336,13 @@ function MaritimeMap() {
           </div>
           <div className="mt-1 text-ocean-400">
             주요 표지·Fairway는 <span className="font-mono">zoom {MAP_NAV_AID_FETCH_MIN_ZOOM}+</span>에서 자동 조회됩니다.
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 text-ocean-100">
+            <span className="font-medium">선택 선박 오버레이</span>
+            <span className="font-mono text-[10px] text-ocean-400">{activeSelectedOverlayCount}/3 활성</span>
+          </div>
+          <div className="mt-1 text-ocean-400">
+            Turf.js 기반 안전 반경, 진행 sector, {MAP_SELECTED_PREDICTION_MINUTES}분 예측 경로를 표시합니다.
           </div>
         </div>
       </div>
@@ -1151,6 +1380,19 @@ function MaritimeMap() {
         <div className="flex items-center gap-2">
           <span className="inline-block w-3 h-px bg-emerald-300" />
           <span className="text-emerald-200">Fairway 보조선</span>
+        </div>
+        <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">선택 선박</div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/70 bg-sky-400/20" />
+          <span className="text-sky-200">안전 반경</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-400/20" />
+          <span className="text-amber-200">Heading sector</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-px bg-green-300" />
+          <span className="text-green-200">예측 경로</span>
         </div>
         {zoneVisible && (
           <>

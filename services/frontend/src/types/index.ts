@@ -21,6 +21,61 @@ export interface PlatformState extends Platform {
   last_seen: string;   // ISO timestamp
 }
 
+export interface SpatialReferencePoint {
+  time: string;
+  lat: number;
+  lon: number;
+}
+
+export interface NearbyPlatform {
+  platform_id: string;
+  platform_type: PlatformType;
+  name: string;
+  lat: number;
+  lon: number;
+  sog: number | null;
+  cog: number | null;
+  heading: number | null;
+  nav_status: string | null;
+  distance_nm: number;
+}
+
+export interface NearbyZone {
+  zone_id: string;
+  name: string;
+  zone_type: string;
+  active: boolean;
+  contains_platform: boolean;
+  distance_nm: number;
+  rules: Record<string, unknown>;
+}
+
+export interface PlatformSpatialContext {
+  platform_id: string;
+  reference: SpatialReferencePoint;
+  nearby_platforms: NearbyPlatform[];
+  nearby_zones: NearbyZone[];
+  nearest_fairway: NearbyZone | null;
+  route_deviation_nm: number | null;
+  in_fairway: boolean;
+}
+
+export interface ZoneDwellSession {
+  zone_id: string;
+  zone_name: string;
+  zone_type: string | null;
+  entered_at: string;
+  exited_at: string | null;
+  dwell_minutes: number | null;
+  active: boolean;
+}
+
+export interface PlatformZoneDwell {
+  platform_id: string;
+  active_sessions: ZoneDwellSession[];
+  recent_sessions: ZoneDwellSession[];
+}
+
 export type AlertSeverity = "critical" | "warning" | "info";
 export type AlertStatus = "new" | "acknowledged" | "resolved";
 export type AlertType =
