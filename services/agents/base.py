@@ -45,6 +45,9 @@ class AlertPayload:
     metadata: dict = field(default_factory=dict)
     # 중복 방지 키 — 같은 문제면 동일값, 없으면 매번 새 경보
     dedup_key: str | None = None
+    # 자동 해제 키 — 이 경보 저장 시 해당 dedup_key의 활성 경보를 자동 resolve
+    # 예: AIS 복구 → ais_off:{pid} 경보 자동 해제
+    resolve_dedup_key: str | None = None
 
     alert_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_by: str = ""
@@ -74,6 +77,7 @@ class AlertPayload:
             "metadata": meta,
             "created_at": self.created_at,
             "dedup_key": self.dedup_key,
+            "resolve_dedup_key": self.resolve_dedup_key,
             "schema_version": ALERT_SCHEMA_VERSION,
         }
 

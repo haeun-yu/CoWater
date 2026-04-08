@@ -44,6 +44,9 @@ class PlatformReport:
     platform_type: str | None = None
     name: str | None = None
 
+    # 시뮬레이터 태그 — True이면 에이전트가 실경보 생성을 건너뛸 수 있다
+    is_simulator: bool = False
+
     # 원본 정보 보존
     source_protocol: Literal["ais", "ros", "mavlink", "nmea", "custom"] = "custom"
     raw_payload_b64: str | None = None
@@ -67,6 +70,7 @@ class PlatformReport:
             "platform_type": self.platform_type,
             "name": self.name,
             "source_protocol": self.source_protocol,
+            "is_simulator": self.is_simulator,
         }
         if self.raw_payload_b64 is not None:
             payload["raw_payload_b64"] = self.raw_payload_b64

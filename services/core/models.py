@@ -77,6 +77,8 @@ class AlertModel(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     recommendation: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default="{}")
+    # dedup_key: 전용 컬럼으로 인덱스 지원 (JSONB metadata에서 추출하는 것보다 빠름)
+    dedup_key: Mapped[str | None] = mapped_column(Text, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

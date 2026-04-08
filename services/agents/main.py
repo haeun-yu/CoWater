@@ -21,6 +21,7 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 from ai.anomaly_ai import AnomalyAIAgent
@@ -290,6 +291,8 @@ app = FastAPI(title="CoWater Agent Runtime", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
+Instrumentator().instrument(app).expose(app)
 
 
 # ── Agent 제어 API ────────────────────────────────────────────────────────────

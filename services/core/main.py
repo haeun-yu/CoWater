@@ -7,6 +7,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 
 from db import AsyncSessionLocal
@@ -92,6 +93,8 @@ app.include_router(platforms_router)
 app.include_router(alerts_router)
 app.include_router(zones_router)
 app.include_router(ws_router)
+
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")

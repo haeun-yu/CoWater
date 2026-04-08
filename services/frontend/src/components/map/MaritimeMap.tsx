@@ -7,6 +7,7 @@ import { useAlertStore } from "@/stores/alertStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
 import type { PlatformState } from "@/types";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import {
   ALERT_HIGHLIGHT_SEVERITY,
   ALERT_TRAIL_COLOR,
@@ -443,7 +444,38 @@ function MaritimeMap() {
     );
 
     map.on("load", () => {
-      // ── 항적 소스 + 레이어 ────────────────────────────────────────────
+      // ── 역사적 항적 소스 (선택된 선박 DB 이력) ─────────────────────────
+      map.addSource("history-trail", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "history-trail-casing",
+        type: "line",
+        source: "history-trail",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#0f172a",
+          "line-width": 4,
+          "line-opacity": 0.5,
+        },
+      });
+
+      map.addLayer({
+        id: "history-trail-line",
+        type: "line",
+        source: "history-trail",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#fbbf24",
+          "line-width": 2,
+          "line-opacity": 0.65,
+          "line-dasharray": [3, 2],
+        },
+      });
+
+      // ── 실시간 항적 소스 + 레이어 ────────────────────────────────────
       map.addSource("trails", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -858,6 +890,52 @@ function MaritimeMap() {
       mapRef.current.easeTo({ center: [p.lon, p.lat], duration: MAP_TRACK_EASE_DURATION });
     }
   }, [platforms, selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 선택 선박 역사적 항적 (DB 조회) ──────────────────────────────────────
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const src = map.getSource("history-trail") as GeoJSONSource | undefined;
+    if (!src) return;
+
+    if (!selectedId) {
+      src.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const url = `${getCoreApiUrl()}/platforms/${encodeURIComponent(selectedId)}/track?limit=500`;
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) return;
+        const points = (await res.json()) as Array<{ lon: number; lat: number }>;
+        if (controller.signal.aborted) return;
+        if (points.length < 2) {
+          src.setData({ type: "FeatureCollection", features: [] });
+          return;
+        }
+        src.setData({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: {
+                type: "LineString",
+                coordinates: points.map((p) => [p.lon, p.lat]),
+              },
+              properties: {},
+            },
+          ],
+        });
+      } catch {
+        // 취소 또는 네트워크 오류 — 무시
+      }
+    })();
+
+    return () => controller.abort();
+  }, [selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 해도 심볼(OpenSeaMap) 레이어 표시/숨김 ────────────────────────────────
 

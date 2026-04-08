@@ -3,6 +3,9 @@
 dedup_key가 있으면 동일 문제의 활성(status=new) 경보를 찾아 UPDATE.
 없거나 찾지 못하면 INSERT.
 
+resolve_dedup_key가 있으면 해당 dedup_key를 가진 활성 경보를 자동 resolve.
+예: AIS 복구 시 소실 경보 자동 해제, 구역 이탈 시 침입 경보 자동 해제.
+
 Race Condition 방지: SELECT ... FOR UPDATE로 행 잠금 후 UPDATE/INSERT 결정.
 동일 dedup_key를 가진 두 경보가 동시에 도착해도 중복 삽입되지 않는다.
 """
@@ -42,6 +45,9 @@ async def _handle_alert(data: dict) -> None:
     dedup_key: str | None = data.get("dedup_key") or data.get("metadata", {}).get(
         "dedup_key"
     )
+    resolve_dedup_key: str | None = data.get("resolve_dedup_key")
+    generated_by: str = data.get("generated_by", "")
+
     created_at_raw = data.get("created_at")
     created_at = None
     if created_at_raw:
@@ -53,6 +59,7 @@ async def _handle_alert(data: dict) -> None:
 
     updated_alert: AlertModel | None = None
     new_alert: AlertModel | None = None
+    auto_resolved: list[AlertModel] = []
 
     async with AsyncSessionLocal() as session:
         # SELECT FOR UPDATE로 트랜잭션 내 행 잠금 → 동시 요청 간 race condition 방지
@@ -65,8 +72,8 @@ async def _handle_alert(data: dict) -> None:
                     select(AlertModel)
                     .where(
                         AlertModel.status == "new",
-                        AlertModel.generated_by == data["generated_by"],
-                        AlertModel.metadata_["dedup_key"].astext == dedup_key,
+                        AlertModel.generated_by == generated_by,
+                        AlertModel.dedup_key == dedup_key,
                     )
                     .order_by(AlertModel.created_at.desc())
                     .limit(1)
@@ -94,7 +101,6 @@ async def _handle_alert(data: dict) -> None:
                 if changed:
                     updated_alert = existing
                 else:
-                    # 변경 없으면 DB/WS 작업 스킵 (트랜잭션은 정상 커밋)
                     logger.debug("Alert dedup: no change for key=%s", dedup_key)
 
             else:
@@ -106,15 +112,36 @@ async def _handle_alert(data: dict) -> None:
                     status=data.get("status", "new"),
                     platform_ids=data.get("platform_ids", []),
                     zone_id=data.get("zone_id"),
-                    generated_by=data["generated_by"],
+                    generated_by=generated_by,
                     message=data["message"],
                     recommendation=data.get("recommendation"),
                     metadata_=data.get("metadata", {}),
+                    dedup_key=dedup_key,
                     created_at=created_at,
                 )
                 session.add(alert)
                 new_alert = alert
-        # session.begin().__aexit__ → 자동 커밋
+
+            # resolve_dedup_key: 해당 key의 활성 경보를 자동 해제
+            if resolve_dedup_key:
+                resolve_result = await session.execute(
+                    select(AlertModel)
+                    .where(
+                        AlertModel.status.in_(["new", "acknowledged"]),
+                        AlertModel.generated_by == generated_by,
+                        AlertModel.dedup_key == resolve_dedup_key,
+                    )
+                    .with_for_update()
+                )
+                for row in resolve_result.scalars().all():
+                    row.status = "resolved"
+                    row.resolved_at = datetime.now(timezone.utc)
+                    auto_resolved.append(row)
+                    logger.info(
+                        "Alert auto-resolved: id=%s dedup_key=%s by %s",
+                        row.alert_id, resolve_dedup_key, data["alert_type"],
+                    )
+        # 자동 커밋
 
         # 커밋 이후 refresh 및 WS 브로드캐스트
         if updated_alert:
@@ -146,9 +173,17 @@ async def _handle_alert(data: dict) -> None:
             await hub.broadcast("alerts", ws_payload)
             logger.info("Alert created: id=%s key=%s", data["alert_id"], dedup_key)
 
+        # 자동 해제된 경보들 WS 브로드캐스트
+        for row in auto_resolved:
+            await session.refresh(row)
+            ws_payload = _to_ws_dict(row)
+            ws_payload["type"] = "alert_updated"
+            ws_payload["event"] = build_event("alert_updated", "core")
+            await hub.broadcast("alerts", ws_payload)
+
 
 def _to_ws_dict(alert: AlertModel) -> dict:
-    metadata = alert.metadata_ or {}
+    metadata = dict(alert.metadata_ or {})
     metadata.setdefault("source", "agent-runtime")
     metadata.setdefault(
         "produced_at",
