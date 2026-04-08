@@ -151,6 +151,8 @@ async def run_alert_action(
     지원 액션:
     - acknowledge
     - resolve
+    - start_investigation
+    - escalate
     - notify_guard
     - request_course_change
     - request_speed_reduction
@@ -159,6 +161,8 @@ async def run_alert_action(
     allowed = {
         "acknowledge",
         "resolve",
+        "start_investigation",
+        "escalate",
         "notify_guard",
         "request_course_change",
         "request_speed_reduction",
@@ -181,6 +185,17 @@ async def run_alert_action(
         }
     )
     meta["actions"] = actions
+
+    if body.action == "start_investigation":
+        meta["workflow_state"] = "investigating"
+        meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
+    elif body.action == "escalate":
+        meta["workflow_state"] = "escalated"
+        meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
+    elif body.action == "resolve":
+        meta["workflow_state"] = "resolved"
+        meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
+
     row.metadata_ = meta
 
     if body.action == "acknowledge" and row.status == "new":
