@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import redis.asyncio as aioredis
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -607,4 +608,35 @@ async def generate_report(incident_id: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agents": len(_registry.all())}
+    redis_ok = False
+    core_ok = False
+
+    try:
+        if _redis is not None:
+            redis_ok = bool(await _redis.ping())
+    except Exception:
+        logger.exception("Agent health check: Redis ping failed")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{settings.core_api_url}/health")
+            core_ok = response.is_success
+    except Exception:
+        logger.exception("Agent health check: core API request failed")
+
+    agents = _registry.all()
+
+    return {
+        "status": "ok" if redis_ok and core_ok else "degraded",
+        "agents": len(agents),
+        "agent_counts": {
+            "rule": sum(1 for agent in agents if agent.agent_type == "rule"),
+            "ai": sum(1 for agent in agents if agent.agent_type == "ai"),
+            "enabled": len(_registry.enabled()),
+        },
+        "pending_ai_tasks": len(_pending_ai_tasks),
+        "dependencies": {
+            "redis": "ok" if redis_ok else "error",
+            "core_api": "ok" if core_ok else "error",
+        },
+    }
