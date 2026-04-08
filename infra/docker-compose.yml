@@ -48,8 +48,8 @@ services:
   # ─────────────────────────────────────────────────────
   core:
     build:
-      context: ../services/core
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/core/Dockerfile
     container_name: cowater-core
     restart: unless-stopped
     environment:
@@ -69,8 +69,8 @@ services:
   # ─────────────────────────────────────────────────────
   moth-bridge:
     build:
-      context: ../services/moth-bridge
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/moth-bridge/Dockerfile
     container_name: cowater-moth-bridge
     restart: unless-stopped
     environment:
