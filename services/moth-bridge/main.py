@@ -25,6 +25,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _redis_write_with_retry(operation, *, label: str) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            await operation()
+            return
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Redis write failed: %s attempt=%s", label, attempt, exc_info=exc
+            )
+            if attempt < 3:
+                await asyncio.sleep(0.2 * attempt)
+
+    assert last_error is not None
+    raise last_error
+
+
 def _raw_payload_protocols() -> set[str]:
     return {
         protocol.strip().lower()
@@ -55,7 +73,10 @@ async def _raw_payload_fields(
         return encoded, None, truncated
 
     cache_key = f"platform:raw:{report.platform_id}:{report.timestamp.isoformat()}"
-    await redis.set(cache_key, encoded, ex=settings.raw_payload_ttl_sec)
+    await _redis_write_with_retry(
+        lambda: redis.set(cache_key, encoded, ex=settings.raw_payload_ttl_sec),
+        label=f"raw-payload:{report.platform_id}",
+    )
     return None, cache_key, truncated
 
 
@@ -104,11 +125,17 @@ async def run_moth(redis: aioredis.Redis) -> None:
                 raw_payload_truncated=raw_payload_truncated,
             )
         )
-        await redis.publish(channel_key, payload)
+        await _redis_write_with_retry(
+            lambda: redis.publish(channel_key, payload),
+            label=f"publish:{report.platform_id}",
+        )
 
         # 최신 상태 캐시 (TTL 60s)
         cache_key = f"platform:state:{report.platform_id}"
-        await redis.set(cache_key, payload, ex=60)
+        await _redis_write_with_retry(
+            lambda: redis.set(cache_key, payload, ex=60),
+            label=f"platform-state:{report.platform_id}",
+        )
 
         # 2) WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)
         await broadcast(report)
