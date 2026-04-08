@@ -7,7 +7,7 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 const NAV = [
   { href: "/", label: "대시보드", icon: "◈" },
@@ -35,6 +35,18 @@ export default function NavBar() {
     fmt();
     const id = setInterval(fmt, 1000);
     return () => clearInterval(id);
+  }, []);
+
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  useEffect(() => {
+    setSoundEnabled(localStorage.getItem("cowater-alert-sound") !== "false");
+  }, []);
+  const toggleSound = useCallback(() => {
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      localStorage.setItem("cowater-alert-sound", String(next));
+      return next;
+    });
   }, []);
 
   const platformValues = Object.values(platforms);
@@ -124,6 +136,14 @@ export default function NavBar() {
            <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
            <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
          </div>
+         <button
+           onClick={toggleSound}
+           title={soundEnabled ? "경보음 켜짐 — 클릭하여 끄기" : "경보음 꺼짐 — 클릭하여 켜기"}
+           aria-pressed={soundEnabled}
+           className={`text-sm transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
+         >
+           {soundEnabled ? "🔔" : "🔕"}
+         </button>
          <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
        </div>
       </header>
