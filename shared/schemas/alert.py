@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 import uuid
 
@@ -22,17 +22,17 @@ AlertStatus = Literal["new", "acknowledged", "resolved"]
 class Alert:
     alert_type: AlertType
     severity: AlertSeverity
-    generated_by: str               # Agent ID
+    generated_by: str  # Agent ID
     message: str
     platform_ids: list[str] = field(default_factory=list)
     zone_id: str | None = None
-    recommendation: str | None = None   # AI Agent 권고사항
+    recommendation: str | None = None  # AI Agent 권고사항
     metadata: dict = field(default_factory=dict)
 
     # 자동 생성
     alert_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: AlertStatus = "new"
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
 

@@ -15,9 +15,16 @@ export const MAP_CENTER: [number, number] = [
   Number(process.env.NEXT_PUBLIC_MAP_LAT ?? 34.75),
 ];
 export const MAP_ZOOM = Number(process.env.NEXT_PUBLIC_MAP_ZOOM ?? 8);
+export const MAP_OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const MAP_OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+export const MAP_OPENSEAMAP_SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
+export const MAP_OPENSEAMAP_ATTRIBUTION = "© OpenSeaMap contributors";
 
 /** OSM 기본 타일 불투명도 (0~1) */
 export const MAP_OSM_OPACITY = 0.35;
+export const MAP_SHIP_LAYER_MIN_ZOOM = 9;
+export const MAP_CLUSTER_MAX_ZOOM = 8;
+export const MAP_NAV_AID_FETCH_MIN_ZOOM = 9;
 
 /** 선박 선택 시 최소 줌 레벨 */
 export const MAP_SELECT_MIN_ZOOM = 11;
@@ -86,6 +93,19 @@ export const PLATFORM_DIMS: Record<string, { L: number; W: number }> = {
   buoy:   { L: 12, W: 12 },
 };
 
+/** 지도 위 선박 실루엣 렌더링용 상대 길이/폭(m) */
+export const PLATFORM_RENDER_METERS: Record<string, { length: number; beam: number }> = {
+  vessel: { length: 90, beam: 18 },
+  usv: { length: 28, beam: 8 },
+  rov: { length: 16, beam: 10 },
+  auv: { length: 22, beam: 7 },
+  drone: { length: 14, beam: 10 },
+  buoy: { length: 10, beam: 10 },
+};
+
+export const OVERPASS_API_URL =
+  process.env.NEXT_PUBLIC_OVERPASS_API_URL ?? "https://overpass-api.de/api/interpreter";
+
 /** zoom 스케일 배율 기저 (zoom 9 → 1.0, zoom 11 → ~2.0) */
 export const ZOOM_SCALE_BASE = 1.42;
 /** zoom 스케일 기준 줌 레벨 */
@@ -100,5 +120,6 @@ export const ICON_PAD = 4;
 
 /** 연결 끊김 후 재연결 대기 시간 (ms) */
 export const WS_RECONNECT_DELAY_MS = 3000;
+export const WS_RECONNECT_MAX_DELAY_MS = 30000;
 /** ping 전송 주기 (ms) */
 export const WS_PING_INTERVAL_MS = 20_000;

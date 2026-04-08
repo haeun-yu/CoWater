@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
+import { useSystemStore } from "@/stores/systemStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import Link from "next/link";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -42,25 +43,50 @@ export default function DashboardAlertPanel() {
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const platforms = usePlatformStore((s) => s.platforms);
+  const alertStream = useSystemStore((s) => s.streams.alert);
+  const alertLoad = useSystemStore((s) => s.initialData.alerts);
+  const toastPush = useToastStore((s) => s.push);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<AlertSeverity | "all">("all");
+  const [pendingAlertId, setPendingAlertId] = useState<string | null>(null);
 
-  const newAlerts = alerts.filter((a) => a.status === "new");
+  const newAlerts = useMemo(() => alerts.filter((a) => a.status === "new"), [alerts]);
   const critical = newAlerts.filter((a) => a.severity === "critical").length;
   const warning = newAlerts.filter((a) => a.severity === "warning").length;
   const info = newAlerts.filter((a) => a.severity === "info").length;
 
   // 대시보드: 미확인만, 최신 30건
-  const displayed = newAlerts.slice(0, 30);
+  const displayed = useMemo(
+    () =>
+      (filter === "all" ? newAlerts : newAlerts.filter((alert) => alert.severity === filter)).slice(0, 30),
+    [filter, newAlerts],
+  );
 
   async function acknowledge(alertId: string) {
-    const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "acknowledge" }),
-    });
-    if (!res.ok) return;
-    const updated = (await res.json()) as Alert;
-    updateAlert(updated);
+    setPendingAlertId(alertId);
+    try {
+      const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "acknowledge" }),
+      });
+      if (!res.ok) {
+        throw new Error(`acknowledge failed: ${res.status}`);
+      }
+      const updated = (await res.json()) as Alert;
+      updateAlert(updated);
+    } catch (error) {
+      console.error("[alerts] acknowledge failed", error);
+      toastPush({
+        severity: "warning",
+        agentName: "시스템",
+        alertType: "경보 처리",
+        message: "경보 인지 처리에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        platformIds: [],
+      });
+    } finally {
+      setPendingAlertId((current) => (current === alertId ? null : current));
+    }
   }
 
   function getPlatformName(id: string) {
@@ -86,6 +112,9 @@ export default function DashboardAlertPanel() {
             전체 보기 →
           </Link>
         </div>
+        <div className="mb-2 text-[11px] text-ocean-500">
+          경보 스트림: {alertStream.status === "connected" ? "정상" : alertStream.status === "reconnecting" ? "재연결 중" : alertStream.status === "error" ? "오류" : "연결 중"}
+        </div>
         {/* 카운트 배지 */}
         <div className="flex gap-2">
           {critical > 0 && (
@@ -108,6 +137,20 @@ export default function DashboardAlertPanel() {
             <span className="text-xs text-green-400">경보 없음 ✓</span>
           )}
         </div>
+        {newAlerts.length > 0 && (
+          <div className="mt-2 flex gap-1">
+            {(["all", "critical", "warning", "info"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFilter(value)}
+                className={`rounded px-2 py-0.5 text-[11px] transition-colors ${filter === value ? "bg-ocean-700 text-ocean-100" : "bg-ocean-900/70 text-ocean-500 hover:text-ocean-300"}`}
+              >
+                {value === "all" ? "전체" : SEVERITY_LABEL[value]}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 경보 목록 */}
@@ -115,7 +158,13 @@ export default function DashboardAlertPanel() {
         {displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 gap-2 text-ocean-400">
             <span className="text-lg">✓</span>
-            <span className="text-xs">미확인 경보 없음</span>
+            <span className="text-xs">
+              {alertLoad.status === "loading"
+                ? "경보 로딩 중..."
+                : alertLoad.status === "error"
+                  ? "경보 로드 실패"
+                  : "미확인 경보 없음"}
+            </span>
           </div>
         ) : (
           displayed.map((alert) => {
@@ -130,6 +179,8 @@ export default function DashboardAlertPanel() {
                   onClick={() =>
                     setExpanded(isExpanded ? null : alert.alert_id)
                   }
+                  aria-expanded={isExpanded}
+                  aria-controls={`dashboard-alert-${alert.alert_id}`}
                 >
                   <div className="flex items-start gap-2">
                     <span
@@ -160,7 +211,7 @@ export default function DashboardAlertPanel() {
                 </button>
 
                 {isExpanded && (
-                  <div className="px-3 pb-2.5 space-y-2">
+                  <div id={`dashboard-alert-${alert.alert_id}`} className="px-3 pb-2.5 space-y-2">
                     {alert.platform_ids.length > 0 && (
                       <div className="flex gap-1 flex-wrap">
                         {alert.platform_ids.map((id) => (
@@ -188,9 +239,10 @@ export default function DashboardAlertPanel() {
                     )}
                     <button
                       onClick={() => acknowledge(alert.alert_id)}
+                      disabled={pendingAlertId === alert.alert_id}
                       className="text-xs px-2.5 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
                     >
-                      인지 처리
+                      {pendingAlertId === alert.alert_id ? "처리 중..." : "인지 처리"}
                     </button>
                   </div>
                 )}

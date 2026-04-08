@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { getAgentsApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
-
-const AGENTS_URL = process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:7701";
 
 interface Message {
   id: string;
@@ -44,7 +43,7 @@ export default function ChatDrawer() {
 
   // 현재 LLM 모델 조회
   useEffect(() => {
-    fetch(`${AGENTS_URL}/agents/chat-agent`)
+      fetch(`${getAgentsApiUrl()}/agents/chat-agent`)
       .then((r) => r.json())
       .then((d) => { if (d.model_name) setCurrentModel(d.model_name); })
       .catch(() => {});
@@ -97,7 +96,7 @@ export default function ChatDrawer() {
         content: m.content,
       }));
 
-      const res = await fetch(`${AGENTS_URL}/chat/stream`, {
+      const res = await fetch(`${getAgentsApiUrl()}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

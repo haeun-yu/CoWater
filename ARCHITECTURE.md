@@ -228,7 +228,7 @@ class PlatformReport:
     rot:            float | None          # Rate of Turn
     # 상태
     nav_status:     str | None            # AIS Nav Status (0-15)
-    # 원본 보존
+    # 원본 보존 (정책 기반)
     source_protocol: str
     raw_payload:    bytes | None
 ```
@@ -600,8 +600,9 @@ POST   /replay/sessions                  # 재생 세션 생성
 GET    /replay/sessions/{id}/stream      # WebSocket 재생 스트리밍
 
 # WebSocket 실시간
-WS     /ws/platforms                     # 실시간 플랫폼 상태
+WS     /ws/positions                     # moth-bridge fast path 위치 스트림
 WS     /ws/alerts                        # 실시간 경보
+WS     /ws/platforms                     # core canonical 플랫폼 상태
 WS     /ws/replay/{session_id}           # 재생 스트림
 ```
 
@@ -614,7 +615,7 @@ WS     /ws/replay/{session_id}           # 재생 스트림
 | **Moth Bridge** | Python 3.12 + asyncio + websockets | 비동기 다중 채널 구독 |
 | **Core Backend** | FastAPI + Uvicorn | 고성능 비동기 API, WebSocket 지원 |
 | **Agent Runtime** | Python 3.12 + asyncio | Anthropic SDK 네이티브 지원 |
-| **AI Agents** | Anthropic Claude SDK | claude-sonnet-4-6 |
+| **AI Agents** | Anthropic Claude SDK | claude-haiku-4-5-20251001 |
 | **Simulator** | Python 3.12 + pyais | AIS 표준 인코딩 |
 | **DB (공간)** | PostgreSQL 15 + PostGIS | Zone 지형 쿼리 |
 | **DB (시계열)** | TimescaleDB | 위치 데이터 시계열 최적화 |

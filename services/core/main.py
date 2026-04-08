@@ -7,7 +7,9 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
+from db import AsyncSessionLocal
 from api.alerts import router as alerts_router
 from api.platforms import router as platforms_router
 from api.ws import router as ws_router
@@ -94,4 +96,26 @@ app.include_router(ws_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    redis_ok = False
+    database_ok = False
+
+    try:
+        redis = await get_redis()
+        redis_ok = bool(await redis.ping())
+    except Exception:
+        logger.exception("Core health check: Redis ping failed")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+            database_ok = True
+    except Exception:
+        logger.exception("Core health check: database query failed")
+
+    return {
+        "status": "ok" if redis_ok and database_ok else "degraded",
+        "dependencies": {
+            "redis": "ok" if redis_ok else "error",
+            "database": "ok" if database_ok else "error",
+        },
+    }

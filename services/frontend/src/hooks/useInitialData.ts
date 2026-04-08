@@ -3,28 +3,64 @@
 import { useEffect } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
+import { useZoneStore, type Zone } from "@/stores/zoneStore";
+import { useSystemStore, type InitialDataKey } from "@/stores/systemStore";
+import { useToastStore } from "@/stores/toastStore";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, PlatformState } from "@/types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function useInitialData() {
   const upsert = usePlatformStore((s) => s.upsert);
   const setAlerts = useAlertStore((s) => s.setAll);
+  const setZones = useZoneStore((s) => s.setZones);
+  const setInitialDataStatus = useSystemStore((s) => s.setInitialDataStatus);
+  const toastPush = useToastStore((s) => s.push);
 
   useEffect(() => {
-    // 초기 플랫폼 메타데이터 로드 — setAll 대신 upsert로 병합
-    // (WS로 이미 들어온 lat/lon/sog 등 위치 데이터를 덮어쓰지 않기 위함)
-    fetch(`${API_URL}/platforms`)
-      .then((r) => r.json())
-      .then((data: PlatformState[]) => {
-        for (const p of data) upsert(p);
-      })
-      .catch(() => {});
+    const apiUrl = getCoreApiUrl();
+    const load = async <T,>(
+      path: string,
+      label: string,
+      key: InitialDataKey,
+    ): Promise<T | null> => {
+      setInitialDataStatus(key, "loading", { error: null });
+      try {
+        const response = await fetch(`${apiUrl}${path}`);
+        if (!response.ok) {
+          throw new Error(`${label} request failed: ${response.status}`);
+        }
+        const payload = await (response.json() as Promise<T>);
+        setInitialDataStatus(key, "ready", { error: null });
+        return payload;
+      } catch (error) {
+        console.error(`[initial-data] ${label} load failed`, error);
+        setInitialDataStatus(
+          key,
+          "error",
+          { error: error instanceof Error ? error.message : `${label} load failed` },
+        );
+        toastPush({
+          severity: "warning",
+          agentName: "시스템",
+          alertType: label,
+          message: `${label} 초기 데이터를 불러오지 못했습니다.`,
+          platformIds: [],
+        });
+        return null;
+      }
+    };
 
-    // 초기 경보 목록 로드
-    fetch(`${API_URL}/alerts?status=new&limit=50`)
-      .then((r) => r.json())
-      .then((data: Alert[]) => setAlerts(data))
-      .catch(() => {});
-  }, [upsert, setAlerts]);
+    void load<PlatformState[]>("/platforms", "플랫폼", "platforms").then((data) => {
+      if (!data) return;
+      for (const platform of data) upsert(platform);
+    });
+
+    void load<Alert[]>("/alerts?status=new&limit=50", "경보", "alerts").then((data) => {
+      if (data) setAlerts(data);
+    });
+
+    void load<Zone[]>("/zones?active_only=false", "구역", "zones").then((data) => {
+      if (data) setZones(data);
+    });
+  }, [upsert, setAlerts, setZones, toastPush, setInitialDataStatus]);
 }

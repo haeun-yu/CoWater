@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
+
+
+REPORT_SCHEMA_VERSION = 1
 
 
 @dataclass
@@ -25,25 +28,33 @@ class PlatformReport:
     # 위치 — Redis wire format과 일치하도록 flat 필드
     lat: float
     lon: float
-    depth_m: float | None = None        # ROV / AUV 수심
-    altitude_m: float | None = None     # 드론 고도
+    schema_version: int = REPORT_SCHEMA_VERSION
+    depth_m: float | None = None  # ROV / AUV 수심
+    altitude_m: float | None = None  # 드론 고도
 
     # 운동
-    sog: float | None = None            # Speed Over Ground (knots)
-    cog: float | None = None            # Course Over Ground (0-360°)
-    heading: float | None = None        # True Heading (0-360°)
-    rot: float | None = None            # Rate of Turn (°/min)
+    sog: float | None = None  # Speed Over Ground (knots)
+    cog: float | None = None  # Course Over Ground (0-360°)
+    heading: float | None = None  # True Heading (0-360°)
+    rot: float | None = None  # Rate of Turn (°/min)
 
     # AIS 항법 상태 (선박 외 플랫폼은 None)
     nav_status: str | None = None
 
+    platform_type: str | None = None
+    name: str | None = None
+
     # 원본 정보 보존
     source_protocol: Literal["ais", "ros", "mavlink", "nmea", "custom"] = "custom"
+    raw_payload_b64: str | None = None
+    raw_payload_cache_key: str | None = None
+    raw_payload_truncated: bool = False
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "platform_id": self.platform_id,
             "timestamp": self.timestamp.isoformat(),
+            "schema_version": self.schema_version,
             "lat": self.lat,
             "lon": self.lon,
             "depth_m": self.depth_m,
@@ -53,14 +64,29 @@ class PlatformReport:
             "heading": self.heading,
             "rot": self.rot,
             "nav_status": self.nav_status,
+            "platform_type": self.platform_type,
+            "name": self.name,
             "source_protocol": self.source_protocol,
         }
+        if self.raw_payload_b64 is not None:
+            payload["raw_payload_b64"] = self.raw_payload_b64
+            payload["raw_payload_truncated"] = self.raw_payload_truncated
+        if self.raw_payload_cache_key is not None:
+            payload["raw_payload_cache_key"] = self.raw_payload_cache_key
+            payload["raw_payload_truncated"] = self.raw_payload_truncated
+        return payload
 
     @classmethod
     def from_dict(cls, d: dict) -> "PlatformReport":
+        timestamp = datetime.fromisoformat(d["timestamp"])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
         return cls(
             platform_id=d["platform_id"],
-            timestamp=datetime.fromisoformat(d["timestamp"]),
+            timestamp=timestamp,
+            schema_version=d.get("schema_version", REPORT_SCHEMA_VERSION),
             lat=d["lat"],
             lon=d["lon"],
             depth_m=d.get("depth_m"),
@@ -70,5 +96,10 @@ class PlatformReport:
             heading=d.get("heading"),
             rot=d.get("rot"),
             nav_status=d.get("nav_status"),
+            platform_type=d.get("platform_type"),
+            name=d.get("name"),
             source_protocol=d.get("source_protocol", "custom"),
+            raw_payload_b64=d.get("raw_payload_b64"),
+            raw_payload_cache_key=d.get("raw_payload_cache_key"),
+            raw_payload_truncated=d.get("raw_payload_truncated", False),
         )

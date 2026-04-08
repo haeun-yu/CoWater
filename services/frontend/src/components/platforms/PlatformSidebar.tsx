@@ -1,7 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
+import { useSystemStore } from "@/stores/systemStore";
+import { countPlatformsByFreshness, formatLastSeen, getPlatformFreshness } from "@/lib/platformStatus";
 import type { PlatformState } from "@/types";
 
 const TYPE_ICON: Record<string, string> = {
@@ -64,22 +67,33 @@ export default function PlatformSidebar() {
   const selectedId = usePlatformStore((s) => s.selectedId);
   const select = usePlatformStore((s) => s.select);
   const alerts = useAlertStore((s) => s.alerts);
+  const platformLoad = useSystemStore((s) => s.initialData.platforms);
+  const platformList = Object.values(platforms);
 
   const selected = selectedId ? platforms[selectedId] : null;
 
-  const activePlatformIds = new Set(
-    alerts.filter((a) => a.status === "new").flatMap((a) => a.platform_ids)
+  const activePlatformIds = useMemo(
+    () => new Set(alerts.filter((a) => a.status === "new").flatMap((a) => a.platform_ids)),
+    [alerts],
   );
+  const freshness = useMemo(() => countPlatformsByFreshness(platformList), [platformList]);
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden border-b border-ocean-800">
       <div className="px-3 py-2 border-b border-ocean-800 flex-shrink-0 flex items-center justify-between">
-        <span className="text-xs font-bold text-ocean-200 tracking-wider">
-          플랫폼
-          <span className="ml-2 text-ocean-500 font-normal">
-            {Object.keys(platforms).length}척
+        <div>
+          <span className="text-xs font-bold text-ocean-200 tracking-wider">
+            플랫폼
+            <span className="ml-2 text-ocean-500 font-normal">
+              {platformList.length}척
+            </span>
           </span>
-        </span>
+          <div className="mt-1 flex gap-2 text-[11px] text-ocean-500">
+            <span>정상 {freshness.live}</span>
+            {freshness.stale > 0 && <span className="text-amber-300">지연 {freshness.stale}</span>}
+            {freshness.lost > 0 && <span className="text-red-300">유실 {freshness.lost}</span>}
+          </div>
+        </div>
         {selected && (
           <button
             onClick={() => select(null)}
@@ -96,9 +110,10 @@ export default function PlatformSidebar() {
         )} />
       ) : (
         <PlatformList
-          platforms={Object.values(platforms)}
+          platforms={platformList}
           onSelect={select}
           activePlatformIds={activePlatformIds}
+          loadStatus={platformLoad.status}
         />
       )}
     </div>
@@ -109,34 +124,52 @@ function PlatformList({
   platforms,
   onSelect,
   activePlatformIds,
+  loadStatus,
 }: {
   platforms: PlatformState[];
   onSelect: (id: string) => void;
   activePlatformIds: Set<string>;
+  loadStatus: "idle" | "loading" | "ready" | "error";
 }) {
   const sorted = [...platforms].sort((a, b) => {
     // 경보 중인 플랫폼 우선
     const aAlert = activePlatformIds.has(a.platform_id) ? 0 : 1;
     const bAlert = activePlatformIds.has(b.platform_id) ? 0 : 1;
-    return aAlert - bAlert;
+    if (aAlert !== bAlert) return aAlert - bAlert;
+
+    const freshnessOrder = { live: 0, stale: 1, lost: 2 };
+    return freshnessOrder[getPlatformFreshness(a.last_seen)] - freshnessOrder[getPlatformFreshness(b.last_seen)];
   });
 
   return (
     <div className="flex-1 overflow-y-auto">
       {sorted.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-24 text-ocean-400 text-xs gap-1">
-          <span>수신 대기 중...</span>
-          <span className="text-ocean-500">시뮬레이터 또는 실제 데이터 필요</span>
+          <span>
+            {loadStatus === "loading"
+              ? "플랫폼 로딩 중..."
+              : loadStatus === "error"
+                ? "플랫폼 로드 실패"
+                : "수신 대기 중..."}
+          </span>
+          <span className="text-ocean-500">
+            {loadStatus === "error"
+              ? "실시간 스트림으로 회복될 수 있습니다"
+              : "시뮬레이터 또는 실제 데이터 필요"}
+          </span>
         </div>
       ) : (
         sorted.map((p) => {
           const hasAlert = activePlatformIds.has(p.platform_id);
+          const freshness = getPlatformFreshness(p.last_seen);
           const color = TYPE_COLOR[p.platform_type ?? "vessel"] ?? "#ffffff";
           const icon = TYPE_ICON[p.platform_type ?? "vessel"] ?? "?";
           return (
             <button
               key={p.platform_id}
               onClick={() => { onSelect(p.platform_id); }}
+              title={`${formatDisplayName(p)} 선택`}
+              aria-label={`${formatDisplayName(p)} 플랫폼 선택`}
               className={`w-full px-3 py-2 text-left border-b border-ocean-900 hover:bg-ocean-800/60 transition-colors flex items-center gap-2 ${
                 hasAlert ? "bg-red-500/5 border-l-2 border-l-red-500/60" : ""
               }`}
@@ -147,6 +180,11 @@ function PlatformList({
                   <span className="text-xs text-ocean-200 truncate font-medium">
                     {formatDisplayName(p)}
                   </span>
+                  {freshness !== "live" && (
+                    <span className={`rounded px-1 py-0.5 text-[10px] ${freshness === "stale" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"}`}>
+                      {freshness === "stale" ? "지연" : "유실"}
+                    </span>
+                  )}
                   {hasAlert && (
                     <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0 animate-pulse" />
                   )}
@@ -159,6 +197,7 @@ function PlatformList({
                       {NAV_STATUS_KR[p.nav_status] ?? p.nav_status}
                     </span>
                   )}
+                  <span className="text-ocean-500">{formatLastSeen(p.last_seen)}</span>
                 </div>
               </div>
             </button>
@@ -235,7 +274,7 @@ function PlatformDetail({
         </div>
         {platform.last_seen && (
           <div className="text-xs text-ocean-400 mt-2">
-            최근 수신 {new Date(platform.last_seen).toLocaleTimeString("ko-KR")}
+            최근 수신 {new Date(platform.last_seen).toLocaleTimeString("ko-KR")} · {formatLastSeen(platform.last_seen)}
           </div>
         )}
       </div>

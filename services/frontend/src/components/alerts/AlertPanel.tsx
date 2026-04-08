@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -33,10 +32,21 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
     .filter((a) => !compact || a.status === "new");
 
   async function acknowledge(alertId: string) {
-    const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+    const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "acknowledge" }),
+    });
+    if (!res.ok) return;
+    const updated = (await res.json()) as Alert;
+    updateAlert(updated);
+  }
+
+  async function runAction(alertId: string, action: string) {
+    const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
     });
     if (!res.ok) return;
     const updated = (await res.json()) as Alert;
@@ -96,6 +106,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
                 setExpanded(expanded === alert.alert_id ? null : alert.alert_id)
               }
               onAck={() => acknowledge(alert.alert_id)}
+              onAction={(action) => runAction(alert.alert_id, action)}
               onSelectPlatform={(id) => select(id)}
             />
           ))
@@ -110,15 +121,20 @@ function AlertRow({
   expanded,
   onToggle,
   onAck,
+  onAction,
   onSelectPlatform,
 }: {
   alert: Alert;
   expanded: boolean;
   onToggle: () => void;
   onAck: () => void;
+  onAction: (action: string) => void;
   onSelectPlatform: (id: string) => void;
 }) {
   const isNew = alert.status === "new";
+  const source = String((alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime");
+  const workflowState = getWorkflowState(alert);
+  const actionHistory = getActionHistory(alert);
 
   return (
     <div
@@ -145,6 +161,16 @@ function AlertRow({
             })}
             {" · "}
             <span className="text-ocean-500">{alert.generated_by}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
+              {source}
+            </span>
+            {workflowState && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
+                {workflowLabel(workflowState)}
+              </span>
+            )}
           </div>
         </div>
         {isNew && (
@@ -186,17 +212,76 @@ function AlertRow({
             </div>
           )}
 
+          {actionHistory.length > 0 && (
+            <div className="text-xs text-ocean-400 bg-ocean-950/60 rounded p-2 border border-ocean-800">
+              최근 처리: {actionLabel(actionHistory[actionHistory.length - 1].action)}
+            </div>
+          )}
+
           {/* 인지 버튼 */}
           {alert.status === "new" && (
-            <button
-              onClick={onAck}
-              className="text-xs px-2 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
-            >
-              인지 처리
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onAck}
+                className="text-xs px-2 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
+              >
+                인지 처리
+              </button>
+              <button
+                onClick={() => onAction("start_investigation")}
+                className="text-xs px-2 py-1 rounded border border-violet-500/40 text-violet-300"
+              >
+                조사 시작
+              </button>
+              <button
+                onClick={() => onAction("escalate")}
+                className="text-xs px-2 py-1 rounded border border-amber-500/40 text-amber-300"
+              >
+                상위 보고
+              </button>
+            </div>
           )}
         </div>
       )}
     </div>
   );
+}
+
+type AlertActionEntry = {
+  action: string;
+  executed_at: string;
+};
+
+function getWorkflowState(alert: Alert): string | null {
+  const workflowState = (alert.metadata as Record<string, unknown> | null)?.workflow_state;
+  return typeof workflowState === "string" ? workflowState : null;
+}
+
+function getActionHistory(alert: Alert): AlertActionEntry[] {
+  const actions = (alert.metadata as Record<string, unknown> | null)?.actions;
+  if (!Array.isArray(actions)) return [];
+  return actions.filter((entry): entry is AlertActionEntry => {
+    if (!entry || typeof entry !== "object") return false;
+    const candidate = entry as Record<string, unknown>;
+    return typeof candidate.action === "string" && typeof candidate.executed_at === "string";
+  });
+}
+
+function workflowLabel(workflowState: string) {
+  if (workflowState === "investigating") return "조사 중";
+  if (workflowState === "escalated") return "상위 보고";
+  if (workflowState === "resolved") return "해결 흐름";
+  return workflowState;
+}
+
+function actionLabel(action: string) {
+  if (action === "acknowledge") return "인지";
+  if (action === "resolve") return "해결";
+  if (action === "notify_guard") return "기관 통보";
+  if (action === "request_course_change") return "변침 요청";
+  if (action === "request_speed_reduction") return "감속 요청";
+  if (action === "request_zone_exit") return "구역 이탈 요청";
+  if (action === "start_investigation") return "조사 시작";
+  if (action === "escalate") return "상위 보고";
+  return action;
 }

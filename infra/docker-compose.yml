@@ -48,8 +48,8 @@ services:
   # ─────────────────────────────────────────────────────
   core:
     build:
-      context: ../services/core
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/core/Dockerfile
     container_name: cowater-core
     restart: unless-stopped
     environment:
@@ -69,14 +69,18 @@ services:
   # ─────────────────────────────────────────────────────
   moth-bridge:
     build:
-      context: ../services/moth-bridge
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/moth-bridge/Dockerfile
     container_name: cowater-moth-bridge
     restart: unless-stopped
     environment:
       MOTH_SERVER_URL: wss://cobot.center:8287
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+      RAW_PAYLOAD_MODE: ${RAW_PAYLOAD_MODE:-cache}
+      RAW_PAYLOAD_PROTOCOLS: ${RAW_PAYLOAD_PROTOCOLS:-ais,ros,mavlink,nmea}
+      RAW_PAYLOAD_MAX_BYTES: ${RAW_PAYLOAD_MAX_BYTES:-4096}
+      RAW_PAYLOAD_TTL_SEC: ${RAW_PAYLOAD_TTL_SEC:-86400}
     ports:
       - "7703:8002"    # WebSocket relay — 프론트엔드 직접 연결
     depends_on:
@@ -245,7 +249,7 @@ services:
     container_name: cowater-frontend
     restart: unless-stopped
     ports:
-      - "7702:3000"
+      - "7702:7702"
     depends_on:
       - core
 

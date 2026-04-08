@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { getAgentsApiUrl } from "@/lib/publicUrl";
 import {
   useAILogStore,
   isAIAgent,
@@ -12,7 +11,8 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
 
-const AGENTS_URL = getAgentsApiUrl();
+const AGENTS_URL =
+  process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:7701";
 
 // ── 에이전트 메타 ──────────────────────────────────────────────────────────────
 
@@ -263,7 +263,6 @@ interface AgentStatus {
   enabled: boolean;
   failure_count?: number;
   last_error?: string | null;
-  model_name?: string;
 }
 
 // ── 페이지 ────────────────────────────────────────────────────────────────────
@@ -280,8 +279,6 @@ export default function AgentsPage() {
   const [statuses, setStatuses] = useState<AgentStatus[]>([]);
   const [updating, setUpdating] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<"ok" | "fallback" | "unknown">("unknown");
-  const [modelEditing, setModelEditing] = useState<string | null>(null);
-  const [modelInput, setModelInput] = useState<string>("");
 
   useEffect(() => {
     fetch(`${AGENTS_URL}/agents`)
@@ -315,28 +312,6 @@ export default function AgentsPage() {
         body: JSON.stringify({ level }),
       });
       setStatuses((p) => p.map((a) => (a.agent_id === id ? { ...a, level } : a)));
-    } finally {
-      setUpdating(null);
-    }
-  }
-
-  async function applyModel(id: string, model: string) {
-    const trimmed = model.trim();
-    if (!trimmed) return;
-    setUpdating(id);
-    try {
-      const res = await fetch(`${AGENTS_URL}/agents/${id}/model`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: trimmed }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStatuses((p) =>
-          p.map((a) => (a.agent_id === id ? { ...a, model_name: data.model_name } : a)),
-        );
-        setModelEditing(null);
-      }
     } finally {
       setUpdating(null);
     }
@@ -389,8 +364,8 @@ export default function AgentsPage() {
       {/* 헤더 */}
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-base font-bold tracking-wide text-white">통합 에이전트 관제</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h1 className="text-sm font-bold tracking-wide text-white">통합 에이전트 관제</h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">
             Rule 동기 처리 → AI 비동기 처리 파이프라인
           </p>
         </div>
@@ -412,11 +387,11 @@ export default function AgentsPage() {
         {/* ── 왼쪽: 에이전트 목록 + 컨트롤 ───────────────────────────────────── */}
         <section className="border-r border-slate-800 flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs text-slate-400 uppercase tracking-widest font-bold">
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
               Agent Orchestrator
             </span>
             {apiStatus !== "unknown" && (
-              <span className={`text-xs px-1.5 py-0.5 rounded border ${
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
                 apiStatus === "ok"
                   ? "text-green-400 border-green-700/40 bg-green-950/30"
                   : "text-amber-400 border-amber-700/40 bg-amber-950/30"
@@ -430,10 +405,10 @@ export default function AgentsPage() {
             {/* Rule 에이전트 */}
             <div className="px-3 pt-3 pb-1">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-blue-400 font-bold uppercase tracking-wider">
+                <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">
                   Rule Based
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-[10px] text-slate-600">
                   {ruleAgents.filter((a) => a.enabled).length}/{ruleAgents.length} 활성
                 </span>
               </div>
@@ -463,10 +438,10 @@ export default function AgentsPage() {
             {/* AI 에이전트 */}
             <div className="px-3 pb-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-violet-400 font-bold uppercase tracking-wider">
+                <span className="text-[10px] text-violet-400 font-bold uppercase tracking-wider">
                   AI Based
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-[10px] text-slate-600">
                   {aiAgents.filter((a) => a.enabled).length}/{aiAgents.length} 준비
                 </span>
               </div>
@@ -519,7 +494,7 @@ export default function AgentsPage() {
             </div>
             {/* 선택된 에이전트 실제 상태 */}
             {focusStatus && (
-              <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-2 text-[10px]">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   focusStatus.enabled ? "bg-green-400" : "bg-slate-600"
                 }`} />
@@ -554,11 +529,11 @@ export default function AgentsPage() {
           <div className="border-t border-slate-800 bg-slate-900/30 px-5 py-4 flex gap-6">
             {/* Sub-Process Trigger */}
             <div className="flex-none min-w-0">
-              <div className="text-xs text-slate-500 font-bold uppercase mb-2">
+              <div className="text-[10px] text-slate-500 font-bold uppercase mb-2">
                 Sub-Process Trigger
               </div>
               {focusMeta.subProcess ? (
-                <div className="flex items-center gap-2 text-sm font-mono">
+                <div className="flex items-center gap-2 text-[11px] font-mono">
                   <span className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-300">
                     {focusMeta.subProcess.from}
                   </span>
@@ -568,13 +543,13 @@ export default function AgentsPage() {
                   </span>
                 </div>
               ) : (
-                <div className="text-sm text-slate-600 italic font-mono">독립 실행 에이전트</div>
+                <div className="text-[11px] text-slate-600 italic font-mono">독립 실행 에이전트</div>
               )}
             </div>
 
             {/* 에이전트별 이벤트 빈도 미니 차트 */}
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-slate-500 font-bold uppercase mb-2">
+              <div className="text-[10px] text-slate-500 font-bold uppercase mb-2">
                 이벤트 처리 현황
               </div>
               <div className="flex items-end gap-1.5 h-10">
@@ -594,7 +569,7 @@ export default function AgentsPage() {
                       title={`${meta?.name ?? a.agent_id}: ${count}건`}
                       className="flex-1 flex flex-col items-center gap-0.5 group"
                     >
-                      <div className="text-xs font-mono text-slate-500 group-hover:text-slate-300">
+                      <div className="text-[9px] font-mono text-slate-500 group-hover:text-slate-300">
                         {count > 0 ? count : ""}
                       </div>
                       <div className="w-full relative" style={{ height: 24 }}>
@@ -609,7 +584,7 @@ export default function AgentsPage() {
                         />
                       </div>
                       <div
-                        className="text-xs truncate w-full text-center"
+                        className="text-[8px] truncate w-full text-center"
                         style={{ color: a.enabled ? color : "#4a5568", opacity: 0.8 }}
                       >
                         {meta?.name?.split(" ")[0] ?? a.agent_id}
@@ -631,11 +606,11 @@ export default function AgentsPage() {
                 <h3 className="text-sm font-bold text-white truncate">
                   {focusMeta.name}
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">{focusMeta.role}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{focusMeta.role}</p>
               </div>
               <button
                 onClick={clearLogs}
-                className="text-xs px-2 py-1 rounded border border-slate-700 text-slate-400 hover:border-red-500/60 hover:text-red-300 flex-shrink-0"
+                className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-400 hover:border-red-500/60 hover:text-red-300 flex-shrink-0"
               >
                 로그 초기화
               </button>
@@ -668,62 +643,9 @@ export default function AgentsPage() {
               </div>
             )}
 
-            {/* AI 에이전트 모델 표시 + 변경 */}
-            {focusMeta.type === "ai" && (
-              <div className="bg-slate-900/50 border border-slate-800 rounded p-2.5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-slate-500 uppercase font-bold">LLM 모델</span>
-                  {modelEditing === focusAgentId ? (
-                    <button
-                      onClick={() => setModelEditing(null)}
-                      className="text-xs text-slate-500 hover:text-slate-300"
-                    >
-                      취소
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setModelEditing(focusAgentId);
-                        setModelInput(focusStatus?.model_name?.split("/")[1] ?? "");
-                      }}
-                      className="text-xs text-ocean-400 hover:text-ocean-300"
-                    >
-                      변경
-                    </button>
-                  )}
-                </div>
-                {modelEditing === focusAgentId ? (
-                  <div className="flex gap-1.5">
-                    <input
-                      value={modelInput}
-                      onChange={(e) => setModelInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") applyModel(focusAgentId, modelInput);
-                        if (e.key === "Escape") setModelEditing(null);
-                      }}
-                      placeholder="예: qwen2.5:0.5b"
-                      className="flex-1 text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-ocean-600 font-mono"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => applyModel(focusAgentId, modelInput)}
-                      disabled={updating === focusAgentId || !modelInput.trim()}
-                      className="text-xs px-2.5 py-1 rounded bg-ocean-700 hover:bg-ocean-600 text-white disabled:opacity-40"
-                    >
-                      적용
-                    </button>
-                  </div>
-                ) : (
-                  <span className="text-sm font-mono text-violet-300">
-                    {focusStatus?.model_name ?? "—"}
-                  </span>
-                )}
-              </div>
-            )}
-
             {/* 마지막 오류 */}
             {focusStatus?.last_error && (
-              <div className="px-2.5 py-2 bg-red-950/30 border border-red-800/40 rounded text-xs text-red-300 font-mono leading-snug line-clamp-2">
+              <div className="px-2.5 py-2 bg-red-950/30 border border-red-800/40 rounded text-[11px] text-red-300 font-mono leading-snug line-clamp-2">
                 {focusStatus.last_error}
               </div>
             )}
@@ -748,7 +670,7 @@ export default function AgentsPage() {
                 <button
                   key={t}
                   onClick={() => setTypeFilter(t)}
-                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                  className={`text-[11px] px-2.5 py-1 rounded border transition-colors ${
                     typeFilter === t
                       ? "bg-ocean-800 text-white border-ocean-600"
                       : "border-slate-700 text-slate-400 hover:border-slate-500"
@@ -757,7 +679,7 @@ export default function AgentsPage() {
                   {t === "all" ? "전체" : t.toUpperCase()}
                 </button>
               ))}
-              <span className="ml-auto text-xs text-slate-600">
+              <span className="ml-auto text-[10px] text-slate-600">
                 {filteredLogs.length}건
               </span>
             </div>
@@ -842,7 +764,7 @@ function AgentControlRow({
 
         {/* 이름 (클릭 → 필터) */}
         <button
-          className="flex-1 min-w-0 text-left text-sm font-semibold truncate"
+          className="flex-1 min-w-0 text-left text-xs font-semibold truncate"
           style={{ color: agent.enabled ? color : "#64748b" }}
           onClick={onSelect}
         >
@@ -851,7 +773,7 @@ function AgentControlRow({
 
         {/* 이벤트 수 */}
         {count > 0 && (
-          <span className="text-xs font-mono text-slate-400 flex-shrink-0">
+          <span className="text-[10px] font-mono text-slate-500 flex-shrink-0">
             {count}
           </span>
         )}
@@ -863,14 +785,14 @@ function AgentControlRow({
             onChange={(e) => onLevel(agent.agent_id, e.target.value)}
             disabled={isUpdating || !agent.enabled}
             onClick={(e) => e.stopPropagation()}
-            className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 flex-shrink-0 disabled:opacity-40 cursor-pointer"
+            className="text-[10px] bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 flex-shrink-0 disabled:opacity-40 cursor-pointer"
           >
             <option value="L1">L1</option>
             <option value="L2">L2</option>
             <option value="L3">L3</option>
           </select>
         ) : (
-          <span className="text-xs text-slate-400 font-mono flex-shrink-0">
+          <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">
             {agent.level}
           </span>
         )}
@@ -903,7 +825,7 @@ function AgentControlRow({
 
       {/* 오류 표시 */}
       {(agent.failure_count ?? 0) > 0 && (
-        <div className="px-2.5 pb-2 text-xs text-red-400">
+        <div className="px-2.5 pb-2 text-[10px] text-red-400">
           ⚠ 오류 {agent.failure_count}회
         </div>
       )}
@@ -941,7 +863,7 @@ function HorizontalPipeline({
             <button
               key={i}
               onClick={() => setActiveRoute(i)}
-              className={`text-xs px-3 py-1.5 rounded border font-semibold transition-colors ${
+              className={`text-[11px] px-3 py-1.5 rounded border font-semibold transition-colors ${
                 activeRoute === i
                   ? "bg-blue-600/20 border-blue-500/60 text-blue-300"
                   : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
@@ -1083,11 +1005,11 @@ function PipelineStep({
         <span className="text-3xl">{icon}</span>
       </div>
       <div className="text-center">
-        <div className="text-sm font-bold text-white whitespace-pre-line leading-tight">{title}</div>
-        <div className="text-xs text-slate-500 whitespace-pre-line leading-tight mt-0.5">{sub}</div>
+        <div className="text-[11px] font-bold text-white whitespace-pre-line leading-tight">{title}</div>
+        <div className="text-[9px] text-slate-500 whitespace-pre-line leading-tight mt-0.5">{sub}</div>
         {/* 레벨 조건 뱃지 */}
         {levelLabel && (
-          <span className={`inline-block mt-1 text-xs px-1.5 py-0.5 rounded border font-mono ${
+          <span className={`inline-block mt-1 text-[9px] px-1.5 py-0.5 rounded border font-mono ${
             levelSatisfied
               ? "text-green-400 border-green-700/50 bg-green-950/30"
               : "text-slate-600 border-slate-700 bg-slate-900"
@@ -1128,11 +1050,11 @@ function LogCard({
         onClick={onToggle}
       >
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-bold flex-shrink-0" style={{ color }}>
+          <span className="text-xs font-bold flex-shrink-0" style={{ color }}>
             {meta?.name ?? log.agent_id}
           </span>
           <span
-            className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 border ${
+            className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 border ${
               isAI
                 ? "bg-violet-900/40 text-violet-300 border-violet-800/50"
                 : "bg-slate-800/60 text-slate-400 border-slate-700/40"
@@ -1140,19 +1062,19 @@ function LogCard({
           >
             {isAI ? "AI" : "Rule"}
           </span>
-          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/40 flex-shrink-0">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/40 flex-shrink-0">
             {ALERT_TYPE_KR[log.alert_type] ?? log.alert_type}
           </span>
-          <span className={`text-xs font-bold flex-shrink-0 px-1.5 py-0.5 rounded ${sev.badge}`}>
+          <span className={`text-[10px] font-bold flex-shrink-0 px-1.5 py-0.5 rounded ${sev.badge}`}>
             {sev.label}
           </span>
           {isFallback && (
-            <span className="text-xs text-amber-400/60 flex-shrink-0">fallback</span>
+            <span className="text-[10px] text-amber-400/60 flex-shrink-0">fallback</span>
           )}
-          <span className="ml-auto text-xs text-slate-500 flex-shrink-0">
+          <span className="ml-auto text-[10px] text-slate-500 flex-shrink-0">
             {formatDistanceToNow(new Date(log.timestamp), { addSuffix: true, locale: ko })}
           </span>
-          <span className={`text-slate-400 text-xs transition-transform flex-shrink-0 ${expanded ? "rotate-90" : ""}`}>
+          <span className={`text-slate-400 text-[10px] transition-transform flex-shrink-0 ${expanded ? "rotate-90" : ""}`}>
             ▶
           </span>
         </div>
@@ -1179,16 +1101,16 @@ function LogCard({
           </div>
         ) : (
           <>
-            <p className="mt-1.5 text-sm text-slate-300 leading-snug line-clamp-1">{log.message}</p>
+            <p className="mt-1.5 text-xs text-slate-300 leading-snug line-clamp-1">{log.message}</p>
             {log.platform_ids.length > 0 && (
               <div className="flex gap-1 mt-1.5 flex-wrap">
                 {log.platform_ids.slice(0, 4).map((id) => (
-                  <span key={id} className="text-xs px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono border border-slate-700/30">
+                  <span key={id} className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-mono border border-slate-700/30">
                     {getPlatformName(id)}
                   </span>
                 ))}
                 {log.platform_ids.length > 4 && (
-                  <span className="text-xs text-slate-400">+{log.platform_ids.length - 4}</span>
+                  <span className="text-[10px] text-slate-400">+{log.platform_ids.length - 4}</span>
                 )}
               </div>
             )}
@@ -1305,8 +1227,8 @@ function InfoCell({
 }) {
   return (
     <div className="bg-slate-900/50 border border-slate-800 p-2 rounded">
-      <div className="text-xs text-slate-500 uppercase font-bold mb-0.5">{label}</div>
-      <div className={`text-sm font-mono font-bold ${color ?? "text-slate-300"}`}>{value}</div>
+      <div className="text-[9px] text-slate-500 uppercase font-bold mb-0.5">{label}</div>
+      <div className={`text-[11px] font-mono font-bold ${color ?? "text-slate-300"}`}>{value}</div>
     </div>
   );
 }
@@ -1320,7 +1242,7 @@ function FlowRow({
   color: string;
 }) {
   return (
-    <div className="flex items-start gap-1.5 text-sm">
+    <div className="flex items-start gap-1.5 text-[11px]">
       <span className={`${color} flex-shrink-0 mt-0.5`}>{icon}</span>
       <div>
         <span className="text-slate-500">{label}: </span>
@@ -1341,7 +1263,7 @@ function DetailSection({
   const accentColor = { ocean: "text-slate-400", cyan: "text-cyan-400", amber: "text-amber-400" }[accent];
   return (
     <div className="px-4 py-2.5 border-t border-slate-800/30">
-      <div className={`flex items-center gap-1.5 text-sm font-semibold mb-2 ${accentColor}`}>
+      <div className={`flex items-center gap-1.5 text-xs font-semibold mb-2 ${accentColor}`}>
         <span>{icon}</span>
         <span>{title}</span>
       </div>
@@ -1352,7 +1274,7 @@ function DetailSection({
 
 function DataRow({ label, value, highlight }: { label: string; value: string; highlight?: string }) {
   return (
-    <div className="flex items-start gap-2 text-sm">
+    <div className="flex items-start gap-2 text-xs">
       <span className="text-slate-500 flex-shrink-0 w-24">{label}</span>
       <span className="text-slate-300 leading-snug" style={highlight ? { color: highlight } : undefined}>
         {value}
@@ -1371,7 +1293,7 @@ function MetricBadge({ label, value, sev }: { label: string; value: string; sev:
   return (
     <div className={`rounded px-2.5 py-1.5 border ${color} text-center`}>
       <div className="text-xs opacity-60">{label}</div>
-      <div className="text-base font-mono font-bold">{value}</div>
+      <div className="text-sm font-mono font-bold">{value}</div>
     </div>
   );
 }

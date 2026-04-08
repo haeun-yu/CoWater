@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
+import { useSystemStore } from "@/stores/systemStore";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, AlertSeverity, AlertStatus } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
-
 async function apiDeleteAlerts(alertIds: string[]) {
-  const res = await fetch(`${API_URL}/alerts`, {
+  const res = await fetch(`${getCoreApiUrl()}/alerts`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ alert_ids: alertIds }),
@@ -20,7 +20,7 @@ async function apiDeleteAlerts(alertIds: string[]) {
 }
 
 async function apiRunAlertAction(alertId: string, action: string) {
-  const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+  const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action }),
@@ -79,6 +79,7 @@ export default function AlertsPage() {
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const removeAlerts = useAlertStore((s) => s.removeAlerts);
   const platforms = usePlatformStore((s) => s.platforms);
+  const alertLoad = useSystemStore((s) => s.initialData.alerts);
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">(
     "all",
   );
@@ -89,8 +90,13 @@ export default function AlertsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [modalAlertId, setModalAlertId] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [agentFilter, setAgentFilter] = useState<string | "all">("all");
+  const [workflowFilter, setWorkflowFilter] = useState<string | "all">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+
+  const agentFilters = Array.from(new Set(alerts.map((alert) => alert.generated_by))).sort();
+  const workflowFilters = Array.from(new Set(alerts.map((alert) => getWorkflowState(alert)).filter((state): state is string => state !== null))).sort();
 
   // 시간 필터
   const now = new Date();
@@ -102,7 +108,9 @@ export default function AlertsPage() {
 
   const filtered = timeFiltered
     .filter((a) => severityFilter === "all" || a.severity === severityFilter)
-    .filter((a) => statusFilter === "all" || a.status === statusFilter);
+    .filter((a) => statusFilter === "all" || a.status === statusFilter)
+    .filter((a) => agentFilter === "all" || a.generated_by === agentFilter)
+    .filter((a) => workflowFilter === "all" || getWorkflowState(a) === workflowFilter);
 
   // 요약 통계
   const newAlerts = alerts.filter((a) => a.status === "new");
@@ -266,6 +274,58 @@ export default function AlertsPage() {
             ))}
           </div>
 
+          <div className="flex gap-1">
+            <button
+              onClick={() => setAgentFilter("all")}
+              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                agentFilter === "all"
+                  ? "bg-ocean-700 text-ocean-100 border-ocean-600"
+                  : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
+              }`}
+            >
+              전체 에이전트
+            </button>
+            {agentFilters.map((agentId) => (
+              <button
+                key={agentId}
+                onClick={() => setAgentFilter(agentId)}
+                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                  agentFilter === agentId
+                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
+                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
+                }`}
+              >
+                {agentId}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-1">
+            <button
+              onClick={() => setWorkflowFilter("all")}
+              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                workflowFilter === "all"
+                  ? "bg-ocean-700 text-ocean-100 border-ocean-600"
+                  : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
+              }`}
+            >
+              전체 워크플로우
+            </button>
+            {workflowFilters.map((workflow) => (
+              <button
+                key={workflow}
+                onClick={() => setWorkflowFilter(workflow)}
+                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                  workflowFilter === workflow
+                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
+                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
+                }`}
+              >
+                {workflowLabel(workflow)}
+              </button>
+            ))}
+          </div>
+
           {/* 시간 */}
           <div className="flex gap-1 ml-auto">
             {(["all", "1h", "6h", "24h"] as const).map((f) => (
@@ -315,7 +375,11 @@ export default function AlertsPage() {
             </div>
             {active.length === 0 ? (
               <div className="text-xs text-green-400 py-4">
-                미확인 경보 없음 ✓
+                {alertLoad.status === "loading"
+                  ? "경보 로딩 중..."
+                  : alertLoad.status === "error"
+                    ? "경보 로드 실패"
+                    : "미확인 경보 없음 ✓"}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -448,6 +512,11 @@ function AlertRow({
 }) {
   const s = SEVERITY_STYLE[alert.severity];
   const fallback = Boolean(alert.metadata?.llm_fallback);
+  const source = String(
+    (alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime",
+  );
+  const workflowState = getWorkflowState(alert);
+  const actionHistory = getActionHistory(alert);
 
   return (
     <div
@@ -494,9 +563,17 @@ function AlertRow({
               >
                 {STATUS_LABEL[alert.status]}
               </span>
-              <span className="text-xs text-ocean-400">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-800/80 text-ocean-400 border border-ocean-700">
                 {alert.generated_by}
               </span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
+                {source}
+              </span>
+              {workflowState && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
+                  {workflowLabel(workflowState)}
+                </span>
+              )}
               <span className="text-xs text-ocean-400 ml-auto">
                 {formatDistanceToNow(new Date(alert.created_at), {
                   addSuffix: true,
@@ -559,6 +636,21 @@ function AlertRow({
             )}
           </div>
 
+          {actionHistory.length > 0 && (
+            <div className="rounded border border-ocean-800 bg-ocean-900/40 p-2.5">
+              <div className="mb-2 text-xs text-ocean-500">처리 이력</div>
+              <div className="space-y-1.5">
+                {actionHistory.map((entry, index) => (
+                  <div key={`${entry.action}-${entry.executed_at}-${index}`} className="flex items-center gap-2 text-xs text-ocean-300">
+                    <span className="rounded bg-ocean-800 px-1.5 py-0.5 text-ocean-400">{actionLabel(entry.action)}</span>
+                    <span>{entry.executor ?? "operator-ui"}</span>
+                    <span className="text-ocean-500 font-mono ml-auto">{format(new Date(entry.executed_at), "MM/dd HH:mm:ss")}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* AI 권고 */}
           {alert.recommendation ? (
             <div className="bg-ocean-900/70 rounded p-2.5 border border-ocean-800">
@@ -618,6 +710,20 @@ function AlertRow({
                 </button>
               )}
               <button
+                onClick={() => onAction(alert.alert_id, "start_investigation")}
+                disabled={acting === `${alert.alert_id}:start_investigation`}
+                className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
+              >
+                조사 시작
+              </button>
+              <button
+                onClick={() => onAction(alert.alert_id, "escalate")}
+                disabled={acting === `${alert.alert_id}:escalate`}
+                className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
+              >
+                상위 보고
+              </button>
+              <button
                 onClick={onOpenModal}
                 className="text-xs px-3 py-1.5 rounded border border-ocean-700 text-ocean-300"
               >
@@ -645,6 +751,8 @@ function AlertActionModal({
   getPlatformName: (id: string) => string;
 }) {
   const fallback = Boolean(alert.metadata?.llm_fallback);
+  const workflowState = getWorkflowState(alert);
+  const actions = getActionHistory(alert);
 
   return (
     <div
@@ -663,6 +771,7 @@ function AlertActionModal({
             <div className="text-xs text-ocean-500 mt-0.5">
               {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type} ·{" "}
               {alert.generated_by}
+              {workflowState && ` · ${workflowLabel(workflowState)}`}
             </div>
           </div>
           <button
@@ -698,6 +807,21 @@ function AlertActionModal({
           </div>
         )}
 
+        {actions.length > 0 && (
+          <div className="mt-3 rounded border border-ocean-800 bg-ocean-900/40 p-2.5">
+            <div className="mb-2 text-xs text-ocean-500">처리 이력</div>
+            <div className="space-y-1.5">
+              {actions.map((entry, index) => (
+                <div key={`${entry.action}-${entry.executed_at}-${index}`} className="flex items-center gap-2 text-xs text-ocean-300">
+                  <span className="rounded bg-ocean-800 px-1.5 py-0.5 text-ocean-400">{actionLabel(entry.action)}</span>
+                  <span>{entry.executor ?? "operator-ui"}</span>
+                  <span className="ml-auto text-ocean-500 font-mono">{format(new Date(entry.executed_at), "MM/dd HH:mm:ss")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             onClick={() => onAction(alert.alert_id, "acknowledge")}
@@ -720,8 +844,63 @@ function AlertActionModal({
           >
             관계기관 통보
           </button>
+          <button
+            onClick={() => onAction(alert.alert_id, "start_investigation")}
+            disabled={acting === `${alert.alert_id}:start_investigation`}
+            className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
+          >
+            조사 시작
+          </button>
+          <button
+            onClick={() => onAction(alert.alert_id, "escalate")}
+            disabled={acting === `${alert.alert_id}:escalate`}
+            className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
+          >
+            상위 보고
+          </button>
         </div>
       </div>
     </div>
   );
+}
+
+type AlertActionEntry = {
+  action: string;
+  executed_at: string;
+  executor?: string;
+};
+
+function getWorkflowState(alert: Alert): string | null {
+  const workflowState = (alert.metadata as Record<string, unknown> | null)?.workflow_state;
+  return typeof workflowState === "string" ? workflowState : null;
+}
+
+function getActionHistory(alert: Alert): AlertActionEntry[] {
+  const actions = (alert.metadata as Record<string, unknown> | null)?.actions;
+  if (!Array.isArray(actions)) return [];
+
+  return actions.filter((entry): entry is AlertActionEntry => {
+    if (!entry || typeof entry !== "object") return false;
+    const candidate = entry as Record<string, unknown>;
+    return typeof candidate.action === "string" && typeof candidate.executed_at === "string";
+  });
+}
+
+function workflowLabel(workflowState: string) {
+  if (workflowState === "investigating") return "조사 중";
+  if (workflowState === "escalated") return "상위 보고";
+  if (workflowState === "resolved") return "해결 흐름";
+  return workflowState;
+}
+
+function actionLabel(action: string) {
+  if (action === "acknowledge") return "인지";
+  if (action === "resolve") return "해결";
+  if (action === "notify_guard") return "기관 통보";
+  if (action === "request_course_change") return "변침 요청";
+  if (action === "request_speed_reduction") return "감속 요청";
+  if (action === "request_zone_exit") return "구역 이탈 요청";
+  if (action === "start_investigation") return "조사 시작";
+  if (action === "escalate") return "상위 보고";
+  return action;
 }

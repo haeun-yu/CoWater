@@ -9,12 +9,14 @@ Race Condition 방지: SELECT ... FOR UPDATE로 행 잠금 후 UPDATE/INSERT 결
 
 import json
 import logging
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from sqlalchemy import select
 
 from db import AsyncSessionLocal
 from models import AlertModel
+from shared.events import alert_created_pattern, build_event
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
@@ -22,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 async def consume_alerts(redis: aioredis.Redis) -> None:
     pubsub = redis.pubsub()
-    await pubsub.psubscribe("alert.created.*")
-    logger.info("Alert consumer started — subscribed to alert.created.*")
+    pattern = alert_created_pattern()
+    await pubsub.psubscribe(pattern)
+    logger.info("Alert consumer started — subscribed to %s", pattern)
 
     async for message in pubsub.listen():
         if message["type"] != "pmessage":
@@ -36,7 +39,17 @@ async def consume_alerts(redis: aioredis.Redis) -> None:
 
 
 async def _handle_alert(data: dict) -> None:
-    dedup_key: str | None = data.get("dedup_key") or data.get("metadata", {}).get("dedup_key")
+    dedup_key: str | None = data.get("dedup_key") or data.get("metadata", {}).get(
+        "dedup_key"
+    )
+    created_at_raw = data.get("created_at")
+    created_at = None
+    if created_at_raw:
+        created_at = datetime.fromisoformat(created_at_raw)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = created_at.astimezone(timezone.utc)
 
     updated_alert: AlertModel | None = None
     new_alert: AlertModel | None = None
@@ -49,11 +62,14 @@ async def _handle_alert(data: dict) -> None:
             if dedup_key:
                 # 같은 dedup_key + 같은 에이전트의 활성 경보 조회 (잠금 획득)
                 result = await session.execute(
-                    select(AlertModel).where(
+                    select(AlertModel)
+                    .where(
                         AlertModel.status == "new",
                         AlertModel.generated_by == data["generated_by"],
                         AlertModel.metadata_["dedup_key"].astext == dedup_key,
-                    ).order_by(AlertModel.created_at.desc()).limit(1)
+                    )
+                    .order_by(AlertModel.created_at.desc())
+                    .limit(1)
                     .with_for_update()
                 )
                 existing = result.scalar_one_or_none()
@@ -94,6 +110,7 @@ async def _handle_alert(data: dict) -> None:
                     message=data["message"],
                     recommendation=data.get("recommendation"),
                     metadata_=data.get("metadata", {}),
+                    created_at=created_at,
                 )
                 session.add(alert)
                 new_alert = alert
@@ -104,15 +121,39 @@ async def _handle_alert(data: dict) -> None:
             await session.refresh(updated_alert)
             ws_payload = _to_ws_dict(updated_alert)
             ws_payload["type"] = "alert_updated"
+            ws_payload["event"] = build_event(
+                "alert_updated",
+                "core",
+                produced_at=updated_alert.created_at.isoformat()
+                if updated_alert.created_at
+                else None,
+            )
             await hub.broadcast("alerts", ws_payload)
-            logger.info("Alert updated: id=%s key=%s", updated_alert.alert_id, dedup_key)
+            logger.info(
+                "Alert updated: id=%s key=%s", updated_alert.alert_id, dedup_key
+            )
         elif new_alert:
-            ws_payload = {**data, "type": "alert_created"}
+            await session.refresh(new_alert)
+            ws_payload = _to_ws_dict(new_alert)
+            ws_payload["type"] = "alert_created"
+            ws_payload["event"] = build_event(
+                "alert_created",
+                "core",
+                produced_at=new_alert.created_at.isoformat()
+                if new_alert.created_at
+                else None,
+            )
             await hub.broadcast("alerts", ws_payload)
             logger.info("Alert created: id=%s key=%s", data["alert_id"], dedup_key)
 
 
 def _to_ws_dict(alert: AlertModel) -> dict:
+    metadata = alert.metadata_ or {}
+    metadata.setdefault("source", "agent-runtime")
+    metadata.setdefault(
+        "produced_at",
+        alert.created_at.isoformat() if alert.created_at else None,
+    )
     return {
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,
@@ -123,8 +164,11 @@ def _to_ws_dict(alert: AlertModel) -> dict:
         "generated_by": alert.generated_by,
         "message": alert.message,
         "recommendation": alert.recommendation,
-        "metadata": alert.metadata_ or {},
+        "metadata": metadata,
+        "schema_version": metadata.get("schema_version", 1),
         "created_at": alert.created_at.isoformat() if alert.created_at else None,
-        "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+        "acknowledged_at": alert.acknowledged_at.isoformat()
+        if alert.acknowledged_at
+        else None,
         "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
     }

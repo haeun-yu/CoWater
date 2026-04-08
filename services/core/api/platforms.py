@@ -8,11 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
 from models import PlatformModel, PlatformReportModel
+from services.track_consumer import clear_platform_cache
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 
 
 # ── Request / Response schemas ──────────────────────────────────────────────
+
 
 class PlatformCreate(BaseModel):
     platform_id: str
@@ -68,6 +70,7 @@ class TrackPoint(BaseModel):
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=list[PlatformResponse])
 async def list_platforms(db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(select(PlatformModel))
@@ -83,7 +86,9 @@ async def get_platform(platform_id: str, db: Annotated[AsyncSession, Depends(get
 
 
 @router.post("", response_model=PlatformResponse, status_code=201)
-async def create_platform(body: PlatformCreate, db: Annotated[AsyncSession, Depends(get_db)]):
+async def create_platform(
+    body: PlatformCreate, db: Annotated[AsyncSession, Depends(get_db)]
+):
     platform = PlatformModel(
         platform_id=body.platform_id,
         platform_type=body.platform_type,
@@ -108,6 +113,7 @@ async def update_platform(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     from datetime import timezone
+
     row = await db.get(PlatformModel, platform_id)
     if row is None:
         raise HTTPException(404, f"Platform '{platform_id}' not found")
@@ -118,6 +124,7 @@ async def update_platform(
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
+    clear_platform_cache(platform_id)
     return PlatformResponse.from_model(row)
 
 

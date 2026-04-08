@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getAgentsApiUrl } from "@/lib/publicUrl";
 import { useAgentStore } from "@/stores/agentStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import type { AgentInfo, AgentLevel } from "@/types";
-
-const API_URL = process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:7701";
 
 const LEVEL_COLORS: Record<AgentLevel, string> = {
   L1: "text-blue-400",
@@ -78,7 +77,7 @@ export default function AgentPanel() {
   const selectedPlatformId = usePlatformStore((s) => s.selectedId);
 
   useEffect(() => {
-    fetch(`${API_URL}/agents`)
+    fetch(`${getAgentsApiUrl()}/agents`)
       .then((r) => r.json())
       .then(setAll)
       .catch(() => {});
@@ -88,7 +87,7 @@ export default function AgentPanel() {
     const endpoint = agent.enabled ? "disable" : "enable";
     setLoading(true);
     try {
-      await fetch(`${API_URL}/agents/${agent.agent_id}/${endpoint}`, {
+      await fetch(`${getAgentsApiUrl()}/agents/${agent.agent_id}/${endpoint}`, {
         method: "PATCH",
       });
       setEnabled(agent.agent_id, !agent.enabled);
@@ -99,7 +98,7 @@ export default function AgentPanel() {
 
   const changeLevel = async (agent: AgentInfo, level: AgentLevel) => {
     try {
-      await fetch(`${API_URL}/agents/${agent.agent_id}/level`, {
+      await fetch(`${getAgentsApiUrl()}/agents/${agent.agent_id}/level`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ level }),
@@ -140,7 +139,7 @@ export default function AgentPanel() {
         }
       }
 
-      await fetch(`${API_URL}/agents/${agent.agent_id}/run`, {
+      await fetch(`${getAgentsApiUrl()}/agents/${agent.agent_id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -191,7 +190,7 @@ export default function AgentPanel() {
         {agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-16 text-ocean-400 text-xs gap-1">
             <span>Agent Runtime 연결 대기 중...</span>
-            <span className="text-ocean-500">:{API_URL.split(":").pop()}</span>
+            <span className="text-ocean-500">:{new URL(getAgentsApiUrl()).port}</span>
           </div>
         ) : (
           <>

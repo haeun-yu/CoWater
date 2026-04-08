@@ -41,10 +41,10 @@ docker compose build core && docker compose up -d core
 pip install -r requirements.txt
 
 # core
-cd services/core && uvicorn main:app --reload --port 8000
+cd services/core && uvicorn main:app --reload --port 7700
 
 # agents
-cd services/agents && PYTHONPATH=../.. uvicorn main:app --reload --port 8001
+cd services/agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7701
 
 # moth-bridge
 cd services/moth-bridge && python main.py
@@ -59,7 +59,7 @@ cd services/simulator && SCENARIO=default python main.py
 cd services/frontend
 cp .env.local.example .env.local  # 최초 1회
 npm install
-npm run dev      # http://localhost:3000
+npm run dev      # http://localhost:7702
 npm run build
 npm run lint
 ```
@@ -87,11 +87,14 @@ Moth Server (wss://cobot.center:8287)
                                               [frontend] WebSocket 수신
 ```
 
+- 위치 스트림: `moth-bridge`의 `/ws/positions` fast path 사용
+- 경보 스트림: `core`의 `/ws/alerts` 사용
+
 ### 서비스별 역할
 
 | 서비스        | 포트 | 역할                                                                       |
 | ------------- | ---- | -------------------------------------------------------------------------- |
-| `moth-bridge` | —    | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행                      |
+| `moth-bridge` | 7703 (host) / 8002 (container) | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행 + `/ws/positions` relay |
 | `core`        | 7700 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`) |
 | `agents`      | 7701 | Rule/AI 에이전트 실행환경, 에이전트 제어 API                               |
 | `simulator`   | —    | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시                          |
@@ -142,7 +145,7 @@ AI 에이전트는 `ai/llm_client.py`의 `make_llm_client(settings)`를 통해 C
 ### Frontend 상태 관리
 
 - Zustand 스토어: `platformStore`(위치 상태), `alertStore`(경보), `agentStore`(에이전트 목록)
-- WebSocket: `useWebSocket` 훅이 `/ws/platforms`, `/ws/alerts` 두 연결 유지 (20초 ping, 3초 재연결)
+- WebSocket: `useWebSocket` 훅이 `moth-bridge /ws/positions`와 `core /ws/alerts` 두 연결 유지
 - 지도: MapLibre GL + MapLibre 마커. `mapLoaded` state로 스타일 로드 완료 후 마커 동기화 보장.
 
 ---
