@@ -47,12 +47,13 @@ _redis: aioredis.Redis | None = None
 _pending_ai_tasks: set[asyncio.Task] = set()
 
 # 런타임 타이밍 상수 — settings에서 읽어 모듈 초기화 시 고정
-_AI_TASK_TIMEOUT      = settings.ai_task_timeout_sec
-_RECONNECT_MAX_DELAY  = settings.reconnect_max_delay_sec
+_AI_TASK_TIMEOUT = settings.ai_task_timeout_sec
+_RECONNECT_MAX_DELAY = settings.reconnect_max_delay_sec
 _SHUTDOWN_DRAIN_TIMEOUT = settings.shutdown_drain_timeout_sec
 
 
 # ── 초기화 ──────────────────────────────────────────────────────────────────
+
 
 def _setup_agents(redis: aioredis.Redis) -> None:
     agents: list[Agent] = [
@@ -70,6 +71,7 @@ def _setup_agents(redis: aioredis.Redis) -> None:
 
 # ── AI 태스크 헬퍼 ──────────────────────────────────────────────────────────
 
+
 def _track_task(coro, *, name: str) -> asyncio.Task:
     """태스크를 생성하고 _pending_ai_tasks에 등록. 완료 시 자동 제거."""
     task = asyncio.create_task(coro, name=name)
@@ -79,6 +81,7 @@ def _track_task(coro, *, name: str) -> asyncio.Task:
 
 
 # ── Redis 컨슈머 ─────────────────────────────────────────────────────────────
+
 
 async def _consume_platform_reports(redis: aioredis.Redis) -> None:
     pubsub = redis.pubsub()
@@ -102,13 +105,14 @@ async def _dispatch_report(report: PlatformReport) -> None:
     AI Agent:   백그라운드 태스크로 실행 (Claude API 호출이 다음 보고 처리를 블로킹하지 않음)
     """
     rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
-    ai_agents   = [a for a in _registry.enabled() if a.agent_type == "ai"]
+    ai_agents = [a for a in _registry.enabled() if a.agent_type == "ai"]
 
     # Rule Agent — 직렬 처리 (순서 보장, 빠름)
     for agent in rule_agents:
         try:
             await agent.on_platform_report(report)
-        except Exception:
+        except Exception as exc:
+            agent._record_error(str(exc))
             logger.exception("Rule agent error: %s", agent.agent_id)
 
     # AI Agent — 각각 독립 태스크로 실행 (블로킹 없음), 추적 집합에 등록
@@ -149,12 +153,13 @@ async def _consume_alerts(redis: aioredis.Redis) -> None:
 
 async def _dispatch_alert(alert: dict) -> None:
     rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
-    ai_agents   = [a for a in _registry.enabled() if a.agent_type == "ai"]
+    ai_agents = [a for a in _registry.enabled() if a.agent_type == "ai"]
 
     for agent in rule_agents:
         try:
             await agent.on_alert(alert)
-        except Exception:
+        except Exception as exc:
+            agent._record_error(str(exc))
             logger.exception("Rule agent on_alert error: %s", agent.agent_id)
 
     for agent in ai_agents:
@@ -221,6 +226,7 @@ async def _run_with_reconnect(
 
 # ── FastAPI ──────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _redis
@@ -249,7 +255,9 @@ async def lifespan(app: FastAPI):
 
     # 진행 중인 AI 태스크 drain (최대 _SHUTDOWN_DRAIN_TIMEOUT초)
     if _pending_ai_tasks:
-        logger.info("Waiting for %d pending AI task(s) to finish...", len(_pending_ai_tasks))
+        logger.info(
+            "Waiting for %d pending AI task(s) to finish...", len(_pending_ai_tasks)
+        )
         done, pending = await asyncio.wait(
             _pending_ai_tasks, timeout=_SHUTDOWN_DRAIN_TIMEOUT
         )
@@ -258,15 +266,19 @@ async def lifespan(app: FastAPI):
         if pending:
             logger.warning("%d AI task(s) cancelled at shutdown", len(pending))
 
-    await _redis.aclose()
+    if _redis is not None:
+        await _redis.aclose()
     logger.info("Agent Runtime stopped")
 
 
 app = FastAPI(title="CoWater Agent Runtime", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 # ── Agent 제어 API ────────────────────────────────────────────────────────────
+
 
 @app.get("/agents")
 async def list_agents():
@@ -335,6 +347,7 @@ async def set_agent_model(agent_id: str, body: ModelBody):
     backend = settings.llm_backend.lower()
     # 현재 백엔드와 동일한 클라이언트를 새 모델로 교체
     from ai.llm_client import ClaudeClient, OllamaClient, VllmClient
+
     try:
         if backend == "ollama":
             agent._llm = OllamaClient(  # type: ignore[attr-defined]
@@ -452,7 +465,9 @@ async def _latest_report_from_redis(platform_id: str) -> PlatformReport | None:
         data = json.loads(raw)
         return PlatformReport.from_dict(data)
     except Exception:
-        logger.exception("Failed to deserialize latest platform state for %s", platform_id)
+        logger.exception(
+            "Failed to deserialize latest platform state for %s", platform_id
+        )
         return None
 
 
@@ -478,9 +493,15 @@ async def run_agent(agent_id: str, body: ManualRunBody):
         }
 
     if has_platform:
-        report = await _latest_report_from_redis(body.platform_id)
+        platform_id = body.platform_id
+        if platform_id is None:
+            raise HTTPException(400, "platform_id is required")
+
+        report = await _latest_report_from_redis(platform_id)
         if report is None:
-            raise HTTPException(404, f"latest platform state not found for {body.platform_id}")
+            raise HTTPException(
+                404, f"latest platform state not found for {platform_id}"
+            )
 
         if agent.agent_type == "ai":
             _track_task(
@@ -511,7 +532,9 @@ async def run_agent(agent_id: str, body: ManualRunBody):
 
 class ChatRequest(BaseModel):
     message: str
-    history: list[dict] | None = None          # [{"role": "user"|"assistant", "content": "..."}, ...]
+    history: list[dict] | None = (
+        None  # [{"role": "user"|"assistant", "content": "..."}, ...]
+    )
     focus_platform_ids: list[str] | None = None  # 현재 주목 중인 선박 ID 목록
 
 

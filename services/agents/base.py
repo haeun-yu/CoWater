@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ import redis.asyncio as aioredis
 
 # shared 패키지에서 canonical PlatformReport 임포트
 from shared.schemas.report import PlatformReport  # noqa: F401 (re-exported for sub-modules)
+
+ALERT_SCHEMA_VERSION = 1
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +46,15 @@ class AlertPayload:
 
     alert_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_by: str = ""
-    created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(tz=timezone.utc).isoformat()
+    )
 
     def to_dict(self) -> dict:
         meta = dict(self.metadata)
+        meta.setdefault("schema_version", ALERT_SCHEMA_VERSION)
+        meta.setdefault("generated_by", self.generated_by)
+        meta.setdefault("created_at", self.created_at)
         if self.dedup_key:
             meta["dedup_key"] = self.dedup_key
         return {
@@ -62,6 +70,7 @@ class AlertPayload:
             "metadata": meta,
             "created_at": self.created_at,
             "dedup_key": self.dedup_key,
+            "schema_version": ALERT_SCHEMA_VERSION,
         }
 
 
@@ -93,8 +102,34 @@ class Agent(ABC):
     async def emit_alert(self, payload: AlertPayload) -> None:
         payload.generated_by = self.agent_id
         channel = f"alert.created.{payload.severity}"
-        await self._redis.publish(channel, json.dumps(payload.to_dict()))
-        self._log.info("Alert emitted: type=%s severity=%s", payload.alert_type, payload.severity)
+        body = json.dumps(payload.to_dict())
+        last_error: Exception | None = None
+
+        for attempt in range(1, 4):
+            try:
+                await self._redis.publish(channel, body)
+                self._log.info(
+                    "Alert emitted: type=%s severity=%s attempt=%s",
+                    payload.alert_type,
+                    payload.severity,
+                    attempt,
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+                self._record_error(f"emit_alert failed: {exc}")
+                self._log.warning(
+                    "Alert publish failed: type=%s severity=%s attempt=%s",
+                    payload.alert_type,
+                    payload.severity,
+                    attempt,
+                    exc_info=exc,
+                )
+                if attempt < 3:
+                    await asyncio.sleep(0.25 * attempt)
+
+        assert last_error is not None
+        raise last_error
 
     def set_level(self, level: AgentLevel) -> None:
         self.level = level
