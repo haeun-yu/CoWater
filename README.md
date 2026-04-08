@@ -176,6 +176,7 @@ Core, Agent Runtime, Moth Bridge는 Docker Compose에서 환경 변수를 직접
 | `CORE_API_URL`      | `http://localhost:7700`  | Core Backend URL     |
 | `ANTHROPIC_API_KEY` | —                        | Claude API 키 (필수) |
 | `CLAUDE_MODEL`      | `claude-haiku-4-5-20251001` | 사용할 Claude 모델 |
+| `OLLAMA_THINK`      | `false`                  | Ollama reasoning/think 모드 사용 여부 |
 
 ### Frontend (`services/frontend/.env.local`)
 
@@ -208,7 +209,3 @@ Core, Agent Runtime, Moth Bridge는 Docker Compose에서 환경 변수를 직접
 - `db` 모드: core가 `platform_reports.raw_payload`에 저장합니다.
 - `off` 모드: raw payload를 저장하지 않습니다.
 - 운영 환경에서는 `cache`를 권장하고, 장기 보관이 꼭 필요할 때만 `db`로 전환하세요.
-
-```
-docker-compose down --volumes --remove-orphansdocker network prune -f
-```

@@ -148,14 +148,16 @@ async def run_moth(redis: aioredis.Redis) -> None:
             track_publish_result(True)
         except Exception:
             track_publish_result(False)
-            raise
-
-        # 최신 상태 캐시 (TTL 60s)
-        cache_key = f"platform:state:{report.platform_id}"
-        await _redis_write_with_retry(
-            lambda: redis.set(cache_key, payload, ex=60),
-            label=f"platform-state:{report.platform_id}",
-        )
+            logger.exception(
+                "Failed to publish report to Redis: %s", report.platform_id
+            )
+        else:
+            # 최신 상태 캐시 (TTL 60s)
+            cache_key = f"platform:state:{report.platform_id}"
+            await _redis_write_with_retry(
+                lambda: redis.set(cache_key, payload, ex=60),
+                label=f"platform-state:{report.platform_id}",
+            )
 
         # 2) WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)
         await broadcast(report)
