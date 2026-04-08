@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -33,7 +32,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
     .filter((a) => !compact || a.status === "new");
 
   async function acknowledge(alertId: string) {
-    const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+    const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "acknowledge" }),
