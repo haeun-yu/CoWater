@@ -1,0 +1,54 @@
+# 시나리오: 충돌 위험 (CPA 훈련)
+# 두 선박이 교차 항로로 접근 → CPA Agent 경보 발생 확인
+
+vessels:
+  - mmsi: "441010000"
+    name: "알파호"
+    lat: 34.750
+    lon: 126.400
+    heading: 90          # 동쪽으로 항행
+    speed: 12.0
+    max_speed: 15.0
+    waypoints:
+      - { lat: 34.750, lon: 126.700 }
+      - { lat: 34.750, lon: 126.400 }  # 순환
+
+  - mmsi: "441011000"
+    name: "베타호"
+    lat: 34.850
+    lon: 126.550
+    heading: 180         # 남쪽으로 항행 — 알파호 항로와 교차
+    speed: 10.0
+    max_speed: 14.0
+    waypoints:
+      - { lat: 34.650, lon: 126.550 }
+      - { lat: 34.850, lon: 126.550 }  # 순환
+
+  - mmsi: "441012000"
+    name: "감마호"
+    lat: 34.700
+    lon: 126.300
+    heading: 60
+    speed: 8.0
+    max_speed: 12.0
+    waypoints:
+      - { lat: 34.800, lon: 126.650 }
+      - { lat: 34.700, lon: 126.300 }
+
+events:
+  # t=120s: 알파호 속도 증가 → 충돌 위험 심화
+  - at: 120
+    mmsi: "441010000"
+    type: set_speed
+    speed: 15.0
+
+  # t=300s: 베타호 엔진 고장 → 표류 시작
+  - at: 300
+    mmsi: "441011000"
+    type: engine_stop
+
+  # t=420s: 베타호 엔진 복구
+  - at: 420
+    mmsi: "441011000"
+    type: engine_restore
+    speed: 6.0

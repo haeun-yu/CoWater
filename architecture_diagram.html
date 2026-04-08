@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoWater 시스템 아키텍처</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #080c18;
+  color: #e0e6f0;
+  min-height: 100vh;
+  padding: 28px 20px 48px;
+}
+h1 { text-align:center; font-size:1.5rem; font-weight:700; color:#7dd3fc; margin-bottom:6px; letter-spacing:.05em; }
+.subtitle { text-align:center; font-size:.82rem; color:#475569; margin-bottom:32px; }
+
+/* ── 탭 ── */
+.tabs { display:flex; gap:8px; justify-content:center; margin-bottom:28px; flex-wrap:wrap; }
+.tab { padding:7px 18px; border-radius:999px; border:1px solid #1e3a5f; background:#0f172a; color:#64748b; cursor:pointer; font-size:.8rem; font-weight:600; transition:all .2s; }
+.tab:hover { border-color:#3b82f6; color:#93c5fd; }
+.tab.active { background:#1e40af; border-color:#3b82f6; color:#fff; }
+
+.view { display:none; }
+.view.active { display:block; }
+
+/* ── 공통 박스 ── */
+.box {
+  border-radius:10px; padding:12px 16px; border:1.5px solid;
+  position:relative;
+}
+.box-label { font-size:.6rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:3px; }
+.box-name  { font-size:.95rem; font-weight:700; margin-bottom:3px; }
+.box-desc  { font-size:.7rem; line-height:1.5; color:#94a3b8; }
+.box-port  { position:absolute; top:10px; right:12px; font-size:.62rem; font-weight:700; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.06); }
+.tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+.tag { font-size:.6rem; padding:2px 7px; border-radius:999px; border:1px solid; font-weight:600; }
+
+/* ── 색상 테마 ── */
+.t-ext    { border-color:#334155; background:#0b1120; }
+.t-ext    .box-label { color:#64748b; } .t-ext .box-name { color:#cbd5e1; }
+.t-bridge { border-color:#0e4f6b; background:#04111a; }
+.t-bridge .box-label { color:#38bdf8; } .t-bridge .box-name { color:#7dd3fc; }
+.t-redis  { border-color:#7f1d1d; background:#110505; }
+.t-redis  .box-label { color:#f87171; } .t-redis .box-name { color:#fca5a5; }
+.t-core   { border-color:#1e4d2b; background:#04100a; }
+.t-core   .box-label { color:#4ade80; } .t-core .box-name { color:#86efac; }
+.t-agents { border-color:#7c3a0e; background:#110800; }
+.t-agents .box-label { color:#fb923c; } .t-agents .box-name { color:#fdba74; }
+.t-db     { border-color:#312e81; background:#080718; }
+.t-db     .box-label { color:#818cf8; } .t-db .box-name { color:#a5b4fc; }
+.t-fe     { border-color:#581c87; background:#0e0518; }
+.t-fe     .box-label { color:#c084fc; } .t-fe .box-name { color:#d8b4fe; }
+.t-llm    { border-color:#1c3a2a; background:#040c06; }
+.t-llm    .box-label { color:#34d399; } .t-llm .box-name { color:#6ee7b7; }
+.t-sim    { border-color:#4a3500; background:#0e0900; }
+.t-sim    .box-label { color:#fbbf24; } .t-sim .box-name { color:#fcd34d; }
+
+/* ════════════════════════
+   VIEW 1: 전체 흐름
+════════════════════════ */
+#view-flow { max-width:1200px; margin:0 auto; }
+
+/* SVG 화살표 오버레이 대신 CSS 화살표 */
+.flow-canvas {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  grid-template-rows: auto auto auto auto auto auto auto;
+  gap: 0;
+  position: relative;
+}
+
+/* 각 셀 */
+.fc { display:flex; align-items:stretch; justify-content:center; padding:6px 8px; }
+.fc .box { flex:1; }
+
+/* 수직 화살표 셀 */
+.arr-v { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 8px; }
+.arr-v-line { width:2px; height:24px; }
+.arr-v-head { width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; }
+.arr-label { font-size:.62rem; padding:2px 8px; border-radius:4px; border:1px solid; white-space:nowrap; margin:3px 0; }
+/* 가로 화살표 */
+.arr-h { display:flex; align-items:center; justify-content:center; padding:0 4px; font-size:.8rem; }
+
+/* 색상별 */
+.arr-blue .arr-v-line { background:linear-gradient(to bottom,#1e40af,#3b82f6); }
+.arr-blue .arr-v-head { border-top:7px solid #3b82f6; }
+.arr-blue .arr-label  { color:#38bdf8; background:#04111a; border-color:#1e3a5f; }
+
+.arr-red .arr-v-line { background:linear-gradient(to bottom,#7f1d1d,#ef4444); }
+.arr-red .arr-v-head { border-top:7px solid #ef4444; }
+.arr-red .arr-label  { color:#f87171; background:#110505; border-color:#7f1d1d; }
+
+.arr-green .arr-v-line { background:linear-gradient(to bottom,#1e4d2b,#4ade80); }
+.arr-green .arr-v-head { border-top:7px solid #4ade80; }
+.arr-green .arr-label  { color:#4ade80; background:#04100a; border-color:#1e4d2b; }
+
+.arr-purple .arr-v-line { background:linear-gradient(to bottom,#581c87,#c084fc); }
+.arr-purple .arr-v-head { border-top:7px solid #c084fc; }
+.arr-purple .arr-label  { color:#c084fc; background:#0e0518; border-color:#581c87; }
+
+.arr-orange .arr-v-line { background:linear-gradient(to bottom,#7c3a0e,#fb923c); }
+.arr-orange .arr-v-head { border-top:7px solid #fb923c; }
+.arr-orange .arr-label  { color:#fb923c; background:#110800; border-color:#7c3a0e; }
+
+.arr-yellow .arr-v-line { background:linear-gradient(to bottom,#4a3500,#fbbf24); }
+.arr-yellow .arr-v-head { border-top:7px solid #fbbf24; }
+.arr-yellow .arr-label  { color:#fbbf24; background:#0e0900; border-color:#4a3500; }
+
+/* 범례 */
+.legend {
+  display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+  margin-bottom:16px;
+}
+.legend-item { display:flex; align-items:center; gap:5px; font-size:.67rem; color:#64748b; }
+.legend-dot { width:10px; height:10px; border-radius:50%; }
+
+/* 섹션 헤더 */
+.section-hdr {
+  font-size:.68rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  padding:6px 14px; border-radius:6px; margin:8px 8px 0;
+  display:inline-flex; align-items:center; gap:6px;
+}
+
+/* ════════════════════════
+   VIEW 2: moth-bridge 상세
+════════════════════════ */
+.detail-wrapper { max-width:960px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+.detail-box { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:20px 24px; }
+.detail-title { font-size:.75rem; font-weight:700; color:#64748b; letter-spacing:.1em; text-transform:uppercase; margin-bottom:14px; }
+
+.code-block {
+  background:#04080f; border:1px solid #1e293b; border-radius:8px;
+  padding:14px 18px; font-family:monospace; font-size:.73rem; line-height:1.9; color:#94a3b8;
+}
+.cm { color:#475569; font-style:italic; }
+.ck { color:#818cf8; }
+.cs { color:#fbbf24; }
+.cf { color:#38bdf8; }
+.cv { color:#fb923c; }
+
+/* 경로 비교 */
+.path-compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+.path-card { border-radius:10px; padding:14px 16px; border:1.5px solid; }
+.path-old { border-color:#334155; background:#0b1120; }
+.path-new { border-color:#1e4d2b; background:#04100a; }
+.path-badge { font-size:.62rem; font-weight:700; padding:2px 8px; border-radius:4px; display:inline-block; margin-bottom:8px; }
+.path-old .path-badge { background:#1e293b; color:#64748b; }
+.path-new .path-badge { background:#1e4d2b; color:#4ade80; }
+.path-steps { font-size:.72rem; line-height:2; color:#94a3b8; }
+.path-steps span { display:inline-block; padding:1px 6px; border-radius:4px; margin:0 2px; font-size:.68rem; font-weight:600; }
+
+/* ════════════════════════
+   VIEW 3: core 소비자 상세
+════════════════════════ */
+/* ════════════════════════
+   VIEW 4: 에이전트 상세
+════════════════════════ */
+.agent-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.ac { border-radius:12px; padding:16px; border:1.5px solid; }
+.ac.rule { border-color:#7c3a0e; background:#110800; }
+.ac.ai   { border-color:#312e81; background:#08071e; }
+.ac-id { font-family:monospace; font-size:.62rem; font-weight:700; padding:2px 8px; border-radius:4px; display:inline-block; margin-bottom:6px; }
+.ac.rule .ac-id { color:#fb923c; background:rgba(251,146,60,.1); }
+.ac.ai   .ac-id { color:#818cf8; background:rgba(129,140,248,.1); }
+.ac-name { font-size:.9rem; font-weight:700; margin-bottom:6px; }
+.ac.rule .ac-name { color:#fdba74; }
+.ac.ai   .ac-name { color:#a5b4fc; }
+.ac-desc { font-size:.7rem; color:#94a3b8; line-height:1.5; margin-bottom:8px; }
+.ac-row  { font-size:.68rem; padding:4px 8px; border-radius:5px; margin-bottom:3px; border-left:2px solid; line-height:1.4; }
+.tr-r { background:rgba(16,185,129,.07); border-color:#10b981; color:#6ee7b7; }
+.tr-a { background:rgba(245,158,11,.07); border-color:#f59e0b; color:#fcd34d; }
+.out-c { background:rgba(239,68,68,.07); border-color:#ef4444; color:#fca5a5; }
+.out-w { background:rgba(251,146,60,.07); border-color:#f97316; color:#fdba74; }
+.out-i { background:rgba(148,163,184,.07); border-color:#94a3b8; color:#cbd5e1; }
+.out-ai{ background:rgba(129,140,248,.07); border-color:#818cf8; color:#c7d2fe; }
+.lv { font-size:.6rem; font-weight:700; padding:1px 5px; border-radius:3px; margin-right:2px; }
+.lv1 { background:#1e293b; color:#94a3b8; }
+.lv2 { background:#1c3a5c; color:#93c5fd; }
+.lv3 { background:#1e3a2a; color:#6ee7b7; }
+
+/* ════════════════════════
+   VIEW 5: DB 스키마
+════════════════════════ */
+.db-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; max-width:1100px; margin:0 auto; }
+.tc { background:#0c0b1e; border:1.5px solid #312e81; border-radius:12px; overflow:hidden; }
+.tc-hdr { background:#1e1b4b; padding:9px 14px; display:flex; align-items:center; justify-content:space-between; }
+.tc-name { font-size:.82rem; font-weight:700; color:#a5b4fc; font-family:monospace; }
+.tc-badge { font-size:.58rem; font-weight:700; padding:2px 7px; border-radius:4px; background:rgba(129,140,248,.15); color:#818cf8; }
+.tc-body { padding:10px 14px; }
+.cr { display:flex; align-items:baseline; gap:8px; padding:4px 0; border-bottom:1px solid #1e1b4b; font-size:.68rem; }
+.cr:last-child { border-bottom:none; }
+.cn { color:#e0e7ff; font-family:monospace; min-width:110px; }
+.ct { color:#6366f1; font-size:.63rem; }
+.cnote { color:#475569; font-size:.63rem; margin-left:auto; }
+.pk { color:#f59e0b; font-size:.58rem; font-weight:700; }
+.fk { color:#38bdf8; font-size:.58rem; }
+.sp { color:#4ade80; font-size:.58rem; }
+
+/* ════════════════════════
+   VIEW 6: 자율성 레벨
+════════════════════════ */
+.level-wrap { max-width:880px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+.lc { border-radius:12px; padding:18px 22px; border:1.5px solid; display:grid; grid-template-columns:72px 1fr; gap:16px; align-items:start; }
+.lc.l1c { border-color:#1e293b; background:#090f1c; }
+.lc.l2c { border-color:#1c3a5c; background:#04101e; }
+.lc.l3c { border-color:#1e3a2a; background:#040e08; }
+.lbig { font-size:1.8rem; font-weight:900; display:flex; align-items:center; justify-content:center; width:56px; height:56px; border-radius:10px; }
+.l1c .lbig { background:#1e293b; color:#94a3b8; }
+.l2c .lbig { background:#1c3a5c; color:#93c5fd; }
+.l3c .lbig { background:#1e3a2a; color:#6ee7b7; }
+.lc-title { font-size:.95rem; font-weight:700; margin-bottom:5px; }
+.l1c .lc-title { color:#cbd5e1; }
+.l2c .lc-title { color:#93c5fd; }
+.l3c .lc-title { color:#6ee7b7; }
+.lc-desc { font-size:.75rem; color:#94a3b8; line-height:1.6; margin-bottom:8px; }
+.lc-feats { display:flex; flex-wrap:wrap; gap:5px; }
+.lc-feat { font-size:.67rem; padding:3px 9px; border-radius:5px; font-weight:600; }
+.l1c .lc-feat { background:#1e293b; color:#94a3b8; }
+.l2c .lc-feat { background:#1c3a5c; color:#93c5fd; }
+.l3c .lc-feat { background:#1e3a2a; color:#6ee7b7; }
+
+.cmp-table { background:#0f172a; border:1px solid #1e293b; border-radius:10px; overflow:hidden; }
+.cmp-hdr { display:grid; grid-template-columns:2.2fr 1fr 1fr 1fr; background:#1e293b; padding:9px 14px; font-size:.7rem; font-weight:700; color:#94a3b8; }
+.cmp-row { display:grid; grid-template-columns:2.2fr 1fr 1fr 1fr; padding:9px 14px; border-bottom:1px solid #1e293b; font-size:.72rem; align-items:center; }
+.cmp-row:last-child { border-bottom:none; }
+.cmp-row:hover { background:#131f35; }
+.cf2 { color:#cbd5e1; }
+.chk { color:#4ade80; text-align:center; font-size:.9rem; }
+.crs { color:#334155; text-align:center; font-size:.9rem; }
+.cpt { color:#fbbf24; text-align:center; font-size:.72rem; }
+
+@media(max-width:768px){
+  .agent-grid,.db-grid { grid-template-columns:1fr; }
+  .path-compare { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<h1>CoWater 시스템 아키텍처</h1>
+<p class="subtitle">연안 VTS 해양 운영 플랫폼 — 실시간 선박 관제 · 자율 에이전트 · AI 분석</p>
+
+<div class="tabs">
+  <div class="tab active" onclick="show('flow')">전체 데이터 흐름</div>
+  <div class="tab" onclick="show('bridge')">moth-bridge 상세</div>
+  <div class="tab" onclick="show('core')">core 소비자 상세</div>
+  <div class="tab" onclick="show('agents')">에이전트 상세</div>
+  <div class="tab" onclick="show('db')">DB 스키마</div>
+  <div class="tab" onclick="show('levels')">자율성 레벨</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 1: 전체 데이터 흐름
+═══════════════════════════════════════════════════ -->
+<div id="view-flow" class="view active">
+<div id="view-flow" style="max-width:1200px;margin:0 auto;">
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>위치 데이터 (일반 경로)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>위치 데이터 (직접 경로 — 저지연)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>경보 데이터</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c084fc"></div>WebSocket → 프론트엔드</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#6ee7b7"></div>LLM 호출</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div>시뮬레이터 (선택적)</div>
+</div>
+
+<!-- Row 0: Moth Server + Simulator -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;margin-bottom:0;">
+  <div style="padding:6px 8px;grid-column:1/3;">
+    <div class="box t-ext">
+      <div class="box-label">External</div>
+      <div class="box-name">Moth Server</div>
+      <div class="box-desc">실제 선박 AIS 신호 수신 서버<br><code style="color:#7dd3fc;font-size:.67rem">wss://cobot.center:8287</code></div>
+      <div class="tags">
+        <span class="tag" style="color:#38bdf8;border-color:#0e4f6b">RSSP</span>
+        <span class="tag" style="color:#38bdf8;border-color:#0e4f6b">WebSocket</span>
+      </div>
+    </div>
+  </div>
+  <div style="padding:6px 8px;grid-column:4/6;">
+    <div class="box t-sim">
+      <div class="box-label">Optional — --profile simulation</div>
+      <div class="box-name">Simulator</div>
+      <div class="box-desc">YAML 시나리오 기반 가상 선박 AIS 생성<br>실제 Moth 서버에 RSSP 퍼블리시</div>
+      <div class="tags">
+        <span class="tag" style="color:#fbbf24;border-color:#4a3500">collision_risk</span>
+        <span class="tag" style="color:#fbbf24;border-color:#4a3500">zone_intrusion</span>
+        <span class="tag" style="color:#fbbf24;border-color:#4a3500">distress</span>
+        <span class="tag" style="color:#fbbf24;border-color:#4a3500">demo</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arrow 0: Moth Server ↓ -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+  <div class="arr-v arr-blue" style="grid-column:1/3;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">RSSP / WebSocket 구독</div>
+    <div class="arr-v-head"></div>
+  </div>
+  <div style="grid-column:3"></div>
+  <div class="arr-v arr-yellow" style="grid-column:4/6;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">RSSP 퍼블리시 → Moth Server</div>
+    <div class="arr-v-head" style="border-top-color:#fbbf24"></div>
+  </div>
+</div>
+
+<!-- Row 1: moth-bridge -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;">
+  <div style="padding:6px 8px;grid-column:1/6;">
+    <div class="box t-bridge">
+      <div class="box-label">Adapter Layer</div>
+      <div class="box-name">moth-bridge</div>
+      <div class="box-port" style="color:#38bdf8">:7703</div>
+      <div class="box-desc">
+        Moth 서버 WebSocket 구독 → NMEA/RSSP 파싱 → <code style="font-size:.67rem;color:#7dd3fc">ParsedReport</code> 생성<br>
+        <strong style="color:#4ade80">① Redis pub/sub 발행</strong> (agents, core 소비용)<br>
+        <strong style="color:#4ade80">② WebSocket relay 직접 브로드캐스트</strong> (프론트엔드 직접 — Redis 경유 없음)
+      </div>
+      <div class="tags">
+        <span class="tag" style="color:#38bdf8;border-color:#0e4f6b">NMEAAdapter (활성)</span>
+        <span class="tag" style="color:#475569;border-color:#334155">MAVLinkAdapter (stub)</span>
+        <span class="tag" style="color:#475569;border-color:#334155">ROSAdapter (stub)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arrow 1: 세 방향으로 분기 -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+  <!-- Redis 방향 (좌) -->
+  <div class="arr-v arr-blue" style="grid-column:1/3;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">platform.report.{id} 발행<br>platform:state:{id} 캐시 (TTL 60s)</div>
+    <div class="arr-v-head"></div>
+  </div>
+  <!-- 공백 -->
+  <div style="grid-column:3"></div>
+  <!-- WS relay 방향 (우) — 직접 -->
+  <div class="arr-v" style="grid-column:4/6;display:flex;flex-direction:column;align-items:center;padding:4px 8px;">
+    <div class="arr-v-line" style="background:linear-gradient(to bottom,#1e4d2b,#4ade80)"></div>
+    <div class="arr-label" style="color:#4ade80;background:#04100a;border-color:#1e4d2b;font-weight:700">
+      ⚡ WS /ws/positions 직접 브로드캐스트<br>
+      <span style="color:#64748b;font-weight:400">Redis · core 경유 없음 — 최저 지연</span>
+    </div>
+    <div class="arr-v-head" style="border-top-color:#4ade80"></div>
+  </div>
+</div>
+
+<!-- Row 2: Redis + (arrow to frontend 우측) -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;">
+  <!-- Redis -->
+  <div style="padding:6px 8px;grid-column:1/3;">
+    <div class="box t-redis">
+      <div class="box-label">Message Broker</div>
+      <div class="box-name">Redis</div>
+      <div class="box-port" style="color:#f87171">:6379</div>
+      <div class="box-desc">서비스 간 이벤트 버스 (pub/sub)</div>
+      <div class="tags">
+        <span class="tag" style="color:#f87171;border-color:#7f1d1d">platform.report.*</span>
+        <span class="tag" style="color:#f87171;border-color:#7f1d1d">alert.created.*</span>
+        <span class="tag" style="color:#f87171;border-color:#7f1d1d">platform:state:* (TTL)</span>
+      </div>
+    </div>
+  </div>
+  <div style="grid-column:3"></div>
+  <!-- frontend (위치 직접 수신) -->
+  <div style="padding:6px 8px;grid-column:4/6;display:flex;align-items:center;">
+    <div class="box t-fe" style="flex:1;border-style:dashed;border-color:#4ade80;">
+      <div class="box-label" style="color:#4ade80">⚡ Direct WebSocket</div>
+      <div class="box-name">frontend — 위치 수신</div>
+      <div class="box-desc">
+        <code style="font-size:.67rem;color:#4ade80">ws://localhost:7703/ws/positions</code><br>
+        <code style="font-size:.67rem;color:#d8b4fe">platformStore.upsert()</code> → 지도 마커 업데이트
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arrow 2: Redis → core/agents 분기 -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+  <div class="arr-v arr-blue" style="grid-column:1/2;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">구독</div>
+    <div class="arr-v-head"></div>
+  </div>
+  <div class="arr-v arr-orange" style="grid-column:2/3;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">구독</div>
+    <div class="arr-v-head"></div>
+  </div>
+</div>
+
+<!-- Row 3: core + agents + LLM -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;align-items:start;">
+  <!-- core -->
+  <div style="padding:6px 8px;grid-column:1/2;">
+    <div class="box t-core">
+      <div class="box-label">Backend API</div>
+      <div class="box-name">core</div>
+      <div class="box-port" style="color:#4ade80">:7700</div>
+      <div class="box-desc">
+        FastAPI REST API<br>
+        <strong>track_consumer</strong>: platform.report.* 구독 → DB 저장 → /ws/platforms 브로드캐스트<br>
+        <strong>alert_consumer</strong>: alert.created.* 구독 → dedup → DB 저장 → /ws/alerts 브로드캐스트
+      </div>
+      <div class="tags">
+        <span class="tag" style="color:#4ade80;border-color:#1e4d2b">/ws/platforms</span>
+        <span class="tag" style="color:#4ade80;border-color:#1e4d2b">/ws/alerts</span>
+        <span class="tag" style="color:#94a3b8;border-color:#334155">/zones REST</span>
+      </div>
+    </div>
+  </div>
+  <!-- agents -->
+  <div style="padding:6px 8px;grid-column:2/4;">
+    <div class="box t-agents">
+      <div class="box-label">Agent Runtime</div>
+      <div class="box-name">agents</div>
+      <div class="box-port" style="color:#fb923c">:7701</div>
+      <div class="box-desc">
+        Rule 에이전트 3개 (직렬 await)<br>
+        AI 에이전트 3개 (asyncio.create_task 백그라운드)<br>
+        alert.created.* 구독 → 에이전트 간 연계
+      </div>
+      <div class="tags">
+        <span class="tag" style="color:#fb923c;border-color:#7c3a0e">CPA</span>
+        <span class="tag" style="color:#fb923c;border-color:#7c3a0e">ZoneMonitor</span>
+        <span class="tag" style="color:#fb923c;border-color:#7c3a0e">AnomalyRule</span>
+        <span class="tag" style="color:#818cf8;border-color:#312e81">AnomalyAI</span>
+        <span class="tag" style="color:#818cf8;border-color:#312e81">Distress</span>
+        <span class="tag" style="color:#818cf8;border-color:#312e81">Report</span>
+      </div>
+    </div>
+  </div>
+  <!-- LLM -->
+  <div style="padding:6px 8px;grid-column:4/6;">
+    <div class="box t-llm">
+      <div class="box-label">LLM — --profile ollama</div>
+      <div class="box-name">Claude / Ollama</div>
+      <div class="box-desc">
+        <code style="font-size:.67rem;color:#6ee7b7">LLM_BACKEND=claude</code> → Anthropic API<br>
+        <code style="font-size:.67rem;color:#6ee7b7">LLM_BACKEND=ollama</code> → 로컬 qwen2.5:3b<br>
+        <code style="font-size:.67rem;color:#6ee7b7">make_llm_client()</code> 동일 인터페이스
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arrow 3: agents → Redis (경보), core → DB, agents → LLM -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+  <!-- core → DB -->
+  <div class="arr-v arr-blue" style="grid-column:1/2;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">INSERT / SELECT</div>
+    <div class="arr-v-head"></div>
+  </div>
+  <!-- agents → Redis (경보 발행) -->
+  <div style="grid-column:2/4;display:flex;align-items:center;justify-content:center;padding:4px 8px;">
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <div style="width:2px;height:18px;background:linear-gradient(to bottom,#7f1d1d,#ef4444)"></div>
+      <div class="arr-label" style="color:#f87171;background:#110505;border-color:#7f1d1d">alert.created.{severity} 발행</div>
+      <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #ef4444;margin-bottom:4px"></div>
+      <div class="arr-label" style="color:#f87171;background:#110505;border-color:#7f1d1d;font-size:.58rem">↑ Redis로 역방향</div>
+    </div>
+  </div>
+  <!-- agents → LLM -->
+  <div class="arr-v arr-green" style="grid-column:4/6;">
+    <div class="arr-v-line"></div>
+    <div class="arr-label">Claude API / Ollama HTTP</div>
+    <div class="arr-v-head"></div>
+  </div>
+</div>
+
+<!-- Row 4: DB -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;">
+  <div style="padding:6px 8px;grid-column:1/3;">
+    <div class="box t-db">
+      <div class="box-label">Persistence</div>
+      <div class="box-name">TimescaleDB + PostGIS</div>
+      <div class="box-port" style="color:#818cf8">:5432</div>
+      <div class="box-desc">
+        <code style="font-size:.67rem;color:#a5b4fc">platform_reports</code> Hypertable (시계열)<br>
+        <code style="font-size:.67rem;color:#a5b4fc">zones</code> PostGIS geometry<br>
+        <code style="font-size:.67rem;color:#a5b4fc">alerts · incidents · audit_logs</code>
+      </div>
+    </div>
+  </div>
+  <div style="grid-column:3/6;padding:6px 8px;display:flex;align-items:center;">
+    <div style="background:#04100a;border:1px dashed #1e4d2b;border-radius:8px;padding:10px 14px;font-size:.7rem;color:#64748b;flex:1;">
+      <strong style="color:#4ade80">alert_consumer dedup 로직</strong><br>
+      경보 수신 시 <code style="color:#fca5a5">dedup_key</code>로 기존 <code style="color:#fca5a5">status=new</code> 경보 검색<br>
+      ├── 존재 + 내용 변경 → <strong style="color:#fbbf24">UPDATE</strong> + WS <code style="color:#fbbf24">alert_updated</code> 이벤트<br>
+      ├── 존재 + 변경 없음 → <strong style="color:#475569">SKIP</strong> (DB/WS 작업 없음)<br>
+      └── 없음 → <strong style="color:#4ade80">INSERT</strong> + WS <code style="color:#4ade80">alert_created</code> 이벤트
+    </div>
+  </div>
+</div>
+
+<!-- Arrow 4: core WS → frontend -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+  <div style="grid-column:1/2;display:flex;flex-direction:column;align-items:center;padding:4px 8px;">
+    <div style="width:2px;height:18px;background:linear-gradient(to bottom,#312e81,#c084fc)"></div>
+    <div class="arr-label" style="color:#c084fc;background:#0e0518;border-color:#581c87;">
+      /ws/alerts → alert_created / alert_updated<br>
+      <span style="color:#475569;font-size:.58rem">/ws/platforms → position_update (프론트 미연결)</span>
+    </div>
+    <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #c084fc;"></div>
+  </div>
+</div>
+
+<!-- Row 5: frontend (최종) -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0;">
+  <div style="padding:6px 8px;grid-column:1/6;">
+    <div class="box t-fe">
+      <div class="box-label">Client</div>
+      <div class="box-name">frontend — Next.js 15 해양 관제 대시보드</div>
+      <div class="box-port" style="color:#c084fc">:7702</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px;">
+        <div style="background:rgba(74,222,128,.06);border:1px solid #1e4d2b;border-radius:8px;padding:10px 12px;font-size:.7rem;">
+          <div style="color:#4ade80;font-weight:700;margin-bottom:5px">⚡ 위치 스트림 (직접)</div>
+          <code style="color:#6ee7b7;font-size:.65rem">ws://localhost:7703/ws/positions</code><br>
+          <div style="color:#94a3b8;margin-top:4px">← moth-bridge 직접<br>
+          position_update → <code style="color:#d8b4fe">platformStore.upsert()</code><br>
+          MapLibre 지도 마커 실시간 업데이트</div>
+        </div>
+        <div style="background:rgba(239,68,68,.06);border:1px solid #7f1d1d;border-radius:8px;padding:10px 12px;font-size:.7rem;">
+          <div style="color:#f87171;font-weight:700;margin-bottom:5px">경보 스트림 (core)</div>
+          <code style="color:#fca5a5;font-size:.65rem">ws://localhost:7700/ws/alerts</code><br>
+          <div style="color:#94a3b8;margin-top:4px">← core WebSocket<br>
+          alert_created → <code style="color:#d8b4fe">alertStore.addAlert()</code><br>
+          alert_updated → <code style="color:#d8b4fe">alertStore.updateAlert()</code><br>
+          → <code style="color:#d8b4fe">aiLogStore.addLog()</code></div>
+        </div>
+        <div style="background:rgba(129,140,248,.06);border:1px solid #312e81;border-radius:8px;padding:10px 12px;font-size:.7rem;">
+          <div style="color:#818cf8;font-weight:700;margin-bottom:5px">상태 관리 (Zustand)</div>
+          <div style="color:#94a3b8;">
+            <code style="color:#d8b4fe">platformStore</code> — 선박 위치<br>
+            <code style="color:#d8b4fe">alertStore</code> — 경보 목록<br>
+            <code style="color:#d8b4fe">agentStore</code> — 에이전트 상태<br>
+            <code style="color:#d8b4fe">aiLogStore</code> — AI 활동 로그<br>
+            <br>
+            20s ping / 3s 재연결
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 2: moth-bridge 상세
+═══════════════════════════════════════════════════ -->
+<div id="view-bridge" class="view">
+<div class="detail-wrapper">
+
+  <div class="detail-box">
+    <div class="detail-title">moth-bridge 이중 출력 구조</div>
+    <div class="path-compare">
+      <div class="path-card path-old">
+        <div class="path-badge">기존 경로 (DB 저장용)</div>
+        <div class="path-steps">
+          Moth Server<br>
+          ↓<br>
+          moth-bridge (파싱)<br>
+          ↓ <span style="color:#f87171;background:rgba(248,113,113,.1);border-radius:4px;padding:1px 6px;">Redis pub/sub</span><br>
+          platform.report.{id}<br>
+          ↓<br>
+          core (track_consumer)<br>
+          ↓<br>
+          TimescaleDB INSERT<br>
+          ↓<br>
+          core /ws/platforms<br>
+          ↓ <span style="color:#94a3b8;font-size:.65rem">(프론트가 이 엔드포인트는 연결 안 함)</span>
+        </div>
+      </div>
+      <div class="path-card path-new">
+        <div class="path-badge">⚡ 신규 직접 경로 (위치 표시용)</div>
+        <div class="path-steps">
+          Moth Server<br>
+          ↓<br>
+          moth-bridge (파싱)<br>
+          ↓ <span style="color:#4ade80;background:rgba(74,222,128,.1);border-radius:4px;padding:1px 6px;">ws_relay.broadcast()</span><br>
+          <strong style="color:#4ade80">Redis 경유 없음!</strong><br>
+          ↓<br>
+          frontend :7703/ws/positions<br>
+          ↓<br>
+          platformStore.upsert()<br>
+          ↓<br>
+          지도 마커 즉시 업데이트
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-box">
+    <div class="detail-title">moth-bridge/main.py — publish_report() 핵심 로직</div>
+    <div class="code-block">
+<span class="ck">async def</span> <span class="cf">publish_report</span>(report: ParsedReport) → None:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># ① Redis pub/sub — agents, core 소비용</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;channel_key = <span class="cs">f"platform.report.{report.platform_id}"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;payload = json.dumps(report.to_redis_payload())<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">await</span> redis.publish(channel_key, payload)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 최신 상태 캐시 (TTL 60s)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;cache_key = <span class="cs">f"platform:state:{report.platform_id}"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">await</span> redis.set(cache_key, payload, ex=<span class="cv">60</span>)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># ② WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">await</span> <span class="cf">broadcast</span>(report) &nbsp;<span class="cm"># ws_relay.py</span>
+    </div>
+  </div>
+
+  <div class="detail-box">
+    <div class="detail-title">ws_relay.py — 프론트엔드 직접 연결 서버</div>
+    <div class="code-block">
+<span class="cm"># moth-bridge 내부에서 uvicorn으로 함께 실행 (포트 8002 = 외부 :7703)</span><br>
+<span class="cm"># run_relay()와 run_moth()가 asyncio.gather()로 병렬 실행</span><br>
+<br>
+_clients: set[WebSocket] = set() &nbsp;<span class="cm"># 연결된 프론트엔드 목록</span><br>
+<br>
+<span class="ck">async def</span> <span class="cf">broadcast</span>(report) → None:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;payload = json.dumps({<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cs">"type"</span>: <span class="cs">"position_update"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cs">"platform_id"</span>: report.platform_id,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cs">"lat"</span>: report.position.lat, <span class="cs">"lon"</span>: report.position.lon,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cs">"sog"</span>: report.sog, <span class="cs">"cog"</span>: report.cog, ...<br>
+&nbsp;&nbsp;&nbsp;&nbsp;})<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">for</span> ws <span class="ck">in</span> _clients:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">await</span> ws.send_text(payload) &nbsp;<span class="cm"># 모든 클라이언트에 브로드캐스트</span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 3: core 소비자 상세
+═══════════════════════════════════════════════════ -->
+<div id="view-core" class="view">
+<div class="detail-wrapper">
+
+  <div class="detail-box">
+    <div class="detail-title">core 서비스 내부 구조</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+      <div style="background:#04100a;border:1px solid #1e4d2b;border-radius:10px;padding:16px;">
+        <div style="color:#4ade80;font-size:.75rem;font-weight:700;margin-bottom:10px;">track_consumer — 위치 처리</div>
+        <div style="font-size:.72rem;line-height:1.9;color:#94a3b8;">
+          Redis 구독: <code style="color:#7dd3fc">platform.report.*</code><br>
+          ↓<br>
+          platforms 테이블 upsert<br>
+          (최초 수신 선박 자동 등록)<br>
+          ↓<br>
+          platform_reports INSERT<br>
+          (TimescaleDB Hypertable)<br>
+          ↓<br>
+          <code style="color:#4ade80">/ws/platforms</code> 브로드캐스트<br>
+          <span style="color:#475569;font-size:.65rem">※ 현재 프론트엔드는 이 엔드포인트 미연결<br>
+          프론트는 moth-bridge :7703 직접 사용</span>
+        </div>
+      </div>
+
+      <div style="background:#150508;border:1px solid #7f1d1d;border-radius:10px;padding:16px;">
+        <div style="color:#f87171;font-size:.75rem;font-weight:700;margin-bottom:10px;">alert_consumer — 경보 처리 (dedup)</div>
+        <div style="font-size:.72rem;line-height:1.9;color:#94a3b8;">
+          Redis 구독: <code style="color:#fca5a5">alert.created.*</code><br>
+          ↓<br>
+          dedup_key 추출<br>
+          ↓<br>
+          기존 status=new 경보 조회<br>
+          ├── 있음 + 변경 → <span style="color:#fbbf24">UPDATE</span> + <code style="color:#fbbf24">alert_updated</code><br>
+          ├── 있음 + 동일 → <span style="color:#475569">SKIP</span><br>
+          └── 없음 → <span style="color:#4ade80">INSERT</span> + <code style="color:#4ade80">alert_created</code><br>
+          ↓<br>
+          <code style="color:#f87171">/ws/alerts</code> 브로드캐스트<br>
+          <span style="color:#6ee7b7;font-size:.65rem">← 프론트엔드 실제 연결 중</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="detail-box">
+    <div class="detail-title">REST API 엔드포인트</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:.72rem;">
+      <div style="background:#0a1628;border:1px solid #1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#4ade80;font-weight:700;margin-bottom:6px;">platforms</div>
+        <div style="color:#94a3b8;line-height:1.8;">
+          GET /platforms<br>
+          GET /platforms/{id}<br>
+          GET /platforms/{id}/track<br>
+          PATCH /platforms/{id}
+        </div>
+      </div>
+      <div style="background:#0a1628;border:1px solid #1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#f87171;font-weight:700;margin-bottom:6px;">alerts</div>
+        <div style="color:#94a3b8;line-height:1.8;">
+          GET /alerts<br>
+          GET /alerts/{id}<br>
+          PATCH /alerts/{id}/acknowledge<br>
+          PATCH /alerts/{id}/resolve
+        </div>
+      </div>
+      <div style="background:#0a1628;border:1px solid #1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#818cf8;font-weight:700;margin-bottom:6px;">zones</div>
+        <div style="color:#94a3b8;line-height:1.8;">
+          GET /zones<br>
+          POST /zones<br>
+          GET /zones/{id}<br>
+          PUT /zones/{id}<br>
+          DELETE /zones/{id}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-box">
+    <div class="detail-title">WebSocket 엔드포인트 (core)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:.72rem;">
+      <div style="background:#0a1628;border:1.5px solid #1e4d2b;border-radius:8px;padding:14px;">
+        <div style="color:#4ade80;font-weight:700;margin-bottom:6px;">/ws/platforms</div>
+        <div style="color:#94a3b8;line-height:1.7;">
+          track_consumer가 브로드캐스트<br>
+          payload: position_update<br>
+          <br>
+          <span style="color:#fbbf24;">⚠ 프론트엔드 미연결</span><br>
+          프론트는 moth-bridge :7703 사용<br>
+          (이 엔드포인트는 향후 확장용으로 존재)
+        </div>
+      </div>
+      <div style="background:#0a1628;border:1.5px solid #7f1d1d;border-radius:8px;padding:14px;">
+        <div style="color:#f87171;font-weight:700;margin-bottom:6px;">/ws/alerts ← 프론트 연결 중</div>
+        <div style="color:#94a3b8;line-height:1.7;">
+          alert_consumer가 브로드캐스트<br>
+          payload type:<br>
+          &nbsp;&nbsp;<code style="color:#4ade80">alert_created</code> (신규)<br>
+          &nbsp;&nbsp;<code style="color:#fbbf24">alert_updated</code> (dedup 업데이트)<br>
+          <br>
+          → alertStore + aiLogStore 업데이트
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 4: 에이전트 상세
+═══════════════════════════════════════════════════ -->
+<div id="view-agents" class="view">
+<div style="max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:20px;">
+
+  <div>
+    <div style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:6px;margin-bottom:12px;color:#fb923c;background:rgba(251,146,60,.06);border-left:3px solid #fb923c;">
+      Rule 에이전트 — 수치 기반 즉각 판단 · 직렬 처리 (await)
+    </div>
+    <div class="agent-grid">
+
+      <div class="ac rule">
+        <div class="ac-id">cpa-agent</div>
+        <div class="ac-name">CPA / TCPA Agent</div>
+        <div class="ac-desc">선박 간 최근접거리(CPA)와 최근접시간(TCPA)을 속도 벡터로 계산. COLREGS Rule 16 기준.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-r">on_platform_report — 전체 선박과 쌍별 계산</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력 경보</div>
+        <div class="ac-row out-c">CRITICAL — CPA &lt; 0.2NM AND TCPA &lt; 10분</div>
+        <div class="ac-row out-w">WARNING — CPA &lt; 0.5NM AND TCPA &lt; 30분</div>
+        <div style="font-size:.65rem;color:#475569;margin-top:6px;">dedup_key: <code style="color:#fb923c">cpa:{id1}:{id2}</code></div>
+      </div>
+
+      <div class="ac rule">
+        <div class="ac-id">zone-monitor</div>
+        <div class="ac-name">Zone Monitor Agent</div>
+        <div class="ac-desc">Core API에서 구역 목록 5분마다 로드. Ray Casting으로 폴리곤 내부 판단.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-r">on_platform_report — 구역 내 포함 여부 검사</div>
+        <div class="ac-row" style="color:#475569;background:transparent;border-color:#334155;font-size:.68rem;padding:4px 8px;margin-bottom:3px;">load_zones() — 5분 주기 자동 갱신</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력 경보</div>
+        <div class="ac-row out-c">CRITICAL — prohibited 구역 신규 진입</div>
+        <div class="ac-row out-w">WARNING — restricted 구역 신규 진입</div>
+        <div class="ac-row out-i">INFO — 구역 이탈</div>
+      </div>
+
+      <div class="ac rule">
+        <div class="ac-id">anomaly-rule</div>
+        <div class="ac-name">Anomaly Rule Agent</div>
+        <div class="ac-desc">세 가지 이상 패턴 탐지. AIS 소실은 20초 주기 별도 루프.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-r">on_platform_report — 속도·선회율 실시간 체크</div>
+        <div class="ac-row" style="color:#475569;background:transparent;border-color:#334155;font-size:.68rem;padding:4px 8px;margin-bottom:3px;">check_ais_timeout() — 20초 주기</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력 경보</div>
+        <div class="ac-row out-w">WARNING — AIS 소실 (90초 이상 미수신)</div>
+        <div class="ac-row out-w">WARNING — 급속도 저하 (5kts 이상/틱)</div>
+        <div class="ac-row out-w">WARNING — 비정상 선회 (ROT &gt; 25°/min)</div>
+        <div class="ac-row out-i">INFO — AIS 신호 복구</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div>
+    <div style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:6px;margin-bottom:12px;color:#818cf8;background:rgba(129,140,248,.06);border-left:3px solid #818cf8;">
+      AI 에이전트 — Claude / Ollama 호출 · 백그라운드 태스크 (asyncio.create_task)
+    </div>
+    <div class="agent-grid">
+
+      <div class="ac ai">
+        <div class="ac-id">anomaly-ai</div>
+        <div class="ac-name">Anomaly AI Agent</div>
+        <div class="ac-desc">Rule 에이전트의 이상 경보를 받아 원인 진단 + 권고 생성. on_platform_report에서는 최근 보고 캐시만.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-a">on_alert — anomaly / ais_off (info 제외, 자기발신 제외)</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력</div>
+        <div class="ac-row out-ai">Claude 분석 → 진단 + 권고 + 우선순위 새 경보</div>
+        <div style="font-size:.65rem;color:#64748b;margin-top:6px;">
+          <span class="lv lv1">L1</span>비활성 &nbsp;
+          <span class="lv lv2">L2</span>활성 &nbsp;
+          <span class="lv lv3">L3</span>활성
+        </div>
+      </div>
+
+      <div class="ac ai">
+        <div class="ac-id">distress-agent</div>
+        <div class="ac-name">Distress Agent</div>
+        <div class="ac-desc">nav_status 조난 상태 직접 감지. AIS 소실 경보를 조난 가능성으로 에스컬레이션. L3 자동 통보.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-r">on_platform_report — not_under_command / aground 감지</div>
+        <div class="ac-row tr-a">on_alert — ais_off WARNING → 조난 에스컬레이션</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력</div>
+        <div class="ac-row out-c">CRITICAL — 조난 신호 (SAR 대응 지침 포함)</div>
+        <div class="ac-row out-w">WARNING — AIS 소실 조난 가능성</div>
+        <div style="font-size:.65rem;color:#64748b;margin-top:6px;">
+          <span class="lv lv1">L1</span>기본문 &nbsp;
+          <span class="lv lv2">L2</span>LLM문 &nbsp;
+          <span class="lv lv3">L3</span>+자동통보
+        </div>
+      </div>
+
+      <div class="ac ai">
+        <div class="ac-id">report-agent</div>
+        <div class="ac-name">Report Agent</div>
+        <div class="ac-desc">Critical 경보 발생 시 7섹션 공식 보고서 자동 생성. 수동 API 트리거도 가능.</div>
+        <div style="font-size:.62rem;color:#64748b;margin-bottom:6px;">트리거</div>
+        <div class="ac-row tr-a">on_alert — distress / cpa / zone_intrusion CRITICAL</div>
+        <div class="ac-row tr-a">POST /agents/report-agent/generate/{incident_id}</div>
+        <div style="font-size:.62rem;color:#64748b;margin:6px 0 4px;">출력</div>
+        <div class="ac-row out-ai">INFO compliance — 7섹션 공식 해양 사건 보고서</div>
+        <div style="font-size:.65rem;color:#64748b;margin-top:6px;">
+          <span class="lv lv1">L1</span>비활성 &nbsp;
+          <span class="lv lv2">L2</span>자동생성 &nbsp;
+          <span class="lv lv3">L3</span>자동생성
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 무한루프 방지 -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:18px 22px;">
+    <div style="font-size:.72rem;font-weight:700;color:#64748b;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">무한루프 방지 설계</div>
+    <div style="font-size:.75rem;color:#94a3b8;line-height:1.7;margin-bottom:10px;">
+      AI 에이전트가 경보를 발행하면 자신도 <code style="color:#fca5a5">alert.created.*</code>를 구독하므로 재수신합니다.
+      경보 발행 시 <code style="color:#fb923c">generated_by: self.agent_id</code>를 포함하고, <code style="color:#a5b4fc">on_alert()</code> 진입 즉시 자기발신 여부를 확인해 즉시 반환합니다.
+    </div>
+    <div class="code-block">
+<span class="ck">async def</span> <span class="cf">on_alert</span>(self, alert: dict) → None:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 자신이 생성한 경보 → 즉시 반환 (무한루프 차단)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">if</span> alert.get(<span class="cs">"generated_by"</span>) == <span class="cv">self.agent_id</span>:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="ck">return</span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 5: DB 스키마
+═══════════════════════════════════════════════════ -->
+<div id="view-db" class="view">
+<div class="db-grid">
+
+  <div class="tc">
+    <div class="tc-hdr"><div class="tc-name">platforms</div><div class="tc-badge">Master</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">platform_id</div><div class="ct">TEXT</div><div class="cnote"><span class="pk">PK</span></div></div>
+      <div class="cr"><div class="cn">platform_type</div><div class="ct">TEXT</div><div class="cnote">vessel/rov/usv/auv/drone/buoy</div></div>
+      <div class="cr"><div class="cn">name</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">flag</div><div class="ct">TEXT</div><div class="cnote">국적 코드</div></div>
+      <div class="cr"><div class="cn">source_protocol</div><div class="ct">TEXT</div><div class="cnote">ais/ros/mavlink/nmea</div></div>
+      <div class="cr"><div class="cn">moth_channel</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">capabilities</div><div class="ct">TEXT[]</div></div>
+      <div class="cr"><div class="cn">dimensions</div><div class="ct">JSONB</div><div class="cnote">length/beam/draft</div></div>
+      <div class="cr"><div class="cn">metadata_</div><div class="ct">JSONB</div><div class="cnote" style="color:#f87171">SQLAlchemy 예약어→_</div></div>
+    </div>
+  </div>
+
+  <div class="tc" style="border-color:#1e4d2b;">
+    <div class="tc-hdr" style="background:#0d2b16;"><div class="tc-name" style="color:#86efac;">platform_reports</div><div class="tc-badge" style="background:rgba(74,222,128,.1);color:#4ade80;">TimescaleDB Hypertable</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">time</div><div class="ct">TIMESTAMPTZ</div><div class="cnote"><span class="sp">파티션 키</span></div></div>
+      <div class="cr"><div class="cn">platform_id</div><div class="ct">TEXT</div><div class="cnote"><span class="fk">FK</span> platforms</div></div>
+      <div class="cr"><div class="cn">lat / lon</div><div class="ct">DOUBLE</div><div class="cnote">위경도</div></div>
+      <div class="cr"><div class="cn">sog</div><div class="ct">REAL</div><div class="cnote">대지속도 knots</div></div>
+      <div class="cr"><div class="cn">cog</div><div class="ct">REAL</div><div class="cnote">대지침로 °</div></div>
+      <div class="cr"><div class="cn">heading</div><div class="ct">REAL</div><div class="cnote">선수방위 °</div></div>
+      <div class="cr"><div class="cn">rot</div><div class="ct">REAL</div><div class="cnote">선회율 °/min</div></div>
+      <div class="cr"><div class="cn">nav_status</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">raw_payload</div><div class="ct">BYTEA</div></div>
+      <div style="margin-top:8px;font-size:.62rem;color:#4ade80;padding:4px 0;border-top:1px solid #1e4d2b;">
+        INDEX: (platform_id, time DESC)<br>INDEX: BRIN (lat, lon)<br>파티션: platform_id × 4
+      </div>
+    </div>
+  </div>
+
+  <div class="tc" style="border-color:#1e4d2b;">
+    <div class="tc-hdr" style="background:#0d2b16;"><div class="tc-name" style="color:#86efac;">zones</div><div class="tc-badge" style="background:rgba(74,222,128,.1);color:#4ade80;">PostGIS</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">zone_id</div><div class="ct">UUID</div><div class="cnote"><span class="pk">PK</span></div></div>
+      <div class="cr"><div class="cn">name</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">zone_type</div><div class="ct">TEXT</div><div class="cnote">fairway/restricted/prohibited/anchorage/tss</div></div>
+      <div class="cr"><div class="cn">geometry</div><div class="ct">GEOMETRY</div><div class="cnote"><span class="sp">GIST인덱스</span> SRID:4326</div></div>
+      <div class="cr"><div class="cn">rules</div><div class="ct">JSONB</div><div class="cnote">speed_limit 등</div></div>
+      <div class="cr"><div class="cn">active</div><div class="ct">BOOLEAN</div><div class="cnote">DEFAULT TRUE</div></div>
+      <div style="margin-top:8px;font-size:.62rem;color:#4ade80;padding:4px 0;border-top:1px solid #1e4d2b;">
+        to_shape().geojson으로 변환 후 응답
+      </div>
+    </div>
+  </div>
+
+  <div class="tc" style="border-color:#7f1d1d;">
+    <div class="tc-hdr" style="background:#2a0a0a;"><div class="tc-name" style="color:#fca5a5;">alerts</div><div class="tc-badge" style="background:rgba(248,113,113,.1);color:#f87171;">Event + dedup</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">alert_id</div><div class="ct">UUID</div><div class="cnote"><span class="pk">PK</span></div></div>
+      <div class="cr"><div class="cn">alert_type</div><div class="ct">TEXT</div><div class="cnote">cpa/zone_intrusion/anomaly/ais_off/distress...</div></div>
+      <div class="cr"><div class="cn">severity</div><div class="ct">TEXT</div><div class="cnote">info/warning/critical</div></div>
+      <div class="cr"><div class="cn">status</div><div class="ct">TEXT</div><div class="cnote">new/acknowledged/resolved</div></div>
+      <div class="cr"><div class="cn">platform_ids</div><div class="ct">TEXT[]</div><div class="cnote">GIN 인덱스</div></div>
+      <div class="cr"><div class="cn">zone_id</div><div class="ct">UUID</div><div class="cnote"><span class="fk">FK</span> zones (nullable)</div></div>
+      <div class="cr"><div class="cn">generated_by</div><div class="ct">TEXT</div><div class="cnote">에이전트 ID</div></div>
+      <div class="cr"><div class="cn">recommendation</div><div class="ct">TEXT</div><div class="cnote">AI 권고사항</div></div>
+      <div class="cr"><div class="cn">metadata_</div><div class="ct">JSONB</div><div class="cnote">dedup_key 포함</div></div>
+    </div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-hdr"><div class="tc-name">incidents</div><div class="tc-badge">Aggregated</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">incident_id</div><div class="ct">UUID</div><div class="cnote"><span class="pk">PK</span></div></div>
+      <div class="cr"><div class="cn">incident_type</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">alert_ids</div><div class="ct">UUID[]</div><div class="cnote">관련 경보</div></div>
+      <div class="cr"><div class="cn">platform_ids</div><div class="ct">TEXT[]</div></div>
+      <div class="cr"><div class="cn">timeline</div><div class="ct">JSONB</div><div class="cnote">시간순 이벤트</div></div>
+      <div class="cr"><div class="cn">resolved</div><div class="ct">BOOLEAN</div></div>
+      <div class="cr"><div class="cn">report</div><div class="ct">TEXT</div><div class="cnote">report-agent 생성</div></div>
+    </div>
+  </div>
+
+  <div class="tc" style="border-color:#7f1d1d;">
+    <div class="tc-hdr" style="background:#2a0a0a;"><div class="tc-name" style="color:#fca5a5;">audit_logs</div><div class="tc-badge" style="background:rgba(248,113,113,.1);color:#f87171;">불변 Immutable</div></div>
+    <div class="tc-body">
+      <div class="cr"><div class="cn">log_id</div><div class="ct">UUID</div><div class="cnote"><span class="pk">PK</span></div></div>
+      <div class="cr"><div class="cn">event_type</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">actor</div><div class="ct">TEXT</div><div class="cnote">operator / agent ID</div></div>
+      <div class="cr"><div class="cn">entity_type</div><div class="ct">TEXT</div><div class="cnote">platform/alert/agent</div></div>
+      <div class="cr"><div class="cn">entity_id</div><div class="ct">TEXT</div></div>
+      <div class="cr"><div class="cn">payload</div><div class="ct">JSONB</div></div>
+      <div class="cr"><div class="cn">created_at</div><div class="ct">TIMESTAMPTZ</div></div>
+      <div style="margin-top:8px;font-size:.62rem;color:#f87171;padding:4px 0;border-top:1px solid #3b0a0a;">
+        PostgreSQL RULE로 UPDATE / DELETE 완전 차단<br>INSERT만 허용 — 감사 무결성 보장
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 6: 자율성 레벨
+═══════════════════════════════════════════════════ -->
+<div id="view-levels" class="view">
+<div class="level-wrap">
+
+  <div class="lc l1c">
+    <div class="lbig">L1</div>
+    <div>
+      <div class="lc-title">모니터링 전용 (Monitoring Only)</div>
+      <div class="lc-desc">경보만 생성. 권고사항 없음. AI 에이전트(anomaly-ai, report-agent) 비활성. 관제사가 모든 판단.</div>
+      <div class="lc-feats">
+        <span class="lc-feat">경보 생성 ✓</span>
+        <span class="lc-feat">권고사항 없음</span>
+        <span class="lc-feat">AI 분석 없음</span>
+        <span class="lc-feat">자동 조치 없음</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="lc l2c">
+    <div class="lbig">L2</div>
+    <div>
+      <div class="lc-title">보조 지원 (Decision Support)</div>
+      <div class="lc-desc">Rule 에이전트가 권고문 포함. AI 에이전트(anomaly-ai, distress-agent, report-agent) 활성화. 최종 결정은 관제사.</div>
+      <div class="lc-feats">
+        <span class="lc-feat">경보 생성 ✓</span>
+        <span class="lc-feat">권고사항 포함 ✓</span>
+        <span class="lc-feat">AI 분석 활성 ✓</span>
+        <span class="lc-feat">자동 조치 없음</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="lc l3c">
+    <div class="lbig">L3</div>
+    <div>
+      <div class="lc-title">자율 대응 (Autonomous Response)</div>
+      <div class="lc-desc">L2 전체 + 조난 시 distress-agent가 _auto_notify() 자동 통보 실행. 향후 해양경찰청 API 연동 예정.</div>
+      <div class="lc-feats">
+        <span class="lc-feat">경보 생성 ✓</span>
+        <span class="lc-feat">권고사항 포함 ✓</span>
+        <span class="lc-feat">AI 분석 활성 ✓</span>
+        <span class="lc-feat">자동 통보 ✓</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="cmp-table">
+    <div class="cmp-hdr"><div>기능</div><div style="text-align:center">L1</div><div style="text-align:center">L2</div><div style="text-align:center">L3</div></div>
+    <div class="cmp-row"><div class="cf2">경보 발행 (Rule 에이전트)</div><div class="chk">✓</div><div class="chk">✓</div><div class="chk">✓</div></div>
+    <div class="cmp-row"><div class="cf2">Rule 에이전트 권고사항 텍스트</div><div class="crs">—</div><div class="chk">✓</div><div class="chk">✓</div></div>
+    <div class="cmp-row"><div class="cf2">anomaly-ai Claude 원인 분석</div><div class="crs">—</div><div class="chk">✓</div><div class="chk">✓</div></div>
+    <div class="cmp-row"><div class="cf2">distress-agent LLM SAR 대응 지침</div><div class="cpt">기본문</div><div class="chk">LLM</div><div class="chk">LLM</div></div>
+    <div class="cmp-row"><div class="cf2">report-agent 사건 보고서 자동 생성</div><div class="crs">—</div><div class="chk">✓</div><div class="chk">✓</div></div>
+    <div class="cmp-row"><div class="cf2">distress-agent 자동 통보 (_auto_notify)</div><div class="crs">—</div><div class="crs">—</div><div class="chk">✓</div></div>
+    <div class="cmp-row"><div class="cf2" style="color:#475569;font-size:.68rem;">레벨 변경: PATCH /agents/{agent_id}/level &nbsp;{"level": "L1"|"L2"|"L3"} — 에이전트마다 독립 설정 가능</div><div></div><div></div><div></div></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const views = ['flow','bridge','core','agents','db','levels'];
+function show(name) {
+  views.forEach(v => {
+    document.getElementById('view-'+v).style.display = (v===name)?'block':'none';
+  });
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('active', views[i]===name);
+  });
+}
+// init
+views.forEach(v => {
+  document.getElementById('view-'+v).style.display = (v==='flow')?'block':'none';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Literal
+
+
+@dataclass
+class GeoPoint:
+    lat: float
+    lon: float
+
+
+@dataclass
+class PlatformReport:
+    """모든 외부 프로토콜을 정규화한 내부 공통 포맷.
+
+    Redis pub/sub 직렬화(to_dict / from_dict) 기준이 되는 단일 정의.
+    moth-bridge → Redis → agents 파이프라인 전체에서 이 스키마를 사용한다.
+    """
+
+    platform_id: str
+    timestamp: datetime
+
+    # 위치 — Redis wire format과 일치하도록 flat 필드
+    lat: float
+    lon: float
+    depth_m: float | None = None        # ROV / AUV 수심
+    altitude_m: float | None = None     # 드론 고도
+
+    # 운동
+    sog: float | None = None            # Speed Over Ground (knots)
+    cog: float | None = None            # Course Over Ground (0-360°)
+    heading: float | None = None        # True Heading (0-360°)
+    rot: float | None = None            # Rate of Turn (°/min)
+
+    # AIS 항법 상태 (선박 외 플랫폼은 None)
+    nav_status: str | None = None
+
+    # 원본 정보 보존
+    source_protocol: Literal["ais", "ros", "mavlink", "nmea", "custom"] = "custom"
+
+    def to_dict(self) -> dict:
+        return {
+            "platform_id": self.platform_id,
+            "timestamp": self.timestamp.isoformat(),
+            "lat": self.lat,
+            "lon": self.lon,
+            "depth_m": self.depth_m,
+            "altitude_m": self.altitude_m,
+            "sog": self.sog,
+            "cog": self.cog,
+            "heading": self.heading,
+            "rot": self.rot,
+            "nav_status": self.nav_status,
+            "source_protocol": self.source_protocol,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PlatformReport":
+        return cls(
+            platform_id=d["platform_id"],
+            timestamp=datetime.fromisoformat(d["timestamp"]),
+            lat=d["lat"],
+            lon=d["lon"],
+            depth_m=d.get("depth_m"),
+            altitude_m=d.get("altitude_m"),
+            sog=d.get("sog"),
+            cog=d.get("cog"),
+            heading=d.get("heading"),
+            rot=d.get("rot"),
+            nav_status=d.get("nav_status"),
+            source_protocol=d.get("source_protocol", "custom"),
+        )

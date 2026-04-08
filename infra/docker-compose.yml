@@ -1,0 +1,256 @@
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────────────
+  # PostgreSQL + PostGIS + TimescaleDB
+  # ─────────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb-ha:pg15-latest
+    container_name: cowater-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cowater
+      POSTGRES_USER: cowater
+      POSTGRES_PASSWORD: cowater_dev
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+      - ./postgres/01_extensions.sql:/docker-entrypoint-initdb.d/01_extensions.sql
+      - ./postgres/02_schema.sql:/docker-entrypoint-initdb.d/02_schema.sql
+      - ./postgres/03_seed.sql:/docker-entrypoint-initdb.d/03_seed.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cowater -d cowater"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────
+  # Redis
+  # ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cowater-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────
+  # Core Backend
+  # ─────────────────────────────────────────────────────
+  core:
+    build:
+      context: ../services/core
+      dockerfile: Dockerfile
+    container_name: cowater-core
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cowater:cowater_dev@postgres:5432/cowater
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    ports:
+      - "7700:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────
+  # Moth Bridge
+  # ─────────────────────────────────────────────────────
+  moth-bridge:
+    build:
+      context: ../services/moth-bridge
+      dockerfile: Dockerfile
+    container_name: cowater-moth-bridge
+    restart: unless-stopped
+    environment:
+      MOTH_SERVER_URL: wss://cobot.center:8287
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    ports:
+      - "7703:8002"    # WebSocket relay — 프론트엔드 직접 연결
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────
+  # Ollama (로컬 LLM 서버) — LLM_BACKEND=ollama 시 사용
+  # ─────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cowater-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # Apple Silicon / NVIDIA GPU 자동 감지
+    # Mac M-series: Metal 백엔드 자동 사용 (별도 설정 불필요)
+    # NVIDIA GPU 사용 시 아래 주석 해제:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 모델 자동 pull (최초 1회)
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: cowater-ollama-init
+    profiles:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "
+        ollama serve &
+        sleep 5 &&
+        ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
+        kill %1
+      "
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+    depends_on:
+      - ollama
+
+  # ─────────────────────────────────────────────────────
+  # vLLM (고성능 로컬 LLM 서버) — LLM_BACKEND=vllm 시 사용
+  #
+  # Apple Silicon (MPS):
+  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
+  #
+  # NVIDIA GPU:
+  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
+  #   → deploy.resources 섹션 주석 해제 필요
+  # ─────────────────────────────────────────────────────
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: cowater-vllm
+    restart: unless-stopped
+    profiles:
+      - vllm
+    environment:
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      --dtype ${VLLM_DTYPE:-auto}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
+      --gpu-memory-utilization ${VLLM_GPU_MEM:-0.85}
+      --host 0.0.0.0
+      --port 8000
+    volumes:
+      - vllm_data:/root/.cache/huggingface
+    ports:
+      - "8001:8000"
+    # ── Apple Silicon (MPS) ──────────────────────────
+    # vLLM MPS 지원은 실험적. 현재 CPU fallback으로 동작할 수 있음.
+    # ── NVIDIA GPU ───────────────────────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ─────────────────────────────────────────────────────
+  # Agent Runtime
+  # ─────────────────────────────────────────────────────
+  agents:
+    build:
+      context: ..
+      dockerfile: services/agents/Dockerfile
+    container_name: cowater-agents
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379
+      CORE_API_URL: http://core:8000
+      # ── LLM 백엔드 설정 ─────────────────────────────
+      # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
+      # Ollama 사용: LLM_BACKEND=ollama (--profile ollama 포함 실행 필요)
+      # vLLM  사용: LLM_BACKEND=vllm   (--profile vllm  포함 실행 필요)
+      LLM_BACKEND: ${LLM_BACKEND:-claude}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      LOG_LEVEL: info
+    ports:
+      - "7701:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      core:
+        condition: service_started
+
+  # ─────────────────────────────────────────────────────
+  # Simulator (선택적 — 개발/훈련 시만 실행)
+  # ─────────────────────────────────────────────────────
+  simulator:
+    build:
+      context: ../services/simulator
+      dockerfile: Dockerfile
+    container_name: cowater-simulator
+    restart: "no"
+    profiles:
+      - simulation
+    environment:
+      MOTH_SERVER_URL: wss://cobot.center:8287
+      CORE_API_URL: http://core:8000
+      SCENARIO: ${SCENARIO:-demo}
+      TIME_SCALE: "3.0"
+      LOG_LEVEL: info
+
+  # ─────────────────────────────────────────────────────
+  # Frontend
+  # ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:7700
+        NEXT_PUBLIC_WS_URL: ws://localhost:7700
+        NEXT_PUBLIC_AGENTS_URL: http://localhost:7701
+        NEXT_PUBLIC_POSITION_WS_URL: ws://localhost:7703
+    container_name: cowater-frontend
+    restart: unless-stopped
+    ports:
+      - "7702:3000"
+    depends_on:
+      - core
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  vllm_data:

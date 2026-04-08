@@ -1,0 +1,29 @@
+# Moth Bridge 채널 설정
+# 각 채널에 대해 연결할 Moth 채널과 사용할 Protocol Adapter를 지정합니다.
+
+channels:
+  - name: "ais-coastal"
+    moth_channel_type: instant          # instant | static | dynamic
+    moth_channel_name: "cowater-ais"
+    moth_track: "data"
+    moth_source: "base"
+    adapter: NMEAAdapter
+    platform_type: vessel
+
+  # USV / MAVLink 채널 (추후 활성화)
+  # - name: "usv-alpha"
+  #   moth_channel_type: static
+  #   moth_channel_name: "usv-alpha-telemetry"
+  #   moth_track: "telemetry"
+  #   moth_source: "base"
+  #   adapter: MAVLinkAdapter
+  #   platform_type: usv
+
+  # ROV / ROS 채널 (추후 활성화)
+  # - name: "rov-survey"
+  #   moth_channel_type: instant
+  #   moth_channel_name: "rov-survey-01"
+  #   moth_track: "ros"
+  #   moth_source: "base"
+  #   adapter: ROSAdapter
+  #   platform_type: rov

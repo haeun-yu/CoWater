@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+:root {
+  --bg-primary: #020d1a;
+  --bg-secondary: #082240;
+  --bg-panel: rgba(4, 20, 40, 0.92);
+  --border: rgba(45, 141, 212, 0.2);
+  --text-primary: #e2f0fa;
+  --text-secondary: #7ab8d9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", monospace;
+  overflow: hidden;
+}
+
+/* 스크롤바 스타일 */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: #164e8a;
+  border-radius: 2px;
+}
+
+/* 경보 레벨 색상 */
+.severity-critical { color: #ef4444; }
+.severity-warning  { color: #f59e0b; }
+.severity-info     { color: #3b82f6; }
+
+.bg-severity-critical { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); }
+.bg-severity-warning  { background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); }
+.bg-severity-info     { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); }
+
+/* 패널 공통 */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
