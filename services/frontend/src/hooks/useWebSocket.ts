@@ -5,6 +5,7 @@ import { getCoreWsUrl, getPositionWsUrl } from "@/lib/publicUrl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAILogStore, isAIAgent, type ActivityLogEntry } from "@/stores/aiLogStore";
+import { useSystemStore, type StreamKey } from "@/stores/systemStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { WsMessage, PlatformType } from "@/types";
 import {
@@ -25,7 +26,7 @@ const AGENT_NAMES: Record<string, string> = {
 type ManagedWsHandlers = {
   onMessage: (data: unknown) => void;
   onOpen?: () => void;
-  onDisconnect?: () => void;
+  onDisconnect?: (reconnectAttempt: number) => void;
   onError?: (event: Event) => void;
   onParseError?: (raw: string) => void;
 };
@@ -81,7 +82,7 @@ function createManagedWs(url: string, handlers: ManagedWsHandlers) {
     ws.onclose = () => {
       clearPing();
       if (!disposed) {
-        handlers.onDisconnect?.();
+        handlers.onDisconnect?.(reconnectAttempt + 1);
         console.warn(`[WS] disconnected: ${url}, reconnecting...`);
         scheduleReconnect();
       }
@@ -113,6 +114,8 @@ export function useWebSocket() {
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const addLog = useAILogStore((s) => s.addLog);
   const updateLog = useAILogStore((s) => s.updateLog);
+  const setStreamStatus = useSystemStore((s) => s.setStreamStatus);
+  const markStreamMessage = useSystemStore((s) => s.markStreamMessage);
   const toastPush = useToastStore((s) => s.push);
   const positionIssueShown = useRef(false);
   const alertIssueShown = useRef(false);
@@ -120,6 +123,18 @@ export function useWebSocket() {
   const alertParseShown = useRef(false);
 
   useEffect(() => {
+    const setConnected = (stream: StreamKey) => {
+      setStreamStatus(stream, "connected", { reconnectAttempt: 0, error: null });
+    };
+
+    const setDisconnected = (stream: StreamKey, reconnectAttempt: number) => {
+      setStreamStatus(stream, "reconnecting", { reconnectAttempt });
+    };
+
+    const setErrored = (stream: StreamKey, message: string) => {
+      setStreamStatus(stream, "error", { error: message });
+    };
+
     const notifyIssue = (kind: "position" | "alert", message: string) => {
       const ref = kind === "position" ? positionIssueShown : alertIssueShown;
       if (ref.current) return;
@@ -150,11 +165,14 @@ export function useWebSocket() {
       onOpen: () => {
         positionIssueShown.current = false;
         positionParseShown.current = false;
+        setConnected("position");
       },
-      onDisconnect: () => {
+      onDisconnect: (reconnectAttempt) => {
+        setDisconnected("position", reconnectAttempt);
         notifyIssue("position", "위치 스트림 연결이 끊어졌습니다. 자동으로 재연결합니다.");
       },
       onError: () => {
+        setErrored("position", "위치 스트림 연결 오류");
         notifyIssue("position", "위치 스트림 연결에 문제가 발생했습니다.");
       },
       onParseError: () => {
@@ -176,6 +194,7 @@ export function useWebSocket() {
           nav_status: string | null;
         };
         if (msg.type !== "position_update") return;
+        markStreamMessage("position");
         upsert({
           platform_id: msg.platform_id,
           ...(msg.platform_type && { platform_type: msg.platform_type }),
@@ -195,11 +214,14 @@ export function useWebSocket() {
       onOpen: () => {
         alertIssueShown.current = false;
         alertParseShown.current = false;
+        setConnected("alert");
       },
-      onDisconnect: () => {
+      onDisconnect: (reconnectAttempt) => {
+        setDisconnected("alert", reconnectAttempt);
         notifyIssue("alert", "경보 스트림 연결이 끊어졌습니다. 자동으로 재연결합니다.");
       },
       onError: () => {
+        setErrored("alert", "경보 스트림 연결 오류");
         notifyIssue("alert", "경보 스트림 연결에 문제가 발생했습니다.");
       },
       onParseError: () => {
@@ -209,6 +231,7 @@ export function useWebSocket() {
       onMessage: (data) => {
         const msg = data as WsMessage;
         if (msg.type !== "alert_created" && msg.type !== "alert_updated") return;
+        markStreamMessage("alert");
 
         const alertData = {
           alert_id: msg.alert_id,
@@ -267,5 +290,5 @@ export function useWebSocket() {
       disposePosition();
       disposeAlerts();
     };
-  }, [upsert, addAlert, updateAlert, addLog, updateLog, toastPush]);
+  }, [upsert, addAlert, updateAlert, addLog, updateLog, toastPush, setStreamStatus, markStreamMessage]);
 }
