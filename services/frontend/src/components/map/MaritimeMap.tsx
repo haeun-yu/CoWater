@@ -396,8 +396,12 @@ export default function MaritimeMap() {
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
 
-    const ids = new Set(Object.keys(platforms));
-    removeStaleMarkers(ids);
+    const visibleIds = new Set(
+      Object.values(platforms)
+        .filter((platform) => platform.lat != null && platform.lon != null)
+        .map((platform) => platform.platform_id),
+    );
+    removeStaleMarkers(visibleIds);
 
     for (const p of Object.values(platforms)) {
       updateTrail(p);
