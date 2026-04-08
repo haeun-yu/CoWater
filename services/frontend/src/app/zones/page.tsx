@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { MultiPolygon, Polygon } from "geojson";
+import { area as turfArea, bbox as turfBbox, booleanValid as turfBooleanValid, feature, pointOnFeature } from "@turf/turf";
 import ZoneMapPanel from "@/components/map/ZoneMapPanel";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useZoneStore, type Zone } from "@/stores/zoneStore";
@@ -34,6 +36,43 @@ export default function ZonesPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+
+  let geometryPreview: {
+    valid: boolean;
+    areaKm2: number | null;
+    bboxText: string | null;
+    centroidText: string | null;
+    error: string | null;
+  } = {
+    valid: false,
+    areaKm2: null,
+    bboxText: null,
+    centroidText: null,
+    error: null,
+  };
+
+  try {
+    const geometry = JSON.parse(geometryText) as Zone["geometry"];
+    const zoneFeature = feature(geometry as Polygon | MultiPolygon);
+    const isValid = turfBooleanValid(zoneFeature);
+    const [minLon, minLat, maxLon, maxLat] = turfBbox(zoneFeature);
+    const centroid = pointOnFeature(zoneFeature);
+    geometryPreview = {
+      valid: isValid,
+      areaKm2: turfArea(zoneFeature) / 1_000_000,
+      bboxText: `${minLon.toFixed(4)}, ${minLat.toFixed(4)} → ${maxLon.toFixed(4)}, ${maxLat.toFixed(4)}`,
+      centroidText: `${centroid.geometry.coordinates[1].toFixed(4)}, ${centroid.geometry.coordinates[0].toFixed(4)}`,
+      error: isValid ? null : "GeoJSON 형상은 파싱되지만 self-intersection 등으로 유효하지 않을 수 있습니다.",
+    };
+  } catch (previewError) {
+    geometryPreview = {
+      valid: false,
+      areaKm2: null,
+      bboxText: null,
+      centroidText: null,
+      error: previewError instanceof Error ? previewError.message : "GeoJSON 파싱 실패",
+    };
+  }
 
   // store의 zones를 로컬 상태로 사용 (페이지 내 변경도 store에 반영)
   const zones = zonesFromStore;
@@ -141,10 +180,22 @@ export default function ZonesPage() {
                   rows={6}
                   className="w-full text-xs px-2 py-1.5 rounded border border-ocean-700 bg-ocean-950 text-ocean-200 font-mono leading-relaxed focus:outline-none focus:border-ocean-500"
                 />
+                <div className={`mt-2 rounded border px-2.5 py-2 text-xs ${geometryPreview.valid ? "border-emerald-500/30 bg-emerald-500/8 text-emerald-200" : "border-amber-500/30 bg-amber-500/8 text-amber-200"}`}>
+                  <div className="font-medium">Turf.js preview {geometryPreview.valid ? "유효" : "검토 필요"}</div>
+                  {geometryPreview.error ? (
+                    <div className="mt-1 text-[11px] opacity-90">{geometryPreview.error}</div>
+                  ) : (
+                    <div className="mt-1 space-y-1 text-[11px]">
+                      <div>면적: {geometryPreview.areaKm2?.toFixed(3)} km²</div>
+                      <div>BBOX: {geometryPreview.bboxText}</div>
+                      <div>대표점: {geometryPreview.centroidText}</div>
+                    </div>
+                  )}
+                </div>
               </div>
               <button
                 onClick={createZone}
-                disabled={creating || !name.trim()}
+                disabled={creating || !name.trim() || !geometryPreview.valid}
                 className="w-full text-sm py-1.5 rounded border border-cyan-600 text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-40 transition-colors"
               >
                 {creating ? "생성 중..." : "구역 생성"}

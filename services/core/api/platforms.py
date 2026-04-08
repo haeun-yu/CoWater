@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db import get_db
 from models import PlatformModel, PlatformReportModel
 from services.track_consumer import clear_platform_cache
+from services.geodesy import sample_projected_track
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 
@@ -121,6 +122,23 @@ class PlatformZoneDwell(BaseModel):
     platform_id: str
     active_sessions: list[ZoneDwellSession]
     recent_sessions: list[ZoneDwellSession]
+
+
+class PredictedTrackPoint(BaseModel):
+    minute: int
+    lat: float
+    lon: float
+    distance_nm: float
+
+
+class PredictedTrackResponse(BaseModel):
+    platform_id: str
+    reference_time: datetime
+    speed_knots: float
+    bearing_deg: float
+    minutes_ahead: int
+    step_minutes: int
+    points: list[PredictedTrackPoint]
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
@@ -509,4 +527,57 @@ async def get_zone_dwell(
         platform_id=platform_id,
         active_sessions=active_sessions,
         recent_sessions=recent_sessions,
+    )
+
+
+@router.get("/{platform_id}/predicted-track", response_model=PredictedTrackResponse)
+async def get_predicted_track(
+    platform_id: str,
+    minutes_ahead: int = Query(default=12, ge=1, le=120),
+    step_minutes: int = Query(default=3, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+):
+    latest_stmt = text(
+        """
+        SELECT time, lat, lon, sog, heading, cog
+        FROM platform_reports
+        WHERE platform_id = :platform_id
+        ORDER BY time DESC
+        LIMIT 1
+        """
+    )
+    latest_row = (
+        (await db.execute(latest_stmt, {"platform_id": platform_id})).mappings().first()
+    )
+    if latest_row is None:
+        raise HTTPException(
+            404, f"No position history found for platform '{platform_id}'"
+        )
+
+    speed_knots = latest_row["sog"]
+    bearing_deg = (
+        latest_row["heading"]
+        if latest_row["heading"] is not None
+        else latest_row["cog"]
+    )
+    if speed_knots is None or speed_knots <= 0 or bearing_deg is None:
+        raise HTTPException(400, "Predicted track requires current SOG and heading/COG")
+
+    samples = sample_projected_track(
+        lat=latest_row["lat"],
+        lon=latest_row["lon"],
+        bearing_deg=bearing_deg,
+        speed_knots=speed_knots,
+        minutes_ahead=minutes_ahead,
+        step_minutes=step_minutes,
+    )
+
+    return PredictedTrackResponse(
+        platform_id=platform_id,
+        reference_time=latest_row["time"],
+        speed_knots=speed_knots,
+        bearing_deg=bearing_deg,
+        minutes_ahead=minutes_ahead,
+        step_minutes=step_minutes,
+        points=[PredictedTrackPoint(**sample) for sample in samples],
     )
