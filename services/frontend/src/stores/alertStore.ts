@@ -1,7 +1,23 @@
 import { create } from "zustand";
-import type { Alert } from "@/types";
+import type { Alert, AlertStatus } from "@/types";
 
 const countUnread = (alerts: Alert[]) => alerts.filter((alert) => alert.status === "new").length;
+
+function updateAlertStatus(alert: Alert, status: AlertStatus): Alert {
+  if (status === "acknowledged") {
+    return {
+      ...alert,
+      status,
+      acknowledged_at: new Date().toISOString(),
+    };
+  }
+
+  return {
+    ...alert,
+    status,
+    resolved_at: new Date().toISOString(),
+  };
+}
 
 interface AlertStore {
   alerts: Alert[];
@@ -40,7 +56,7 @@ export const useAlertStore = create<AlertStore>((set) => ({
     set((state) => {
       const alerts = state.alerts.map((a) =>
         a.alert_id === alertId
-          ? { ...a, status: "acknowledged", acknowledged_at: new Date().toISOString() }
+          ? updateAlertStatus(a, "acknowledged")
           : a
       );
       return { alerts, unreadCount: countUnread(alerts) };
@@ -50,7 +66,7 @@ export const useAlertStore = create<AlertStore>((set) => ({
     set((state) => {
       const alerts = state.alerts.map((a) =>
         a.alert_id === alertId
-          ? { ...a, status: "resolved", resolved_at: new Date().toISOString() }
+          ? updateAlertStatus(a, "resolved")
           : a
       );
       return { alerts, unreadCount: countUnread(alerts) };
