@@ -132,6 +132,7 @@ async def _handle_alert(data: dict) -> None:
 
 
 def _to_ws_dict(alert: AlertModel) -> dict:
+    metadata = alert.metadata_ or {}
     return {
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,
@@ -142,7 +143,8 @@ def _to_ws_dict(alert: AlertModel) -> dict:
         "generated_by": alert.generated_by,
         "message": alert.message,
         "recommendation": alert.recommendation,
-        "metadata": alert.metadata_ or {},
+        "metadata": metadata,
+        "schema_version": metadata.get("schema_version", 1),
         "created_at": alert.created_at.isoformat() if alert.created_at else None,
         "acknowledged_at": alert.acknowledged_at.isoformat()
         if alert.acknowledged_at

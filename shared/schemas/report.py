@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Literal
 
 
+REPORT_SCHEMA_VERSION = 1
+
+
 @dataclass
 class GeoPoint:
     lat: float
@@ -25,6 +28,7 @@ class PlatformReport:
     # 위치 — Redis wire format과 일치하도록 flat 필드
     lat: float
     lon: float
+    schema_version: int = REPORT_SCHEMA_VERSION
     depth_m: float | None = None  # ROV / AUV 수심
     altitude_m: float | None = None  # 드론 고도
 
@@ -50,6 +54,7 @@ class PlatformReport:
         payload = {
             "platform_id": self.platform_id,
             "timestamp": self.timestamp.isoformat(),
+            "schema_version": self.schema_version,
             "lat": self.lat,
             "lon": self.lon,
             "depth_m": self.depth_m,
@@ -81,6 +86,7 @@ class PlatformReport:
         return cls(
             platform_id=d["platform_id"],
             timestamp=timestamp,
+            schema_version=d.get("schema_version", REPORT_SCHEMA_VERSION),
             lat=d["lat"],
             lon=d["lon"],
             depth_m=d.get("depth_m"),

@@ -53,6 +53,7 @@ async def _handle_report(data: dict) -> None:
     platform_type = data.get("platform_type") or "vessel"
     platform_name = data.get("name") or platform_id
     source_protocol = data.get("source_protocol", "custom")
+    schema_version = data.get("schema_version", 1)
     timestamp = datetime.fromisoformat(data["timestamp"])
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
@@ -118,6 +119,7 @@ async def _handle_report(data: dict) -> None:
             "platform_type": platform_type,
             "name": platform_name,
             "timestamp": data["timestamp"],
+            "schema_version": schema_version,
             "lat": data["lat"],
             "lon": data["lon"],
             "sog": data.get("sog"),
