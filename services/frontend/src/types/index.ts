@@ -1,5 +1,11 @@
 export type PlatformType = "vessel" | "rov" | "usv" | "auv" | "drone" | "buoy";
 
+export interface PlatformDimensions {
+  length_m: number | null;
+  beam_m: number | null;
+  draft_m?: number | null;
+}
+
 export interface Platform {
   platform_id: string;
   platform_type: PlatformType;
@@ -8,6 +14,7 @@ export interface Platform {
   source_protocol: string;
   moth_channel: string | null;
   capabilities: string[];
+  dimensions?: PlatformDimensions | null;
   metadata: Record<string, unknown>;
 }
 

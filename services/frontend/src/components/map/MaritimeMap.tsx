@@ -29,10 +29,11 @@ import {
   MAP_OSM_TILE_URL,
   MAP_SELECT_FLY_DURATION,
   MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG,
-  MAP_SELECTED_HEADING_SECTOR_RADIUS_NM,
+  MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER,
   MAP_SELECT_MIN_ZOOM,
   MAP_SELECTED_PREDICTION_MINUTES,
-  MAP_SELECTED_SAFETY_BUFFER_NM,
+  MAP_SELECTED_SAFETY_BUFFER_BASE_NM,
+  MAP_SELECTED_SAFETY_SPEED_LOOKAHEAD_MIN,
   MAP_SHIP_LAYER_MIN_ZOOM,
   MAP_TRACK_EASE_DURATION,
   MAP_ZOOM,
@@ -146,8 +147,28 @@ function nmToKm(value: number) {
   return value * 1.852;
 }
 
+function metersToNm(value: number) {
+  return value / 1852;
+}
+
 function normalizeBearing(value: number) {
   return ((value % 360) + 360) % 360;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getPlatformDimensions(platform: PlatformState) {
+  const fallback = PLATFORM_RENDER_METERS[platform.platform_type ?? "vessel"] ?? PLATFORM_RENDER_METERS.vessel;
+  const length = platform.dimensions?.length_m != null && platform.dimensions.length_m > 0
+    ? platform.dimensions.length_m
+    : fallback.length;
+  const beam = platform.dimensions?.beam_m != null && platform.dimensions.beam_m > 0
+    ? platform.dimensions.beam_m
+    : fallback.beam;
+
+  return { length, beam };
 }
 
 function metersToLon(meters: number, latitude: number) {
@@ -161,7 +182,7 @@ function metersToLat(meters: number) {
 }
 
 function buildShipPolygon(platform: PlatformState, heading: number, scale = 1) {
-  const dimensions = PLATFORM_RENDER_METERS[platform.platform_type ?? "vessel"] ?? PLATFORM_RENDER_METERS.vessel;
+  const dimensions = getPlatformDimensions(platform);
   const length = dimensions.length * scale;
   const beam = dimensions.beam * scale;
   const bow = length * 0.5;
@@ -193,7 +214,7 @@ function buildShipPolygon(platform: PlatformState, heading: number, scale = 1) {
 }
 
 function buildBridgePolygon(platform: PlatformState, heading: number) {
-  const dimensions = PLATFORM_RENDER_METERS[platform.platform_type ?? "vessel"] ?? PLATFORM_RENDER_METERS.vessel;
+  const dimensions = getPlatformDimensions(platform);
   const bridgeLength = dimensions.length * 0.18;
   const bridgeBeam = dimensions.beam * 0.42;
   const offsetForward = dimensions.length * 0.02;
@@ -233,14 +254,28 @@ function buildSelectedSpatialData(platform: PlatformState | null) {
   const center = turfPoint([platform.lon, platform.lat], { platform_id: platform.platform_id });
   const heading = platform.heading ?? platform.cog;
   const normalizedHeading = heading == null ? null : normalizeBearing(heading);
+  const dimensions = getPlatformDimensions(platform);
+  const speedKnots = Math.max(platform.sog ?? 0, 0);
+  const hullFootprintNm = metersToNm(dimensions.length * 1.2 + dimensions.beam * 0.8);
+  const speedAdvanceNm = speedKnots * (MAP_SELECTED_SAFETY_SPEED_LOOKAHEAD_MIN / 60);
+  const safetyRadiusNm = clamp(
+    Math.max(MAP_SELECTED_SAFETY_BUFFER_BASE_NM, hullFootprintNm + speedAdvanceNm),
+    MAP_SELECTED_SAFETY_BUFFER_BASE_NM,
+    3.5,
+  );
+  const headingSectorRadiusNm = clamp(
+    Math.max(safetyRadiusNm * MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER, metersToNm(dimensions.length * 2)),
+    safetyRadiusNm,
+    4.5,
+  );
 
-  const safetyBuffer = turfBuffer(center, nmToKm(MAP_SELECTED_SAFETY_BUFFER_NM), { units: "kilometers" });
+  const safetyBuffer = turfBuffer(center, nmToKm(safetyRadiusNm), { units: "kilometers" });
 
   const headingSector = normalizedHeading == null
     ? emptyFeatureCollection()
     : turfSector(
         center,
-        nmToKm(MAP_SELECTED_HEADING_SECTOR_RADIUS_NM),
+        nmToKm(headingSectorRadiusNm),
         normalizeBearing(normalizedHeading - MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
         normalizeBearing(normalizedHeading + MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
         { units: "kilometers" },
@@ -1307,7 +1342,7 @@ function MaritimeMap() {
 
           <button
             onClick={() => setHeadingSectorVisible((v) => !v)}
-            title="선택 선박 진행 방향 sector 표시"
+            title="선택 선박 진행 방향 부채꼴 표시"
             aria-pressed={headingSectorVisible}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
               headingSectorVisible
@@ -1316,7 +1351,7 @@ function MaritimeMap() {
             }`}
           >
             <span className={`w-2 h-2 rounded-full ${headingSectorVisible ? "bg-amber-300" : "bg-ocean-700"}`} />
-            Heading sector
+            진행 방향 부채꼴
           </button>
 
           <button
@@ -1347,7 +1382,7 @@ function MaritimeMap() {
             <span className="font-mono text-[10px] text-ocean-400">{activeSelectedOverlayCount}/3 활성</span>
           </div>
           <div className="mt-1 text-ocean-400">
-            Turf.js 기반 안전 반경, 진행 sector, {MAP_SELECTED_PREDICTION_MINUTES}분 예측 경로를 표시합니다.
+            선박 크기·속도 기반 안전 반경, 진행 방향 부채꼴, {MAP_SELECTED_PREDICTION_MINUTES}분 예측 경로를 표시합니다.
           </div>
         </div>
       </div>
@@ -1393,7 +1428,7 @@ function MaritimeMap() {
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-400/20" />
-          <span className="text-amber-200">Heading sector</span>
+          <span className="text-amber-200">진행 방향 부채꼴</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-block w-3 h-px bg-green-300" />
