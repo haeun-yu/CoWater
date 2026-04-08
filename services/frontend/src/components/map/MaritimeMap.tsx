@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
+import { useSystemStore } from "@/stores/systemStore";
 import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
 import type { PlatformState } from "@/types";
 import { createShipIcon } from "@/lib/shipIcon";
@@ -93,7 +94,7 @@ function buildTrailGeoJSON(
   } as maplibregl.GeoJSONSourceSpecification["data"] & object;
 }
 
-export default function MaritimeMap() {
+function MaritimeMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -111,15 +112,20 @@ export default function MaritimeMap() {
   const select = usePlatformStore((s) => s.select);
   const selectedId = usePlatformStore((s) => s.selectedId);
   const alerts = useAlertStore((s) => s.alerts);
+  const streams = useSystemStore((s) => s.streams);
   const zones = useZoneStore((s) => s.zones);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [seamarkVisible, setSeamarkVisible] = useState(true);
   const [zoneVisible, setZoneVisible] = useState(true);
 
-  const alertPlatformIds = new Set(
-    alerts
-      .filter((a) => a.status === "new" && a.severity === ALERT_HIGHLIGHT_SEVERITY)
-      .flatMap((a) => a.platform_ids),
+  const alertPlatformIds = useMemo(
+    () =>
+      new Set(
+        alerts
+          .filter((a) => a.status === "new" && a.severity === ALERT_HIGHLIGHT_SEVERITY)
+          .flatMap((a) => a.platform_ids),
+      ),
+    [alerts],
   );
 
   // zoom 핸들러는 마운트 1회짜리 useEffect 클로저 안에 있어서
@@ -498,7 +504,7 @@ export default function MaritimeMap() {
 
   return (
     <div className="relative w-full h-full">
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full" role="img" aria-label="실시간 해양 플랫폼 지도" />
 
       {/* 상태 배지 */}
       <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
@@ -510,6 +516,11 @@ export default function MaritimeMap() {
           <div className="panel px-2.5 py-1 text-xs text-red-400 rounded flex items-center gap-2 border border-red-500/40">
             <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block animate-pulse" />
             <span className="font-mono font-bold">위험 {criticalCount}건</span>
+          </div>
+        )}
+        {(streams.position.status !== "connected" || streams.alert.status !== "connected") && (
+          <div className="panel px-2.5 py-1 text-xs text-amber-300 rounded border border-amber-500/30">
+            스트림 상태: 위치 {streams.position.status === "connected" ? "정상" : "주의"} · 경보 {streams.alert.status === "connected" ? "정상" : "주의"}
           </div>
         )}
       </div>
@@ -624,3 +635,5 @@ export default function MaritimeMap() {
     </div>
   );
 }
+
+export default memo(MaritimeMap);

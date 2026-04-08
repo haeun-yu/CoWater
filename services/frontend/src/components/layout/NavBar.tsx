@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
+import { useSystemStore } from "@/stores/systemStore";
+import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import { useEffect, useState } from "react";
 
 const NAV = [
@@ -20,6 +22,7 @@ export default function NavBar() {
   const alerts = useAlertStore((s) => s.alerts);
   const platforms = usePlatformStore((s) => s.platforms);
   const aiLogs = useAILogStore((s) => s.logs);
+  const streams = useSystemStore((s) => s.streams);
   const newAlerts = alerts.filter((a) => a.status === "new").length;
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
@@ -34,6 +37,15 @@ export default function NavBar() {
     return () => clearInterval(id);
   }, []);
 
+  const platformValues = Object.values(platforms);
+  const freshness = countPlatformsByFreshness(platformValues);
+  const allStreamsConnected = Object.values(streams).every((stream) => stream.status === "connected");
+
+  const streamSummary = [
+    `위치 ${streams.position.status === "connected" ? "정상" : "주의"}`,
+    `경보 ${streams.alert.status === "connected" ? "정상" : "주의"}`,
+  ].join(" · ");
+
   return (
     <header className="h-11 flex-shrink-0 flex items-center border-b border-ocean-800 bg-ocean-900 px-4 gap-6">
       {/* 로고 */}
@@ -47,7 +59,7 @@ export default function NavBar() {
       </div>
 
       {/* 네비게이션 */}
-      <nav className="flex items-center gap-1">
+      <nav className="flex items-center gap-1" aria-label="주요 메뉴">
         {NAV.map(({ href, label, icon }) => {
           const isActive =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -83,25 +95,31 @@ export default function NavBar() {
       </nav>
 
       {/* 우측 상태 */}
-      <div className="ml-auto flex items-center gap-5 text-xs">
-        <div className="flex items-center gap-1.5 text-ocean-400">
-          <span className="font-mono text-ocean-200">
-            {Object.keys(platforms).length}
-          </span>
-          <span>척 관제</span>
-        </div>
-        {criticalCount > 0 && (
-          <div className="flex items-center gap-1 text-red-400 font-bold animate-pulse">
-            <span>⚠</span>
-            <span>CRITICAL {criticalCount}</span>
-          </div>
-        )}
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-ocean-400">LIVE</span>
-        </div>
-        <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
-      </div>
-    </header>
+       <div className="ml-auto flex items-center gap-5 text-xs">
+         <div className="flex items-center gap-1.5 text-ocean-400">
+            <span className="font-mono text-ocean-200">
+             {platformValues.length}
+            </span>
+           <span>척 관제</span>
+         </div>
+         {freshness.stale > 0 && (
+           <div className="text-amber-300">지연 {freshness.stale}</div>
+         )}
+         {freshness.lost > 0 && (
+           <div className="text-red-300">유실 {freshness.lost}</div>
+         )}
+         {criticalCount > 0 && (
+           <div className="flex items-center gap-1 text-red-400 font-bold animate-pulse">
+             <span>⚠</span>
+             <span>CRITICAL {criticalCount}</span>
+           </div>
+         )}
+         <div className="flex items-center gap-1.5" title={streamSummary} aria-label={streamSummary}>
+           <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
+           <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
+         </div>
+         <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
+       </div>
+      </header>
   );
 }
