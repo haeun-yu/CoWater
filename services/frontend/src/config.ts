@@ -36,7 +36,7 @@ export const MAP_SELECTED_SAFETY_BUFFER_NM = 0.5;
 export const MAP_SELECTED_HEADING_SECTOR_RADIUS_NM = 1.2;
 export const MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG = 50;
 export const MAP_SELECTED_PREDICTION_MINUTES = 12;
-export const MAP_HISTORY_SIMPLIFY_TOLERANCE_KM = 0.03;
+export const MAP_HISTORY_SIMPLIFY_TOLERANCE_DEGREES = 0.0003;
 
 // ── 항적(Trail) 시각화 ───────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,9 +24,9 @@ class PlatformCreate(BaseModel):
     source_protocol: str
     flag: str | None = None
     moth_channel: str | None = None
-    capabilities: list[str] = []
+    capabilities: list[str] = Field(default_factory=list)
     dimensions: dict | None = None
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 class PlatformResponse(BaseModel):
@@ -265,6 +265,8 @@ async def get_spatial_context(
         raise HTTPException(
             404, f"No position history found for platform '{platform_id}'"
         )
+    if latest_row["lat"] is None or latest_row["lon"] is None:
+        raise HTTPException(400, "Latest platform position is missing coordinates")
 
     radius_m = radius_nm * 1852.0
     params = {
@@ -289,6 +291,8 @@ async def get_spatial_context(
                 pr.heading,
                 pr.nav_status
             FROM platform_reports pr
+            WHERE pr.lat IS NOT NULL
+              AND pr.lon IS NOT NULL
             ORDER BY pr.platform_id, pr.time DESC
         ), reference AS (
             SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS ref_geog
@@ -473,6 +477,8 @@ async def get_zone_dwell(
     for row in rows:
         zone_id = row["zone_id"]
         if row["alert_type"] == "zone_intrusion":
+            if zone_id in active_entries:
+                continue
             active_entries[zone_id] = {
                 "zone_name": row["zone_name"] or zone_id,
                 "zone_type": row["zone_type"],

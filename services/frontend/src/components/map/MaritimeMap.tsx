@@ -36,7 +36,7 @@ import {
   MAP_SHIP_LAYER_MIN_ZOOM,
   MAP_TRACK_EASE_DURATION,
   MAP_ZOOM,
-  MAP_HISTORY_SIMPLIFY_TOLERANCE_KM,
+  MAP_HISTORY_SIMPLIFY_TOLERANCE_DEGREES,
   OVERPASS_API_URL,
   PLATFORM_COLORS,
   PLATFORM_RENDER_METERS,
@@ -146,6 +146,10 @@ function nmToKm(value: number) {
   return value * 1.852;
 }
 
+function normalizeBearing(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
 function metersToLon(meters: number, latitude: number) {
   const latRad = (latitude * Math.PI) / 180;
   const metersPerDegreeLon = 111_320 * Math.cos(latRad);
@@ -228,27 +232,28 @@ function buildSelectedSpatialData(platform: PlatformState | null) {
 
   const center = turfPoint([platform.lon, platform.lat], { platform_id: platform.platform_id });
   const heading = platform.heading ?? platform.cog;
+  const normalizedHeading = heading == null ? null : normalizeBearing(heading);
 
   const safetyBuffer = turfBuffer(center, nmToKm(MAP_SELECTED_SAFETY_BUFFER_NM), { units: "kilometers" });
 
-  const headingSector = heading == null
+  const headingSector = normalizedHeading == null
     ? emptyFeatureCollection()
     : turfSector(
         center,
         nmToKm(MAP_SELECTED_HEADING_SECTOR_RADIUS_NM),
-        heading - MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2,
-        heading + MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2,
+        normalizeBearing(normalizedHeading - MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
+        normalizeBearing(normalizedHeading + MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
         { units: "kilometers" },
       );
 
-  const predictedPath = heading == null || !platform.sog || platform.sog <= 0
+  const predictedPath = normalizedHeading == null || !platform.sog || platform.sog <= 0
     ? emptyFeatureCollection()
     : turfLineString([
         [platform.lon, platform.lat],
         turfDestination(
           center,
           nmToKm(platform.sog * (MAP_SELECTED_PREDICTION_MINUTES / 60)),
-          heading,
+          normalizedHeading,
           { units: "kilometers" },
         ).geometry.coordinates as LonLat,
       ]);
@@ -264,7 +269,7 @@ function simplifyHistoryLine(points: Array<{ lon: number; lat: number }>) {
   if (points.length < 3) return points.map((p) => [p.lon, p.lat] as LonLat);
   const simplified = turfSimplify(
     turfLineString(points.map((p) => [p.lon, p.lat] as LonLat)),
-    { tolerance: MAP_HISTORY_SIMPLIFY_TOLERANCE_KM, highQuality: false },
+    { tolerance: MAP_HISTORY_SIMPLIFY_TOLERANCE_DEGREES, highQuality: false },
   );
   return simplified.geometry.coordinates as LonLat[];
 }

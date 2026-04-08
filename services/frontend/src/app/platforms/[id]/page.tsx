@@ -72,7 +72,10 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
   }, [p, platformId, select]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void loadSpatialContext();
+    }, 1200);
 
     const loadSpatialContext = async () => {
       setSpatialLoading(true);
@@ -80,9 +83,11 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
         const [contextResponse, dwellResponse] = await Promise.all([
           fetch(
             `${getCoreApiUrl()}/platforms/${encodeURIComponent(platformId)}/spatial-context?radius_nm=5&platform_limit=8&zone_limit=8`,
+            { signal: controller.signal },
           ),
           fetch(
             `${getCoreApiUrl()}/platforms/${encodeURIComponent(platformId)}/zone-dwell?limit=5`,
+            { signal: controller.signal },
           ),
         ]);
         if (!contextResponse.ok) {
@@ -92,24 +97,23 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
           contextResponse.json() as Promise<PlatformSpatialContext>,
           dwellResponse.ok ? dwellResponse.json() as Promise<PlatformZoneDwell> : Promise.resolve(null),
         ]);
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setSpatialContext(contextPayload);
           setZoneDwell(dwellPayload);
         }
       } catch {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setSpatialContext(null);
           setZoneDwell(null);
         }
       } finally {
-        if (!cancelled) setSpatialLoading(false);
+        if (!controller.signal.aborted) setSpatialLoading(false);
       }
     };
 
-    void loadSpatialContext();
-
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, [platformId, p?.last_seen]);
 
