@@ -133,6 +133,11 @@ async def _handle_alert(data: dict) -> None:
 
 def _to_ws_dict(alert: AlertModel) -> dict:
     metadata = alert.metadata_ or {}
+    metadata.setdefault("source", "agent-runtime")
+    metadata.setdefault(
+        "produced_at",
+        alert.created_at.isoformat() if alert.created_at else None,
+    )
     return {
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,

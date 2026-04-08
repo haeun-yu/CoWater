@@ -53,6 +53,8 @@ class AlertPayload:
     def to_dict(self) -> dict:
         meta = dict(self.metadata)
         meta.setdefault("schema_version", ALERT_SCHEMA_VERSION)
+        meta.setdefault("source", "agent-runtime")
+        meta.setdefault("produced_at", self.created_at)
         meta.setdefault("generated_by", self.generated_by)
         meta.setdefault("created_at", self.created_at)
         if self.dedup_key:

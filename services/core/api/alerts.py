@@ -32,6 +32,12 @@ class AlertResponse(BaseModel):
 
     @classmethod
     def from_model(cls, m: AlertModel) -> "AlertResponse":
+        metadata = dict(m.metadata_ or {})
+        metadata.setdefault("source", "agent-runtime")
+        metadata.setdefault(
+            "produced_at",
+            m.created_at.isoformat() if m.created_at else None,
+        )
         return cls(
             alert_id=m.alert_id,
             alert_type=m.alert_type,
@@ -42,7 +48,7 @@ class AlertResponse(BaseModel):
             generated_by=m.generated_by,
             message=m.message,
             recommendation=m.recommendation,
-            metadata=m.metadata_,
+            metadata=metadata,
             created_at=m.created_at,
             acknowledged_at=m.acknowledged_at,
             resolved_at=m.resolved_at,
