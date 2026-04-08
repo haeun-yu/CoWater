@@ -15,6 +15,10 @@ export const MAP_CENTER: [number, number] = [
   Number(process.env.NEXT_PUBLIC_MAP_LAT ?? 34.75),
 ];
 export const MAP_ZOOM = Number(process.env.NEXT_PUBLIC_MAP_ZOOM ?? 8);
+export const MAP_OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const MAP_OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+export const MAP_OPENSEAMAP_SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
+export const MAP_OPENSEAMAP_ATTRIBUTION = "© OpenSeaMap contributors";
 
 /** OSM 기본 타일 불투명도 (0~1) */
 export const MAP_OSM_OPACITY = 0.35;

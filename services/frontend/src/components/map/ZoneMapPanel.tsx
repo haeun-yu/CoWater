@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { MAP_CENTER, MAP_OSM_OPACITY, MAP_ZOOM } from "@/config";
+import {
+  MAP_CENTER,
+  MAP_OPENSEAMAP_ATTRIBUTION,
+  MAP_OPENSEAMAP_SEAMARK_TILE_URL,
+  MAP_OSM_ATTRIBUTION,
+  MAP_OSM_OPACITY,
+  MAP_OSM_TILE_URL,
+  MAP_ZOOM,
+} from "@/config";
 import { buildZoneGeoJSON, buildZoneLabelGeoJSON, type Zone } from "@/stores/zoneStore";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -32,6 +40,7 @@ export default function ZoneMapPanel({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
+  const [seamarkVisible, setSeamarkVisible] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -43,9 +52,15 @@ export default function ZoneMapPanel({
         sources: {
           osm: {
             type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tiles: [MAP_OSM_TILE_URL],
             tileSize: 256,
-            attribution: "© OpenStreetMap",
+            attribution: MAP_OSM_ATTRIBUTION,
+          },
+          seamark: {
+            type: "raster",
+            tiles: [MAP_OPENSEAMAP_SEAMARK_TILE_URL],
+            tileSize: 256,
+            attribution: MAP_OPENSEAMAP_ATTRIBUTION,
           },
         },
         layers: [
@@ -54,6 +69,12 @@ export default function ZoneMapPanel({
             type: "raster",
             source: "osm",
             paint: { "raster-opacity": MAP_OSM_OPACITY },
+          },
+          {
+            id: "seamark-layer",
+            type: "raster",
+            source: "seamark",
+            layout: { visibility: "none" },
           },
         ],
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
@@ -64,6 +85,7 @@ export default function ZoneMapPanel({
     });
 
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+    map.addControl(new maplibregl.ScaleControl({ unit: "nautical" }), "bottom-left");
 
     map.on("load", () => {
       map.addSource("zones", {
@@ -219,6 +241,15 @@ export default function ZoneMapPanel({
     }
   }, [zoneVisible, mapLoaded]);
 
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.setLayoutProperty(
+      "seamark-layer",
+      "visibility",
+      seamarkVisible ? "visible" : "none",
+    );
+  }, [seamarkVisible, mapLoaded]);
+
   const activeCount = zones.filter((zone) => zone.active).length;
 
   return (
@@ -243,12 +274,34 @@ export default function ZoneMapPanel({
           구역
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
         </button>
+
+        <button
+          onClick={() => setSeamarkVisible((visible) => !visible)}
+          title="OpenSeaMap seamark 오버레이 토글"
+          aria-pressed={seamarkVisible}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            seamarkVisible
+              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+          }`}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+            <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor" opacity="0.8" />
+            <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5" />
+            <rect x="3" y="10" width="6" height="2" rx="0.5" fill="currentColor" />
+          </svg>
+          Seamark
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`} />
+        </button>
       </div>
 
       <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
         <div className="panel px-2.5 py-1 text-xs text-ocean-300 rounded flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
           <span className="font-mono">활성 {activeCount} / 전체 {zones.length}개</span>
+        </div>
+        <div className="panel px-2.5 py-1 text-[11px] text-ocean-400 rounded">
+          Zone 맵에서도 OpenSeaMap seamark를 함께 확인할 수 있습니다.
         </div>
         {selectedZoneId && (
           <div className="panel px-2.5 py-1 text-xs text-ocean-200 rounded border border-ocean-600/60">

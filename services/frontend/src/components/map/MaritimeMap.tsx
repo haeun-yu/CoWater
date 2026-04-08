@@ -13,7 +13,11 @@ import {
   MAP_CENTER,
   MAP_CLUSTER_MAX_ZOOM,
   MAP_NAV_AID_FETCH_MIN_ZOOM,
+  MAP_OPENSEAMAP_ATTRIBUTION,
+  MAP_OPENSEAMAP_SEAMARK_TILE_URL,
+  MAP_OSM_ATTRIBUTION,
   MAP_OSM_OPACITY,
+  MAP_OSM_TILE_URL,
   MAP_SELECT_FLY_DURATION,
   MAP_SELECT_MIN_ZOOM,
   MAP_SHIP_LAYER_MIN_ZOOM,
@@ -382,15 +386,15 @@ function MaritimeMap() {
         sources: {
           osm: {
             type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tiles: [MAP_OSM_TILE_URL],
             tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
+            attribution: MAP_OSM_ATTRIBUTION,
           },
           seamark: {
             type: "raster",
-            tiles: ["https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"],
+            tiles: [MAP_OPENSEAMAP_SEAMARK_TILE_URL],
             tileSize: 256,
-            attribution: "© OpenSeaMap contributors",
+            attribution: MAP_OPENSEAMAP_ATTRIBUTION,
           },
           "platform-points": {
             type: "geojson",
@@ -907,6 +911,7 @@ function MaritimeMap() {
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
+  const activeNauticalLayerCount = Number(navAidVisible) + Number(fairwayVisible) + Number(seamarkVisible);
 
   return (
     <div className="relative w-full h-full">
@@ -932,96 +937,107 @@ function MaritimeMap() {
       </div>
 
       {/* 레이어 토글 */}
-      <div className="absolute top-3 right-12 z-10 flex gap-2">
-        <button
-          onClick={() => setZoneVisible((v) => !v)}
-          title="설정된 금지·제한·주의 구역 표시"
-          aria-pressed={zoneVisible}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            zoneVisible
-              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-          }`}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
-            <polygon points="6,1 11,10 1,10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.8"/>
-            <line x1="6" y1="4" x2="6" y2="7" stroke="currentColor" strokeWidth="1.2"/>
-            <circle cx="6" cy="8.5" r="0.7" fill="currentColor"/>
-          </svg>
-          구역
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
-        </button>
-
-        <button
-          onClick={() => setNavAidVisible((v) => !v)}
-          title="주요 부표·등대·표지만 간추려 표시"
-          aria-pressed={navAidVisible}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            navAidVisible
-              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-          }`}
-        >
-          <span className={`w-2 h-2 rounded-full ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
-          주요 표지
-        </button>
-
-        <button
-          onClick={() => setFairwayVisible((v) => !v)}
-          title="항로 감각을 돕는 fairway 보조 레이어"
-          aria-pressed={fairwayVisible}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            fairwayVisible
-              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-          }`}
-        >
-          <span className={`w-2 h-2 rounded-full ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
-          Fairway
-        </button>
-
-        <button
-          onClick={() => setSeamarkVisible((v) => !v)}
-          title="OpenSeaMap 전체 seamark 오버레이 (세부 정보 많음)"
-          aria-pressed={seamarkVisible}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            seamarkVisible
-              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400"
-          }`}
-        >
-          {/* 등대 아이콘 (SVG) */}
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            fill="none"
-            className="flex-shrink-0"
+      <div className="absolute top-3 right-12 z-10 flex flex-col items-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            onClick={() => setZoneVisible((v) => !v)}
+            title="설정된 금지·제한·주의 구역 표시"
+            aria-pressed={zoneVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              zoneVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
           >
-            <rect
-              x="4.5"
-              y="0"
-              width="3"
-              height="2"
-              rx="0.5"
-              fill="currentColor"
-              opacity="0.8"
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+              <polygon points="6,1 11,10 1,10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.8"/>
+              <line x1="6" y1="4" x2="6" y2="7" stroke="currentColor" strokeWidth="1.2"/>
+              <circle cx="6" cy="8.5" r="0.7" fill="currentColor"/>
+            </svg>
+            구역
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
+          </button>
+
+          <button
+            onClick={() => setNavAidVisible((v) => !v)}
+            title="주요 부표·등대·표지만 간추려 표시"
+            aria-pressed={navAidVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              navAidVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
+            주요 표지
+          </button>
+
+          <button
+            onClick={() => setFairwayVisible((v) => !v)}
+            title="항로 감각을 돕는 fairway 보조 레이어"
+            aria-pressed={fairwayVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              fairwayVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
+            Fairway
+          </button>
+
+          <button
+            onClick={() => setSeamarkVisible((v) => !v)}
+            title="OpenSeaMap 전체 seamark 오버레이 (세부 정보 많음)"
+            aria-pressed={seamarkVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              seamarkVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400"
+            }`}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              className="flex-shrink-0"
+            >
+              <rect
+                x="4.5"
+                y="0"
+                width="3"
+                height="2"
+                rx="0.5"
+                fill="currentColor"
+                opacity="0.8"
+              />
+              <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5" />
+              <rect
+                x="3"
+                y="10"
+                width="6"
+                height="2"
+                rx="0.5"
+                fill="currentColor"
+              />
+            </svg>
+            전체 seamark
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
             />
-            <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5" />
-            <rect
-              x="3"
-              y="10"
-              width="6"
-              height="2"
-              rx="0.5"
-              fill="currentColor"
-            />
-          </svg>
-          전체 seamark
-          <span
-            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
-          />
-        </button>
+          </button>
+        </div>
+
+        <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+          <div className="flex items-center justify-between gap-3 text-ocean-100">
+            <span className="font-medium">해양 레이어</span>
+            <span className="font-mono text-[10px] text-ocean-400">{activeNauticalLayerCount}/3 활성</span>
+          </div>
+          <div className="mt-1 text-ocean-400">
+            주요 표지·Fairway는 <span className="font-mono">zoom {MAP_NAV_AID_FETCH_MIN_ZOOM}+</span>에서 자동 조회됩니다.
+          </div>
+        </div>
       </div>
 
       {/* 범례 */}
