@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -74,14 +74,16 @@ async def get_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_db)])
 
 
 @router.patch("/{alert_id}/acknowledge", response_model=AlertResponse)
-async def acknowledge_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_db)]):
+async def acknowledge_alert(
+    alert_id: str, db: Annotated[AsyncSession, Depends(get_db)]
+):
     row = await db.get(AlertModel, alert_id)
     if row is None:
         raise HTTPException(404)
     if row.status != "new":
         raise HTTPException(400, "Alert is not in 'new' state")
     row.status = "acknowledged"
-    row.acknowledged_at = datetime.utcnow()
+    row.acknowledged_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
     payload = AlertResponse.from_model(row).model_dump(mode="json")
@@ -95,7 +97,7 @@ async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_d
     if row is None:
         raise HTTPException(404)
     row.status = "resolved"
-    row.resolved_at = datetime.utcnow()
+    row.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
     payload = AlertResponse.from_model(row).model_dump(mode="json")
@@ -115,7 +117,9 @@ class DeleteAlertsBody(BaseModel):
 
 
 @router.delete("", status_code=200)
-async def delete_alerts(body: DeleteAlertsBody, db: Annotated[AsyncSession, Depends(get_db)]):
+async def delete_alerts(
+    body: DeleteAlertsBody, db: Annotated[AsyncSession, Depends(get_db)]
+):
     """지정한 alert_ids를 DB에서 삭제한다. 빈 리스트이면 아무것도 하지 않는다."""
     if not body.alert_ids:
         return {"deleted": 0}
@@ -163,20 +167,22 @@ async def run_alert_action(
 
     meta = dict(row.metadata_ or {})
     actions = list(meta.get("actions", []))
-    actions.append({
-        "action": body.action,
-        "executed_at": datetime.utcnow().isoformat(),
-        "executor": "operator-ui",
-    })
+    actions.append(
+        {
+            "action": body.action,
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executor": "operator-ui",
+        }
+    )
     meta["actions"] = actions
     row.metadata_ = meta
 
     if body.action == "acknowledge" and row.status == "new":
         row.status = "acknowledged"
-        row.acknowledged_at = datetime.utcnow()
+        row.acknowledged_at = datetime.now(timezone.utc)
     elif body.action == "resolve":
         row.status = "resolved"
-        row.resolved_at = datetime.utcnow()
+        row.resolved_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(row)
