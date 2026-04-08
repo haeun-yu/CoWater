@@ -49,7 +49,7 @@ class CPAAgent(Agent):
             if other_id == changed_id:
                 continue
             cpa, tcpa = _compute_cpa_tcpa(r1, r2)
-            if cpa is None or tcpa is None or tcpa < 0:
+            if cpa is None or tcpa is None or tcpa < 0 or not math.isfinite(tcpa):
                 continue
             await self._evaluate(r1, r2, cpa, tcpa)
 
@@ -65,6 +65,7 @@ class CPAAgent(Agent):
 
         if cpa < cfg["critical_cpa_nm"] and tcpa < cfg["critical_tcpa_min"]:
             self._alerted_warning.discard(pair)
+            self._alerted_critical.add(pair)
             rec = None
             if self.level in ("L2", "L3"):
                 rec = (
@@ -85,7 +86,8 @@ class CPAAgent(Agent):
             ))
 
         elif cpa < cfg["warning_cpa_nm"] and tcpa < cfg["warning_tcpa_min"]:
-            if pair not in self._alerted_critical:
+            if pair not in self._alerted_warning and pair not in self._alerted_critical:
+                self._alerted_warning.add(pair)
                 rec = None
                 if self.level in ("L2", "L3"):
                     rec = (

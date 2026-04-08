@@ -66,19 +66,23 @@ async def _handle_report(data: dict) -> None:
     raw_payload = b64decode(raw_payload_b64) if raw_payload_b64 else None
 
     async with AsyncSessionLocal() as session:
-        # platform_reports → platforms FK 보장:
-        # 최초 수신 시 platforms 행을 자동 생성 (이미 있으면 무시)
+        # 신규 플랫폼은 INSERT, 기존 플랫폼은 name/platform_type을 최신 보고 기준으로 갱신
+        insert_stmt = pg_insert(PlatformModel).values(
+            platform_id=platform_id,
+            platform_type=platform_type,
+            name=platform_name,
+            source_protocol=source_protocol,
+            capabilities=[],
+            metadata_={},
+        )
         await session.execute(
-            pg_insert(PlatformModel)
-            .values(
-                platform_id=platform_id,
-                platform_type=platform_type,
-                name=platform_name,
-                source_protocol=source_protocol,
-                capabilities=[],
-                metadata_={},
+            insert_stmt.on_conflict_do_update(
+                index_elements=["platform_id"],
+                set_={
+                    "platform_type": insert_stmt.excluded.platform_type,
+                    "name": insert_stmt.excluded.name,
+                },
             )
-            .on_conflict_do_nothing(index_elements=["platform_id"])
         )
 
         report = PlatformReportModel(
@@ -99,18 +103,8 @@ async def _handle_report(data: dict) -> None:
         session.add(report)
         await session.commit()
 
-        # 캐시 미스 시에만 DB 조회 — 플랫폼당 최초 1회
-        if platform_id not in _platform_meta:
-            platform_row = await session.get(PlatformModel, platform_id)
-            if platform_row:
-                _platform_meta[platform_id] = (
-                    platform_row.platform_type,
-                    platform_row.name or platform_id,
-                )
-
-    platform_type, platform_name = _platform_meta.get(
-        platform_id, (platform_type, platform_name)
-    )
+    # 캐시를 항상 최신 보고 기준으로 갱신
+    _platform_meta[platform_id] = (platform_type, platform_name)
 
     # WebSocket 브로드캐스트
     await hub.broadcast(

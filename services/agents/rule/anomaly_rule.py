@@ -37,11 +37,11 @@ class AnomalyRuleAgent(Agent):
         if pid in self._ais_lost:
             self._ais_lost.discard(pid)
             await self.emit_alert(AlertPayload(
-                alert_type="ais_off",
+                alert_type="ais_recovered",
                 severity="info",
                 message=f"{pid} AIS 신호 복구",
                 platform_ids=[pid],
-                dedup_key=f"ais_off:{pid}",
+                # dedup_key 없음: 복구는 독립 이벤트로 발행하여 소실 경보를 덮어쓰지 않음
             ))
 
         self._last_seen[pid] = now

@@ -75,11 +75,12 @@ class ZoneMonitorAgent(Agent):
                 # 이탈
                 self._inside.get(report.platform_id, set()).discard(zone_id)
                 await self.emit_alert(AlertPayload(
-                    alert_type="zone_intrusion",
+                    alert_type="zone_exit",
                     severity="info",
                     message=f"{report.platform_id}가 구역 '{zone['name']}'에서 이탈",
                     platform_ids=[report.platform_id],
                     zone_id=zone_id,
+                    dedup_key=f"zone_exit:{report.platform_id}:{zone_id}",
                 ))
 
 

@@ -14,7 +14,8 @@ export function getPlatformAgeMs(lastSeen: string | null | undefined): number | 
 
 export function getPlatformFreshness(lastSeen: string | null | undefined): PlatformFreshness {
   const age = getPlatformAgeMs(lastSeen);
-  if (age == null || age < STALE_WARNING_MS) return "live";
+  if (age == null) return "lost";
+  if (age < STALE_WARNING_MS) return "live";
   if (age < STALE_CRITICAL_MS) return "stale";
   return "lost";
 }

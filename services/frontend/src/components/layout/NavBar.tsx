@@ -39,11 +39,17 @@ export default function NavBar() {
 
   const platformValues = Object.values(platforms);
   const freshness = countPlatformsByFreshness(platformValues);
-  const allStreamsConnected = Object.values(streams).every((stream) => stream.status === "connected");
+  const STREAM_DATA_TIMEOUT_MS = 60_000;
+  const allStreamsConnected = Object.values(streams).every(
+    (s) =>
+      s.status === "connected" &&
+      s.lastMessageAt != null &&
+      Date.now() - new Date(s.lastMessageAt).getTime() < STREAM_DATA_TIMEOUT_MS,
+  );
 
   const streamSummary = [
-    `위치 ${streams.position.status === "connected" ? "정상" : "주의"}`,
-    `경보 ${streams.alert.status === "connected" ? "정상" : "주의"}`,
+    `위치 ${streams.position.status === "connected" ? (streams.position.lastMessageAt ? "정상" : "대기") : "주의"}`,
+    `경보 ${streams.alert.status === "connected" ? (streams.alert.lastMessageAt ? "정상" : "대기") : "주의"}`,
   ].join(" · ");
 
   return (
