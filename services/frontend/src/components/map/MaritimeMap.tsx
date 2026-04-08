@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
+import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
 import type { PlatformState } from "@/types";
 import { createShipIcon } from "@/lib/shipIcon";
 import {
@@ -110,8 +111,10 @@ export default function MaritimeMap() {
   const select = usePlatformStore((s) => s.select);
   const selectedId = usePlatformStore((s) => s.selectedId);
   const alerts = useAlertStore((s) => s.alerts);
+  const zones = useZoneStore((s) => s.zones);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [seamarkVisible, setSeamarkVisible] = useState(true);
+  const [zoneVisible, setZoneVisible] = useState(true);
 
   const alertPlatformIds = new Set(
     alerts
@@ -282,6 +285,77 @@ export default function MaritimeMap() {
         },
       });
 
+      // ── 구역 소스 + 레이어 ────────────────────────────────────────────
+      map.addSource("zones", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource("zone-labels", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      // 구역 반투명 fill
+      map.addLayer({
+        id: "zones-fill",
+        type: "fill",
+        source: "zones",
+        paint: {
+          "fill-color": [
+            "match", ["get", "zone_type"],
+            "prohibited", "#ef4444",
+            "restricted", "#f59e0b",
+            "caution", "#3b82f6",
+            "#64748b",
+          ],
+          "fill-opacity": 0.12,
+        },
+      });
+
+      // 구역 테두리
+      map.addLayer({
+        id: "zones-border",
+        type: "line",
+        source: "zones",
+        paint: {
+          "line-color": [
+            "match", ["get", "zone_type"],
+            "prohibited", "#ef4444",
+            "restricted", "#f59e0b",
+            "caution", "#3b82f6",
+            "#64748b",
+          ],
+          "line-width": 1.8,
+          "line-opacity": 0.75,
+          "line-dasharray": [
+            "case",
+            ["==", ["get", "zone_type"], "prohibited"],
+            ["literal", [1, 0]],
+            ["literal", [4, 2]],
+          ],
+        },
+      });
+
+      // 구역 라벨 (이름 + 유형)
+      map.addLayer({
+        id: "zones-label",
+        type: "symbol",
+        source: "zone-labels",
+        layout: {
+          "text-field": ["concat", ["get", "name"], "\n", ["get", "type_label"]],
+          "text-size": 12,
+          "text-anchor": "center",
+          "text-justify": "center",
+          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+          "text-max-width": 10,
+        },
+        paint: {
+          "text-color": "#f1f5f9",
+          "text-halo-color": "#0f172a",
+          "text-halo-width": 1.5,
+        },
+      });
+
       setMapLoaded(true);
     });
 
@@ -392,6 +466,27 @@ export default function MaritimeMap() {
     );
   }, [seamarkVisible, mapLoaded]);
 
+  // ── 구역 소스 데이터 갱신 ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    (map.getSource("zones") as maplibregl.GeoJSONSource | undefined)
+      ?.setData(buildZoneGeoJSON(zones) as Parameters<maplibregl.GeoJSONSource["setData"]>[0]);
+    (map.getSource("zone-labels") as maplibregl.GeoJSONSource | undefined)
+      ?.setData(buildZoneLabelGeoJSON(zones) as Parameters<maplibregl.GeoJSONSource["setData"]>[0]);
+  }, [zones, mapLoaded]);
+
+  // ── 구역 레이어 표시/숨김 ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const vis = zoneVisible ? "visible" : "none";
+    for (const id of ["zones-fill", "zones-border", "zones-label"]) {
+      mapRef.current.setLayoutProperty(id, "visibility", vis);
+    }
+  }, [zoneVisible, mapLoaded]);
+
   const platformCount = Object.keys(platforms).length;
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
@@ -415,8 +510,27 @@ export default function MaritimeMap() {
         )}
       </div>
 
+      {/* 구역 레이어 토글 */}
+      <div className="absolute top-3 right-12 z-10 flex gap-2">
+        <button
+          onClick={() => setZoneVisible((v) => !v)}
+          title="설정된 금지·제한·주의 구역 표시"
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            zoneVisible
+              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+          }`}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+            <polygon points="6,1 11,10 1,10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.8"/>
+            <line x1="6" y1="4" x2="6" y2="7" stroke="currentColor" strokeWidth="1.2"/>
+            <circle cx="6" cy="8.5" r="0.7" fill="currentColor"/>
+          </svg>
+          구역
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
+        </button>
+
       {/* 해도 심볼 토글 */}
-      <div className="absolute top-3 right-12 z-10">
         <button
           onClick={() => setSeamarkVisible((v) => !v)}
           title="OpenSeaMap 해도 심볼 (등대·부표·침선 등 실제 항로표지)"
@@ -485,6 +599,23 @@ export default function MaritimeMap() {
           <span className="inline-block w-2 h-2 rounded-full bg-red-500/60" />
           <span className="text-red-400">위험 경보</span>
         </div>
+        {zoneVisible && (
+          <>
+            <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">구역</div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-500/20" />
+              <span className="text-red-300">금지</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-500/20" />
+              <span className="text-amber-300">제한</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-2 rounded-sm border border-blue-400/70 bg-blue-500/20" />
+              <span className="text-blue-300">주의</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
