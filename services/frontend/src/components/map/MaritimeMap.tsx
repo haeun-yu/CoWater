@@ -321,6 +321,9 @@ function MaritimeMap() {
   const prevPosRef = useRef(new Map<string, string>()); // pid → "lon,lat"
   const followRef = useRef(false);
   const lastOverlayBoundsRef = useRef<string | null>(null);
+  const overlayCacheRef = useRef(new Map<string, Awaited<ReturnType<typeof fetchNauticalOverlays>>>());
+  const overlayFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const overlayVisibilityRef = useRef({ navAidVisible: true, fairwayVisible: false });
 
   const platforms = usePlatformStore((s) => s.platforms);
   const select = usePlatformStore((s) => s.select);
@@ -333,6 +336,8 @@ function MaritimeMap() {
   const [navAidVisible, setNavAidVisible] = useState(true);
   const [fairwayVisible, setFairwayVisible] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
+
+  overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
 
   const alertPlatformIds = useMemo(
     () =>
@@ -572,7 +577,16 @@ function MaritimeMap() {
         filter: ["!", ["has", "point_count"]],
         minzoom: MAP_SHIP_LAYER_MIN_ZOOM + 1,
         layout: {
-          "text-field": ["get", "name"],
+          "text-field": [
+            "case",
+            ["==", ["get", "selected"], true],
+            ["get", "name"],
+            ["==", ["get", "alert"], true],
+            ["get", "name"],
+            [">=", ["zoom"], 12],
+            ["get", "name"],
+            "",
+          ],
           "text-size": 11,
           "text-offset": [0, 1.8],
           "text-anchor": "top",
@@ -733,21 +747,52 @@ function MaritimeMap() {
       map.on("click", "platform-point-fallback", selectPlatformFromFeature);
       map.on("click", "platform-hulls-fill", selectPlatformFromFeature);
 
-      map.on("moveend", async () => {
-        if (!navAidVisible && !fairwayVisible) return;
-        if (map.getZoom() < MAP_NAV_AID_FETCH_MIN_ZOOM) return;
-        const bounds = map.getBounds();
-        const key = `${bounds.getSouth().toFixed(2)}:${bounds.getWest().toFixed(2)}:${bounds.getNorth().toFixed(2)}:${bounds.getEast().toFixed(2)}`;
-        if (lastOverlayBoundsRef.current === key) return;
-        lastOverlayBoundsRef.current = key;
+      const setInteractiveCursor = () => {
+        map.getCanvas().style.cursor = "pointer";
+      };
+      const resetCursor = () => {
+        map.getCanvas().style.cursor = "";
+      };
 
-        try {
-          const overlayData = await fetchNauticalOverlays(bounds);
-          (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(overlayData.navAids);
-          (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(overlayData.fairways);
-        } catch (error) {
-          console.error("[map] failed to fetch nautical overlays", error);
+      for (const layerId of ["platform-clusters", "platform-point-fallback", "platform-hulls-fill"]) {
+        map.on("mouseenter", layerId, setInteractiveCursor);
+        map.on("mouseleave", layerId, resetCursor);
+      }
+
+      map.on("moveend", async () => {
+        if (overlayFetchTimerRef.current) {
+          clearTimeout(overlayFetchTimerRef.current);
         }
+
+        overlayFetchTimerRef.current = setTimeout(async () => {
+          const { navAidVisible: navVisible, fairwayVisible: fairwayLayerVisible } = overlayVisibilityRef.current;
+          if (!navVisible && !fairwayLayerVisible) return;
+          if (map.getZoom() < MAP_NAV_AID_FETCH_MIN_ZOOM) return;
+          const bounds = map.getBounds();
+          const key = `${bounds.getSouth().toFixed(2)}:${bounds.getWest().toFixed(2)}:${bounds.getNorth().toFixed(2)}:${bounds.getEast().toFixed(2)}`;
+          if (lastOverlayBoundsRef.current === key) return;
+          lastOverlayBoundsRef.current = key;
+
+          const cached = overlayCacheRef.current.get(key);
+          if (cached) {
+            (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(cached.navAids);
+            (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(cached.fairways);
+            return;
+          }
+
+          try {
+            const overlayData = await fetchNauticalOverlays(bounds);
+            overlayCacheRef.current.set(key, overlayData);
+            if (overlayCacheRef.current.size > 12) {
+              const oldestKey = overlayCacheRef.current.keys().next().value;
+              if (oldestKey) overlayCacheRef.current.delete(oldestKey);
+            }
+            (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(overlayData.navAids);
+            (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(overlayData.fairways);
+          } catch (error) {
+            console.error("[map] failed to fetch nautical overlays", error);
+          }
+        }, 250);
       });
 
       setMapLoaded(true);
@@ -759,6 +804,9 @@ function MaritimeMap() {
 
     mapRef.current = map;
     return () => {
+      if (overlayFetchTimerRef.current) {
+        clearTimeout(overlayFetchTimerRef.current);
+      }
       map.remove();
       mapRef.current = null;
       setMapLoaded(false);
