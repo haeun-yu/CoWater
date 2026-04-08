@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { getAgentsApiUrl } from "@/lib/publicUrl";
 import {
   useAILogStore,
   isAIAgent,
@@ -11,8 +12,7 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
 
-const AGENTS_URL =
-  process.env.NEXT_PUBLIC_AGENTS_URL ?? "http://localhost:7701";
+const AGENTS_URL = getAgentsApiUrl();
 
 // ── 에이전트 메타 ──────────────────────────────────────────────────────────────
 
