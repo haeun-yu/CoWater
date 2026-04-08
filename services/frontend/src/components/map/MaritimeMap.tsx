@@ -1,31 +1,35 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
 import type { PlatformState } from "@/types";
-import { createShipIcon } from "@/lib/shipIcon";
 import {
-  MAP_CENTER,
-  MAP_ZOOM,
-  MAP_OSM_OPACITY,
-  MAP_SELECT_MIN_ZOOM,
-  MAP_SELECT_FLY_DURATION,
-  MAP_TRACK_EASE_DURATION,
-  TRAIL_MAX,
-  TRAIL_RECENT,
-  TRAIL_MID,
-  TRAIL_OPACITY,
-  TRAIL_LINE_WIDTH,
-  TRAIL_CASING_WIDTH,
-  TRAIL_CASING_COLOR,
-  TRAIL_CASING_OPACITY_FACTOR,
   ALERT_HIGHLIGHT_SEVERITY,
   ALERT_TRAIL_COLOR,
+  MAP_CENTER,
+  MAP_CLUSTER_MAX_ZOOM,
+  MAP_NAV_AID_FETCH_MIN_ZOOM,
+  MAP_OSM_OPACITY,
+  MAP_SELECT_FLY_DURATION,
+  MAP_SELECT_MIN_ZOOM,
+  MAP_SHIP_LAYER_MIN_ZOOM,
+  MAP_TRACK_EASE_DURATION,
+  MAP_ZOOM,
+  OVERPASS_API_URL,
   PLATFORM_COLORS,
+  PLATFORM_RENDER_METERS,
+  TRAIL_CASING_COLOR,
+  TRAIL_CASING_OPACITY_FACTOR,
+  TRAIL_CASING_WIDTH,
+  TRAIL_LINE_WIDTH,
+  TRAIL_MAX,
+  TRAIL_MID,
+  TRAIL_OPACITY,
+  TRAIL_RECENT,
 } from "@/config";
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -38,6 +42,16 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 type LonLat = [number, number];
+type PointFeature = {
+  type: "Feature";
+  geometry: { type: "Point"; coordinates: LonLat };
+  properties: Record<string, string | number | boolean | null>;
+};
+type PolygonFeature = {
+  type: "Feature";
+  geometry: { type: "Polygon"; coordinates: LonLat[][] };
+  properties: Record<string, string | number | boolean | null>;
+};
 
 type TrailFeature = {
   type: "Feature";
@@ -94,19 +108,219 @@ function buildTrailGeoJSON(
   } as maplibregl.GeoJSONSourceSpecification["data"] & object;
 }
 
+const NAV_AID_LABELS: Record<string, string> = {
+  lighthouse: "등대",
+  beacon_lateral: "표지",
+  beacon_cardinal: "방위표지",
+  buoy_lateral: "부표",
+  buoy_cardinal: "방위부표",
+};
+
+function toFeatureCollection(features: Array<PointFeature | PolygonFeature>) {
+  return { type: "FeatureCollection" as const, features };
+}
+
+function metersToLon(meters: number, latitude: number) {
+  const latRad = (latitude * Math.PI) / 180;
+  const metersPerDegreeLon = 111_320 * Math.cos(latRad);
+  return meters / Math.max(metersPerDegreeLon, 1);
+}
+
+function metersToLat(meters: number) {
+  return meters / 110_540;
+}
+
+function buildShipPolygon(platform: PlatformState, heading: number, scale = 1) {
+  const dimensions = PLATFORM_RENDER_METERS[platform.platform_type ?? "vessel"] ?? PLATFORM_RENDER_METERS.vessel;
+  const length = dimensions.length * scale;
+  const beam = dimensions.beam * scale;
+  const bow = length * 0.5;
+  const stern = length * 0.5;
+  const halfBeam = beam * 0.5;
+  const rad = (heading * Math.PI) / 180;
+  const forwardX = Math.sin(rad);
+  const forwardY = Math.cos(rad);
+  const starboardX = Math.cos(rad);
+  const starboardY = -Math.sin(rad);
+
+  const localPoints = [
+    { forward: bow, starboard: 0 },
+    { forward: bow * 0.2, starboard: halfBeam },
+    { forward: -stern, starboard: halfBeam * 0.75 },
+    { forward: -stern, starboard: -halfBeam * 0.75 },
+    { forward: bow * 0.2, starboard: -halfBeam },
+    { forward: bow, starboard: 0 },
+  ];
+
+  return localPoints.map((point) => {
+    const dxMeters = forwardX * point.forward + starboardX * point.starboard;
+    const dyMeters = forwardY * point.forward + starboardY * point.starboard;
+    return [
+      platform.lon + metersToLon(dxMeters, platform.lat),
+      platform.lat + metersToLat(dyMeters),
+    ] as LonLat;
+  });
+}
+
+function buildBridgePolygon(platform: PlatformState, heading: number) {
+  const dimensions = PLATFORM_RENDER_METERS[platform.platform_type ?? "vessel"] ?? PLATFORM_RENDER_METERS.vessel;
+  const bridgeLength = dimensions.length * 0.18;
+  const bridgeBeam = dimensions.beam * 0.42;
+  const offsetForward = dimensions.length * 0.02;
+  const rad = (heading * Math.PI) / 180;
+  const forwardX = Math.sin(rad);
+  const forwardY = Math.cos(rad);
+  const starboardX = Math.cos(rad);
+  const starboardY = -Math.sin(rad);
+
+  const localPoints = [
+    { forward: offsetForward + bridgeLength, starboard: bridgeBeam },
+    { forward: offsetForward + bridgeLength, starboard: -bridgeBeam },
+    { forward: offsetForward, starboard: -bridgeBeam },
+    { forward: offsetForward, starboard: bridgeBeam },
+    { forward: offsetForward + bridgeLength, starboard: bridgeBeam },
+  ];
+
+  return localPoints.map((point) => {
+    const dxMeters = forwardX * point.forward + starboardX * point.starboard;
+    const dyMeters = forwardY * point.forward + starboardY * point.starboard;
+    return [
+      platform.lon + metersToLon(dxMeters, platform.lat),
+      platform.lat + metersToLat(dyMeters),
+    ] as LonLat;
+  });
+}
+
+function buildPlatformSources(
+  platforms: Record<string, PlatformState>,
+  selectedId: string | null,
+  alertIds: Set<string>,
+) {
+  const pointFeatures: PointFeature[] = [];
+  const hullFeatures: PolygonFeature[] = [];
+  const bridgeFeatures: PolygonFeature[] = [];
+
+  for (const platform of Object.values(platforms)) {
+    if (platform.lat == null || platform.lon == null) continue;
+    const selected = platform.platform_id === selectedId;
+    const alert = alertIds.has(platform.platform_id);
+    const heading = platform.heading ?? platform.cog ?? 0;
+    const colors = PLATFORM_COLORS[platform.platform_type ?? "vessel"] ?? PLATFORM_COLORS.vessel;
+    const commonProps = {
+      platform_id: platform.platform_id,
+      platform_type: platform.platform_type ?? "vessel",
+      name: platform.name ?? platform.platform_id,
+      selected,
+      alert,
+      heading,
+      hullColor: selected ? "#f59e0b" : colors.top,
+      bridgeColor: selected ? "#fbbf24" : colors.bridge,
+      outlineColor: alert ? "#ef4444" : selected ? "#fbbf24" : colors.side,
+    };
+
+    pointFeatures.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [platform.lon, platform.lat] },
+      properties: commonProps,
+    });
+
+    hullFeatures.push({
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [buildShipPolygon(platform, heading)] },
+      properties: commonProps,
+    });
+
+    bridgeFeatures.push({
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [buildBridgePolygon(platform, heading)] },
+      properties: commonProps,
+    });
+  }
+
+  return {
+    points: toFeatureCollection(pointFeatures),
+    hulls: toFeatureCollection(hullFeatures),
+    bridges: toFeatureCollection(bridgeFeatures),
+  };
+}
+
+type OverpassElement = {
+  type: "node" | "way";
+  id: number;
+  lat?: number;
+  lon?: number;
+  tags?: Record<string, string>;
+  geometry?: Array<{ lat: number; lon: number }>;
+};
+
+async function fetchNauticalOverlays(bounds: maplibregl.LngLatBounds) {
+  const south = bounds.getSouth();
+  const west = bounds.getWest();
+  const north = bounds.getNorth();
+  const east = bounds.getEast();
+
+  const query = `[out:json][timeout:20];(
+    node["seamark:type"~"lighthouse|beacon_lateral|beacon_cardinal|buoy_lateral|buoy_cardinal"](${south},${west},${north},${east});
+    way["waterway"="fairway"](${south},${west},${north},${east});
+  );out body geom;`;
+
+  const response = await fetch(OVERPASS_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    body: query,
+  });
+  if (!response.ok) {
+    throw new Error(`Overpass request failed: ${response.status}`);
+  }
+  const data = (await response.json()) as { elements?: OverpassElement[] };
+  const elements = data.elements ?? [];
+
+  const navAidFeatures: PointFeature[] = [];
+  const fairwayFeatures: Array<{ type: "Feature"; geometry: { type: "LineString"; coordinates: LonLat[] }; properties: Record<string, string> }> = [];
+
+  for (const element of elements) {
+    if (element.type === "node" && element.lat != null && element.lon != null) {
+      const seamarkType = element.tags?.["seamark:type"];
+      if (!seamarkType) continue;
+      navAidFeatures.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [element.lon, element.lat] },
+        properties: {
+          seamark_type: seamarkType,
+          label: NAV_AID_LABELS[seamarkType] ?? seamarkType,
+          name: element.tags?.name ?? NAV_AID_LABELS[seamarkType] ?? seamarkType,
+        },
+      });
+      continue;
+    }
+
+    if (element.type === "way" && element.geometry?.length) {
+      fairwayFeatures.push({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: element.geometry.map((point) => [point.lon, point.lat] as LonLat),
+        },
+        properties: {
+          name: element.tags?.name ?? "Fairway",
+        },
+      });
+    }
+  }
+
+  return {
+    navAids: toFeatureCollection(navAidFeatures),
+    fairways: { type: "FeatureCollection" as const, features: fairwayFeatures },
+  };
+}
+
 function MaritimeMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // 선박 마커 관리: platform_id → Marker
-  const markersRef = useRef(new Map<string, maplibregl.Marker>());
-  // 항적 관리: platform_id → [[lon, lat], ...]
   const trailsRef = useRef(new Map<string, LonLat[]>());
-  // 직전 위치 기록 (중복 포인트 방지용)
   const prevPosRef = useRef(new Map<string, string>()); // pid → "lon,lat"
-  // 현재 zoom
-  const zoomRef = useRef(8);
   const followRef = useRef(false);
+  const lastOverlayBoundsRef = useRef<string | null>(null);
 
   const platforms = usePlatformStore((s) => s.platforms);
   const select = usePlatformStore((s) => s.select);
@@ -115,7 +329,9 @@ function MaritimeMap() {
   const streams = useSystemStore((s) => s.streams);
   const zones = useZoneStore((s) => s.zones);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [seamarkVisible, setSeamarkVisible] = useState(true);
+  const [seamarkVisible, setSeamarkVisible] = useState(false);
+  const [navAidVisible, setNavAidVisible] = useState(true);
+  const [fairwayVisible, setFairwayVisible] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
 
   const alertPlatformIds = useMemo(
@@ -127,70 +343,6 @@ function MaritimeMap() {
       ),
     [alerts],
   );
-
-  // zoom 핸들러는 마운트 1회짜리 useEffect 클로저 안에 있어서
-  // platforms / selectedId / alertPlatformIds를 직접 참조하면 초기값에 고정된다.
-  // ref를 통해 항상 최신 값을 읽도록 동기화한다.
-  const platformsRef = useRef(platforms);
-  const selectedIdRef = useRef(selectedId);
-  const alertIdsRef = useRef(alertPlatformIds);
-  platformsRef.current = platforms;
-  selectedIdRef.current = selectedId;
-  alertIdsRef.current = alertPlatformIds;
-
-  // ── 선박 마커 생성/갱신 ────────────────────────────────────────────────────
-
-  function updateMarker(
-    p: PlatformState,
-    isSelected: boolean,
-    isAlert: boolean,
-  ) {
-    if (p.lat == null || p.lon == null) return;
-    const { html, anchorX, anchorY } = createShipIcon(
-      p.platform_type ?? "vessel",
-      p.heading ?? p.cog ?? 0,
-      isSelected,
-      isAlert,
-      zoomRef.current,
-    );
-
-    const existing = markersRef.current.get(p.platform_id);
-    if (existing) {
-      // 기존 마커: HTML 업데이트 + 위치 이동
-      existing.getElement().innerHTML = html;
-      existing.setLngLat([p.lon, p.lat]);
-    } else {
-      // 신규 마커 생성
-      const el = document.createElement("div");
-      el.innerHTML = html;
-      el.style.cursor = "pointer";
-      el.addEventListener("click", () => {
-        followRef.current = true;
-        select(p.platform_id);
-      });
-
-      const marker = new maplibregl.Marker({
-        element: el,
-        offset: [-anchorX, -anchorY], // hull center → coordinate
-        anchor: "top-left",
-      })
-        .setLngLat([p.lon, p.lat])
-        .addTo(mapRef.current!);
-
-      markersRef.current.set(p.platform_id, marker);
-    }
-  }
-
-  function removeStaleMarkers(currentIds: Set<string>) {
-    for (const [pid, marker] of markersRef.current) {
-      if (!currentIds.has(pid)) {
-        marker.remove();
-        markersRef.current.delete(pid);
-        trailsRef.current.delete(pid);
-        prevPosRef.current.delete(pid);
-      }
-    }
-  }
 
   function updateTrail(p: PlatformState) {
     if (p.lat == null || p.lon == null) return;
@@ -207,7 +359,7 @@ function MaritimeMap() {
   function flushTrailSource() {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const src = map.getSource("trails") as maplibregl.GeoJSONSource | undefined;
+    const src = map.getSource("trails") as GeoJSONSource | undefined;
     src?.setData(
       buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds),
     );
@@ -235,6 +387,29 @@ function MaritimeMap() {
             tileSize: 256,
             attribution: "© OpenSeaMap contributors",
           },
+          "platform-points": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+            cluster: true,
+            clusterRadius: 46,
+            clusterMaxZoom: MAP_CLUSTER_MAX_ZOOM,
+          },
+          "platform-hulls": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "platform-bridges": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "nav-aids": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          fairways: {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
         },
         layers: [
           {
@@ -243,7 +418,7 @@ function MaritimeMap() {
             source: "osm",
             paint: { "raster-opacity": MAP_OSM_OPACITY },
           },
-          { id: "seamark-layer", type: "raster", source: "seamark" },
+          { id: "seamark-layer", type: "raster", source: "seamark", layout: { visibility: "none" } },
         ],
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       },
@@ -288,6 +463,178 @@ function MaritimeMap() {
           "line-color": ["get", "color"],
           "line-width": TRAIL_LINE_WIDTH,
           "line-opacity": ["get", "opacity"],
+        },
+      });
+
+      map.addLayer({
+        id: "fairway-lines",
+        type: "line",
+        source: "fairways",
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#67e8f9",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 12, 3.4],
+          "line-opacity": 0.5,
+          "line-dasharray": [4, 3],
+        },
+      });
+
+      map.addLayer({
+        id: "platform-clusters",
+        type: "circle",
+        source: "platform-points",
+        filter: ["has", "point_count"],
+        paint: {
+          "circle-color": "#0f172a",
+          "circle-stroke-color": "#38bdf8",
+          "circle-stroke-width": 1.5,
+          "circle-radius": [
+            "step",
+            ["get", "point_count"],
+            16,
+            10,
+            20,
+            30,
+            24,
+            100,
+            30,
+          ],
+        },
+      });
+
+      map.addLayer({
+        id: "platform-cluster-count",
+        type: "symbol",
+        source: "platform-points",
+        filter: ["has", "point_count"],
+        layout: {
+          "text-field": ["get", "point_count_abbreviated"],
+          "text-size": 11,
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+        },
+        paint: {
+          "text-color": "#dbeafe",
+        },
+      });
+
+      map.addLayer({
+        id: "platform-point-fallback",
+        type: "circle",
+        source: "platform-points",
+        filter: ["!", ["has", "point_count"]],
+        maxzoom: MAP_SHIP_LAYER_MIN_ZOOM,
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "alert"], true], 7, 5],
+          "circle-color": ["get", "hullColor"],
+          "circle-stroke-color": ["case", ["==", ["get", "selected"], true], "#fbbf24", "#0f172a"],
+          "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 2, 1],
+        },
+      });
+
+      map.addLayer({
+        id: "platform-hulls-fill",
+        type: "fill",
+        source: "platform-hulls",
+        minzoom: MAP_SHIP_LAYER_MIN_ZOOM,
+        paint: {
+          "fill-color": ["get", "hullColor"],
+          "fill-opacity": 0.92,
+        },
+      });
+
+      map.addLayer({
+        id: "platform-hulls-outline",
+        type: "line",
+        source: "platform-hulls",
+        minzoom: MAP_SHIP_LAYER_MIN_ZOOM,
+        paint: {
+          "line-color": ["get", "outlineColor"],
+          "line-width": ["case", ["==", ["get", "selected"], true], 2.6, 1.2],
+          "line-opacity": 0.95,
+        },
+      });
+
+      map.addLayer({
+        id: "platform-bridges-fill",
+        type: "fill",
+        source: "platform-bridges",
+        minzoom: MAP_SHIP_LAYER_MIN_ZOOM,
+        paint: {
+          "fill-color": ["get", "bridgeColor"],
+          "fill-opacity": 0.95,
+        },
+      });
+
+      map.addLayer({
+        id: "platform-labels",
+        type: "symbol",
+        source: "platform-points",
+        filter: ["!", ["has", "point_count"]],
+        minzoom: MAP_SHIP_LAYER_MIN_ZOOM + 1,
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 11,
+          "text-offset": [0, 1.8],
+          "text-anchor": "top",
+          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+        },
+        paint: {
+          "text-color": "#e2e8f0",
+          "text-halo-color": "#020617",
+          "text-halo-width": 1.2,
+        },
+      });
+
+      map.addLayer({
+        id: "nav-aids-circle",
+        type: "circle",
+        source: "nav-aids",
+        layout: { visibility: "visible" },
+        paint: {
+          "circle-radius": [
+            "match",
+            ["get", "seamark_type"],
+            "lighthouse",
+            6,
+            "beacon_lateral",
+            5,
+            "beacon_cardinal",
+            5,
+            4,
+          ],
+          "circle-color": [
+            "match",
+            ["get", "seamark_type"],
+            "lighthouse",
+            "#f8fafc",
+            "beacon_cardinal",
+            "#f59e0b",
+            "buoy_cardinal",
+            "#fbbf24",
+            "#38bdf8",
+          ],
+          "circle-stroke-color": "#082f49",
+          "circle-stroke-width": 1,
+          "circle-opacity": 0.9,
+        },
+      });
+
+      map.addLayer({
+        id: "nav-aids-label",
+        type: "symbol",
+        source: "nav-aids",
+        minzoom: 11,
+        layout: {
+          visibility: "visible",
+          "text-field": ["get", "label"],
+          "text-size": 10,
+          "text-offset": [0, 1.2],
+          "text-anchor": "top",
+        },
+        paint: {
+          "text-color": "#bae6fd",
+          "text-halo-color": "#082f49",
+          "text-halo-width": 1,
         },
       });
 
@@ -362,25 +709,48 @@ function MaritimeMap() {
         },
       });
 
-      setMapLoaded(true);
-    });
+      map.on("click", "platform-clusters", (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const clusterId = feature.properties?.cluster_id;
+        const source = map.getSource("platform-points") as GeoJSONSource | undefined;
+        if (!source || typeof clusterId !== "number") return;
+        void source.getClusterExpansionZoom(clusterId).then((zoom) => {
+          const geometry = feature.geometry as { coordinates?: LonLat };
+          if (!geometry.coordinates) return;
+          map.easeTo({ center: geometry.coordinates, zoom, duration: 500 });
+        });
+      });
 
-    // zoom 변화 시 모든 마커 아이콘 크기 갱신
-    // ref를 통해 최신 platforms / selectedId / alertIds를 읽는다 (클로저 stale 방지)
-    map.on("zoom", () => {
-      zoomRef.current = map.getZoom();
-      for (const [pid, marker] of markersRef.current) {
-        const p = platformsRef.current[pid];
-        if (!p) continue;
-        const { html } = createShipIcon(
-          p.platform_type ?? "vessel",
-          p.heading ?? p.cog ?? 0,
-          pid === selectedIdRef.current,
-          alertIdsRef.current.has(pid),
-          zoomRef.current,
-        );
-        marker.getElement().innerHTML = html;
-      }
+      const selectPlatformFromFeature = (event: maplibregl.MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        const platformId = feature?.properties?.platform_id;
+        if (typeof platformId !== "string") return;
+        followRef.current = true;
+        select(platformId);
+      };
+
+      map.on("click", "platform-point-fallback", selectPlatformFromFeature);
+      map.on("click", "platform-hulls-fill", selectPlatformFromFeature);
+
+      map.on("moveend", async () => {
+        if (!navAidVisible && !fairwayVisible) return;
+        if (map.getZoom() < MAP_NAV_AID_FETCH_MIN_ZOOM) return;
+        const bounds = map.getBounds();
+        const key = `${bounds.getSouth().toFixed(2)}:${bounds.getWest().toFixed(2)}:${bounds.getNorth().toFixed(2)}:${bounds.getEast().toFixed(2)}`;
+        if (lastOverlayBoundsRef.current === key) return;
+        lastOverlayBoundsRef.current = key;
+
+        try {
+          const overlayData = await fetchNauticalOverlays(bounds);
+          (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(overlayData.navAids);
+          (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(overlayData.fairways);
+        } catch (error) {
+          console.error("[map] failed to fetch nautical overlays", error);
+        }
+      });
+
+      setMapLoaded(true);
     });
 
     map.on("dragstart", () => {
@@ -389,8 +759,6 @@ function MaritimeMap() {
 
     mapRef.current = map;
     return () => {
-      for (const m of markersRef.current.values()) m.remove();
-      markersRef.current.clear();
       map.remove();
       mapRef.current = null;
       setMapLoaded(false);
@@ -401,44 +769,18 @@ function MaritimeMap() {
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
-
-    const visibleIds = new Set(
-      Object.values(platforms)
-        .filter((platform) => platform.lat != null && platform.lon != null)
-        .map((platform) => platform.platform_id),
-    );
-    removeStaleMarkers(visibleIds);
-
     for (const p of Object.values(platforms)) {
       updateTrail(p);
-      updateMarker(
-        p,
-        p.platform_id === selectedId,
-        alertPlatformIds.has(p.platform_id),
-      );
     }
     flushTrailSource();
+    const sourceData = buildPlatformSources(platforms, selectedId, alertPlatformIds);
+    (mapRef.current.getSource("platform-points") as GeoJSONSource | undefined)?.setData(sourceData.points);
+    (mapRef.current.getSource("platform-hulls") as GeoJSONSource | undefined)?.setData(sourceData.hulls);
+    (mapRef.current.getSource("platform-bridges") as GeoJSONSource | undefined)?.setData(sourceData.bridges);
   }, [platforms, alerts, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── 선택 변경 → 마커 재렌더 + Follow ──────────────────────────────────────
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
-
-    // 이전 선택 해제 (리셋)
-    for (const [pid, marker] of markersRef.current) {
-      const p = platforms[pid];
-      if (!p) continue;
-      const wasSelected = pid === selectedId;
-      const { html } = createShipIcon(
-        p.platform_type ?? "vessel",
-        p.heading ?? p.cog ?? 0,
-        wasSelected,
-        alertPlatformIds.has(pid),
-        zoomRef.current,
-      );
-      marker.getElement().innerHTML = html;
-    }
 
     if (selectedId) {
       followRef.current = true;
@@ -475,6 +817,22 @@ function MaritimeMap() {
       seamarkVisible ? "visible" : "none",
     );
   }, [seamarkVisible, mapLoaded]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const visibility = navAidVisible ? "visible" : "none";
+    mapRef.current.setLayoutProperty("nav-aids-circle", "visibility", visibility);
+    mapRef.current.setLayoutProperty("nav-aids-label", "visibility", visibility);
+  }, [navAidVisible, mapLoaded]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.setLayoutProperty(
+      "fairway-lines",
+      "visibility",
+      fairwayVisible ? "visible" : "none",
+    );
+  }, [fairwayVisible, mapLoaded]);
 
   // ── 구역 소스 데이터 갱신 ─────────────────────────────────────────────────
 
@@ -525,7 +883,7 @@ function MaritimeMap() {
         )}
       </div>
 
-      {/* 구역 레이어 토글 */}
+      {/* 레이어 토글 */}
       <div className="absolute top-3 right-12 z-10 flex gap-2">
         <button
           onClick={() => setZoneVisible((v) => !v)}
@@ -546,10 +904,37 @@ function MaritimeMap() {
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
         </button>
 
-      {/* 해도 심볼 토글 */}
+        <button
+          onClick={() => setNavAidVisible((v) => !v)}
+          title="주요 부표·등대·표지만 간추려 표시"
+          aria-pressed={navAidVisible}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            navAidVisible
+              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
+          주요 표지
+        </button>
+
+        <button
+          onClick={() => setFairwayVisible((v) => !v)}
+          title="항로 감각을 돕는 fairway 보조 레이어"
+          aria-pressed={fairwayVisible}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            fairwayVisible
+              ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+              : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
+          Fairway
+        </button>
+
         <button
           onClick={() => setSeamarkVisible((v) => !v)}
-          title="OpenSeaMap 해도 심볼 (등대·부표·침선 등 실제 항로표지)"
+          title="OpenSeaMap 전체 seamark 오버레이 (세부 정보 많음)"
           aria-pressed={seamarkVisible}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             seamarkVisible
@@ -584,7 +969,7 @@ function MaritimeMap() {
               fill="currentColor"
             />
           </svg>
-          해도 심볼
+          전체 seamark
           <span
             className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
           />
@@ -615,6 +1000,15 @@ function MaritimeMap() {
         <div className="flex items-center gap-2 border-t border-ocean-800 pt-1.5 mt-0.5">
           <span className="inline-block w-2 h-2 rounded-full bg-red-500/60" />
           <span className="text-red-400">위험 경보</span>
+        </div>
+        <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">항로 보조</div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-cyan-300" />
+          <span className="text-cyan-200">주요 부표/등대/표지</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-px bg-emerald-300" />
+          <span className="text-emerald-200">Fairway 보조선</span>
         </div>
         {zoneVisible && (
           <>
