@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
+import { useSystemStore } from "@/stores/systemStore";
 import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -41,15 +42,21 @@ export default function DashboardAlertPanel() {
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const platforms = usePlatformStore((s) => s.platforms);
+  const alertStream = useSystemStore((s) => s.streams.alert);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<AlertSeverity | "all">("all");
 
-  const newAlerts = alerts.filter((a) => a.status === "new");
+  const newAlerts = useMemo(() => alerts.filter((a) => a.status === "new"), [alerts]);
   const critical = newAlerts.filter((a) => a.severity === "critical").length;
   const warning = newAlerts.filter((a) => a.severity === "warning").length;
   const info = newAlerts.filter((a) => a.severity === "info").length;
 
   // 대시보드: 미확인만, 최신 30건
-  const displayed = newAlerts.slice(0, 30);
+  const displayed = useMemo(
+    () =>
+      (filter === "all" ? newAlerts : newAlerts.filter((alert) => alert.severity === filter)).slice(0, 30),
+    [filter, newAlerts],
+  );
 
   async function acknowledge(alertId: string) {
     const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
@@ -85,6 +92,9 @@ export default function DashboardAlertPanel() {
             전체 보기 →
           </Link>
         </div>
+        <div className="mb-2 text-[11px] text-ocean-500">
+          경보 스트림: {alertStream.status === "connected" ? "정상" : alertStream.status === "reconnecting" ? "재연결 중" : alertStream.status === "error" ? "오류" : "연결 중"}
+        </div>
         {/* 카운트 배지 */}
         <div className="flex gap-2">
           {critical > 0 && (
@@ -107,6 +117,20 @@ export default function DashboardAlertPanel() {
             <span className="text-xs text-green-400">경보 없음 ✓</span>
           )}
         </div>
+        {newAlerts.length > 0 && (
+          <div className="mt-2 flex gap-1">
+            {(["all", "critical", "warning", "info"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFilter(value)}
+                className={`rounded px-2 py-0.5 text-[11px] transition-colors ${filter === value ? "bg-ocean-700 text-ocean-100" : "bg-ocean-900/70 text-ocean-500 hover:text-ocean-300"}`}
+              >
+                {value === "all" ? "전체" : SEVERITY_LABEL[value]}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 경보 목록 */}
