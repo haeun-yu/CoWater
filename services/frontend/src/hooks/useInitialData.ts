@@ -5,7 +5,7 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import type { Alert, PlatformState } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 export function useInitialData() {
   const upsert = usePlatformStore((s) => s.upsert);

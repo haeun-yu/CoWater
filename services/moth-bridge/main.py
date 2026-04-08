@@ -25,6 +25,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _raw_payload_protocols() -> set[str]:
+    return {
+        protocol.strip().lower()
+        for protocol in settings.raw_payload_protocols.split(",")
+        if protocol.strip()
+    }
+
+
+def _raw_payload_enabled(report: ParsedReport) -> bool:
+    if settings.raw_payload_mode == "off" or report.raw_payload is None:
+        return False
+    protocols = _raw_payload_protocols()
+    return not protocols or report.source_protocol.lower() in protocols
+
+
+async def _raw_payload_fields(
+    redis: aioredis.Redis,
+    report: ParsedReport,
+) -> tuple[str | None, str | None, bool]:
+    if not _raw_payload_enabled(report):
+        return None, None, False
+
+    encoded, truncated = report.encode_raw_payload(settings.raw_payload_max_bytes)
+    if encoded is None:
+        return None, None, False
+
+    if settings.raw_payload_mode == "db":
+        return encoded, None, truncated
+
+    cache_key = f"platform:raw:{report.platform_id}:{report.timestamp.isoformat()}"
+    await redis.set(cache_key, encoded, ex=settings.raw_payload_ttl_sec)
+    return None, cache_key, truncated
+
+
 def load_channels(path: str) -> list[ChannelConfig]:
     with open(path) as f:
         cfg = yaml.safe_load(f)
@@ -34,15 +68,17 @@ def load_channels(path: str) -> list[ChannelConfig]:
         adapter_cls = ADAPTER_REGISTRY.get(ch["adapter"])
         if adapter_cls is None:
             raise ValueError(f"Unknown adapter: {ch['adapter']}")
-        channels.append(ChannelConfig(
-            name=ch["name"],
-            moth_channel_type=ch["moth_channel_type"],
-            moth_channel_name=ch["moth_channel_name"],
-            moth_track=ch["moth_track"],
-            moth_source=ch.get("moth_source", "base"),
-            adapter=adapter_cls(),
-            platform_type=ch.get("platform_type", "vessel"),
-        ))
+        channels.append(
+            ChannelConfig(
+                name=ch["name"],
+                moth_channel_type=ch["moth_channel_type"],
+                moth_channel_name=ch["moth_channel_name"],
+                moth_track=ch["moth_track"],
+                moth_source=ch.get("moth_source", "base"),
+                adapter=adapter_cls(),
+                platform_type=ch.get("platform_type", "vessel"),
+            )
+        )
     return channels
 
 
@@ -53,7 +89,21 @@ async def run_moth(redis: aioredis.Redis) -> None:
     async def publish_report(report: ParsedReport) -> None:
         # 1) Redis pub/sub — agents, core 소비용
         channel_key = f"platform.report.{report.platform_id}"
-        payload = json.dumps(report.to_redis_payload())
+        (
+            raw_payload_b64,
+            raw_payload_cache_key,
+            raw_payload_truncated,
+        ) = await _raw_payload_fields(
+            redis,
+            report,
+        )
+        payload = json.dumps(
+            report.to_redis_payload(
+                raw_payload_b64=raw_payload_b64,
+                raw_payload_cache_key=raw_payload_cache_key,
+                raw_payload_truncated=raw_payload_truncated,
+            )
+        )
         await redis.publish(channel_key, payload)
 
         # 최신 상태 캐시 (TTL 60s)

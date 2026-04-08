@@ -41,19 +41,23 @@ async def broadcast(report: "ParsedReport") -> None:
     if not _clients:
         return
 
-    payload = json.dumps({
-        "type": "position_update",
-        "platform_id": report.platform_id,
-        "timestamp": report.timestamp.isoformat(),
-        "lat": report.position.lat,
-        "lon": report.position.lon,
-        "sog": report.sog,
-        "cog": report.cog,
-        "heading": report.heading,
-        "rot": report.rot,
-        "nav_status": report.nav_status,
-        "source_protocol": report.source_protocol,
-    })
+    payload = json.dumps(
+        {
+            "type": "position_update",
+            "platform_id": report.platform_id,
+            "platform_type": report.platform_type,
+            "name": report.name,
+            "timestamp": report.timestamp.isoformat(),
+            "lat": report.position.lat,
+            "lon": report.position.lon,
+            "sog": report.sog,
+            "cog": report.cog,
+            "heading": report.heading,
+            "rot": report.rot,
+            "nav_status": report.nav_status,
+            "source_protocol": report.source_protocol,
+        }
+    )
 
     dead: set[WebSocket] = set()
     for ws in list(_clients):

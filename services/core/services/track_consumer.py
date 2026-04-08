@@ -7,6 +7,7 @@
 
 import json
 import logging
+from base64 import b64decode
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
@@ -49,24 +50,36 @@ async def consume_platform_reports(redis: aioredis.Redis) -> None:
 
 async def _handle_report(data: dict) -> None:
     platform_id = data["platform_id"]
+    platform_type = data.get("platform_type") or "vessel"
+    platform_name = data.get("name") or platform_id
     source_protocol = data.get("source_protocol", "custom")
+    timestamp = datetime.fromisoformat(data["timestamp"])
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+
+    raw_payload_b64 = data.get("raw_payload_b64")
+    raw_payload = b64decode(raw_payload_b64) if raw_payload_b64 else None
 
     async with AsyncSessionLocal() as session:
         # platform_reports → platforms FK 보장:
         # 최초 수신 시 platforms 행을 자동 생성 (이미 있으면 무시)
         await session.execute(
-            pg_insert(PlatformModel).values(
+            pg_insert(PlatformModel)
+            .values(
                 platform_id=platform_id,
-                platform_type="vessel",
-                name=platform_id,
+                platform_type=platform_type,
+                name=platform_name,
                 source_protocol=source_protocol,
                 capabilities=[],
                 metadata_={},
-            ).on_conflict_do_nothing(index_elements=["platform_id"])
+            )
+            .on_conflict_do_nothing(index_elements=["platform_id"])
         )
 
         report = PlatformReportModel(
-            time=datetime.fromisoformat(data["timestamp"]).replace(tzinfo=timezone.utc),
+            time=timestamp,
             platform_id=platform_id,
             lat=data["lat"],
             lon=data["lon"],
@@ -78,6 +91,7 @@ async def _handle_report(data: dict) -> None:
             rot=data.get("rot"),
             nav_status=data.get("nav_status"),
             source_protocol=source_protocol,
+            raw_payload=raw_payload,
         )
         session.add(report)
         await session.commit()
@@ -91,19 +105,24 @@ async def _handle_report(data: dict) -> None:
                     platform_row.name or platform_id,
                 )
 
-    platform_type, platform_name = _platform_meta.get(platform_id, ("vessel", platform_id))
+    platform_type, platform_name = _platform_meta.get(
+        platform_id, (platform_type, platform_name)
+    )
 
     # WebSocket 브로드캐스트
-    await hub.broadcast("platforms", {
-        "type": "position_update",
-        "platform_id": platform_id,
-        "platform_type": platform_type,
-        "name": platform_name,
-        "timestamp": data["timestamp"],
-        "lat": data["lat"],
-        "lon": data["lon"],
-        "sog": data.get("sog"),
-        "cog": data.get("cog"),
-        "heading": data.get("heading"),
-        "nav_status": data.get("nav_status"),
-    })
+    await hub.broadcast(
+        "platforms",
+        {
+            "type": "position_update",
+            "platform_id": platform_id,
+            "platform_type": platform_type,
+            "name": platform_name,
+            "timestamp": data["timestamp"],
+            "lat": data["lat"],
+            "lon": data["lon"],
+            "sog": data.get("sog"),
+            "cog": data.get("cog"),
+            "heading": data.get("heading"),
+            "nav_status": data.get("nav_status"),
+        },
+    )

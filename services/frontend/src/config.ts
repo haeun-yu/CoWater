@@ -100,5 +100,6 @@ export const ICON_PAD = 4;
 
 /** 연결 끊김 후 재연결 대기 시간 (ms) */
 export const WS_RECONNECT_DELAY_MS = 3000;
+export const WS_RECONNECT_MAX_DELAY_MS = 30000;
 /** ping 전송 주기 (ms) */
 export const WS_PING_INTERVAL_MS = 20_000;

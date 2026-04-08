@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ChannelConfig:
     name: str
-    moth_channel_type: str      # instant | static | dynamic
+    moth_channel_type: str  # instant | static | dynamic
     moth_channel_name: str
     moth_track: str
     moth_source: str
@@ -40,7 +40,7 @@ class MothChannelClient:
 
     def __init__(self, config: ChannelConfig, on_report) -> None:
         self._config = config
-        self._on_report = on_report     # async callback(ParsedReport)
+        self._on_report = on_report  # async callback(ParsedReport)
 
     def _build_url(self) -> str:
         params = {
@@ -62,7 +62,9 @@ class MothChannelClient:
             except ConnectionClosedError as e:
                 logger.warning(
                     "Channel '%s' disconnected (code=%s reason=%s), reconnecting...",
-                    self._config.name, e.code, e.reason,
+                    self._config.name,
+                    e.code,
+                    e.reason,
                 )
             except Exception:
                 logger.exception("Channel '%s' error", self._config.name)
@@ -70,7 +72,9 @@ class MothChannelClient:
             attempts += 1
             max_attempts = settings.reconnect_max_attempts
             if max_attempts and attempts >= max_attempts:
-                logger.error("Channel '%s' max reconnect attempts reached", self._config.name)
+                logger.error(
+                    "Channel '%s' max reconnect attempts reached", self._config.name
+                )
                 return
 
             await asyncio.sleep(settings.reconnect_delay_s)
@@ -87,7 +91,9 @@ class MothChannelClient:
                 if isinstance(message, str):
                     # MIME 신호 수신
                     current_mime = message.strip()
-                    logger.debug("MIME received on '%s': %s", self._config.name, current_mime)
+                    logger.debug(
+                        "MIME received on '%s': %s", self._config.name, current_mime
+                    )
                     continue
 
                 if isinstance(message, bytes):
@@ -97,6 +103,10 @@ class MothChannelClient:
                         )
                     report = self._config.adapter.parse(message, current_mime)
                     if report is not None:
+                        report.platform_type = (
+                            report.platform_type or self._config.platform_type
+                        )
+                        report.name = report.name or report.platform_id
                         await self._on_report(report)
                     continue
 

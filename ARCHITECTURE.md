@@ -228,7 +228,7 @@ class PlatformReport:
     rot:            float | None          # Rate of Turn
     # 상태
     nav_status:     str | None            # AIS Nav Status (0-15)
-    # 원본 보존
+    # 원본 보존 (정책 기반)
     source_protocol: str
     raw_payload:    bytes | None
 ```
@@ -600,8 +600,9 @@ POST   /replay/sessions                  # 재생 세션 생성
 GET    /replay/sessions/{id}/stream      # WebSocket 재생 스트리밍
 
 # WebSocket 실시간
-WS     /ws/platforms                     # 실시간 플랫폼 상태
+WS     /ws/positions                     # moth-bridge fast path 위치 스트림
 WS     /ws/alerts                        # 실시간 경보
+WS     /ws/platforms                     # core canonical 플랫폼 상태
 WS     /ws/replay/{session_id}           # 재생 스트림
 ```
 

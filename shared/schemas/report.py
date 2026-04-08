@@ -25,23 +25,29 @@ class PlatformReport:
     # 위치 — Redis wire format과 일치하도록 flat 필드
     lat: float
     lon: float
-    depth_m: float | None = None        # ROV / AUV 수심
-    altitude_m: float | None = None     # 드론 고도
+    depth_m: float | None = None  # ROV / AUV 수심
+    altitude_m: float | None = None  # 드론 고도
 
     # 운동
-    sog: float | None = None            # Speed Over Ground (knots)
-    cog: float | None = None            # Course Over Ground (0-360°)
-    heading: float | None = None        # True Heading (0-360°)
-    rot: float | None = None            # Rate of Turn (°/min)
+    sog: float | None = None  # Speed Over Ground (knots)
+    cog: float | None = None  # Course Over Ground (0-360°)
+    heading: float | None = None  # True Heading (0-360°)
+    rot: float | None = None  # Rate of Turn (°/min)
 
     # AIS 항법 상태 (선박 외 플랫폼은 None)
     nav_status: str | None = None
 
+    platform_type: str | None = None
+    name: str | None = None
+
     # 원본 정보 보존
     source_protocol: Literal["ais", "ros", "mavlink", "nmea", "custom"] = "custom"
+    raw_payload_b64: str | None = None
+    raw_payload_cache_key: str | None = None
+    raw_payload_truncated: bool = False
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "platform_id": self.platform_id,
             "timestamp": self.timestamp.isoformat(),
             "lat": self.lat,
@@ -53,8 +59,17 @@ class PlatformReport:
             "heading": self.heading,
             "rot": self.rot,
             "nav_status": self.nav_status,
+            "platform_type": self.platform_type,
+            "name": self.name,
             "source_protocol": self.source_protocol,
         }
+        if self.raw_payload_b64 is not None:
+            payload["raw_payload_b64"] = self.raw_payload_b64
+            payload["raw_payload_truncated"] = self.raw_payload_truncated
+        if self.raw_payload_cache_key is not None:
+            payload["raw_payload_cache_key"] = self.raw_payload_cache_key
+            payload["raw_payload_truncated"] = self.raw_payload_truncated
+        return payload
 
     @classmethod
     def from_dict(cls, d: dict) -> "PlatformReport":
@@ -70,5 +85,10 @@ class PlatformReport:
             heading=d.get("heading"),
             rot=d.get("rot"),
             nav_status=d.get("nav_status"),
+            platform_type=d.get("platform_type"),
+            name=d.get("name"),
             source_protocol=d.get("source_protocol", "custom"),
+            raw_payload_b64=d.get("raw_payload_b64"),
+            raw_payload_cache_key=d.get("raw_payload_cache_key"),
+            raw_payload_truncated=d.get("raw_payload_truncated", False),
         )
