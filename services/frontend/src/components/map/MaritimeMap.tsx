@@ -530,6 +530,7 @@ function MaritimeMap() {
         <button
           onClick={() => setZoneVisible((v) => !v)}
           title="설정된 금지·제한·주의 구역 표시"
+          aria-pressed={zoneVisible}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             zoneVisible
               ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
@@ -549,6 +550,7 @@ function MaritimeMap() {
         <button
           onClick={() => setSeamarkVisible((v) => !v)}
           title="OpenSeaMap 해도 심볼 (등대·부표·침선 등 실제 항로표지)"
+          aria-pressed={seamarkVisible}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             seamarkVisible
               ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"

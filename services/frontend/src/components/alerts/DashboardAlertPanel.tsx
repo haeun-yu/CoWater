@@ -45,6 +45,7 @@ export default function DashboardAlertPanel() {
   const alertStream = useSystemStore((s) => s.streams.alert);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
+  const [pendingAlertId, setPendingAlertId] = useState<string | null>(null);
 
   const newAlerts = useMemo(() => alerts.filter((a) => a.status === "new"), [alerts]);
   const critical = newAlerts.filter((a) => a.severity === "critical").length;
@@ -59,14 +60,23 @@ export default function DashboardAlertPanel() {
   );
 
   async function acknowledge(alertId: string) {
-    const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "acknowledge" }),
-    });
-    if (!res.ok) return;
-    const updated = (await res.json()) as Alert;
-    updateAlert(updated);
+    setPendingAlertId(alertId);
+    try {
+      const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "acknowledge" }),
+      });
+      if (!res.ok) {
+        throw new Error(`acknowledge failed: ${res.status}`);
+      }
+      const updated = (await res.json()) as Alert;
+      updateAlert(updated);
+    } catch (error) {
+      console.error("[alerts] acknowledge failed", error);
+    } finally {
+      setPendingAlertId((current) => (current === alertId ? null : current));
+    }
   }
 
   function getPlatformName(id: string) {
@@ -153,6 +163,8 @@ export default function DashboardAlertPanel() {
                   onClick={() =>
                     setExpanded(isExpanded ? null : alert.alert_id)
                   }
+                  aria-expanded={isExpanded}
+                  aria-controls={`dashboard-alert-${alert.alert_id}`}
                 >
                   <div className="flex items-start gap-2">
                     <span
@@ -183,7 +195,7 @@ export default function DashboardAlertPanel() {
                 </button>
 
                 {isExpanded && (
-                  <div className="px-3 pb-2.5 space-y-2">
+                  <div id={`dashboard-alert-${alert.alert_id}`} className="px-3 pb-2.5 space-y-2">
                     {alert.platform_ids.length > 0 && (
                       <div className="flex gap-1 flex-wrap">
                         {alert.platform_ids.map((id) => (
@@ -211,9 +223,10 @@ export default function DashboardAlertPanel() {
                     )}
                     <button
                       onClick={() => acknowledge(alert.alert_id)}
+                      disabled={pendingAlertId === alert.alert_id}
                       className="text-xs px-2.5 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
                     >
-                      인지 처리
+                      {pendingAlertId === alert.alert_id ? "처리 중..." : "인지 처리"}
                     </button>
                   </div>
                 )}

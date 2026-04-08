@@ -153,6 +153,8 @@ function PlatformList({
             <button
               key={p.platform_id}
               onClick={() => { onSelect(p.platform_id); }}
+              title={`${formatDisplayName(p)} 선택`}
+              aria-label={`${formatDisplayName(p)} 플랫폼 선택`}
               className={`w-full px-3 py-2 text-left border-b border-ocean-900 hover:bg-ocean-800/60 transition-colors flex items-center gap-2 ${
                 hasAlert ? "bg-red-500/5 border-l-2 border-l-red-500/60" : ""
               }`}
