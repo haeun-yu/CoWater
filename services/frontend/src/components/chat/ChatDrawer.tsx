@@ -29,6 +29,7 @@ export default function ChatDrawer() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isPending, startTransition] = useTransition();
   const [isLoading, setIsLoading] = useState(false);
+  const [currentModel, setCurrentModel] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -40,6 +41,14 @@ export default function ChatDrawer() {
   const warningCount = alerts.filter((a) => a.status === "new" && a.severity === "warning").length;
   const platformCount = Object.keys(platforms).length;
   const selectedPlatform = selectedId ? platforms[selectedId] : null;
+
+  // 현재 LLM 모델 조회
+  useEffect(() => {
+    fetch(`${AGENTS_URL}/agents/chat-agent`)
+      .then((r) => r.json())
+      .then((d) => { if (d.model_name) setCurrentModel(d.model_name); })
+      .catch(() => {});
+  }, []);
 
   // 드로어 열릴 때 입력창 포커스
   useEffect(() => {
@@ -133,6 +142,7 @@ export default function ChatDrawer() {
 
       // 모델명 업데이트
       if (model) {
+        setCurrentModel(model);
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, model } : m)),
         );
@@ -169,13 +179,13 @@ export default function ChatDrawer() {
         onClick={() => setOpen((v) => !v)}
         className={`fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
           open
-            ? "bg-ocean-700 text-white rotate-45"
+            ? "bg-ocean-700 text-white"
             : "bg-ocean-600 hover:bg-ocean-500 text-white"
         } ${criticalCount > 0 && !open ? "ring-2 ring-red-500 ring-offset-2 ring-offset-slate-950" : ""}`}
         title={open ? "챗봇 닫기" : "AI 보좌관 열기"}
       >
         {open ? (
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="M2 2l14 14M16 2L2 16" />
           </svg>
         ) : (
@@ -206,9 +216,14 @@ export default function ChatDrawer() {
                 CoWater Assistant
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              현재 상황 기반 실시간 해양 운항 지원
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] text-slate-500">현재 상황 기반 실시간 해양 운항 지원</span>
+              {currentModel && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 font-mono">
+                  {currentModel}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {messages.length > 0 && (

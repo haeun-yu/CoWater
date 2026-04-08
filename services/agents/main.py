@@ -299,6 +299,10 @@ class LevelBody(BaseModel):
     level: str
 
 
+class ModelBody(BaseModel):
+    model: str
+
+
 class LLMConfigBody(BaseModel):
     backend: str | None = None
     model: str | None = None
@@ -317,6 +321,53 @@ async def set_level(agent_id: str, body: LevelBody):
     if not _registry.set_level(agent_id, body.level):
         raise HTTPException(404)
     return {"agent_id": agent_id, "level": body.level}
+
+
+@app.patch("/agents/{agent_id}/model")
+async def set_agent_model(agent_id: str, body: ModelBody):
+    """개별 AI 에이전트의 LLM 모델을 런타임 변경한다."""
+    agent = _registry.get(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not hasattr(agent, "_llm"):
+        raise HTTPException(400, "This agent does not use an LLM")
+
+    backend = settings.llm_backend.lower()
+    # 현재 백엔드와 동일한 클라이언트를 새 모델로 교체
+    from ai.llm_client import ClaudeClient, OllamaClient, VllmClient
+    try:
+        if backend == "ollama":
+            agent._llm = OllamaClient(  # type: ignore[attr-defined]
+                base_url=settings.ollama_url,
+                model=body.model,
+                think=settings.ollama_think,
+                timeout=settings.local_llm_timeout_sec,
+                max_attempts=settings.local_llm_max_attempts,
+                base_delay=settings.local_llm_base_delay_sec,
+            )
+        elif backend == "claude":
+            agent._llm = ClaudeClient(  # type: ignore[attr-defined]
+                api_key=settings.anthropic_api_key,
+                model=body.model,
+                timeout=settings.claude_timeout_sec,
+                max_attempts=settings.claude_max_attempts,
+                base_delay=settings.claude_base_delay_sec,
+            )
+        elif backend == "vllm":
+            agent._llm = VllmClient(  # type: ignore[attr-defined]
+                base_url=settings.vllm_url,
+                model=body.model,
+                timeout=settings.local_llm_timeout_sec,
+                max_attempts=settings.local_llm_max_attempts,
+                base_delay=settings.local_llm_base_delay_sec,
+            )
+        else:
+            raise HTTPException(400, f"Unknown backend: {backend}")
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+
+    logger.info("Agent %s model changed to %s/%s", agent_id, backend, body.model)
+    return {"agent_id": agent_id, "model_name": agent._llm.model_name}  # type: ignore[attr-defined]
 
 
 @app.patch("/agents/{agent_id}/config")

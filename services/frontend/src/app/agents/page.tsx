@@ -263,6 +263,7 @@ interface AgentStatus {
   enabled: boolean;
   failure_count?: number;
   last_error?: string | null;
+  model_name?: string;
 }
 
 // ── 페이지 ────────────────────────────────────────────────────────────────────
@@ -279,6 +280,8 @@ export default function AgentsPage() {
   const [statuses, setStatuses] = useState<AgentStatus[]>([]);
   const [updating, setUpdating] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<"ok" | "fallback" | "unknown">("unknown");
+  const [modelEditing, setModelEditing] = useState<string | null>(null);
+  const [modelInput, setModelInput] = useState<string>("");
 
   useEffect(() => {
     fetch(`${AGENTS_URL}/agents`)
@@ -312,6 +315,28 @@ export default function AgentsPage() {
         body: JSON.stringify({ level }),
       });
       setStatuses((p) => p.map((a) => (a.agent_id === id ? { ...a, level } : a)));
+    } finally {
+      setUpdating(null);
+    }
+  }
+
+  async function applyModel(id: string, model: string) {
+    const trimmed = model.trim();
+    if (!trimmed) return;
+    setUpdating(id);
+    try {
+      const res = await fetch(`${AGENTS_URL}/agents/${id}/model`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: trimmed }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStatuses((p) =>
+          p.map((a) => (a.agent_id === id ? { ...a, model_name: data.model_name } : a)),
+        );
+        setModelEditing(null);
+      }
     } finally {
       setUpdating(null);
     }
@@ -640,6 +665,59 @@ export default function AgentsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <InfoCell label="타입" value={focusMeta.type === "ai" ? "AI 에이전트" : "Rule 에이전트"} />
                 <InfoCell label="기본 레벨" value={focusMeta.level} color="text-blue-400" />
+              </div>
+            )}
+
+            {/* AI 에이전트 모델 표시 + 변경 */}
+            {focusMeta.type === "ai" && (
+              <div className="bg-slate-900/50 border border-slate-800 rounded p-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-slate-500 uppercase font-bold">LLM 모델</span>
+                  {modelEditing === focusAgentId ? (
+                    <button
+                      onClick={() => setModelEditing(null)}
+                      className="text-xs text-slate-500 hover:text-slate-300"
+                    >
+                      취소
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setModelEditing(focusAgentId);
+                        setModelInput(focusStatus?.model_name?.split("/")[1] ?? "");
+                      }}
+                      className="text-xs text-ocean-400 hover:text-ocean-300"
+                    >
+                      변경
+                    </button>
+                  )}
+                </div>
+                {modelEditing === focusAgentId ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      value={modelInput}
+                      onChange={(e) => setModelInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyModel(focusAgentId, modelInput);
+                        if (e.key === "Escape") setModelEditing(null);
+                      }}
+                      placeholder="예: qwen2.5:0.5b"
+                      className="flex-1 text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-ocean-600 font-mono"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => applyModel(focusAgentId, modelInput)}
+                      disabled={updating === focusAgentId || !modelInput.trim()}
+                      className="text-xs px-2.5 py-1 rounded bg-ocean-700 hover:bg-ocean-600 text-white disabled:opacity-40"
+                    >
+                      적용
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-sm font-mono text-violet-300">
+                    {focusStatus?.model_name ?? "—"}
+                  </span>
+                )}
               </div>
             )}
 

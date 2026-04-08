@@ -106,7 +106,7 @@ class Agent(ABC):
         self._last_error = message
 
     def health(self) -> dict:
-        return {
+        result: dict = {
             "agent_id": self.agent_id,
             "name": self.name,
             "type": self.agent_type,
@@ -115,3 +115,7 @@ class Agent(ABC):
             "failure_count": self._failure_count,
             "last_error": self._last_error,
         }
+        # AI 에이전트는 현재 LLM 모델명 포함
+        if hasattr(self, "_llm"):
+            result["model_name"] = self._llm.model_name  # type: ignore[attr-defined]
+        return result
