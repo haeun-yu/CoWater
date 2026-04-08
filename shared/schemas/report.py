@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 
@@ -73,9 +73,14 @@ class PlatformReport:
 
     @classmethod
     def from_dict(cls, d: dict) -> "PlatformReport":
+        timestamp = datetime.fromisoformat(d["timestamp"])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
         return cls(
             platform_id=d["platform_id"],
-            timestamp=datetime.fromisoformat(d["timestamp"]),
+            timestamp=timestamp,
             lat=d["lat"],
             lon=d["lon"],
             depth_m=d.get("depth_m"),

@@ -159,14 +159,16 @@ Body: {"level": "L2"}
 
 기본 로컬 포트는 7700번대로 통일합니다.
 
-### Core (`services/core/.env`)
+Core, Agent Runtime, Moth Bridge는 Docker Compose에서 환경 변수를 직접 주입합니다. 로컬 실행 시에는 셸 환경 변수로 지정하거나 별도 `.env` 파일을 직접 만들어 사용할 수 있습니다.
+
+### Core (환경 변수)
 
 | 변수           | 기본값                     | 설명                    |
 | -------------- | -------------------------- | ----------------------- |
 | `DATABASE_URL` | `postgresql+asyncpg://...` | TimescaleDB 연결 문자열 |
 | `REDIS_URL`    | `redis://localhost:6379`   | Redis 주소              |
 
-### Agent Runtime (`services/agents/.env`)
+### Agent Runtime (환경 변수)
 
 | 변수                | 기본값                   | 설명                 |
 | ------------------- | ------------------------ | -------------------- |
@@ -184,7 +186,7 @@ Body: {"level": "L2"}
 | `NEXT_PUBLIC_AGENTS_URL` | `http://localhost:7701` | Agent Runtime  |
 | `NEXT_PUBLIC_POSITION_WS_URL` | `ws://localhost:7703` | Moth-bridge 위치 relay |
 
-### Moth Bridge (`services/moth-bridge/.env`)
+### Moth Bridge (환경 변수)
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
