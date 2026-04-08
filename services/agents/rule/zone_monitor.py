@@ -9,6 +9,7 @@ Shapely를 사용하여 폴리곤 홀(hole)을 포함한 정확한 공간 연산
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -20,6 +21,8 @@ from base import Agent, AlertPayload, PlatformReport
 logger = logging.getLogger(__name__)
 
 _ALERT_TYPES = {"prohibited", "restricted"}   # 경보 발생 구역 유형
+_STATE_KEY = "agent:zone_monitor:inside"
+_STATE_TTL = 3600
 
 
 class ZoneMonitorAgent(Agent):
@@ -34,6 +37,25 @@ class ZoneMonitorAgent(Agent):
         self._zones: list[dict] = []
         self._zone_shapes: dict[str, object] = {}   # zone_id → Shapely geometry
         self._inside: dict[str, set[str]] = {}       # platform_id → {zone_id, ...}
+
+    async def restore_state(self) -> None:
+        """서비스 시작 시 Redis에서 구역 내부 상태 복구."""
+        try:
+            raw = await self._redis.get(_STATE_KEY)
+            if not raw:
+                return
+            data = json.loads(raw)
+            self._inside = {pid: set(zone_ids) for pid, zone_ids in data.items()}
+            logger.info("ZoneMonitorAgent state restored: %d platforms inside zones", len(self._inside))
+        except Exception:
+            logger.exception("Failed to restore ZoneMonitorAgent state")
+
+    async def _save_state(self) -> None:
+        try:
+            data = {pid: list(zone_ids) for pid, zone_ids in self._inside.items() if zone_ids}
+            await self._redis.set(_STATE_KEY, json.dumps(data), ex=_STATE_TTL)
+        except Exception:
+            logger.warning("Failed to save ZoneMonitorAgent state")
 
     async def load_zones(self) -> None:
         """Core API에서 활성 Zone 목록 로드 및 Shapely geometry 파싱."""
@@ -72,6 +94,7 @@ class ZoneMonitorAgent(Agent):
             if inside and not prev_inside:
                 # 신규 진입
                 self._inside.setdefault(report.platform_id, set()).add(zone_id)
+                await self._save_state()
                 severity = "critical" if zone["zone_type"] == "prohibited" else "warning"
                 rec = None
                 if self.level in ("L2", "L3"):
@@ -89,6 +112,7 @@ class ZoneMonitorAgent(Agent):
             elif not inside and prev_inside:
                 # 이탈 — 침입 경보를 자동 해제
                 self._inside.get(report.platform_id, set()).discard(zone_id)
+                await self._save_state()
                 await self.emit_alert(AlertPayload(
                     alert_type="zone_exit",
                     severity="info",

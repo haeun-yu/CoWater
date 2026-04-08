@@ -71,6 +71,16 @@ def _setup_agents(redis: aioredis.Redis) -> None:
         _registry.register(agent)
 
 
+async def _restore_agent_states() -> None:
+    """재시작 시 Redis에서 에이전트 상태 복구."""
+    for agent in _registry.all():
+        if hasattr(agent, "restore_state"):
+            try:
+                await agent.restore_state()
+            except Exception:
+                logger.exception("Failed to restore state for agent %s", agent.agent_id)
+
+
 # ── AI 태스크 헬퍼 ──────────────────────────────────────────────────────────
 
 
@@ -236,6 +246,7 @@ async def lifespan(app: FastAPI):
     global _redis
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     _setup_agents(_redis)
+    await _restore_agent_states()
 
     tasks = [
         asyncio.create_task(
