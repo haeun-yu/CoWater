@@ -3,14 +3,13 @@
 import { useState } from "react";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, AlertSeverity, AlertStatus } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
-
 async function apiDeleteAlerts(alertIds: string[]) {
-  const res = await fetch(`${API_URL}/alerts`, {
+  const res = await fetch(`${getCoreApiUrl()}/alerts`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ alert_ids: alertIds }),
@@ -20,7 +19,7 @@ async function apiDeleteAlerts(alertIds: string[]) {
 }
 
 async function apiRunAlertAction(alertId: string, action: string) {
-  const res = await fetch(`${API_URL}/alerts/${alertId}/action`, {
+  const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action }),

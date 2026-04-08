@@ -4,34 +4,49 @@ import { useEffect } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useZoneStore, type Zone } from "@/stores/zoneStore";
+import { useToastStore } from "@/stores/toastStore";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, PlatformState } from "@/types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 export function useInitialData() {
   const upsert = usePlatformStore((s) => s.upsert);
   const setAlerts = useAlertStore((s) => s.setAll);
   const setZones = useZoneStore((s) => s.setZones);
+  const toastPush = useToastStore((s) => s.push);
 
   useEffect(() => {
-    // 초기 플랫폼 메타데이터 로드 — setAll 대신 upsert로 병합
-    fetch(`${API_URL}/platforms`)
-      .then((r) => r.json())
-      .then((data: PlatformState[]) => {
-        for (const p of data) upsert(p);
-      })
-      .catch(() => {});
+    const apiUrl = getCoreApiUrl();
+    const load = async <T,>(path: string, label: string): Promise<T | null> => {
+      try {
+        const response = await fetch(`${apiUrl}${path}`);
+        if (!response.ok) {
+          throw new Error(`${label} request failed: ${response.status}`);
+        }
+        return response.json() as Promise<T>;
+      } catch (error) {
+        console.error(`[initial-data] ${label} load failed`, error);
+        toastPush({
+          severity: "warning",
+          agentName: "시스템",
+          alertType: label,
+          message: `${label} 초기 데이터를 불러오지 못했습니다.`,
+          platformIds: [],
+        });
+        return null;
+      }
+    };
 
-    // 초기 경보 목록 로드
-    fetch(`${API_URL}/alerts?status=new&limit=50`)
-      .then((r) => r.json())
-      .then((data: Alert[]) => setAlerts(data))
-      .catch(() => {});
+    void load<PlatformState[]>("/platforms", "플랫폼").then((data) => {
+      if (!data) return;
+      for (const platform of data) upsert(platform);
+    });
 
-    // 구역 목록 로드 (활성+비활성 모두)
-    fetch(`${API_URL}/zones?active_only=false`)
-      .then((r) => r.json())
-      .then((data: Zone[]) => setZones(data))
-      .catch(() => {});
-  }, [upsert, setAlerts, setZones]);
+    void load<Alert[]>("/alerts?status=new&limit=50", "경보").then((data) => {
+      if (data) setAlerts(data);
+    });
+
+    void load<Zone[]>("/zones?active_only=false", "구역").then((data) => {
+      if (data) setZones(data);
+    });
+  }, [upsert, setAlerts, setZones, toastPush]);
 }

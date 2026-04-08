@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import ZoneMapPanel from "@/components/map/ZoneMapPanel";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useZoneStore, type Zone } from "@/stores/zoneStore";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7700";
 
 type ZoneType = "prohibited" | "restricted" | "caution";
 
@@ -43,7 +42,7 @@ export default function ZonesPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/zones?active_only=false`);
+      const res = await fetch(`${getCoreApiUrl()}/zones?active_only=false`);
       if (!res.ok) throw new Error(`zones load failed (${res.status})`);
       const data = (await res.json()) as Zone[];
       setZonesInStore(data);
@@ -64,7 +63,7 @@ export default function ZonesPage() {
     setError(null);
     try {
       const geometry = JSON.parse(geometryText);
-      const res = await fetch(`${API_URL}/zones`, {
+      const res = await fetch(`${getCoreApiUrl()}/zones`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, zone_type: zoneType, geometry, rules: {} }),
@@ -81,7 +80,7 @@ export default function ZonesPage() {
 
   async function deactivateZone(zoneId: string) {
     try {
-      const res = await fetch(`${API_URL}/zones/${zoneId}/deactivate`, { method: "PATCH" });
+      const res = await fetch(`${getCoreApiUrl()}/zones/${zoneId}/deactivate`, { method: "PATCH" });
       if (!res.ok) throw new Error(`zone deactivate failed (${res.status})`);
       await loadZones();
     } catch (e) {
