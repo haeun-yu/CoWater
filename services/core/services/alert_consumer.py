@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from db import AsyncSessionLocal
 from models import AlertModel
+from shared.events import alert_created_pattern, build_event
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 async def consume_alerts(redis: aioredis.Redis) -> None:
     pubsub = redis.pubsub()
-    await pubsub.psubscribe("alert.created.*")
-    logger.info("Alert consumer started — subscribed to alert.created.*")
+    pattern = alert_created_pattern()
+    await pubsub.psubscribe(pattern)
+    logger.info("Alert consumer started — subscribed to %s", pattern)
 
     async for message in pubsub.listen():
         if message["type"] != "pmessage":
@@ -119,6 +121,13 @@ async def _handle_alert(data: dict) -> None:
             await session.refresh(updated_alert)
             ws_payload = _to_ws_dict(updated_alert)
             ws_payload["type"] = "alert_updated"
+            ws_payload["event"] = build_event(
+                "alert_updated",
+                "core",
+                produced_at=updated_alert.created_at.isoformat()
+                if updated_alert.created_at
+                else None,
+            )
             await hub.broadcast("alerts", ws_payload)
             logger.info(
                 "Alert updated: id=%s key=%s", updated_alert.alert_id, dedup_key
@@ -127,6 +136,13 @@ async def _handle_alert(data: dict) -> None:
             await session.refresh(new_alert)
             ws_payload = _to_ws_dict(new_alert)
             ws_payload["type"] = "alert_created"
+            ws_payload["event"] = build_event(
+                "alert_created",
+                "core",
+                produced_at=new_alert.created_at.isoformat()
+                if new_alert.created_at
+                else None,
+            )
             await hub.broadcast("alerts", ws_payload)
             logger.info("Alert created: id=%s key=%s", data["alert_id"], dedup_key)
 

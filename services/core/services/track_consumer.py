@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db import AsyncSessionLocal
 from models import PlatformModel, PlatformReportModel
+from shared.events import build_event, platform_report_pattern
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
@@ -35,8 +36,9 @@ def clear_platform_cache(platform_id: str | None = None) -> None:
 async def consume_platform_reports(redis: aioredis.Redis) -> None:
     """platform.report.* 채널을 구독하여 처리."""
     pubsub = redis.pubsub()
-    await pubsub.psubscribe("platform.report.*")
-    logger.info("Track consumer started — subscribed to platform.report.*")
+    pattern = platform_report_pattern()
+    await pubsub.psubscribe(pattern)
+    logger.info("Track consumer started — subscribed to %s", pattern)
 
     async for message in pubsub.listen():
         if message["type"] != "pmessage":
@@ -115,11 +117,18 @@ async def _handle_report(data: dict) -> None:
         "platforms",
         {
             "type": "position_update",
+            "event": build_event(
+                "position_update",
+                "core",
+                produced_at=data.get("timestamp"),
+            ),
             "platform_id": platform_id,
             "platform_type": platform_type,
             "name": platform_name,
             "timestamp": data["timestamp"],
             "schema_version": schema_version,
+            "source": data.get("source", "moth-bridge"),
+            "source_protocol": source_protocol,
             "lat": data["lat"],
             "lon": data["lon"],
             "sog": data.get("sog"),

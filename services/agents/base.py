@@ -21,6 +21,8 @@ from typing import Literal
 
 import redis.asyncio as aioredis
 
+from shared.events import alert_created_channel, build_event
+
 # shared 패키지에서 canonical PlatformReport 임포트
 from shared.schemas.report import PlatformReport  # noqa: F401 (re-exported for sub-modules)
 
@@ -103,8 +105,15 @@ class Agent(ABC):
 
     async def emit_alert(self, payload: AlertPayload) -> None:
         payload.generated_by = self.agent_id
-        channel = f"alert.created.{payload.severity}"
-        body = json.dumps(payload.to_dict())
+        channel = alert_created_channel(payload.severity)
+        body_dict = payload.to_dict()
+        body_dict["event"] = build_event(
+            "alert_created",
+            "agents",
+            channel=channel,
+            produced_at=payload.created_at,
+        )
+        body = json.dumps(body_dict)
         last_error: Exception | None = None
 
         for attempt in range(1, 4):

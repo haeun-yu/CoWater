@@ -34,6 +34,7 @@ from registry import AgentRegistry
 from rule.anomaly_rule import AnomalyRuleAgent
 from rule.cpa_agent import CPAAgent
 from rule.zone_monitor import ZoneMonitorAgent
+from shared.events import alert_created_pattern, platform_report_pattern
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -86,8 +87,9 @@ def _track_task(coro, *, name: str) -> asyncio.Task:
 
 async def _consume_platform_reports(redis: aioredis.Redis) -> None:
     pubsub = redis.pubsub()
-    await pubsub.psubscribe("platform.report.*")
-    logger.info("Agent Runtime: subscribed to platform.report.*")
+    pattern = platform_report_pattern()
+    await pubsub.psubscribe(pattern)
+    logger.info("Agent Runtime: subscribed to %s", pattern)
 
     async for msg in pubsub.listen():
         if msg["type"] != "pmessage":
@@ -139,8 +141,9 @@ async def _safe_ai_dispatch(agent: Agent, report: PlatformReport) -> None:
 
 async def _consume_alerts(redis: aioredis.Redis) -> None:
     pubsub = redis.pubsub()
-    await pubsub.psubscribe("alert.created.*")
-    logger.info("Agent Runtime: subscribed to alert.created.*")
+    pattern = alert_created_pattern()
+    await pubsub.psubscribe(pattern)
+    logger.info("Agent Runtime: subscribed to %s", pattern)
 
     async for msg in pubsub.listen():
         if msg["type"] != "pmessage":
