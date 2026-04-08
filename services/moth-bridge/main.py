@@ -15,8 +15,15 @@ import yaml
 from adapters import ADAPTER_REGISTRY, ParsedReport
 from config import settings
 from moth_client import ChannelConfig, MothChannelClient
+from shared.events import build_event, platform_report_channel
 from ws_relay import app as relay_app
-from ws_relay import broadcast
+from ws_relay import (
+    attach_redis,
+    broadcast,
+    set_expected_channels,
+    track_publish_result,
+    track_report_activity,
+)
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -105,11 +112,12 @@ def load_channels(path: str) -> list[ChannelConfig]:
 
 async def run_moth(redis: aioredis.Redis) -> None:
     channels = load_channels(settings.channels_config)
+    set_expected_channels(len(channels))
     logger.info("Loaded %d channel(s)", len(channels))
 
     async def publish_report(report: ParsedReport) -> None:
         # 1) Redis pub/sub — agents, core 소비용
-        channel_key = f"platform.report.{report.platform_id}"
+        channel_key = platform_report_channel(report.platform_id)
         (
             raw_payload_b64,
             raw_payload_cache_key,
@@ -118,17 +126,29 @@ async def run_moth(redis: aioredis.Redis) -> None:
             redis,
             report,
         )
-        payload = json.dumps(
-            report.to_redis_payload(
-                raw_payload_b64=raw_payload_b64,
-                raw_payload_cache_key=raw_payload_cache_key,
-                raw_payload_truncated=raw_payload_truncated,
+        payload_dict = report.to_redis_payload(
+            raw_payload_b64=raw_payload_b64,
+            raw_payload_cache_key=raw_payload_cache_key,
+            raw_payload_truncated=raw_payload_truncated,
+        )
+        payload_dict["source"] = "moth-bridge"
+        payload_dict["event"] = build_event(
+            "platform_report",
+            "moth-bridge",
+            channel=channel_key,
+            produced_at=report.timestamp.isoformat(),
+        )
+        payload = json.dumps(payload_dict)
+        track_report_activity(report)
+        try:
+            await _redis_write_with_retry(
+                lambda: redis.publish(channel_key, payload),
+                label=f"publish:{report.platform_id}",
             )
-        )
-        await _redis_write_with_retry(
-            lambda: redis.publish(channel_key, payload),
-            label=f"publish:{report.platform_id}",
-        )
+            track_publish_result(True)
+        except Exception:
+            track_publish_result(False)
+            raise
 
         # 최신 상태 캐시 (TTL 60s)
         cache_key = f"platform:state:{report.platform_id}"
@@ -173,6 +193,7 @@ async def run_relay() -> None:
 
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    attach_redis(redis)
     try:
         await asyncio.gather(
             run_moth(redis),
