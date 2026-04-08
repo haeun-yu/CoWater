@@ -97,12 +97,15 @@ services:
     restart: unless-stopped
     profiles:
       - ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+      OLLAMA_NUM_GPU: "99"          # 모든 레이어 GPU 오프로드 (MPS/CUDA 공통)
+      OLLAMA_FLASH_ATTENTION: "1"   # 메모리 효율 개선 → 속도 향상
     volumes:
       - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
-    # Apple Silicon / NVIDIA GPU 자동 감지
-    # Mac M-series: Metal 백엔드 자동 사용 (별도 설정 불필요)
+    # Apple Silicon: MPS (Metal) 백엔드 자동 사용
     # NVIDIA GPU 사용 시 아래 주석 해제:
     # deploy:
     #   resources:
@@ -131,6 +134,7 @@ services:
         ollama serve &
         sleep 5 &&
         ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
+        ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b} &&
         kill %1
       "
     environment:
@@ -205,6 +209,7 @@ services:
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
