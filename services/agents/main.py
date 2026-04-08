@@ -118,6 +118,9 @@ async def _dispatch_report(report: PlatformReport) -> None:
     Rule Agent: 순차 await (빠름, 이벤트 루프 차단 없음)
     AI Agent:   백그라운드 태스크로 실행 (Claude API 호출이 다음 보고 처리를 블로킹하지 않음)
     """
+    if settings.ignore_simulator_reports and report.is_simulator:
+        return
+
     rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
     ai_agents = [a for a in _registry.enabled() if a.agent_type == "ai"]
 

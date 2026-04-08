@@ -105,6 +105,7 @@ def load_channels(path: str) -> list[ChannelConfig]:
                 moth_source=ch.get("moth_source", "base"),
                 adapter=adapter_cls(),
                 platform_type=ch.get("platform_type", "vessel"),
+                is_simulator=ch.get("is_simulator", False),
             )
         )
     return channels
@@ -115,64 +116,69 @@ async def run_moth(redis: aioredis.Redis) -> None:
     set_expected_channels(len(channels))
     logger.info("Loaded %d channel(s)", len(channels))
 
-    async def publish_report(report: ParsedReport) -> None:
-        # 1) Redis pub/sub — agents, core 소비용
-        channel_key = platform_report_channel(report.platform_id)
-        (
-            raw_payload_b64,
-            raw_payload_cache_key,
-            raw_payload_truncated,
-        ) = await _raw_payload_fields(
-            redis,
-            report,
-        )
-        payload_dict = report.to_redis_payload(
-            raw_payload_b64=raw_payload_b64,
-            raw_payload_cache_key=raw_payload_cache_key,
-            raw_payload_truncated=raw_payload_truncated,
-        )
-        payload_dict["source"] = "moth-bridge"
-        payload_dict["event"] = build_event(
-            "platform_report",
-            "moth-bridge",
-            channel=channel_key,
-            produced_at=report.timestamp.isoformat(),
-        )
-        payload = json.dumps(payload_dict)
-        track_report_activity(report)
-        try:
-            await _redis_write_with_retry(
-                lambda: redis.publish(channel_key, payload),
-                label=f"publish:{report.platform_id}",
+    def make_publish_callback(is_simulator: bool):
+        async def publish_report(report: ParsedReport) -> None:
+            # 1) Redis pub/sub — agents, core 소비용
+            channel_key = platform_report_channel(report.platform_id)
+            (
+                raw_payload_b64,
+                raw_payload_cache_key,
+                raw_payload_truncated,
+            ) = await _raw_payload_fields(
+                redis,
+                report,
             )
-            track_publish_result(True)
-        except Exception:
-            track_publish_result(False)
-            logger.exception(
-                "Failed to publish report to Redis: %s", report.platform_id
+            payload_dict = report.to_redis_payload(
+                raw_payload_b64=raw_payload_b64,
+                raw_payload_cache_key=raw_payload_cache_key,
+                raw_payload_truncated=raw_payload_truncated,
             )
-        else:
-            # 최신 상태 캐시 (TTL 60s)
-            cache_key = f"platform:state:{report.platform_id}"
-            await _redis_write_with_retry(
-                lambda: redis.set(cache_key, payload, ex=60),
-                label=f"platform-state:{report.platform_id}",
+            payload_dict["source"] = "moth-bridge"
+            if is_simulator:
+                payload_dict["is_simulator"] = True
+            payload_dict["event"] = build_event(
+                "platform_report",
+                "moth-bridge",
+                channel=channel_key,
+                produced_at=report.timestamp.isoformat(),
             )
+            payload = json.dumps(payload_dict)
+            track_report_activity(report)
+            try:
+                await _redis_write_with_retry(
+                    lambda: redis.publish(channel_key, payload),
+                    label=f"publish:{report.platform_id}",
+                )
+                track_publish_result(True)
+            except Exception:
+                track_publish_result(False)
+                logger.exception(
+                    "Failed to publish report to Redis: %s", report.platform_id
+                )
+            else:
+                # 최신 상태 캐시 (TTL 60s)
+                cache_key = f"platform:state:{report.platform_id}"
+                await _redis_write_with_retry(
+                    lambda: redis.set(cache_key, payload, ex=60),
+                    label=f"platform-state:{report.platform_id}",
+                )
 
-        # 2) WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)
-        await broadcast(report)
+            # 2) WebSocket relay — 프론트엔드 직접 전송 (지연 최소화)
+            await broadcast(report)
 
-        logger.debug(
-            "Published: platform=%s lat=%.4f lon=%.4f sog=%s",
-            report.platform_id,
-            report.position.lat,
-            report.position.lon,
-            report.sog,
-        )
+            logger.debug(
+                "Published: platform=%s lat=%.4f lon=%.4f sog=%s is_simulator=%s",
+                report.platform_id,
+                report.position.lat,
+                report.position.lon,
+                report.sog,
+                is_simulator,
+            )
+        return publish_report
 
     tasks = [
         asyncio.create_task(
-            MothChannelClient(ch, publish_report).run(),
+            MothChannelClient(ch, make_publish_callback(ch.is_simulator)).run(),
             name=f"moth-{ch.name}",
         )
         for ch in channels

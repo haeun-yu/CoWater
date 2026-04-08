@@ -103,6 +103,7 @@ class PlatformReport:
             platform_type=d.get("platform_type"),
             name=d.get("name"),
             source_protocol=d.get("source_protocol", "custom"),
+            is_simulator=d.get("is_simulator", False),
             raw_payload_b64=d.get("raw_payload_b64"),
             raw_payload_cache_key=d.get("raw_payload_cache_key"),
             raw_payload_truncated=d.get("raw_payload_truncated", False),

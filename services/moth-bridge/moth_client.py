@@ -33,6 +33,7 @@ class ChannelConfig:
     moth_source: str
     adapter: ProtocolAdapter
     platform_type: str
+    is_simulator: bool = False  # True이면 시뮬레이터 채널 — 보고에 is_simulator=True 태깅
 
 
 class MothChannelClient:

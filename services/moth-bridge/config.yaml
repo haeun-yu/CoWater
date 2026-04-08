@@ -10,6 +10,17 @@ channels:
     adapter: NMEAAdapter
     platform_type: vessel
 
+  # 시뮬레이터 채널 예시 — is_simulator: true 설정 시 에이전트 경보 생성 차단 가능
+  # (agents .env: IGNORE_SIMULATOR_REPORTS=true 와 함께 사용)
+  # - name: "ais-sim"
+  #   moth_channel_type: instant
+  #   moth_channel_name: "cowater-sim"
+  #   moth_track: "data"
+  #   moth_source: "base"
+  #   adapter: NMEAAdapter
+  #   platform_type: vessel
+  #   is_simulator: true
+
   # USV / MAVLink 채널 (추후 활성화)
   # - name: "usv-alpha"
   #   moth_channel_type: static

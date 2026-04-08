@@ -75,5 +75,8 @@ class Settings(BaseSettings):
     ais_check_interval_sec: int = 20  # AIS 타임아웃 체크 주기 (초)
     zone_reload_interval_sec: int = 300  # Zone 재로드 주기 (초)
 
+    # 시뮬레이터 격리 — True이면 is_simulator=True 보고를 에이전트에 전달하지 않음
+    ignore_simulator_reports: bool = False
+
 
 settings = Settings()
