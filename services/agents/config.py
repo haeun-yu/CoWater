@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     distress_agent_max_tokens: int = 600
     report_alert_max_tokens: int = 1024
     report_incident_max_tokens: int = 2048
-    chat_agent_max_tokens: int = 512   # 챗봇 응답 최대 토큰 (Ollama 기준 ~11초)
+    chat_agent_max_tokens: int = 1024  # 챗봇 응답 최대 토큰
 
     # ── LLM 타임아웃 / 재시도 ────────────────────────────────────────────────
     # Claude API

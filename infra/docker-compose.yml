@@ -134,7 +134,7 @@ services:
         ollama serve &
         sleep 5 &&
         ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
-        ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b} &&
+        ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:3b} &&
         kill %1
       "
     environment:
@@ -209,7 +209,7 @@ services:
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:3b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
