@@ -17,6 +17,7 @@ services:
       - ./postgres/01_extensions.sql:/docker-entrypoint-initdb.d/01_extensions.sql
       - ./postgres/02_schema.sql:/docker-entrypoint-initdb.d/02_schema.sql
       - ./postgres/03_seed.sql:/docker-entrypoint-initdb.d/03_seed.sql
+      - ./postgres/04_migration_dedup.sql:/docker-entrypoint-initdb.d/04_migration_dedup.sql
     ports:
       - "5432:5432"
     healthcheck:
