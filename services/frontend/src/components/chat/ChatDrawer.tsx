@@ -35,6 +35,15 @@ interface SpeechRecognitionConstructor {
   new (): SpeechRecognitionLike;
 }
 
+interface ParsedCommandPreview {
+  intent: string;
+  summary: string;
+  required_role: string;
+  target_type: string;
+  target_id: string;
+  arguments: Record<string, unknown>;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -42,11 +51,14 @@ interface Message {
   model?: string;
   timestamp: Date;
   error?: boolean;
+  // 명령어 미리보기 전용 필드
+  commandPreview?: ParsedCommandPreview;
+  commandOriginalText?: string;
+  commandSource?: "text" | "voice";
+  commandStatus?: "pending" | "confirmed" | "cancelled" | "executed" | "failed";
+  commandResult?: string;
 }
 
-type ComposerMode = "chat" | "command";
-
-// 상황 요약 빠른 질문 템플릿
 const QUICK_PROMPTS = [
   "현재 상황을 요약해줘",
   "가장 위험한 경보를 설명해줘",
@@ -58,11 +70,11 @@ export default function ChatDrawer() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [isLoading, setIsLoading] = useState(false);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
-  const [mode, setMode] = useState<ComposerMode>("chat");
   const [commandToken, setCommandToken] = useState("");
+  const [showTokenInput, setShowTokenInput] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
@@ -79,9 +91,8 @@ export default function ChatDrawer() {
   const platformCount = Object.keys(platforms).length;
   const selectedPlatform = selectedId ? platforms[selectedId] : null;
 
-  // 현재 LLM 모델 조회
   useEffect(() => {
-      fetch(`${getAgentsApiUrl()}/agents/chat-agent`)
+    fetch(`${getAgentsApiUrl()}/agents/chat-agent`)
       .then((r) => r.json())
       .then((d) => { if (d.model_name) setCurrentModel(d.model_name); })
       .catch(() => {});
@@ -93,17 +104,14 @@ export default function ChatDrawer() {
     setVoiceSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
   }, []);
 
-  // 드로어 열릴 때 입력창 포커스
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
 
-  // 새 메시지 시 스크롤
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  // Escape 키로 닫기
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -112,7 +120,7 @@ export default function ChatDrawer() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  async function sendMessage(text: string) {
+  async function sendUnified(text: string, source: "text" | "voice" = "text") {
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
 
@@ -125,9 +133,9 @@ export default function ChatDrawer() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setInputSource("text");
     setIsLoading(true);
 
-    // 어시스턴트 메시지 플레이스홀더 먼저 추가 (스트리밍 중 내용 채워짐)
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
@@ -140,13 +148,15 @@ export default function ChatDrawer() {
         content: m.content,
       }));
 
-      const res = await fetch(`${getAgentsApiUrl()}/chat/stream`, {
+      const res = await fetch(`${getAgentsApiUrl()}/chat/unified`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: trimmed,
           history,
           focus_platform_ids: selectedId ? [selectedId] : null,
+          source,
+          context: selectedId ? { selected_platform_id: selectedId } : null,
         }),
       });
 
@@ -165,7 +175,23 @@ export default function ChatDrawer() {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.chunk) {
+            if (data.type === "command_preview") {
+              // 명령어 인식 — 확인 대기 카드로 교체
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        content: "",
+                        commandPreview: data.parsed as ParsedCommandPreview,
+                        commandOriginalText: trimmed,
+                        commandSource: source,
+                        commandStatus: "pending",
+                      }
+                    : m,
+                ),
+              );
+            } else if (data.type === "chunk" && data.chunk) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
@@ -173,8 +199,7 @@ export default function ChatDrawer() {
                     : m,
                 ),
               );
-            }
-            if (data.done) {
+            } else if (data.type === "done") {
               model = data.model;
             }
           } catch {
@@ -183,14 +208,13 @@ export default function ChatDrawer() {
         }
       }
 
-      // 모델명 업데이트
       if (model) {
         setCurrentModel(model);
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, model } : m)),
         );
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -208,32 +232,31 @@ export default function ChatDrawer() {
     }
   }
 
-  async function sendCommand(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || isLoading) return;
+  async function executeConfirmedCommand(msgId: string) {
+    const msg = messages.find((m) => m.id === msgId);
+    if (!msg?.commandPreview || !msg.commandOriginalText) return;
 
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: trimmed,
-      timestamp: new Date(),
-    };
+    if (!commandToken.trim()) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                commandStatus: "failed",
+                commandResult: "명령 토큰이 필요합니다. 오른쪽 하단 ⚙ 아이콘으로 토큰을 설정하세요.",
+              }
+            : m,
+        ),
+      );
+      setShowTokenInput(true);
+      return;
+    }
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setIsLoading(true);
-
-    const assistantId = crypto.randomUUID();
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
-    ]);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, commandStatus: "confirmed" } : m)),
+    );
 
     try {
-      if (!commandToken.trim()) {
-        throw new Error("명령 토큰이 필요합니다. operator-dev 또는 admin-dev 토큰을 입력하세요.");
-      }
-
       const res = await fetch(`${getCoreApiUrl()}/commands`, {
         method: "POST",
         headers: {
@@ -241,8 +264,8 @@ export default function ChatDrawer() {
           Authorization: `Bearer ${commandToken.trim()}`,
         },
         body: JSON.stringify({
-          text: trimmed,
-          source: inputSource,
+          text: msg.commandOriginalText,
+          source: msg.commandSource ?? "text",
           context: selectedId ? { selected_platform_id: selectedId } : null,
         }),
       });
@@ -254,40 +277,41 @@ export default function ChatDrawer() {
       }
 
       const command = payload as CommandResponse;
-      const parts = [
-        "명령 실행 완료",
-        `- 요약: ${command.parsed.summary}`,
-        `- 실행 주체: ${command.actor}`,
-      ];
-
+      const parts = [`명령 실행 완료`, `요약: ${command.parsed.summary}`, `주체: ${command.actor}`];
       if (command.result?.kind === "alert") {
-        const alert = command.result.alert as { status?: string; message?: string } | undefined;
-        if (alert?.status) parts.push(`- 경보 상태: ${alert.status}`);
-        if (alert?.message) parts.push(`- 경보 메시지: ${alert.message}`);
+        const alert = command.result.alert as { status?: string } | undefined;
+        if (alert?.status) parts.push(`경보 상태: ${alert.status}`);
       } else if (command.result?.kind === "agent") {
-        const response = command.result.response as Record<string, unknown> | undefined;
-        if (response?.agent_id) parts.push(`- 대상 에이전트: ${String(response.agent_id)}`);
-        if (response?.level) parts.push(`- 레벨: ${String(response.level)}`);
-        if (response?.enabled !== undefined) parts.push(`- 활성화: ${String(response.enabled)}`);
+        const r = command.result.response as Record<string, unknown> | undefined;
+        if (r?.enabled !== undefined) parts.push(`활성화: ${String(r.enabled)}`);
+        if (r?.level) parts.push(`레벨: ${String(r.level)}`);
       }
 
       setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? { ...m, content: parts.join("\n") } : m)),
+        prev.map((m) =>
+          m.id === msgId
+            ? { ...m, commandStatus: "executed", commandResult: parts.join(" · ") }
+            : m,
+        ),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "명령 실행 중 오류가 발생했습니다.";
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: message, error: true }
+          m.id === msgId
+            ? { ...m, commandStatus: "failed", commandResult: message }
             : m,
         ),
       );
-    } finally {
-      setIsLoading(false);
-      setInputSource("text");
-      setTimeout(() => inputRef.current?.focus(), 50);
     }
+  }
+
+  function cancelCommand(msgId: string) {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, commandStatus: "cancelled" } : m,
+      ),
+    );
   }
 
   function startVoiceCapture() {
@@ -332,10 +356,7 @@ export default function ChatDrawer() {
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      startTransition(() => {
-        if (mode === "command") sendCommand(input);
-        else sendMessage(input);
-      });
+      startTransition(() => sendUnified(input, inputSource));
     }
   }
 
@@ -349,7 +370,7 @@ export default function ChatDrawer() {
             ? "bg-ocean-700 text-white"
             : "bg-ocean-600 hover:bg-ocean-500 text-white"
         } ${criticalCount > 0 && !open ? "ring-2 ring-red-500 ring-offset-2 ring-offset-slate-950" : ""}`}
-        title={open ? "챗봇 닫기" : "AI 보좌관 열기"}
+        title={open ? "보좌관 닫기" : "AI 보좌관 열기"}
       >
         {open ? (
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -360,7 +381,6 @@ export default function ChatDrawer() {
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
           </svg>
         )}
-        {/* 긴급 경보 배지 */}
         {criticalCount > 0 && !open && (
           <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
             {criticalCount}
@@ -384,7 +404,7 @@ export default function ChatDrawer() {
               </span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[11px] text-slate-500">현재 상황 기반 실시간 해양 운항 지원</span>
+              <span className="text-[11px] text-slate-500">대화·명령 통합 입력</span>
               {currentModel && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 font-mono">
                   {currentModel}
@@ -393,28 +413,17 @@ export default function ChatDrawer() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-1">
-              <button
-                onClick={() => setMode("chat")}
-                className={`px-2 py-1 rounded text-[10px] transition-colors ${
-                  mode === "chat"
-                    ? "bg-ocean-700 text-white"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                대화
-              </button>
-              <button
-                onClick={() => setMode("command")}
-                className={`px-2 py-1 rounded text-[10px] transition-colors ${
-                  mode === "command"
-                    ? "bg-amber-600 text-slate-950 font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                명령
-              </button>
-            </div>
+            <button
+              onClick={() => setShowTokenInput((v) => !v)}
+              title="명령 토큰 설정"
+              className={`text-xs px-2 py-1 rounded border transition-colors ${
+                commandToken
+                  ? "border-amber-700/50 text-amber-400 hover:border-amber-500"
+                  : "border-slate-700 text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              ⚙
+            </button>
             {messages.length > 0 && (
               <button
                 onClick={() => setMessages([])}
@@ -426,8 +435,24 @@ export default function ChatDrawer() {
           </div>
         </div>
 
+        {/* 토큰 설정 (접힘/펼침) */}
+        {showTokenInput && (
+          <div className="px-4 py-2.5 border-b border-slate-800 bg-amber-950/10 flex-shrink-0">
+            <p className="text-[10px] text-amber-400 mb-1.5 font-semibold">명령 실행 토큰</p>
+            <input
+              value={commandToken}
+              onChange={(e) => updateCommandToken(e.target.value)}
+              placeholder="예: operator-dev 또는 admin-dev"
+              className="w-full rounded border border-amber-800/40 bg-slate-950 px-3 py-1.5 text-[11px] text-amber-100 placeholder:text-amber-700/60 focus:outline-none focus:border-amber-500"
+            />
+            <p className="text-[10px] text-slate-600 mt-1">
+              개발용: viewer-dev / operator-dev / admin-dev
+            </p>
+          </div>
+        )}
+
         {/* 상황 요약 바 */}
-        <div className="px-4 py-2.5 border-b border-slate-800/60 flex items-center gap-3 text-[11px] flex-shrink-0 bg-slate-900/40">
+        <div className="px-4 py-2 border-b border-slate-800/60 flex items-center gap-3 text-[11px] flex-shrink-0 bg-slate-900/40">
           <div className="flex items-center gap-1.5 text-slate-400">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
             <span className="font-mono text-white">{platformCount}</span>척
@@ -464,7 +489,6 @@ export default function ChatDrawer() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 && (
             <div className="space-y-4">
-              {/* 인트로 메시지 */}
               <div className="flex gap-2.5">
                 <div className="w-7 h-7 rounded-full bg-ocean-700 flex items-center justify-center flex-shrink-0 text-sm">
                   ⬡
@@ -472,19 +496,17 @@ export default function ChatDrawer() {
                 <div className="bg-slate-900 border border-slate-800 rounded-lg rounded-tl-none px-3.5 py-2.5 max-w-[290px]">
                   <p className="text-sm text-slate-200 leading-relaxed">
                     안녕하세요. 현재 해양 상황을 실시간으로 파악하고 있습니다.
-                    상황 요약이나 대처 방법에 대해 무엇이든 물어보세요.
+                    질문이나 명령을 자유롭게 입력하세요. 명령어가 감지되면 확인 후 실행됩니다.
                   </p>
                   <span className="text-[10px] text-slate-600 mt-1 block">AI 보좌관</span>
                 </div>
               </div>
-
-              {/* 빠른 질문 */}
               <div className="pl-9 space-y-1.5">
                 <p className="text-[11px] text-slate-500 mb-2">빠른 질문</p>
                 {QUICK_PROMPTS.map((q) => (
                   <button
                     key={q}
-                    onClick={() => sendMessage(q)}
+                    onClick={() => sendUnified(q)}
                     className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-slate-800 hover:border-ocean-700 text-slate-400 hover:text-ocean-300 hover:bg-ocean-900/30 transition-colors"
                   >
                     {q}
@@ -494,33 +516,15 @@ export default function ChatDrawer() {
             </div>
           )}
 
-          {mode === "command" && (
-            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-3 text-[11px] text-amber-200 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold tracking-wide uppercase text-[10px] text-amber-300">
-                  Command Mode
-                </span>
-                <span className="text-[10px] text-amber-400/80">
-                  voice → intent → 권한 → 실행 → audit
-                </span>
-              </div>
-              <input
-                value={commandToken}
-                onChange={(e) => updateCommandToken(e.target.value)}
-                placeholder="Bearer token 없이 토큰만 입력 (예: operator-dev)"
-                className="w-full rounded-lg border border-amber-800/40 bg-slate-950 px-3 py-2 text-[11px] text-amber-100 placeholder:text-amber-700/70 focus:outline-none focus:border-amber-500"
-              />
-              <p className="text-[10px] text-amber-400/80 leading-relaxed">
-                개발 기본 토큰: viewer-dev / operator-dev / admin-dev. 음성 입력은 전사본을 먼저 검토한 뒤 전송합니다.
-              </p>
-            </div>
-          )}
-
           {messages.map((msg) => (
-            <ChatMessage key={msg.id} msg={msg} />
+            <ChatMessage
+              key={msg.id}
+              msg={msg}
+              onConfirm={() => executeConfirmedCommand(msg.id)}
+              onCancel={() => cancelCommand(msg.id)}
+            />
           ))}
 
-          {/* 타이핑 인디케이터 */}
           {isLoading && (
             <div className="flex gap-2.5">
               <div className="w-7 h-7 rounded-full bg-ocean-700 flex items-center justify-center flex-shrink-0 text-sm">
@@ -545,10 +549,10 @@ export default function ChatDrawer() {
               컨텍스트: {selectedPlatform.name ?? selectedId} 선박 정보 포함
             </div>
           )}
-          {mode === "command" && (
-            <div className="mb-2 text-[10px] text-amber-400 flex items-center justify-between gap-2">
-              <span>예: cpa 켜줘 · agent level cpa L2 · alert resolve &lt;uuid&gt;</span>
-              {inputSource === "voice" && <span className="text-amber-300">음성 전사 입력</span>}
+          {inputSource === "voice" && (
+            <div className="mb-1.5 text-[10px] text-amber-400 flex items-center gap-1">
+              <span>🎤</span>
+              <span>음성 전사 입력 — 검토 후 전송하세요</span>
             </div>
           )}
           <div className="flex gap-2 items-end">
@@ -560,25 +564,21 @@ export default function ChatDrawer() {
                 setInputSource("text");
               }}
               onKeyDown={handleKeyDown}
-              placeholder={
-                mode === "command"
-                  ? "음성/텍스트 명령 입력... (예: cpa 켜줘)"
-                  : "상황 요약, 대처 방법, 질문... (Enter로 전송)"
-              }
+              placeholder="질문 또는 명령 입력... 명령어는 자동 감지 후 확인됩니다"
               rows={2}
               disabled={isLoading}
               className="flex-1 resize-none rounded-lg border border-slate-700 bg-slate-900 text-sm text-slate-200 placeholder-slate-600 px-3 py-2.5 focus:outline-none focus:border-ocean-600 disabled:opacity-50 leading-relaxed"
             />
-            {mode === "command" && voiceSupported && (
+            {voiceSupported && (
               <button
                 onClick={startVoiceCapture}
                 disabled={isLoading || isListening}
                 className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0 ${
                   isListening
-                    ? "border-red-500 bg-red-950 text-red-300"
-                    : "border-amber-700 bg-amber-950/40 text-amber-300 hover:bg-amber-900/40"
+                    ? "border-red-500 bg-red-950 text-red-300 animate-pulse"
+                    : "border-slate-700 bg-slate-900 text-slate-400 hover:text-ocean-300 hover:border-ocean-700"
                 } disabled:opacity-50`}
-                title={isListening ? "음성 인식 중" : "음성 명령 입력"}
+                title={isListening ? "음성 인식 중..." : "음성 입력"}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 3a3 3 0 013 3v6a3 3 0 11-6 0V6a3 3 0 013-3z" />
@@ -587,16 +587,9 @@ export default function ChatDrawer() {
               </button>
             )}
             <button
-              onClick={() => startTransition(() => {
-                if (mode === "command") sendCommand(input);
-                else sendMessage(input);
-              })}
+              onClick={() => startTransition(() => sendUnified(input, inputSource))}
               disabled={isLoading || !input.trim()}
-              className={`w-10 h-10 rounded-lg disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors flex-shrink-0 ${
-                mode === "command"
-                  ? "bg-amber-600 hover:bg-amber-500 text-slate-950"
-                  : "bg-ocean-600 hover:bg-ocean-500"
-              }`}
+              className="w-10 h-10 rounded-lg bg-ocean-600 hover:bg-ocean-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors flex-shrink-0"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
@@ -604,17 +597,13 @@ export default function ChatDrawer() {
             </button>
           </div>
           <p className="mt-1.5 text-[10px] text-slate-600">
-            Shift+Enter 줄바꿈 · Enter 전송{mode === "command" ? " · 명령은 audit_logs에 기록됩니다" : ""}
+            Shift+Enter 줄바꿈 · Enter 전송 · 명령어 감지 시 확인 후 실행
           </p>
         </div>
       </div>
 
-      {/* 드로어 열릴 때 배경 오버레이 (선택) */}
       {open && (
-        <div
-          className="fixed inset-0 z-30"
-          onClick={() => setOpen(false)}
-        />
+        <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
       )}
     </>
   );
@@ -622,7 +611,15 @@ export default function ChatDrawer() {
 
 // ── 개별 메시지 컴포넌트 ──────────────────────────────────────────────────────
 
-function ChatMessage({ msg }: { msg: Message }) {
+function ChatMessage({
+  msg,
+  onConfirm,
+  onCancel,
+}: {
+  msg: Message;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   const isUser = msg.role === "user";
 
   if (isUser) {
@@ -641,6 +638,88 @@ function ChatMessage({ msg }: { msg: Message }) {
     );
   }
 
+  // 명령어 미리보기 카드
+  if (msg.commandPreview) {
+    const status = msg.commandStatus;
+    const preview = msg.commandPreview;
+
+    const roleColor =
+      preview.required_role === "admin"
+        ? "text-red-300"
+        : preview.required_role === "operator"
+          ? "text-amber-300"
+          : "text-slate-300";
+
+    return (
+      <div className="flex gap-2.5">
+        <div className="w-7 h-7 rounded-full bg-amber-700 flex items-center justify-center flex-shrink-0 text-sm">
+          ⌘
+        </div>
+        <div className="rounded-lg rounded-tl-none border border-amber-800/50 bg-amber-950/20 px-3.5 py-2.5 max-w-[290px] w-full">
+          <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wide mb-2">
+            명령어 감지됨
+          </p>
+          <p className="text-sm text-slate-200 leading-snug mb-1">{preview.summary}</p>
+          <div className="flex items-center gap-2 text-[10px] mt-1.5 mb-3">
+            <span className="text-slate-500">intent:</span>
+            <span className="font-mono text-slate-400">{preview.intent}</span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">권한:</span>
+            <span className={`font-semibold ${roleColor}`}>{preview.required_role}</span>
+          </div>
+
+          {status === "pending" && (
+            <div className="flex gap-2">
+              <button
+                onClick={onConfirm}
+                className="flex-1 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-semibold transition-colors"
+              >
+                실행
+              </button>
+              <button
+                onClick={onCancel}
+                className="flex-1 py-1.5 rounded border border-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+              >
+                취소
+              </button>
+            </div>
+          )}
+
+          {status === "confirmed" && (
+            <p className="text-[11px] text-amber-400 animate-pulse">실행 중...</p>
+          )}
+
+          {status === "executed" && (
+            <div>
+              <span className="text-[10px] text-green-400 font-semibold">✓ 완료</span>
+              {msg.commandResult && (
+                <p className="text-[11px] text-slate-400 mt-0.5">{msg.commandResult}</p>
+              )}
+            </div>
+          )}
+
+          {status === "failed" && (
+            <div>
+              <span className="text-[10px] text-red-400 font-semibold">✗ 실패</span>
+              {msg.commandResult && (
+                <p className="text-[11px] text-red-300/80 mt-0.5">{msg.commandResult}</p>
+              )}
+            </div>
+          )}
+
+          {status === "cancelled" && (
+            <p className="text-[10px] text-slate-600">취소됨</p>
+          )}
+
+          <span className="text-[10px] text-slate-600 mt-2 block">
+            {formatTime(msg.timestamp)}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 일반 AI 응답
   return (
     <div className="flex gap-2.5">
       <div className="w-7 h-7 rounded-full bg-ocean-700 flex items-center justify-center flex-shrink-0 text-sm">

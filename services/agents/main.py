@@ -586,6 +586,70 @@ class ChatRequest(BaseModel):
     focus_platform_ids: list[str] | None = None  # 현재 주목 중인 선박 ID 목록
 
 
+class UnifiedRequest(BaseModel):
+    message: str
+    history: list[dict] | None = None
+    focus_platform_ids: list[str] | None = None
+    source: str = "text"  # "text" | "voice"
+    context: dict | None = None
+
+
+@app.post("/chat/unified")
+async def chat_unified(body: UnifiedRequest):
+    """통합 채팅+명령 엔드포인트.
+
+    - 명령어로 인식되면: command_preview 이벤트 → 프론트에서 확인 후 core에 실행 요청
+    - 일반 대화이면: 스트리밍 AI 응답 (chat_stream과 동일)
+    """
+    agent = _registry.get("chat-agent")
+    if not agent or not isinstance(agent, ChatAgent):
+        raise HTTPException(404, "Chat agent not available")
+    if not agent.enabled:
+        raise HTTPException(400, "Chat agent is disabled")
+
+    model_name = agent._llm.model_name
+
+    async def generate():
+        # ── 1단계: 명령어 분류 (core /commands/preview 호출) ────────────────
+        is_command = False
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{settings.core_api_url}/commands/preview",
+                    json={"text": body.message, "source": body.source},
+                )
+            if resp.status_code == 200:
+                is_command = True
+                parsed = resp.json()
+                yield f"data: {json.dumps({'type': 'command_preview', 'parsed': parsed})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            # 400 = 명령어 아님 → 대화로 처리
+        except Exception:
+            logger.warning("Command preview check failed, falling back to chat")
+
+        # ── 2단계: 일반 대화 — 스트리밍 응답 ───────────────────────────────
+        _ = is_command  # noqa: F841 — only used for clarity above
+        try:
+            async for chunk in agent.chat_stream(
+                message=body.message,
+                history=body.history,
+                focus_platform_ids=body.focus_platform_ids,
+            ):
+                yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"
+        except Exception:
+            logger.exception("Unified chat stream error")
+            yield f"data: {json.dumps({'type': 'chunk', 'chunk': '[응답 오류]'})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'type': 'done', 'model': model_name})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/chat")
 async def chat(body: ChatRequest):
     """운항자 메시지를 받아 AI 보좌관 응답을 반환한다."""

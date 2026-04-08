@@ -60,6 +60,17 @@ def _request_meta(request: Request) -> dict:
     }
 
 
+@router.post("/preview", response_model=ParsedCommandResponse)
+async def preview_command(body: CommandRequest):
+    """인증 없이 명령어를 파싱하여 미리보기를 반환한다. 실행하지 않음.
+
+    - 200: 유효한 명령어 → 파싱 결과 반환
+    - 400: 명령어로 인식되지 않음 (일반 텍스트/대화)
+    """
+    parsed = parse_command(body.text)
+    return ParsedCommandResponse.from_parsed(parsed)
+
+
 @router.post("", response_model=CommandResponse)
 async def run_command(
     body: CommandRequest,
