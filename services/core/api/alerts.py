@@ -1,3 +1,5 @@
+import json
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -8,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
 from models import AlertModel
+from redis_client import get_redis
+from shared.events import alert_updated_channel, build_event
 from ws_hub import hub
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+logger = logging.getLogger(__name__)
 
 
 class AlertResponse(BaseModel):
@@ -59,6 +64,8 @@ class AlertResponse(BaseModel):
 async def list_alerts(
     status: Annotated[str | None, Query()] = None,
     severity: Annotated[str | None, Query()] = None,
+    generated_by: Annotated[str | None, Query()] = None,
+    workflow_state: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     db: AsyncSession = Depends(get_db),
 ):
@@ -67,6 +74,12 @@ async def list_alerts(
         stmt = stmt.where(AlertModel.status == status)
     if severity:
         stmt = stmt.where(AlertModel.severity == severity)
+    if generated_by:
+        stmt = stmt.where(AlertModel.generated_by == generated_by)
+    if workflow_state:
+        stmt = stmt.where(
+            AlertModel.metadata_["workflow_state"].astext == workflow_state
+        )
     result = await db.execute(stmt)
     return [AlertResponse.from_model(r) for r in result.scalars().all()]
 
@@ -92,8 +105,7 @@ async def acknowledge_alert(
     row.acknowledged_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
-    payload = AlertResponse.from_model(row).model_dump(mode="json")
-    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
+    await _broadcast_and_publish_alert_update(row)
     return AlertResponse.from_model(row)
 
 
@@ -106,8 +118,7 @@ async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_d
     row.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
-    payload = AlertResponse.from_model(row).model_dump(mode="json")
-    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
+    await _broadcast_and_publish_alert_update(row)
     return AlertResponse.from_model(row)
 
 
@@ -138,6 +149,33 @@ async def delete_alerts(
 
 class AlertActionBody(BaseModel):
     action: str
+
+
+def _current_workflow_state(row: AlertModel, metadata: dict) -> str:
+    workflow_state = metadata.get("workflow_state")
+    if isinstance(workflow_state, str):
+        return workflow_state
+    if row.status == "resolved":
+        return "resolved"
+    if row.status == "acknowledged":
+        return "acknowledged"
+    return "new"
+
+
+def _validate_action_transition(row: AlertModel, metadata: dict, action: str) -> None:
+    workflow_state = _current_workflow_state(row, metadata)
+
+    if action == "acknowledge" and row.status != "new":
+        raise HTTPException(400, "Alert is not in 'new' state")
+
+    if action == "resolve" and row.status == "resolved":
+        raise HTTPException(400, "Alert is already resolved")
+
+    if action == "start_investigation" and workflow_state in {"resolved", "escalated"}:
+        raise HTTPException(400, f"Cannot start investigation from '{workflow_state}'")
+
+    if action == "escalate" and workflow_state == "resolved":
+        raise HTTPException(400, "Cannot escalate a resolved alert")
 
 
 @router.post("/{alert_id}/action", response_model=AlertResponse)
@@ -176,6 +214,7 @@ async def run_alert_action(
         raise HTTPException(404, f"Alert '{alert_id}' not found")
 
     meta = dict(row.metadata_ or {})
+    _validate_action_transition(row, meta, body.action)
     actions = list(meta.get("actions", []))
     actions.append(
         {
@@ -207,6 +246,24 @@ async def run_alert_action(
 
     await db.commit()
     await db.refresh(row)
-    payload = AlertResponse.from_model(row).model_dump(mode="json")
-    await hub.broadcast("alerts", {"type": "alert_updated", **payload})
+    await _broadcast_and_publish_alert_update(row)
     return AlertResponse.from_model(row)
+
+
+async def _broadcast_and_publish_alert_update(row: AlertModel) -> None:
+    payload = AlertResponse.from_model(row).model_dump(mode="json")
+    channel = alert_updated_channel(row.alert_id)
+    payload["type"] = "alert_updated"
+    payload["event"] = build_event(
+        "alert_updated",
+        "core",
+        channel=channel,
+        produced_at=payload.get("created_at"),
+    )
+    await hub.broadcast("alerts", payload)
+
+    try:
+        redis = await get_redis()
+        await redis.publish(channel, json.dumps(payload))
+    except Exception:
+        logger.exception("Failed to publish alert update event: %s", row.alert_id)
