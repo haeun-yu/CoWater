@@ -447,6 +447,9 @@ function AlertRow({
 }) {
   const s = SEVERITY_STYLE[alert.severity];
   const fallback = Boolean(alert.metadata?.llm_fallback);
+  const source = String(
+    (alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime",
+  );
 
   return (
     <div
@@ -493,8 +496,11 @@ function AlertRow({
               >
                 {STATUS_LABEL[alert.status]}
               </span>
-              <span className="text-xs text-ocean-400">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-800/80 text-ocean-400 border border-ocean-700">
                 {alert.generated_by}
+              </span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
+                {source}
               </span>
               <span className="text-xs text-ocean-400 ml-auto">
                 {formatDistanceToNow(new Date(alert.created_at), {
