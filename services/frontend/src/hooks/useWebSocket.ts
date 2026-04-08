@@ -186,6 +186,7 @@ export function useWebSocket() {
           platform_type?: PlatformType;
           name?: string;
           timestamp: string;
+          source_protocol?: string;
           lat: number;
           lon: number;
           sog: number | null;
@@ -199,6 +200,7 @@ export function useWebSocket() {
           platform_id: msg.platform_id,
           ...(msg.platform_type && { platform_type: msg.platform_type }),
           ...(msg.name && { name: msg.name }),
+          ...(msg.source_protocol && { source_protocol: msg.source_protocol }),
           lat: msg.lat,
           lon: msg.lon,
           sog: msg.sog,

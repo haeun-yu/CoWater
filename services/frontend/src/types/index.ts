@@ -68,6 +68,6 @@ type AlertWsFields = {
 };
 
 export type WsMessage =
-  | { type: "position_update"; platform_id: string; platform_type?: PlatformType; name?: string; timestamp: string; schema_version?: number; source?: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
+  | { type: "position_update"; platform_id: string; platform_type?: PlatformType; name?: string; timestamp: string; schema_version?: number; source?: string; source_protocol?: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
   | ({ type: "alert_created" } & AlertWsFields)
   | ({ type: "alert_updated" } & AlertWsFields);
