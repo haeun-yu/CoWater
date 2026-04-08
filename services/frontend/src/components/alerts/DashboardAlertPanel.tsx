@@ -5,6 +5,7 @@ import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { Alert, AlertSeverity } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -43,6 +44,8 @@ export default function DashboardAlertPanel() {
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const platforms = usePlatformStore((s) => s.platforms);
   const alertStream = useSystemStore((s) => s.streams.alert);
+  const alertLoad = useSystemStore((s) => s.initialData.alerts);
+  const toastPush = useToastStore((s) => s.push);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [pendingAlertId, setPendingAlertId] = useState<string | null>(null);
@@ -74,6 +77,13 @@ export default function DashboardAlertPanel() {
       updateAlert(updated);
     } catch (error) {
       console.error("[alerts] acknowledge failed", error);
+      toastPush({
+        severity: "warning",
+        agentName: "시스템",
+        alertType: "경보 처리",
+        message: "경보 인지 처리에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        platformIds: [],
+      });
     } finally {
       setPendingAlertId((current) => (current === alertId ? null : current));
     }
@@ -148,7 +158,13 @@ export default function DashboardAlertPanel() {
         {displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 gap-2 text-ocean-400">
             <span className="text-lg">✓</span>
-            <span className="text-xs">미확인 경보 없음</span>
+            <span className="text-xs">
+              {alertLoad.status === "loading"
+                ? "경보 로딩 중..."
+                : alertLoad.status === "error"
+                  ? "경보 로드 실패"
+                  : "미확인 경보 없음"}
+            </span>
           </div>
         ) : (
           displayed.map((alert) => {

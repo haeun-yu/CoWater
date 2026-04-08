@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
+import { useSystemStore } from "@/stores/systemStore";
 import { countPlatformsByFreshness, formatLastSeen, getPlatformFreshness } from "@/lib/platformStatus";
 import type { PlatformState } from "@/types";
 
@@ -66,6 +67,7 @@ export default function PlatformSidebar() {
   const selectedId = usePlatformStore((s) => s.selectedId);
   const select = usePlatformStore((s) => s.select);
   const alerts = useAlertStore((s) => s.alerts);
+  const platformLoad = useSystemStore((s) => s.initialData.platforms);
   const platformList = Object.values(platforms);
 
   const selected = selectedId ? platforms[selectedId] : null;
@@ -111,6 +113,7 @@ export default function PlatformSidebar() {
           platforms={platformList}
           onSelect={select}
           activePlatformIds={activePlatformIds}
+          loadStatus={platformLoad.status}
         />
       )}
     </div>
@@ -121,10 +124,12 @@ function PlatformList({
   platforms,
   onSelect,
   activePlatformIds,
+  loadStatus,
 }: {
   platforms: PlatformState[];
   onSelect: (id: string) => void;
   activePlatformIds: Set<string>;
+  loadStatus: "idle" | "loading" | "ready" | "error";
 }) {
   const sorted = [...platforms].sort((a, b) => {
     // 경보 중인 플랫폼 우선
@@ -140,8 +145,18 @@ function PlatformList({
     <div className="flex-1 overflow-y-auto">
       {sorted.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-24 text-ocean-400 text-xs gap-1">
-          <span>수신 대기 중...</span>
-          <span className="text-ocean-500">시뮬레이터 또는 실제 데이터 필요</span>
+          <span>
+            {loadStatus === "loading"
+              ? "플랫폼 로딩 중..."
+              : loadStatus === "error"
+                ? "플랫폼 로드 실패"
+                : "수신 대기 중..."}
+          </span>
+          <span className="text-ocean-500">
+            {loadStatus === "error"
+              ? "실시간 스트림으로 회복될 수 있습니다"
+              : "시뮬레이터 또는 실제 데이터 필요"}
+          </span>
         </div>
       ) : (
         sorted.map((p) => {
