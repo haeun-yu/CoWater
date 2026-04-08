@@ -94,7 +94,7 @@ Moth Server (wss://cobot.center:8287)
 
 | 서비스        | 포트 | 역할                                                                       |
 | ------------- | ---- | -------------------------------------------------------------------------- |
-| `moth-bridge` | —    | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행                      |
+| `moth-bridge` | 7703 (host) / 8002 (container) | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행 + `/ws/positions` relay |
 | `core`        | 7700 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`) |
 | `agents`      | 7701 | Rule/AI 에이전트 실행환경, 에이전트 제어 API                               |
 | `simulator`   | —    | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시                          |

@@ -148,7 +148,7 @@ Body: {"level": "L2"}
 | Backend     | Python 3.12, FastAPI, SQLAlchemy 2 (async)                |
 | Database    | TimescaleDB (time-series), PostGIS (공간 데이터)          |
 | Message Bus | Redis pub/sub                                             |
-| AI          | Anthropic Claude (claude-sonnet-4-6)                      |
+| AI          | Anthropic Claude (claude-haiku-4-5-20251001)             |
 | Frontend    | Next.js 15 (App Router), TypeScript, Zustand, MapLibre GL |
 | 지도        | OpenStreetMap + OpenSeaMap                                |
 | 인프라      | Docker Compose                                            |
@@ -173,7 +173,7 @@ Body: {"level": "L2"}
 | `REDIS_URL`         | `redis://localhost:6379` | Redis 주소           |
 | `CORE_API_URL`      | `http://localhost:7700`  | Core Backend URL     |
 | `ANTHROPIC_API_KEY` | —                        | Claude API 키 (필수) |
-| `CLAUDE_MODEL`      | `claude-sonnet-4-6`      | 사용할 Claude 모델   |
+| `CLAUDE_MODEL`      | `claude-haiku-4-5-20251001` | 사용할 Claude 모델 |
 
 ### Frontend (`services/frontend/.env.local`)
 
@@ -197,6 +197,7 @@ Body: {"level": "L2"}
 
 - 위치 업데이트: `moth-bridge`의 `ws://localhost:7703/ws/positions`
 - 경보 업데이트: `core`의 `ws://localhost:7700/ws/alerts`
+- Docker 내부에서는 moth-bridge relay가 `8002` 포트에서 listen하고, 호스트에는 `7703`으로 노출됩니다.
 
 ### Raw payload 보존 정책
 
