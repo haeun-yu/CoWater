@@ -521,6 +521,22 @@ events:
 
 **역할**: 실시간 해양 관제 웹 인터페이스
 
+**명령 인터페이스**
+
+```text
+voice or typed command
+  -> Core /commands
+  -> deterministic parser (allowlist)
+  -> role check (viewer/operator/admin)
+  -> existing Core alert action or Agent Runtime control endpoint
+  -> immutable audit_logs append
+```
+
+- voice는 transcript만 저장하고 raw audio는 저장하지 않는다.
+- executor는 요청 body가 아니라 Bearer token 매핑으로 결정한다.
+- 명령 성공/거부/실패를 모두 `audit_logs`에 남긴다.
+- 프론트엔드의 음성 입력은 Web Speech API를 사용하지만 실행 경로는 텍스트 명령과 동일하다.
+
 **주요 화면**
 
 | 화면 | 설명 |
@@ -566,6 +582,16 @@ services:
 | `agent.command.{id}` | Core API | Agent Runtime | Agent 제어 명령 |
 | `agent.health.{id}` | Agent Runtime | Core | Agent 헬스 리포트 |
 
+### Command Ingress
+
+운영자 명령 ingress는 `Core /commands` 하나로 통일한다.
+
+- 입력: voice transcript 또는 typed text
+- 파싱: allowlist 기반 deterministic intent parser
+- 권한: `viewer` / `operator` / `admin` Bearer token
+- 실행: 기존 alert action 또는 agent runtime 제어 API 재사용
+- 감사: `command.received`, `command.denied`, `command.executed`, `command.failed`
+
 ---
 
 ## 8. API 설계 개요
@@ -590,6 +616,10 @@ GET    /alerts                           # 경보 목록 (?status=&level=&platfo
 GET    /alerts/{id}                      # 경보 상세
 PATCH  /alerts/{id}/acknowledge          # 인지 처리
 PATCH  /alerts/{id}/resolve              # 처리 완료
+POST   /alerts/{id}/action               # workflow action 실행
+
+# 명령
+POST   /commands                         # voice/text command 실행 및 audit
 
 # 사건
 GET    /incidents                        # 사건 목록

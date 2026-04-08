@@ -126,3 +126,21 @@ export type WsMessage =
   | { type: "position_update"; platform_id: string; platform_type?: PlatformType; name?: string; timestamp: string; schema_version?: number; source?: string; source_protocol?: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
   | ({ type: "alert_created" } & AlertWsFields)
   | ({ type: "alert_updated" } & AlertWsFields);
+
+export interface CommandParseResult {
+  intent: string;
+  summary: string;
+  required_role: "viewer" | "operator" | "admin";
+  target_type: "alert" | "agent";
+  target_id: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface CommandResponse {
+  status: "dry_run" | "executed";
+  source: "text" | "voice";
+  actor: string;
+  allowed: boolean;
+  parsed: CommandParseResult;
+  result: Record<string, unknown> | null;
+}

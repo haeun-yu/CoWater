@@ -18,7 +18,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -29,12 +29,14 @@ from ai.chat_agent import ChatAgent
 from ai.distress_agent import DistressAgent
 from ai.llm_client import make_llm_client
 from ai.report_agent import ReportAgent
+from auth import require_command_role
 from base import Agent, PlatformReport
 from config import settings
 from registry import AgentRegistry
 from rule.anomaly_rule import AnomalyRuleAgent
 from rule.cpa_agent import CPAAgent
 from rule.zone_monitor import ZoneMonitorAgent
+from shared.command_auth import CommandActor
 from shared.events import alert_created_pattern, platform_report_pattern
 
 logging.basicConfig(
@@ -315,14 +317,20 @@ async def get_agent(agent_id: str):
 
 
 @app.patch("/agents/{agent_id}/enable")
-async def enable_agent(agent_id: str):
+async def enable_agent(
+    agent_id: str,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.enable(agent_id):
         raise HTTPException(404)
     return {"agent_id": agent_id, "enabled": True}
 
 
 @app.patch("/agents/{agent_id}/disable")
-async def disable_agent(agent_id: str):
+async def disable_agent(
+    agent_id: str,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.disable(agent_id):
         raise HTTPException(404)
     return {"agent_id": agent_id, "enabled": False}
@@ -348,7 +356,11 @@ class ManualRunBody(BaseModel):
 
 
 @app.patch("/agents/{agent_id}/level")
-async def set_level(agent_id: str, body: LevelBody):
+async def set_level(
+    agent_id: str,
+    body: LevelBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if body.level not in ("L1", "L2", "L3"):
         raise HTTPException(400, "level must be L1, L2, or L3")
     if not _registry.set_level(agent_id, body.level):
@@ -357,7 +369,11 @@ async def set_level(agent_id: str, body: LevelBody):
 
 
 @app.patch("/agents/{agent_id}/model")
-async def set_agent_model(agent_id: str, body: ModelBody):
+async def set_agent_model(
+    agent_id: str,
+    body: ModelBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     """개별 AI 에이전트의 LLM 모델을 런타임 변경한다."""
     agent = _registry.get(agent_id)
     if not agent:
@@ -405,7 +421,11 @@ async def set_agent_model(agent_id: str, body: ModelBody):
 
 
 @app.patch("/agents/{agent_id}/config")
-async def set_config(agent_id: str, body: dict):
+async def set_config(
+    agent_id: str,
+    body: dict,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.set_config(agent_id, body):
         raise HTTPException(404)
     return {"agent_id": agent_id, "config": body}
@@ -458,7 +478,10 @@ async def get_llm_config():
 
 
 @app.patch("/llm")
-async def set_llm_config(body: LLMConfigBody):
+async def set_llm_config(
+    body: LLMConfigBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if body.backend is not None:
         if body.backend not in ("claude", "ollama", "vllm"):
             raise HTTPException(400, "backend must be claude, ollama, or vllm")
@@ -493,7 +516,11 @@ async def _latest_report_from_redis(platform_id: str) -> PlatformReport | None:
 
 
 @app.post("/agents/{agent_id}/run")
-async def run_agent(agent_id: str, body: ManualRunBody):
+async def run_agent(
+    agent_id: str,
+    body: ManualRunBody,
+    actor: CommandActor = Depends(require_command_role("operator")),
+):
     agent = _registry.get(agent_id)
     if not agent:
         raise HTTPException(404, "agent not found")

@@ -1,9 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { getAgentsApiUrl } from "@/lib/publicUrl";
+import { getAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
+import type { CommandResponse } from "@/types";
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<{
+    0: { transcript: string };
+    isFinal?: boolean;
+  }>;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionLike;
+}
 
 interface Message {
   id: string;
@@ -13,6 +43,8 @@ interface Message {
   timestamp: Date;
   error?: boolean;
 }
+
+type ComposerMode = "chat" | "command";
 
 // 상황 요약 빠른 질문 템플릿
 const QUICK_PROMPTS = [
@@ -29,8 +61,14 @@ export default function ChatDrawer() {
   const [isPending, startTransition] = useTransition();
   const [isLoading, setIsLoading] = useState(false);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
+  const [mode, setMode] = useState<ComposerMode>("chat");
+  const [commandToken, setCommandToken] = useState("");
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   const alerts = useAlertStore((s) => s.alerts);
   const platforms = usePlatformStore((s) => s.platforms);
@@ -47,6 +85,12 @@ export default function ChatDrawer() {
       .then((r) => r.json())
       .then((d) => { if (d.model_name) setCurrentModel(d.model_name); })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setCommandToken(window.localStorage.getItem("cowater-command-token") || "");
+    setVoiceSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
   }, []);
 
   // 드로어 열릴 때 입력창 포커스
@@ -164,10 +208,134 @@ export default function ChatDrawer() {
     }
   }
 
+  async function sendCommand(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || isLoading) return;
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setIsLoading(true);
+
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+    ]);
+
+    try {
+      if (!commandToken.trim()) {
+        throw new Error("명령 토큰이 필요합니다. operator-dev 또는 admin-dev 토큰을 입력하세요.");
+      }
+
+      const res = await fetch(`${getCoreApiUrl()}/commands`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${commandToken.trim()}`,
+        },
+        body: JSON.stringify({
+          text: trimmed,
+          source: inputSource,
+          context: selectedId ? { selected_platform_id: selectedId } : null,
+        }),
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        const detail = typeof payload?.detail === "string" ? payload.detail : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      const command = payload as CommandResponse;
+      const parts = [
+        "명령 실행 완료",
+        `- 요약: ${command.parsed.summary}`,
+        `- 실행 주체: ${command.actor}`,
+      ];
+
+      if (command.result?.kind === "alert") {
+        const alert = command.result.alert as { status?: string; message?: string } | undefined;
+        if (alert?.status) parts.push(`- 경보 상태: ${alert.status}`);
+        if (alert?.message) parts.push(`- 경보 메시지: ${alert.message}`);
+      } else if (command.result?.kind === "agent") {
+        const response = command.result.response as Record<string, unknown> | undefined;
+        if (response?.agent_id) parts.push(`- 대상 에이전트: ${String(response.agent_id)}`);
+        if (response?.level) parts.push(`- 레벨: ${String(response.level)}`);
+        if (response?.enabled !== undefined) parts.push(`- 활성화: ${String(response.enabled)}`);
+      }
+
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: parts.join("\n") } : m)),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "명령 실행 중 오류가 발생했습니다.";
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: message, error: true }
+            : m,
+        ),
+      );
+    } finally {
+      setIsLoading(false);
+      setInputSource("text");
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }
+
+  function startVoiceCapture() {
+    if (typeof window === "undefined") return;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition || isListening) return;
+
+    const recognition = new Recognition();
+    recognition.lang = "ko-KR";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (!transcript) return;
+      setInput(transcript);
+      setInputSource("voice");
+      setTimeout(() => inputRef.current?.focus(), 50);
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
+  }
+
+  function updateCommandToken(value: string) {
+    setCommandToken(value);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("cowater-command-token", value);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      startTransition(() => { sendMessage(input); });
+      startTransition(() => {
+        if (mode === "command") sendCommand(input);
+        else sendMessage(input);
+      });
     }
   }
 
@@ -225,6 +393,28 @@ export default function ChatDrawer() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-1">
+              <button
+                onClick={() => setMode("chat")}
+                className={`px-2 py-1 rounded text-[10px] transition-colors ${
+                  mode === "chat"
+                    ? "bg-ocean-700 text-white"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                대화
+              </button>
+              <button
+                onClick={() => setMode("command")}
+                className={`px-2 py-1 rounded text-[10px] transition-colors ${
+                  mode === "command"
+                    ? "bg-amber-600 text-slate-950 font-semibold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                명령
+              </button>
+            </div>
             {messages.length > 0 && (
               <button
                 onClick={() => setMessages([])}
@@ -304,6 +494,28 @@ export default function ChatDrawer() {
             </div>
           )}
 
+          {mode === "command" && (
+            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-3 text-[11px] text-amber-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold tracking-wide uppercase text-[10px] text-amber-300">
+                  Command Mode
+                </span>
+                <span className="text-[10px] text-amber-400/80">
+                  voice → intent → 권한 → 실행 → audit
+                </span>
+              </div>
+              <input
+                value={commandToken}
+                onChange={(e) => updateCommandToken(e.target.value)}
+                placeholder="Bearer token 없이 토큰만 입력 (예: operator-dev)"
+                className="w-full rounded-lg border border-amber-800/40 bg-slate-950 px-3 py-2 text-[11px] text-amber-100 placeholder:text-amber-700/70 focus:outline-none focus:border-amber-500"
+              />
+              <p className="text-[10px] text-amber-400/80 leading-relaxed">
+                개발 기본 토큰: viewer-dev / operator-dev / admin-dev. 음성 입력은 전사본을 먼저 검토한 뒤 전송합니다.
+              </p>
+            </div>
+          )}
+
           {messages.map((msg) => (
             <ChatMessage key={msg.id} msg={msg} />
           ))}
@@ -333,21 +545,58 @@ export default function ChatDrawer() {
               컨텍스트: {selectedPlatform.name ?? selectedId} 선박 정보 포함
             </div>
           )}
+          {mode === "command" && (
+            <div className="mb-2 text-[10px] text-amber-400 flex items-center justify-between gap-2">
+              <span>예: cpa 켜줘 · agent level cpa L2 · alert resolve &lt;uuid&gt;</span>
+              {inputSource === "voice" && <span className="text-amber-300">음성 전사 입력</span>}
+            </div>
+          )}
           <div className="flex gap-2 items-end">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setInputSource("text");
+              }}
               onKeyDown={handleKeyDown}
-              placeholder="상황 요약, 대처 방법, 질문... (Enter로 전송)"
+              placeholder={
+                mode === "command"
+                  ? "음성/텍스트 명령 입력... (예: cpa 켜줘)"
+                  : "상황 요약, 대처 방법, 질문... (Enter로 전송)"
+              }
               rows={2}
               disabled={isLoading}
               className="flex-1 resize-none rounded-lg border border-slate-700 bg-slate-900 text-sm text-slate-200 placeholder-slate-600 px-3 py-2.5 focus:outline-none focus:border-ocean-600 disabled:opacity-50 leading-relaxed"
             />
+            {mode === "command" && voiceSupported && (
+              <button
+                onClick={startVoiceCapture}
+                disabled={isLoading || isListening}
+                className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0 ${
+                  isListening
+                    ? "border-red-500 bg-red-950 text-red-300"
+                    : "border-amber-700 bg-amber-950/40 text-amber-300 hover:bg-amber-900/40"
+                } disabled:opacity-50`}
+                title={isListening ? "음성 인식 중" : "음성 명령 입력"}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 3a3 3 0 013 3v6a3 3 0 11-6 0V6a3 3 0 013-3z" />
+                  <path d="M19 11a7 7 0 01-14 0M12 18v3M8 21h8" />
+                </svg>
+              </button>
+            )}
             <button
-              onClick={() => startTransition(() => { sendMessage(input); })}
+              onClick={() => startTransition(() => {
+                if (mode === "command") sendCommand(input);
+                else sendMessage(input);
+              })}
               disabled={isLoading || !input.trim()}
-              className="w-10 h-10 rounded-lg bg-ocean-600 hover:bg-ocean-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors flex-shrink-0"
+              className={`w-10 h-10 rounded-lg disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors flex-shrink-0 ${
+                mode === "command"
+                  ? "bg-amber-600 hover:bg-amber-500 text-slate-950"
+                  : "bg-ocean-600 hover:bg-ocean-500"
+              }`}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
@@ -355,7 +604,7 @@ export default function ChatDrawer() {
             </button>
           </div>
           <p className="mt-1.5 text-[10px] text-slate-600">
-            Shift+Enter 줄바꿈 · Enter 전송
+            Shift+Enter 줄바꿈 · Enter 전송{mode === "command" ? " · 명령은 audit_logs에 기록됩니다" : ""}
           </p>
         </div>
       </div>

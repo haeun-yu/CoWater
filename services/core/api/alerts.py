@@ -8,10 +8,12 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import require_command_role
 from db import get_db
 from models import AlertModel
 from redis_client import get_redis
 from shared.events import alert_updated_channel, build_event
+from shared.command_auth import CommandActor
 from ws_hub import hub
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -94,15 +96,17 @@ async def get_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_db)])
 
 @router.patch("/{alert_id}/acknowledge", response_model=AlertResponse)
 async def acknowledge_alert(
-    alert_id: str, db: Annotated[AsyncSession, Depends(get_db)]
+    alert_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[CommandActor, Depends(require_command_role("operator"))],
 ):
-    row = await db.get(AlertModel, alert_id)
-    if row is None:
-        raise HTTPException(404)
-    if row.status != "new":
-        raise HTTPException(400, "Alert is not in 'new' state")
-    row.status = "acknowledged"
-    row.acknowledged_at = datetime.now(timezone.utc)
+    row = await execute_alert_action(
+        db,
+        alert_id,
+        "acknowledge",
+        executor=actor.actor,
+        source="api",
+    )
     await db.commit()
     await db.refresh(row)
     await _broadcast_and_publish_alert_update(row)
@@ -110,12 +114,18 @@ async def acknowledge_alert(
 
 
 @router.patch("/{alert_id}/resolve", response_model=AlertResponse)
-async def resolve_alert(alert_id: str, db: Annotated[AsyncSession, Depends(get_db)]):
-    row = await db.get(AlertModel, alert_id)
-    if row is None:
-        raise HTTPException(404)
-    row.status = "resolved"
-    row.resolved_at = datetime.now(timezone.utc)
+async def resolve_alert(
+    alert_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[CommandActor, Depends(require_command_role("operator"))],
+):
+    row = await execute_alert_action(
+        db,
+        alert_id,
+        "resolve",
+        executor=actor.actor,
+        source="api",
+    )
     await db.commit()
     await db.refresh(row)
     await _broadcast_and_publish_alert_update(row)
@@ -135,7 +145,9 @@ class DeleteAlertsBody(BaseModel):
 
 @router.delete("", status_code=200)
 async def delete_alerts(
-    body: DeleteAlertsBody, db: Annotated[AsyncSession, Depends(get_db)]
+    body: DeleteAlertsBody,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[CommandActor, Depends(require_command_role("admin"))],
 ):
     """지정한 alert_ids를 DB에서 삭제한다. 빈 리스트이면 아무것도 하지 않는다."""
     if not body.alert_ids:
@@ -183,6 +195,7 @@ async def run_alert_action(
     alert_id: str,
     body: AlertActionBody,
     db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[CommandActor, Depends(require_command_role("operator"))],
 ):
     """경보 권고에 대한 자동 처리 액션 실행.
 
@@ -196,6 +209,28 @@ async def run_alert_action(
     - request_speed_reduction
     - request_zone_exit
     """
+    row = await execute_alert_action(
+        db,
+        alert_id,
+        body.action,
+        executor=actor.actor,
+        source="api",
+    )
+
+    await db.commit()
+    await db.refresh(row)
+    await _broadcast_and_publish_alert_update(row)
+    return AlertResponse.from_model(row)
+
+
+async def execute_alert_action(
+    db: AsyncSession,
+    alert_id: str,
+    action: str,
+    *,
+    executor: str,
+    source: str,
+) -> AlertModel:
     allowed = {
         "acknowledge",
         "resolve",
@@ -206,48 +241,49 @@ async def run_alert_action(
         "request_speed_reduction",
         "request_zone_exit",
     }
-    if body.action not in allowed:
-        raise HTTPException(400, f"Unsupported action: {body.action}")
+    if action not in allowed:
+        raise HTTPException(400, f"Unsupported action: {action}")
 
     row = await db.get(AlertModel, alert_id)
     if row is None:
         raise HTTPException(404, f"Alert '{alert_id}' not found")
 
     meta = dict(row.metadata_ or {})
-    _validate_action_transition(row, meta, body.action)
+    _validate_action_transition(row, meta, action)
     actions = list(meta.get("actions", []))
     actions.append(
         {
-            "action": body.action,
+            "action": action,
             "executed_at": datetime.now(timezone.utc).isoformat(),
-            "executor": "operator-ui",
+            "executor": executor,
+            "source": source,
         }
     )
     meta["actions"] = actions
 
-    if body.action == "start_investigation":
+    if action == "start_investigation":
         meta["workflow_state"] = "investigating"
         meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
-    elif body.action == "escalate":
+    elif action == "escalate":
         meta["workflow_state"] = "escalated"
         meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
-    elif body.action == "resolve":
+    elif action == "resolve":
         meta["workflow_state"] = "resolved"
+        meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
+    elif action == "acknowledge":
+        meta["workflow_state"] = "acknowledged"
         meta["workflow_updated_at"] = datetime.now(timezone.utc).isoformat()
 
     row.metadata_ = meta
 
-    if body.action == "acknowledge" and row.status == "new":
+    if action == "acknowledge" and row.status == "new":
         row.status = "acknowledged"
         row.acknowledged_at = datetime.now(timezone.utc)
-    elif body.action == "resolve":
+    elif action == "resolve":
         row.status = "resolved"
         row.resolved_at = datetime.now(timezone.utc)
 
-    await db.commit()
-    await db.refresh(row)
-    await _broadcast_and_publish_alert_update(row)
-    return AlertResponse.from_model(row)
+    return row
 
 
 async def _broadcast_and_publish_alert_update(row: AlertModel) -> None:

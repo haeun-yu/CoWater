@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from db import AsyncSessionLocal
 from api.alerts import router as alerts_router
+from api.commands import router as commands_router
 from api.platforms import router as platforms_router
 from api.ws import router as ws_router
 from api.zones import router as zones_router
@@ -91,6 +92,7 @@ app.add_middleware(
 
 app.include_router(platforms_router)
 app.include_router(alerts_router)
+app.include_router(commands_router)
 app.include_router(zones_router)
 app.include_router(ws_router)
 
