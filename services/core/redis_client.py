@@ -7,7 +7,16 @@ _redis: aioredis.Redis | None = None
 async def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
-        _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        redis = aioredis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            health_check_interval=30,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True,
+        )
+        await redis.ping()
+        _redis = redis
     return _redis
 
 
