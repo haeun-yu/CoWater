@@ -60,6 +60,46 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
   const [zoneDwell, setZoneDwell] = useState<PlatformZoneDwell | null>(null);
   const [spatialLoading, setSpatialLoading] = useState(false);
 
+  // 역사적 항적 날짜 범위
+  const setHistoryOverride = usePlatformStore((s) => s.setHistoryOverride);
+  const historyOverride = usePlatformStore((s) => s.historyOverride);
+  const [trackFrom, setTrackFrom] = useState("");
+  const [trackTo, setTrackTo] = useState("");
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackCount, setTrackCount] = useState<number | null>(null);
+
+  async function loadTrackRange() {
+    if (!trackFrom) return;
+    setTrackLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "2000" });
+      if (trackFrom) params.set("from", new Date(trackFrom).toISOString());
+      if (trackTo) params.set("to", new Date(trackTo).toISOString());
+      const res = await fetch(
+        `${getCoreApiUrl()}/platforms/${encodeURIComponent(platformId)}/track?${params}`,
+      );
+      if (!res.ok) throw new Error(`${res.status}`);
+      const pts = (await res.json()) as Array<{ lon: number; lat: number }>;
+      setTrackCount(pts.length);
+      setHistoryOverride(
+        pts.length >= 2
+          ? { platformId, points: pts.map((p) => [p.lon, p.lat] as [number, number]), from: trackFrom, to: trackTo }
+          : null,
+      );
+    } catch {
+      setTrackCount(0);
+    } finally {
+      setTrackLoading(false);
+    }
+  }
+
+  function clearTrackRange() {
+    setTrackFrom("");
+    setTrackTo("");
+    setTrackCount(null);
+    setHistoryOverride(null);
+  }
+
   const p = platforms[platformId];
   const allAlerts = alerts.filter((a) => a.platform_ids.includes(platformId));
   const activeAlerts = allAlerts.filter((a) => a.status === "new");
@@ -193,6 +233,58 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                 최근 수신 {formatDistanceToNow(new Date(p.last_seen), { addSuffix: true, locale: ko })}
               </div>
             )}
+          </section>
+
+          {/* 역사적 항적 조회 */}
+          <section className="px-4 py-3 border-b border-ocean-900">
+            <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">
+              역사적 항적 조회
+            </div>
+            <div className="space-y-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-ocean-500">시작</label>
+                <input
+                  type="datetime-local"
+                  value={trackFrom}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTrackFrom(e.target.value)}
+                  className="w-full bg-ocean-900 border border-ocean-700 rounded px-2 py-1 text-xs text-ocean-200 focus:outline-none focus:border-ocean-500"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-ocean-500">종료 (선택)</label>
+                <input
+                  type="datetime-local"
+                  value={trackTo}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTrackTo(e.target.value)}
+                  className="w-full bg-ocean-900 border border-ocean-700 rounded px-2 py-1 text-xs text-ocean-200 focus:outline-none focus:border-ocean-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={loadTrackRange}
+                  disabled={!trackFrom || trackLoading}
+                  className="flex-1 text-xs px-2 py-1.5 rounded bg-ocean-700 hover:bg-ocean-600 text-ocean-200 disabled:opacity-40 transition-colors"
+                >
+                  {trackLoading ? "조회 중…" : "항적 조회"}
+                </button>
+                {(historyOverride?.platformId === platformId) && (
+                  <button
+                    onClick={clearTrackRange}
+                    className="text-xs px-2 py-1.5 rounded border border-ocean-700 hover:border-ocean-500 text-ocean-400 transition-colors"
+                  >
+                    초기화
+                  </button>
+                )}
+              </div>
+              {trackCount !== null && (
+                <div className={`text-xs ${trackCount === 0 ? "text-amber-400" : "text-ocean-400"}`}>
+                  {trackCount === 0 ? "해당 기간 보고 없음" : `${trackCount}개 위치 표시 중`}
+                  {historyOverride?.platformId === platformId && (
+                    <span className="ml-1 text-amber-300">← 지도 반영됨</span>
+                  )}
+                </div>
+              )}
+            </div>
           </section>
 
           {/* 활성 경보 */}

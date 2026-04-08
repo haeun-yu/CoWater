@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
@@ -96,6 +96,8 @@ export default function AlertsPage() {
   const [workflowFilter, setWorkflowFilter] = useState<string | "all">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [pastPage, setPastPage] = useState(1);
+  const PAST_PAGE_SIZE = 30;
 
   const agentFilters = Array.from(new Set(alerts.map((alert) => alert.generated_by))).sort();
   const workflowFilters = Array.from(new Set(alerts.map((alert) => getWorkflowState(alert)).filter((state): state is string => state !== null))).sort();
@@ -113,6 +115,9 @@ export default function AlertsPage() {
     .filter((a) => statusFilter === "all" || a.status === statusFilter)
     .filter((a) => agentFilter === "all" || a.generated_by === agentFilter)
     .filter((a) => workflowFilter === "all" || getWorkflowState(a) === workflowFilter);
+
+  // 필터 변경 시 페이지 리셋
+  useEffect(() => { setPastPage(1); }, [severityFilter, statusFilter, timeFilter, agentFilter, workflowFilter]);
 
   // 요약 통계
   const newAlerts = alerts.filter((a) => a.status === "new");
@@ -420,7 +425,7 @@ export default function AlertsPage() {
               </span>
             </div>
             <div className="space-y-1">
-              {past.map((a) => (
+              {past.slice(0, pastPage * PAST_PAGE_SIZE).map((a) => (
                 <AlertRow
                   key={a.alert_id}
                   alert={a}
@@ -439,6 +444,14 @@ export default function AlertsPage() {
                 />
               ))}
             </div>
+            {past.length > pastPage * PAST_PAGE_SIZE && (
+              <button
+                onClick={() => setPastPage((p) => p + 1)}
+                className="mt-2 w-full text-xs py-2 rounded border border-ocean-800 text-ocean-500 hover:text-ocean-300 hover:border-ocean-600 transition-colors"
+              >
+                더 보기 ({past.length - pastPage * PAST_PAGE_SIZE}건 남음)
+              </button>
+            )}
           </section>
         )}
 

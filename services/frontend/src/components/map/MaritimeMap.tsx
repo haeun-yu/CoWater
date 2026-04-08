@@ -446,6 +446,7 @@ function MaritimeMap() {
   const platforms = usePlatformStore((s) => s.platforms);
   const select = usePlatformStore((s) => s.select);
   const selectedId = usePlatformStore((s) => s.selectedId);
+  const historyOverride = usePlatformStore((s) => s.historyOverride);
   const alerts = useAlertStore((s) => s.alerts);
   const streams = useSystemStore((s) => s.streams);
   const zones = useZoneStore((s) => s.zones);
@@ -1084,13 +1085,28 @@ function MaritimeMap() {
     (mapRef.current.getSource("selected-prediction") as GeoJSONSource | undefined)?.setData(spatialData.predictedPath);
   }, [platforms, selectedId, mapLoaded]);
 
-  // ── 선택 선박 역사적 항적 (DB 조회) ──────────────────────────────────────
+  // ── 선택 선박 역사적 항적 (DB 조회 또는 외부 override) ───────────────────
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
     const map = mapRef.current;
     const src = map.getSource("history-trail") as GeoJSONSource | undefined;
     if (!src) return;
+
+    // historyOverride: 플랫폼 상세 페이지에서 날짜 범위 지정 조회 시 사용
+    if (historyOverride && historyOverride.platformId === selectedId && historyOverride.points.length >= 2) {
+      src.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: historyOverride.points },
+            properties: {},
+          },
+        ],
+      });
+      return;
+    }
 
     if (!selectedId) {
       src.setData({ type: "FeatureCollection", features: [] });
@@ -1129,7 +1145,7 @@ function MaritimeMap() {
     })();
 
     return () => controller.abort();
-  }, [selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, historyOverride, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 해도 심볼(OpenSeaMap) 레이어 표시/숨김 ────────────────────────────────
 
