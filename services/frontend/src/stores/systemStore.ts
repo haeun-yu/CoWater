@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 export type StreamKey = "position" | "alert";
 export type StreamStatus = "connecting" | "connected" | "reconnecting" | "error";
+export type InitialDataKey = "platforms" | "alerts" | "zones";
+export type InitialDataStatus = "idle" | "loading" | "ready" | "error";
 
 export interface StreamState {
   status: StreamStatus;
@@ -11,14 +13,26 @@ export interface StreamState {
   lastError: string | null;
 }
 
+export interface InitialDataState {
+  status: InitialDataStatus;
+  lastLoadedAt: string | null;
+  lastError: string | null;
+}
+
 interface SystemStore {
   streams: Record<StreamKey, StreamState>;
+  initialData: Record<InitialDataKey, InitialDataState>;
   setStreamStatus: (
     key: StreamKey,
     status: StreamStatus,
     options?: { reconnectAttempt?: number; error?: string | null },
   ) => void;
   markStreamMessage: (key: StreamKey) => void;
+  setInitialDataStatus: (
+    key: InitialDataKey,
+    status: InitialDataStatus,
+    options?: { error?: string | null },
+  ) => void;
 }
 
 const createInitialStreamState = (): StreamState => ({
@@ -29,10 +43,21 @@ const createInitialStreamState = (): StreamState => ({
   lastError: null,
 });
 
+const createInitialDataState = (): InitialDataState => ({
+  status: "idle",
+  lastLoadedAt: null,
+  lastError: null,
+});
+
 export const useSystemStore = create<SystemStore>((set) => ({
   streams: {
     position: createInitialStreamState(),
     alert: createInitialStreamState(),
+  },
+  initialData: {
+    platforms: createInitialDataState(),
+    alerts: createInitialDataState(),
+    zones: createInitialDataState(),
   },
 
   setStreamStatus: (key, status, options) =>
@@ -60,6 +85,21 @@ export const useSystemStore = create<SystemStore>((set) => ({
         [key]: {
           ...state.streams[key],
           lastMessageAt: new Date().toISOString(),
+        },
+      },
+    })),
+
+  setInitialDataStatus: (key, status, options) =>
+    set((state) => ({
+      initialData: {
+        ...state.initialData,
+        [key]: {
+          ...state.initialData[key],
+          status,
+          lastLoadedAt:
+            status === "ready" ? new Date().toISOString() : state.initialData[key].lastLoadedAt,
+          lastError:
+            options && "error" in options ? options.error ?? null : state.initialData[key].lastError,
         },
       },
     })),

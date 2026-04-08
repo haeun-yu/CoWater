@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const platforms = usePlatformStore((s) => s.platforms);
   const alerts = useAlertStore((s) => s.alerts);
   const streams = useSystemStore((s) => s.streams);
+  const initialData = useSystemStore((s) => s.initialData);
 
   const platformValues = Object.values(platforms);
   const freshness = useMemo(() => countPlatformsByFreshness(platformValues), [platformValues]);
@@ -30,6 +31,11 @@ export default function DashboardPage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {Object.values(initialData).some((resource) => resource.status === "error") && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          일부 초기 데이터를 불러오지 못했습니다. 실시간 스트림은 계속 수신될 수 있습니다.
+        </div>
+      )}
       <section
         className="grid grid-cols-2 gap-px border-b border-ocean-800 bg-ocean-800/80 px-3 py-2 text-xs text-ocean-300 lg:grid-cols-6"
         aria-label="실시간 운영 요약"
@@ -39,6 +45,11 @@ export default function DashboardPage() {
         <SummaryCard label="활성 경보" value={`${newAlerts.length}건`} tone={newAlerts.length > 0 ? "warning" : "neutral"} />
         <SummaryCard label="정상 수신" value={`${freshness.live}척`} tone="neutral" />
         <SummaryCard label="지연 수신" value={`${freshness.stale}척`} tone={freshness.stale > 0 ? "warning" : "neutral"} />
+        <SummaryCard
+          label="초기 로드"
+          value={summarizeInitialData(initialData)}
+          tone={Object.values(initialData).some((resource) => resource.status === "error") ? "warning" : "neutral"}
+        />
         <SummaryCard
           label="스트림 상태"
           value={`${streamLabel(streams.position.status)} / ${streamLabel(streams.alert.status)}`}
@@ -61,6 +72,17 @@ export default function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function summarizeInitialData(initialData: ReturnType<typeof useSystemStore.getState>["initialData"]) {
+  const values = Object.values(initialData);
+  const readyCount = values.filter((resource) => resource.status === "ready").length;
+  const errorCount = values.filter((resource) => resource.status === "error").length;
+
+  if (errorCount > 0) return `오류 ${errorCount}`;
+  if (readyCount === values.length) return "완료";
+  if (values.some((resource) => resource.status === "loading")) return "로딩 중";
+  return "대기";
 }
 
 function SummaryCard({ label, value, tone }: { label: string; value: string; tone: "neutral" | "warning" | "critical" }) {
