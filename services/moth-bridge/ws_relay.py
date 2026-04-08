@@ -48,6 +48,8 @@ async def broadcast(report: "ParsedReport") -> None:
             "platform_type": report.platform_type,
             "name": report.name,
             "timestamp": report.timestamp.isoformat(),
+            "schema_version": 1,
+            "source": "moth-bridge-relay",
             "lat": report.position.lat,
             "lon": report.position.lon,
             "sog": report.sog,
@@ -92,4 +94,4 @@ async def ws_positions(ws: WebSocket) -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "clients": len(_clients)}
+    return {"status": "ok", "transport": "websocket-relay", "clients": len(_clients)}
