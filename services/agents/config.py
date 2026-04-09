@@ -73,6 +73,8 @@ class Settings(BaseSettings):
 
     # ── 런타임 타이밍 ─────────────────────────────────────────────────────────
     ai_task_timeout_sec: float = 120.0  # AI 에이전트 단일 호출 최대 시간 (초)
+    ai_max_concurrent_tasks: int = 4  # 동시에 실행 가능한 AI 태스크 수
+    ai_max_pending_tasks: int = 32  # 대기 포함 전체 AI 태스크 상한
     reconnect_max_delay_sec: float = 60.0  # 컨슈머 재연결 최대 대기 (초)
     shutdown_drain_timeout_sec: float = 15.0  # 종료 시 AI 태스크 drain 대기 (초)
     ais_check_interval_sec: int = 20  # AIS 타임아웃 체크 주기 (초)

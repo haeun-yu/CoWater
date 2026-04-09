@@ -50,6 +50,7 @@ _redis: aioredis.Redis | None = None
 
 # AI 에이전트 백그라운드 태스크 추적 집합
 _pending_ai_tasks: set[asyncio.Task] = set()
+_ai_dispatch_semaphore = asyncio.Semaphore(settings.ai_max_concurrent_tasks)
 
 # 런타임 타이밍 상수 — settings에서 읽어 모듈 초기화 시 고정
 _AI_TASK_TIMEOUT = settings.ai_task_timeout_sec
@@ -125,9 +126,19 @@ async def _restore_agent_states() -> None:
 # ── AI 태스크 헬퍼 ──────────────────────────────────────────────────────────
 
 
-def _track_task(coro, *, name: str) -> asyncio.Task:
-    """태스크를 생성하고 _pending_ai_tasks에 등록. 완료 시 자동 제거."""
-    task = asyncio.create_task(coro, name=name)
+def _track_task(coro, *, name: str, agent: Agent) -> asyncio.Task | None:
+    """태스크를 생성하고 상한을 넘지 않도록 추적. 완료 시 자동 제거."""
+    if len(_pending_ai_tasks) >= settings.ai_max_pending_tasks:
+        msg = f"AI task queue full ({len(_pending_ai_tasks)}/{settings.ai_max_pending_tasks})"
+        logger.warning("Dropping AI task for %s: %s", agent.agent_id, msg)
+        agent._record_error(msg)
+        return None
+
+    async def _run_with_limit() -> None:
+        async with _ai_dispatch_semaphore:
+            await coro
+
+    task = asyncio.create_task(_run_with_limit(), name=name)
     _pending_ai_tasks.add(task)
     task.add_done_callback(_pending_ai_tasks.discard)
     return task
@@ -177,6 +188,7 @@ async def _dispatch_report(report: PlatformReport) -> None:
         _track_task(
             _safe_ai_dispatch(agent, report),
             name=f"ai-report-{agent.agent_id}",
+            agent=agent,
         )
 
 
@@ -224,6 +236,7 @@ async def _dispatch_alert(alert: dict) -> None:
         _track_task(
             _safe_ai_alert(agent, alert),
             name=f"ai-alert-{agent.agent_id}",
+            agent=agent,
         )
 
 
