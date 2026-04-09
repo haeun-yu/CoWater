@@ -7,6 +7,7 @@
 
 import json
 import logging
+import asyncio
 from base64 import b64decode
 from datetime import datetime, timezone
 
@@ -19,6 +20,16 @@ from shared.events import build_event, platform_report_pattern
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
+
+
+def _is_transient_db_unavailable(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "recovery mode" in message
+        or "not yet accepting connections" in message
+        or "connection was closed in the middle of operation" in message
+    )
+
 
 # platform_id → (platform_type, name)
 # 프로세스 생존 기간 동안 유지. 플랫폼 메타가 드물게 변경되므로 TTL 불필요.
@@ -46,8 +57,10 @@ async def consume_platform_reports(redis: aioredis.Redis) -> None:
         try:
             data = json.loads(message["data"])
             await _handle_report(data)
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to process platform report: %s", message["data"])
+            if _is_transient_db_unavailable(exc):
+                await asyncio.sleep(2)
 
 
 async def _handle_report(data: dict) -> None:

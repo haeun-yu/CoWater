@@ -12,6 +12,7 @@ Race Condition 방지: SELECT ... FOR UPDATE로 행 잠금 후 UPDATE/INSERT 결
 
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
@@ -23,6 +24,15 @@ from shared.events import alert_created_pattern, build_event
 from ws_hub import hub
 
 logger = logging.getLogger(__name__)
+
+
+def _is_transient_db_unavailable(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "recovery mode" in message
+        or "not yet accepting connections" in message
+        or "connection was closed in the middle of operation" in message
+    )
 
 
 async def consume_alerts(redis: aioredis.Redis) -> None:
@@ -37,8 +47,10 @@ async def consume_alerts(redis: aioredis.Redis) -> None:
         try:
             data = json.loads(message["data"])
             await _handle_alert(data)
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to process alert: %s", message["data"])
+            if _is_transient_db_unavailable(exc):
+                await asyncio.sleep(2)
 
 
 async def _handle_alert(data: dict) -> None:
@@ -139,7 +151,9 @@ async def _handle_alert(data: dict) -> None:
                     auto_resolved.append(row)
                     logger.info(
                         "Alert auto-resolved: id=%s dedup_key=%s by %s",
-                        row.alert_id, resolve_dedup_key, data["alert_type"],
+                        row.alert_id,
+                        resolve_dedup_key,
+                        data["alert_type"],
                     )
         # 자동 커밋
 
