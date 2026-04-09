@@ -115,6 +115,23 @@ ensure_host_ollama() {
   exit 1
 }
 
+warn_if_disk_low() {
+  local data_line used_pct avail_kb
+  data_line="$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print $5" "$4}')"
+  if [[ -z "$data_line" ]]; then
+    return 0
+  fi
+
+  used_pct="${data_line%% *}"
+  used_pct="${used_pct%%%}"
+  avail_kb="${data_line##* }"
+
+  if [[ "$used_pct" -ge 95 || "$avail_kb" -le 20971520 ]]; then
+    printf 'WARNING: Low disk headroom detected on /System/Volumes/Data (%s%% used, %s KB available).\n' "$used_pct" "$avail_kb" >&2
+    printf 'Postgres previously crashed with "No space left on device" in this condition.\n' >&2
+  fi
+}
+
 stop_host_ollama() {
   if ! command -v lsof >/dev/null 2>&1; then
     printf 'lsof not available; cannot detect host Ollama listener.\n' >&2
@@ -177,6 +194,7 @@ compose() {
 
 case "$ACTION" in
   up)
+    warn_if_disk_low
     ensure_host_ollama
     compose up -d
     ;;
@@ -198,6 +216,7 @@ case "$ACTION" in
     fi
     ;;
   restart)
+    warn_if_disk_low
     ensure_host_ollama
     if [[ ${#SERVICES[@]} -gt 0 ]]; then
       compose stop
