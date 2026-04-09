@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     agents_api_url: str = "http://localhost:7701"
     log_level: str = "info"
     command_request_timeout_sec: float = 10.0
+    command_request_max_attempts: int = 3
+    command_request_base_delay_sec: float = 0.5
     command_tokens_json: str = '{"viewer-dev":{"actor":"viewer-dev","role":"viewer"},"operator-dev":{"actor":"operator-dev","role":"operator"},"admin-dev":{"actor":"admin-dev","role":"admin"}}'
 
     # WebSocket

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,25 +51,27 @@ async def _execute_agent_command(
     }
     base_url = settings.agents_api_url.rstrip("/")
     timeout = settings.command_request_timeout_sec
+    max_attempts = settings.command_request_max_attempts
+    base_delay = settings.command_request_base_delay_sec
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async def _send_request(client: httpx.AsyncClient) -> httpx.Response:
         if parsed.intent == "agent.enable":
-            response = await client.patch(
+            return await client.patch(
                 f"{base_url}/agents/{parsed.target_id}/enable",
                 headers=headers,
             )
-        elif parsed.intent == "agent.disable":
-            response = await client.patch(
+        if parsed.intent == "agent.disable":
+            return await client.patch(
                 f"{base_url}/agents/{parsed.target_id}/disable",
                 headers=headers,
             )
-        elif parsed.intent == "agent.set_level":
-            response = await client.patch(
+        if parsed.intent == "agent.set_level":
+            return await client.patch(
                 f"{base_url}/agents/{parsed.target_id}/level",
                 headers=headers,
                 json={"level": parsed.arguments["level"]},
             )
-        elif parsed.intent == "agent.run":
+        if parsed.intent == "agent.run":
             platform_id = parsed.arguments.get("platform_id") or context.get(
                 "selected_platform_id"
             )
@@ -76,13 +80,38 @@ async def _execute_agent_command(
                     400,
                     "Agent run commands require 'platform <platform_id>' or a selected platform context.",
                 )
-            response = await client.post(
+            return await client.post(
                 f"{base_url}/agents/{parsed.target_id}/run",
                 headers=headers,
                 json={"platform_id": platform_id},
             )
-        else:
-            raise HTTPException(400, f"Unsupported agent intent: {parsed.intent}")
+        raise HTTPException(400, f"Unsupported agent intent: {parsed.intent}")
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response: httpx.Response | None = None
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await _send_request(client)
+                if response.status_code not in {502, 503, 504}:
+                    break
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                last_error = exc
+
+            if attempt == max_attempts:
+                if last_error is not None:
+                    raise HTTPException(
+                        503,
+                        f"Agent runtime unavailable at {base_url}. Please retry shortly.",
+                    ) from last_error
+                break
+
+            await asyncio.sleep(base_delay * attempt)
+
+        if response is None:
+            raise HTTPException(
+                503, "Agent runtime request failed before a response was received"
+            )
 
     if response.is_success:
         return {
