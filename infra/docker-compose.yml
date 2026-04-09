@@ -205,12 +205,14 @@ services:
       # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
       # Ollama 사용: LLM_BACKEND=ollama (--profile ollama 포함 실행 필요)
       # vLLM  사용: LLM_BACKEND=vllm   (--profile vllm  포함 실행 필요)
-      LLM_BACKEND: ${LLM_BACKEND:-claude}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
-      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      # macOS host Ollama 우선 사용 (Docker 내부 CPU fallback 회피)
+      # 필요 시 OLLAMA_URL 로 컨테이너/원격 주소를 override 가능
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:3b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
