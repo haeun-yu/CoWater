@@ -455,7 +455,6 @@ function MaritimeMap() {
   const [navAidVisible, setNavAidVisible] = useState(true);
   const [fairwayVisible, setFairwayVisible] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
-  const [safetyBufferVisible, setSafetyBufferVisible] = useState(true);
   const [headingSectorVisible, setHeadingSectorVisible] = useState(true);
   const [predictionVisible, setPredictionVisible] = useState(true);
 
@@ -600,28 +599,6 @@ function MaritimeMap() {
           "line-color": "#fbbf24",
           "line-width": 2,
           "line-opacity": 0.65,
-          "line-dasharray": [3, 2],
-        },
-      });
-
-      map.addLayer({
-        id: "selected-safety-buffer-fill",
-        type: "fill",
-        source: "selected-safety-buffer",
-        paint: {
-          "fill-color": "#38bdf8",
-          "fill-opacity": 0.08,
-        },
-      });
-
-      map.addLayer({
-        id: "selected-safety-buffer-line",
-        type: "line",
-        source: "selected-safety-buffer",
-        paint: {
-          "line-color": "#38bdf8",
-          "line-width": 1.4,
-          "line-opacity": 0.55,
           "line-dasharray": [3, 2],
         },
       });
@@ -1212,14 +1189,6 @@ function MaritimeMap() {
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
-    const vis = safetyBufferVisible ? "visible" : "none";
-    for (const id of ["selected-safety-buffer-fill", "selected-safety-buffer-line"]) {
-      mapRef.current.setLayoutProperty(id, "visibility", vis);
-    }
-  }, [safetyBufferVisible, mapLoaded]);
-
-  useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
     const vis = headingSectorVisible ? "visible" : "none";
     for (const id of ["selected-heading-sector-fill", "selected-heading-sector-line"]) {
       mapRef.current.setLayoutProperty(id, "visibility", vis);
@@ -1240,7 +1209,7 @@ function MaritimeMap() {
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
   const activeNauticalLayerCount = Number(navAidVisible) + Number(fairwayVisible) + Number(seamarkVisible);
-  const activeSelectedOverlayCount = Number(safetyBufferVisible) + Number(headingSectorVisible) + Number(predictionVisible);
+  const activeSelectedOverlayCount = Number(headingSectorVisible) + Number(predictionVisible);
 
   return (
     <div className="relative w-full h-full">
@@ -1355,20 +1324,6 @@ function MaritimeMap() {
             <span
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
             />
-          </button>
-
-          <button
-            onClick={() => setSafetyBufferVisible((v) => !v)}
-            title="선택 선박 안전 반경 표시"
-            aria-pressed={safetyBufferVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              safetyBufferVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${safetyBufferVisible ? "bg-sky-300" : "bg-ocean-700"}`} />
-            안전 반경
           </button>
 
           <button
