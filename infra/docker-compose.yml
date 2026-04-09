@@ -54,10 +54,10 @@ services:
     container_name: cowater-core
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://cowater:cowater_dev@postgres:5432/cowater
-      REDIS_URL: redis://redis:6379
-      AGENTS_API_URL: http://agents:8001
-      LOG_LEVEL: info
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://cowater:cowater_dev@postgres:5432/cowater}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      AGENTS_API_URL: ${AGENTS_API_URL:-http://agents:8001}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "7700:8000"
     depends_on:
@@ -76,9 +76,9 @@ services:
     container_name: cowater-moth-bridge
     restart: unless-stopped
     environment:
-      MOTH_SERVER_URL: wss://cobot.center:8287
-      REDIS_URL: redis://redis:6379
-      LOG_LEVEL: info
+      MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       RAW_PAYLOAD_MODE: ${RAW_PAYLOAD_MODE:-cache}
       RAW_PAYLOAD_PROTOCOLS: ${RAW_PAYLOAD_PROTOCOLS:-ais,ros,mavlink,nmea}
       RAW_PAYLOAD_MAX_BYTES: ${RAW_PAYLOAD_MAX_BYTES:-4096}
@@ -200,8 +200,8 @@ services:
     container_name: cowater-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: redis://redis:6379
-      CORE_API_URL: http://core:8000
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       # ── LLM 백엔드 설정 ─────────────────────────────
       # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
       # Ollama 사용: LLM_BACKEND=ollama (--profile ollama 포함 실행 필요)
@@ -209,15 +209,13 @@ services:
       LLM_BACKEND: ${LLM_BACKEND:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
-      # macOS host Ollama 우선 사용 (Docker 내부 CPU fallback 회피)
-      # 필요 시 OLLAMA_URL 로 컨테이너/원격 주소를 override 가능
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "7701:8001"
     depends_on:
@@ -238,11 +236,11 @@ services:
     profiles:
       - simulation
     environment:
-      MOTH_SERVER_URL: wss://cobot.center:8287
-      CORE_API_URL: http://core:8000
+      MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
+      CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       SCENARIO: ${SCENARIO:-demo}
       TIME_SCALE: "3.0"
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
 
   # ─────────────────────────────────────────────────────
   # Frontend
@@ -252,10 +250,10 @@ services:
       context: ../services/frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:7700
-        NEXT_PUBLIC_WS_URL: ws://localhost:7700
-        NEXT_PUBLIC_AGENTS_URL: http://localhost:7701
-        NEXT_PUBLIC_POSITION_WS_URL: ws://localhost:7703
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:7700}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:7700}
+        NEXT_PUBLIC_AGENTS_URL: ${NEXT_PUBLIC_AGENTS_URL:-http://localhost:7701}
+        NEXT_PUBLIC_POSITION_WS_URL: ${NEXT_PUBLIC_POSITION_WS_URL:-ws://localhost:7703}
     container_name: cowater-frontend
     restart: unless-stopped
     ports:
