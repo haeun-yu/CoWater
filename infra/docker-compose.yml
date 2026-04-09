@@ -236,11 +236,15 @@ services:
     profiles:
       - simulation
     environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       SCENARIO: ${SCENARIO:-demo}
       TIME_SCALE: "3.0"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
 
   # ─────────────────────────────────────────────────────
   # Frontend

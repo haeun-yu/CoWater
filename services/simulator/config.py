@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     moth_channel_name: str = "cowater-ais"
     moth_track: str = "data"
 
+    redis_url: str = "redis://localhost:6379/0"  # Redis pub/sub 연결
     core_api_url: str = "http://localhost:7700"  # 플랫폼 등록용
     scenario: str = "default"  # scenarios/ 디렉토리 내 파일명 (확장자 제외)
     tick_rate_hz: float = 1.0  # 시뮬레이션 틱 주기 (1Hz = 1초마다 위치 갱신)

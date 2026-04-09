@@ -74,11 +74,13 @@ class MothPublisher:
             # 초기 MIME 전송
             await ws.send(_MIME)
             last_mime_at = asyncio.get_event_loop().time()
+            last_data_at = last_mime_at
+            sent_count = 0
 
             while True:
                 now = asyncio.get_event_loop().time()
 
-                # MIME 주기적 재전송
+                # MIME 주기적 재전송 (30초 idle 타임아웃 방지)
                 if now - last_mime_at >= _MIME_RESEND_INTERVAL:
                     await ws.send(_MIME)
                     last_mime_at = now
@@ -87,5 +89,9 @@ class MothPublisher:
                 try:
                     sentence = await asyncio.wait_for(self._queue.get(), timeout=0.1)
                     await ws.send(sentence.encode("ascii"))
+                    last_data_at = now
+                    sent_count += 1
+                    if sent_count % 15 == 0:
+                        logger.debug("Moth publisher sent %d sentences", sent_count)
                 except asyncio.TimeoutError:
                     pass

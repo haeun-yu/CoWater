@@ -5,7 +5,7 @@ import logging
 import os
 
 from config import settings
-from moth_publisher import MothPublisher
+from redis_publisher import RedisPublisher
 from scenario_runner import ScenarioRunner
 
 logging.basicConfig(
@@ -24,7 +24,7 @@ async def main() -> None:
     if not os.path.exists(scenario_path):
         raise FileNotFoundError(f"Scenario not found: {scenario_path}")
 
-    publisher = MothPublisher()
+    publisher = RedisPublisher()
     runner = ScenarioRunner(scenario_path, publisher)
 
     logger.info("Starting simulator: scenario=%s time_scale=%.1fx", settings.scenario, settings.time_scale)
