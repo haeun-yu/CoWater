@@ -1,4 +1,4 @@
-.PHONY: up-host-ollama up-docker-ollama up-vllm down-host-ollama down-docker-ollama down-vllm downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
+.PHONY: up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim down-host-ollama down-docker-ollama down-vllm down-host-ollama-sim down-docker-ollama-sim down-vllm-sim downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
 
 up-host-ollama:
 	bash infra/run.sh host-ollama up
@@ -9,6 +9,20 @@ up-docker-ollama:
 up-vllm:
 	bash infra/run.sh vllm up
 
+# ─────────────────────────────────────────────────────
+# 시뮬레이터 포함 실행 (SCENARIO 환경변수로 시나리오 선택)
+# 예: make up-host-ollama-sim
+#     SCENARIO=collision_risk make up-host-ollama-sim
+# ─────────────────────────────────────────────────────
+up-host-ollama-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh host-ollama up
+
+up-docker-ollama-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh docker-ollama up
+
+up-vllm-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh vllm up
+
 down-host-ollama:
 	bash infra/run.sh host-ollama down
 
@@ -17,6 +31,15 @@ down-docker-ollama:
 
 down-vllm:
 	bash infra/run.sh vllm down
+
+down-host-ollama-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh host-ollama down
+
+down-docker-ollama-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh docker-ollama down
+
+down-vllm-sim:
+	SCENARIO=${SCENARIO:-demo} bash infra/run.sh vllm down
 
 downall-host-ollama:
 	bash infra/run.sh host-ollama down-all

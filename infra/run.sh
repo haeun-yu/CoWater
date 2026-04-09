@@ -9,6 +9,7 @@ ACTION="${2:-up}"
 PRESET="${3:-full}"
 
 ENV_FILE_OVERRIDE="${COWATER_ENV_FILE:-}"
+SCENARIO="${SCENARIO:-}"
 NO_DEPS=false
 SERVICES=()
 
@@ -31,6 +32,11 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+# SCENARIO이 설정되면 simulation 프로필 활성화
+if [[ -n "$SCENARIO" ]]; then
+  PROFILES+=(--profile simulation)
+fi
 
 if [[ -n "$ENV_FILE_OVERRIDE" ]]; then
   ENV_FILE="$ENV_FILE_OVERRIDE"
@@ -177,6 +183,11 @@ compose() {
 
   if [[ ${#PROFILES[@]} -gt 0 ]]; then
     cmd+=("${PROFILES[@]}")
+  fi
+
+  # SCENARIO 환경변수 전달
+  if [[ -n "$SCENARIO" ]]; then
+    cmd+=(-e SCENARIO="$SCENARIO")
   fi
 
   cmd+=("$@")
