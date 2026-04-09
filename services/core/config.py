@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     command_request_max_attempts: int = 3
     command_request_base_delay_sec: float = 0.5
     command_tokens_json: str = '{"viewer-dev":{"actor":"viewer-dev","role":"viewer"},"operator-dev":{"actor":"operator-dev","role":"operator"},"admin-dev":{"actor":"admin-dev","role":"admin"}}'
+    auth_session_secret: str = "cowater-dev-session-secret"
+    auth_session_expire_sec: int = 43200
+    auth_session_issuer: str = "cowater-core"
 
     # WebSocket
     ws_ping_interval: int = 20  # seconds

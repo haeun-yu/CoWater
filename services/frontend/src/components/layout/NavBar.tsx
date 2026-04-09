@@ -6,6 +6,7 @@ import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
 import { useSystemStore } from "@/stores/systemStore";
+import { useAuthStore } from "@/stores/authStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import { useEffect, useState, useCallback } from "react";
 
@@ -24,6 +25,9 @@ export default function NavBar() {
   const aiLogs = useAILogStore((s) => s.logs);
   const streams = useSystemStore((s) => s.streams);
   const newAlerts = alerts.filter((a) => a.status === "new").length;
+  const actor = useAuthStore((s) => s.actor);
+  const role = useAuthStore((s) => s.role);
+  const logout = useAuthStore((s) => s.logout);
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
@@ -137,15 +141,28 @@ export default function NavBar() {
            <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
          </div>
          <button
-           onClick={toggleSound}
+            onClick={toggleSound}
            title={soundEnabled ? "경보음 켜짐 — 클릭하여 끄기" : "경보음 꺼짐 — 클릭하여 켜기"}
            aria-pressed={soundEnabled}
            className={`text-sm transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
-         >
-           {soundEnabled ? "🔔" : "🔕"}
-         </button>
-         <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
-       </div>
+          >
+            {soundEnabled ? "🔔" : "🔕"}
+          </button>
+          {actor && role && (
+            <div className="hidden lg:flex items-center gap-2 rounded border border-ocean-800 px-2 py-1 text-[11px]">
+              <span className="text-ocean-300">{actor}</span>
+              <span className="text-ocean-600">·</span>
+              <span className="text-ocean-500 uppercase">{role}</span>
+            </div>
+          )}
+          <button
+            onClick={logout}
+            className="text-[11px] text-slate-400 hover:text-red-300 transition-colors"
+          >
+            로그아웃
+          </button>
+          <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
+        </div>
       </header>
   );
 }

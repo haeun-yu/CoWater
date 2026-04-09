@@ -159,3 +159,9 @@ export interface CommandAuthStatus {
   actor: string | null;
   role: CommandRole | null;
 }
+
+export interface AuthMeResponse {
+  authenticated: boolean;
+  actor: string;
+  role: CommandRole;
+}

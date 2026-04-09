@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useToastStore } from "@/stores/toastStore";
-import type { Alert, AlertSeverity } from "@/types";
+import type { Alert, AlertSeverity, CommandRole } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import Link from "next/link";
@@ -41,9 +42,13 @@ const ALERT_TYPE_KR: Record<string, string> = {
   traffic: "교통 혼잡",
 };
 
+const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
 export default function DashboardAlertPanel() {
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const platforms = usePlatformStore((s) => s.platforms);
   const alertStream = useSystemStore((s) => s.streams.alert);
   const alertLoad = useSystemStore((s) => s.initialData.alerts);
@@ -51,6 +56,7 @@ export default function DashboardAlertPanel() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [pendingAlertId, setPendingAlertId] = useState<string | null>(null);
+  const canOperate = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.operator;
 
   const newAlerts = useMemo(() => alerts.filter((a) => a.status === "new"), [alerts]);
   const critical = newAlerts.filter((a) => a.severity === "critical").length;
@@ -65,11 +71,12 @@ export default function DashboardAlertPanel() {
   );
 
   async function acknowledge(alertId: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     setPendingAlertId(alertId);
     try {
       const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action: "acknowledge" }),
       });
       if (!res.ok) {
@@ -239,13 +246,15 @@ export default function DashboardAlertPanel() {
                         {alert.recommendation}
                       </div>
                     )}
-                    <button
-                      onClick={() => acknowledge(alert.alert_id)}
-                      disabled={pendingAlertId === alert.alert_id}
-                      className="text-xs px-2.5 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
-                    >
-                      {pendingAlertId === alert.alert_id ? "처리 중..." : "인지 처리"}
-                    </button>
+                    {canOperate && (
+                      <button
+                        onClick={() => acknowledge(alert.alert_id)}
+                        disabled={pendingAlertId === alert.alert_id}
+                        className="text-xs px-2.5 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
+                      >
+                        {pendingAlertId === alert.alert_id ? "처리 중..." : "인지 처리"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

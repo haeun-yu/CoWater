@@ -2,27 +2,30 @@
 
 import { useState, useEffect } from "react";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { getCoreApiUrl } from "@/lib/publicUrl";
-import type { Alert, AlertSeverity, AlertStatus } from "@/types";
+import type { Alert, AlertSeverity, AlertStatus, CommandRole } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
 
-async function apiDeleteAlerts(alertIds: string[]) {
+const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
+async function apiDeleteAlerts(alertIds: string[], token: string) {
   const res = await fetch(`${getCoreApiUrl()}/alerts`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ alert_ids: alertIds }),
   });
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json() as Promise<{ deleted: number }>;
 }
 
-async function apiRunAlertAction(alertId: string, action: string) {
+async function apiRunAlertAction(alertId: string, action: string, token: string) {
   const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ action }),
   });
   if (!res.ok) throw new Error(`Action failed: ${res.status}`);
@@ -82,6 +85,8 @@ export default function AlertsPage() {
   const removeAlerts = useAlertStore((s) => s.removeAlerts);
   const platforms = usePlatformStore((s) => s.platforms);
   const alertLoad = useSystemStore((s) => s.initialData.alerts);
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">(
     "all",
   );
@@ -98,6 +103,9 @@ export default function AlertsPage() {
   const [deleting, setDeleting] = useState(false);
   const [pastPage, setPastPage] = useState(1);
   const PAST_PAGE_SIZE = 30;
+
+  const canOperate = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.operator;
+  const canAdmin = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.admin;
 
   const agentFilters = Array.from(new Set(alerts.map((alert) => alert.generated_by))).sort();
   const workflowFilters = Array.from(new Set(alerts.map((alert) => getWorkflowState(alert)).filter((state): state is string => state !== null))).sort();
@@ -158,7 +166,8 @@ export default function AlertsPage() {
     setDeleting(true);
     try {
       const ids = Array.from(selected);
-      await apiDeleteAlerts(ids);
+      if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.admin) return;
+      await apiDeleteAlerts(ids, token);
       removeAlerts(ids);
       setSelected(new Set());
     } catch (e) {
@@ -177,9 +186,10 @@ export default function AlertsPage() {
   }
 
   async function runAction(alertId: string, action: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     setActing(`${alertId}:${action}`);
     try {
-      const updated = await apiRunAlertAction(alertId, action);
+      const updated = await apiRunAlertAction(alertId, action, token);
       updateAlert(updated);
     } catch (e) {
       console.error(e);
@@ -201,7 +211,7 @@ export default function AlertsPage() {
             경보 현황
           </h1>
           <div className="flex items-center gap-3">
-            {someSelected && (
+            {someSelected && role && ROLE_ORDER[role] >= ROLE_ORDER.admin && (
               <button
                 onClick={handleDelete}
                 disabled={deleting}
@@ -350,8 +360,8 @@ export default function AlertsPage() {
             ))}
           </div>
 
-          {/* 전체 선택 */}
-          {filtered.length > 0 && (
+          {/* 전체 선택 (admin 전용 — 삭제 기능에만 사용) */}
+          {canAdmin && filtered.length > 0 && (
             <label className="flex items-center gap-1.5 cursor-pointer ml-2 select-none">
               <input
                 type="checkbox"
@@ -401,6 +411,8 @@ export default function AlertsPage() {
                     onAck={() => runAction(a.alert_id, "acknowledge")}
                     getPlatformName={getPlatformName}
                     isActive
+                    canOperate={canOperate}
+                    canAdmin={canAdmin}
                     checked={selected.has(a.alert_id)}
                     onCheck={() => toggleOne(a.alert_id)}
                     onOpenModal={() => setModalAlertId(a.alert_id)}
@@ -436,6 +448,8 @@ export default function AlertsPage() {
                   onAck={() => runAction(a.alert_id, "acknowledge")}
                   getPlatformName={getPlatformName}
                   isActive={false}
+                  canOperate={canOperate}
+                  canAdmin={canAdmin}
                   checked={selected.has(a.alert_id)}
                   onCheck={() => toggleOne(a.alert_id)}
                   onOpenModal={() => setModalAlertId(a.alert_id)}
@@ -468,6 +482,7 @@ export default function AlertsPage() {
           onClose={() => setModalAlertId(null)}
           onAction={runAction}
           acting={acting}
+          canOperate={canOperate}
           getPlatformName={getPlatformName}
         />
       )}
@@ -507,6 +522,8 @@ function AlertRow({
   onAck,
   getPlatformName,
   isActive,
+  canOperate,
+  canAdmin,
   checked,
   onCheck,
   onOpenModal,
@@ -519,6 +536,8 @@ function AlertRow({
   onAck: () => void;
   getPlatformName: (id: string) => string;
   isActive: boolean;
+  canOperate: boolean;
+  canAdmin: boolean;
   checked: boolean;
   onCheck: () => void;
   onOpenModal: () => void;
@@ -539,18 +558,20 @@ function AlertRow({
     >
       {/* 요약 행 */}
       <div className="px-3 py-2.5 flex items-start gap-3">
-        {/* 체크박스 */}
-        <div
-          className="flex-shrink-0 pt-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={onCheck}
-            className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
-          />
-        </div>
+        {/* 체크박스 (admin 전용 — 삭제 기능에만 사용) */}
+        {canAdmin && (
+          <div
+            className="flex-shrink-0 pt-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={onCheck}
+              className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+            />
+          </div>
+        )}
         <div
           className="flex-1 cursor-pointer flex items-start gap-3"
           onClick={onToggle}
@@ -683,8 +704,8 @@ function AlertRow({
             </div>
           )}
 
-          {/* 액션 */}
-          {isActive && (
+          {/* 액션 (operator 이상 전용) */}
+          {isActive && canOperate && (
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={onAck}
@@ -757,12 +778,14 @@ function AlertActionModal({
   onClose,
   onAction,
   acting,
+  canOperate,
   getPlatformName,
 }: {
   alert: Alert;
   onClose: () => void;
   onAction: (alertId: string, action: string) => void;
   acting: string | null;
+  canOperate: boolean;
   getPlatformName: (id: string) => string;
 }) {
   const fallback = Boolean(alert.metadata?.llm_fallback);
@@ -837,43 +860,49 @@ function AlertActionModal({
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => onAction(alert.alert_id, "acknowledge")}
-            disabled={acting === `${alert.alert_id}:acknowledge`}
-            className="text-xs px-3 py-1.5 rounded border border-ocean-600 text-ocean-200 disabled:opacity-40"
-          >
-            인지 처리
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "resolve")}
-            disabled={acting === `${alert.alert_id}:resolve`}
-            className="text-xs px-3 py-1.5 rounded border border-green-500/40 text-green-300 disabled:opacity-40"
-          >
-            해결 처리
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "notify_guard")}
-            disabled={acting === `${alert.alert_id}:notify_guard`}
-            className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
-          >
-            관계기관 통보
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "start_investigation")}
-            disabled={acting === `${alert.alert_id}:start_investigation`}
-            className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
-          >
-            조사 시작
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "escalate")}
-            disabled={acting === `${alert.alert_id}:escalate`}
-            className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
-          >
-            상위 보고
-          </button>
-        </div>
+        {canOperate ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => onAction(alert.alert_id, "acknowledge")}
+              disabled={acting === `${alert.alert_id}:acknowledge`}
+              className="text-xs px-3 py-1.5 rounded border border-ocean-600 text-ocean-200 disabled:opacity-40"
+            >
+              인지 처리
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "resolve")}
+              disabled={acting === `${alert.alert_id}:resolve`}
+              className="text-xs px-3 py-1.5 rounded border border-green-500/40 text-green-300 disabled:opacity-40"
+            >
+              해결 처리
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "notify_guard")}
+              disabled={acting === `${alert.alert_id}:notify_guard`}
+              className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
+            >
+              관계기관 통보
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "start_investigation")}
+              disabled={acting === `${alert.alert_id}:start_investigation`}
+              className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
+            >
+              조사 시작
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "escalate")}
+              disabled={acting === `${alert.alert_id}:escalate`}
+              className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
+            >
+              상위 보고
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 text-xs text-ocean-500">
+            경보 처리 권한이 없습니다. operator 이상 로그인이 필요합니다.
+          </div>
+        )}
       </div>
     </div>
   );

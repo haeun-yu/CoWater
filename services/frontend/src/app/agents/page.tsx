@@ -7,12 +7,14 @@ import {
   isAIAgent,
   type ActivityLogEntry,
 } from "@/stores/aiLogStore";
+import { useAuthStore } from "@/stores/authStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
 
 const AGENTS_URL = getAgentsApiUrl();
+const ROLE_ORDER = { viewer: 0, operator: 1, admin: 2 } as const;
 
 // ── 에이전트 메타 ──────────────────────────────────────────────────────────────
 
@@ -284,6 +286,9 @@ export default function AgentsPage() {
   const [apiStatus, setApiStatus] = useState<"ok" | "fallback" | "unknown">("unknown");
   const [modelEditing, setModelEditing] = useState<string | null>(null);
   const [modelInput, setModelInput] = useState<string>("");
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
+  const canManageAgents = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.admin;
 
   useEffect(() => {
     fetch(`${AGENTS_URL}/agents`)
@@ -299,9 +304,13 @@ export default function AgentsPage() {
   }, [logs]);
 
   async function toggleAgent(id: string, enable: boolean) {
+    if (!token || !canManageAgents) return;
     setUpdating(id);
     try {
-      await fetch(`${AGENTS_URL}/agents/${id}/${enable ? "enable" : "disable"}`, { method: "PATCH" });
+      await fetch(`${AGENTS_URL}/agents/${id}/${enable ? "enable" : "disable"}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setStatuses((p) => p.map((a) => (a.agent_id === id ? { ...a, enabled: enable } : a)));
     } finally {
       setUpdating(null);
@@ -309,11 +318,12 @@ export default function AgentsPage() {
   }
 
   async function setLevel(id: string, level: string) {
+    if (!token || !canManageAgents) return;
     setUpdating(id);
     try {
       await fetch(`${AGENTS_URL}/agents/${id}/level`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ level }),
       });
       setStatuses((p) => p.map((a) => (a.agent_id === id ? { ...a, level } : a)));
@@ -323,13 +333,14 @@ export default function AgentsPage() {
   }
 
   async function applyModel(id: string, model: string) {
+    if (!token || !canManageAgents) return;
     const trimmed = model.trim();
     if (!trimmed) return;
     setUpdating(id);
     try {
       const res = await fetch(`${AGENTS_URL}/agents/${id}/model`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ model: trimmed }),
       });
       if (res.ok) {
@@ -448,6 +459,7 @@ export default function AgentsPage() {
                     maxCount={maxCount}
                     isActive={activeAlertAgents.has(a.agent_id)}
                     isUpdating={updating === a.agent_id}
+                    canManage={canManageAgents}
                     selected={agentFilter === a.agent_id}
                     onSelect={() => {
                       setAgentFilter(a.agent_id);
@@ -481,6 +493,7 @@ export default function AgentsPage() {
                     maxCount={maxCount}
                     isActive={activeAlertAgents.has(a.agent_id)}
                     isUpdating={updating === a.agent_id}
+                    canManage={canManageAgents}
                     selected={agentFilter === a.agent_id}
                     onSelect={() => {
                       setAgentFilter(a.agent_id);
@@ -683,15 +696,19 @@ export default function AgentsPage() {
                       취소
                     </button>
                   ) : (
-                    <button
-                      onClick={() => {
-                        setModelEditing(focusAgentId);
-                        setModelInput(focusStatus?.model_name?.split("/")[1] ?? "");
-                      }}
-                      className="text-xs text-ocean-400 hover:text-ocean-300"
-                    >
-                      변경
-                    </button>
+                    canManageAgents ? (
+                      <button
+                        onClick={() => {
+                          setModelEditing(focusAgentId);
+                          setModelInput(focusStatus?.model_name?.split("/")[1] ?? "");
+                        }}
+                        className="text-xs text-ocean-400 hover:text-ocean-300"
+                      >
+                        변경
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-slate-600">admin 필요</span>
+                    )
                   )}
                 </div>
                 {modelEditing === focusAgentId ? (
@@ -801,6 +818,7 @@ function AgentControlRow({
   maxCount,
   isActive,
   isUpdating,
+  canManage,
   selected,
   onSelect,
   onToggle,
@@ -811,6 +829,7 @@ function AgentControlRow({
   maxCount: number;
   isActive: boolean;
   isUpdating: boolean;
+  canManage: boolean;
   selected: boolean;
   onSelect: () => void;
   onToggle: (id: string, e: boolean) => void;
@@ -863,7 +882,7 @@ function AgentControlRow({
           <select
             value={agent.level}
             onChange={(e) => onLevel(agent.agent_id, e.target.value)}
-            disabled={isUpdating || !agent.enabled}
+            disabled={isUpdating || !agent.enabled || !canManage}
             onClick={(e) => e.stopPropagation()}
             className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 flex-shrink-0 disabled:opacity-40 cursor-pointer"
           >
@@ -880,7 +899,7 @@ function AgentControlRow({
         {/* ON/OFF 토글 */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggle(agent.agent_id, !agent.enabled); }}
-          disabled={isUpdating}
+          disabled={isUpdating || !canManage}
           className={`w-7 h-3.5 rounded-full relative flex-shrink-0 transition-colors disabled:opacity-40 ${
             agent.enabled ? "bg-ocean-600" : "bg-slate-700"
           }`}

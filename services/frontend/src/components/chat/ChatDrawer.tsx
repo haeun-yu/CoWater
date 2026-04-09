@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { getAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
-import type { AlertStatus, CommandAuthStatus, CommandResponse, CommandRole } from "@/types";
+import type { AlertStatus, CommandResponse, CommandRole } from "@/types";
 
 declare global {
   interface Window {
@@ -62,12 +63,6 @@ interface Message {
   commandBlockedReason?: string;
 }
 
-type CommandAuthState =
-  | { status: "missing"; actor: null; role: null; message: string }
-  | { status: "checking"; actor: null; role: null; message: string }
-  | { status: "ready"; actor: string; role: CommandRole; message: string }
-  | { status: "invalid"; actor: null; role: null; message: string };
-
 const QUICK_PROMPTS = [
   "현재 상황을 요약해줘",
   "가장 위험한 경보를 설명해줘",
@@ -84,14 +79,6 @@ export default function ChatDrawer() {
   const [, startTransition] = useTransition();
   const [isLoading, setIsLoading] = useState(false);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
-  const [commandToken, setCommandToken] = useState("");
-  const [showTokenInput, setShowTokenInput] = useState(false);
-  const [commandAuth, setCommandAuth] = useState<CommandAuthState>({
-    status: "missing",
-    actor: null,
-    role: null,
-    message: "명령 권한이 연결되지 않았습니다.",
-  });
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
@@ -104,6 +91,10 @@ export default function ChatDrawer() {
   const setAlertStatus = useAlertStore((s) => s.updateAlert);
   const setAgentEnabled = useAgentStore((s) => s.setEnabled);
   const setAgentLevel = useAgentStore((s) => s.setLevel);
+  const sessionToken = useAuthStore((s) => s.token);
+  const authStatus = useAuthStore((s) => s.status);
+  const authActor = useAuthStore((s) => s.actor);
+  const authRole = useAuthStore((s) => s.role);
   const platforms = usePlatformStore((s) => s.platforms);
   const selectedId = usePlatformStore((s) => s.selectedId);
 
@@ -111,6 +102,11 @@ export default function ChatDrawer() {
   const warningCount = alerts.filter((a) => a.status === "new" && a.severity === "warning").length;
   const platformCount = Object.keys(platforms).length;
   const selectedPlatform = selectedId ? platforms[selectedId] : null;
+  const commandAuth = authStatus === "authenticated" && authActor && authRole
+    ? { status: "ready" as const, actor: authActor, role: authRole, message: `${authActor} · ${authRole} 권한 연결됨` }
+    : authStatus === "checking"
+      ? { status: "checking" as const, actor: null, role: null, message: "권한을 확인하는 중입니다." }
+      : { status: "missing" as const, actor: null, role: null, message: "로그인이 필요합니다." };
 
   useEffect(() => {
     fetch(`${getAgentsApiUrl()}/agents/chat-agent`)
@@ -121,21 +117,7 @@ export default function ChatDrawer() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const savedToken = window.localStorage.getItem("cowater-command-token") || "";
-    setCommandToken(savedToken);
     setVoiceSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
-
-    if (!savedToken.trim()) {
-      setCommandAuth({
-        status: "missing",
-        actor: null,
-        role: null,
-        message: "명령 권한이 연결되지 않았습니다.",
-      });
-      return;
-    }
-
-    void verifyCommandToken(savedToken);
   }, []);
 
   useEffect(() => {
@@ -278,19 +260,18 @@ export default function ChatDrawer() {
     const msg = messages.find((m) => m.id === msgId);
     if (!msg?.commandPreview || !msg.commandOriginalText) return;
 
-    if (!commandToken.trim()) {
+    if (!sessionToken?.trim()) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
             ? {
                 ...m,
                 commandStatus: "failed",
-                commandResult: "명령 토큰이 필요합니다. 오른쪽 하단 ⚙ 아이콘으로 토큰을 설정하세요.",
+                commandResult: "로그인이 필요합니다. 로그인 후 명령을 실행하세요.",
               }
             : m,
         ),
       );
-      setShowTokenInput(true);
       return;
     }
 
@@ -308,7 +289,6 @@ export default function ChatDrawer() {
             : m,
         ),
       );
-      if (commandAuth.status !== "ready") setShowTokenInput(true);
       return;
     }
 
@@ -321,7 +301,7 @@ export default function ChatDrawer() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${commandToken.trim()}`,
+          Authorization: `Bearer ${sessionToken.trim()}`,
         },
         body: JSON.stringify({
           text: msg.commandOriginalText,
@@ -418,64 +398,6 @@ export default function ChatDrawer() {
     recognition.start();
   }
 
-  function updateCommandToken(value: string) {
-    setCommandToken(value);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("cowater-command-token", value);
-    }
-
-    if (!value.trim()) {
-      setCommandAuth({
-        status: "missing",
-        actor: null,
-        role: null,
-        message: "명령 권한이 연결되지 않았습니다.",
-      });
-      return;
-    }
-
-    void verifyCommandToken(value);
-  }
-
-  async function verifyCommandToken(rawToken: string) {
-    const token = rawToken.trim();
-    if (!token) return;
-
-    setCommandAuth({
-      status: "checking",
-      actor: null,
-      role: null,
-      message: "명령 권한을 확인하는 중입니다.",
-    });
-
-    try {
-      const res = await fetch(`${getCoreApiUrl()}/commands/auth-status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const payload = (await res.json()) as CommandAuthStatus;
-      if (!payload.authenticated || !payload.role || !payload.actor) {
-        throw new Error("invalid auth payload");
-      }
-
-      setCommandAuth({
-        status: "ready",
-        actor: payload.actor,
-        role: payload.role,
-        message: `${payload.actor} · ${payload.role} 권한 연결됨`,
-      });
-    } catch {
-      setCommandAuth({
-        status: "invalid",
-        actor: null,
-        role: null,
-        message: "명령 토큰이 없거나 유효하지 않습니다.",
-      });
-    }
-  }
-
   function getCommandBlockedReason(requiredRole: CommandRole): string | null {
     if (commandAuth.status !== "ready" || !commandAuth.role) {
       return "명령 실행 권한 확인이 필요합니다. 먼저 토큰을 연결하세요.";
@@ -542,17 +464,17 @@ export default function ChatDrawer() {
             </div>
             <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
               <span className={`inline-block w-1.5 h-1.5 rounded-full ${commandAuth.status === "ready" ? "bg-green-400" : commandAuth.status === "checking" ? "bg-amber-400 animate-pulse" : "bg-slate-600"}`} />
-              <span className={commandAuth.status === "ready" ? "text-green-300" : commandAuth.status === "invalid" ? "text-red-300" : "text-slate-500"}>
+              <span className={commandAuth.status === "ready" ? "text-green-300" : "text-slate-500"}>
                 {commandAuth.message}
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowTokenInput((v) => !v)}
-              title="명령 토큰 설정"
+              onClick={() => (window.location.href = "/login")}
+              title="권한 로그인"
               className={`text-xs px-2 py-1 rounded border transition-colors ${
-                commandToken
+                commandAuth.status === "ready"
                   ? "border-amber-700/50 text-amber-400 hover:border-amber-500"
                   : "border-slate-700 text-slate-500 hover:text-slate-300"
               }`}
@@ -578,27 +500,6 @@ export default function ChatDrawer() {
             </button>
           </div>
         </div>
-
-        {/* 토큰 설정 (접힘/펼침) */}
-        {showTokenInput && (
-          <div className="px-4 py-2.5 border-b border-slate-800 bg-amber-950/10 flex-shrink-0">
-            <p className="text-[10px] text-amber-400 mb-1.5 font-semibold">명령 실행 토큰</p>
-            <input
-              value={commandToken}
-              onChange={(e) => updateCommandToken(e.target.value)}
-              placeholder="예: operator-dev 또는 admin-dev"
-              className="w-full rounded border border-amber-800/40 bg-slate-950 px-3 py-1.5 text-[11px] text-amber-100 placeholder:text-amber-700/60 focus:outline-none focus:border-amber-500"
-            />
-            <p className="text-[10px] text-slate-600 mt-1">
-              개발용: viewer-dev / operator-dev / admin-dev
-            </p>
-            {commandAuth.status !== "ready" && (
-              <p className={`text-[10px] mt-1 ${commandAuth.status === "invalid" ? "text-red-300" : "text-slate-500"}`}>
-                {commandAuth.message}
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 상황 요약 바 */}
         <div className="px-4 py-2 border-b border-slate-800/60 flex items-center gap-3 text-[11px] flex-shrink-0 bg-slate-900/40">

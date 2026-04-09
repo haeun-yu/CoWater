@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     ai_max_pending_tasks: int = 32  # 대기 포함 전체 AI 태스크 상한
     reconnect_max_delay_sec: float = 60.0  # 컨슈머 재연결 최대 대기 (초)
     shutdown_drain_timeout_sec: float = 15.0  # 종료 시 AI 태스크 drain 대기 (초)
+    auth_session_secret: str = "cowater-dev-session-secret"
+    auth_session_issuer: str = "cowater-core"
     ais_check_interval_sec: int = 20  # AIS 타임아웃 체크 주기 (초)
     zone_reload_interval_sec: int = 300  # Zone 재로드 주기 (초)
 

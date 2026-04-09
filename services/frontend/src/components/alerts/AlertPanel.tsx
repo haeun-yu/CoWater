@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
-import type { Alert, AlertSeverity } from "@/types";
+import type { Alert, AlertSeverity, CommandRole } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 
@@ -14,12 +15,17 @@ const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   info: "정보",
 };
 
+const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
 export default function AlertPanel({ compact }: { compact?: boolean }) {
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const select = usePlatformStore((s) => s.select);
+  const canOperate = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.operator;
 
   const newCount = alerts.filter((a) => a.status === "new").length;
   const criticalCount = alerts.filter(
@@ -32,9 +38,10 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
     .filter((a) => !compact || a.status === "new");
 
   async function acknowledge(alertId: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "acknowledge" }),
     });
     if (!res.ok) return;
@@ -43,9 +50,10 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
   }
 
   async function runAction(alertId: string, action: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action }),
     });
     if (!res.ok) return;
@@ -108,6 +116,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
               onAck={() => acknowledge(alert.alert_id)}
               onAction={(action) => runAction(alert.alert_id, action)}
               onSelectPlatform={(id) => select(id)}
+              canOperate={canOperate}
             />
           ))
         )}
@@ -123,6 +132,7 @@ function AlertRow({
   onAck,
   onAction,
   onSelectPlatform,
+  canOperate,
 }: {
   alert: Alert;
   expanded: boolean;
@@ -130,6 +140,7 @@ function AlertRow({
   onAck: () => void;
   onAction: (action: string) => void;
   onSelectPlatform: (id: string) => void;
+  canOperate: boolean;
 }) {
   const isNew = alert.status === "new";
   const source = String((alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime");
@@ -219,7 +230,7 @@ function AlertRow({
           )}
 
           {/* 인지 버튼 */}
-          {alert.status === "new" && (
+          {alert.status === "new" && canOperate && (
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={onAck}
