@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { getAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { usePlatformStore } from "@/stores/platformStore";
-import type { CommandResponse } from "@/types";
+import type { AlertStatus, CommandResponse } from "@/types";
 
 declare global {
   interface Window {
@@ -85,6 +86,9 @@ export default function ChatDrawer() {
   const submitLockRef = useRef(false);
 
   const alerts = useAlertStore((s) => s.alerts);
+  const setAlertStatus = useAlertStore((s) => s.updateAlert);
+  const setAgentEnabled = useAgentStore((s) => s.setEnabled);
+  const setAgentLevel = useAgentStore((s) => s.setLevel);
   const platforms = usePlatformStore((s) => s.platforms);
   const selectedId = usePlatformStore((s) => s.selectedId);
 
@@ -286,12 +290,24 @@ export default function ChatDrawer() {
       const command = payload as CommandResponse;
       const parts = [`명령 실행 완료`, `요약: ${command.parsed.summary}`, `주체: ${command.actor}`];
       if (command.result?.kind === "alert") {
-        const alert = command.result.alert as { status?: string } | undefined;
+        const alert = command.result.alert as { alert_id?: string; status?: AlertStatus } | undefined;
         if (alert?.status) parts.push(`경보 상태: ${alert.status}`);
+        if (alert?.alert_id && alert.status) {
+          setAlertStatus({ alert_id: alert.alert_id, status: alert.status });
+        }
       } else if (command.result?.kind === "agent") {
         const r = command.result.response as Record<string, unknown> | undefined;
         if (r?.enabled !== undefined) parts.push(`활성화: ${String(r.enabled)}`);
         if (r?.level) parts.push(`레벨: ${String(r.level)}`);
+        if (command.result.agent_id && typeof r?.enabled === "boolean") {
+          setAgentEnabled(String(command.result.agent_id), r.enabled);
+        }
+        if (
+          command.result.agent_id &&
+          (r?.level === "L1" || r?.level === "L2" || r?.level === "L3")
+        ) {
+          setAgentLevel(String(command.result.agent_id), r.level);
+        }
       }
 
       setMessages((prev) =>
@@ -771,8 +787,16 @@ function ChatMessage({
 function renderAssistantContent(content: string, isError: boolean) {
   const textClass = isError ? "text-red-300" : "text-slate-100";
   const normalizedContent = content
+    .replace(/^보좌관\s*:\s*/gm, "")
+    .replace(/([가-힣]):(?=[^\s\n])/g, "$1: ")
+    .replace(/([A-Za-z0-9])([가-힣])/g, "$1 $2")
+    .replace(/([가-힣])([A-Za-z0-9])/g, "$1 $2")
+    .replace(/([가-힣])\(/g, "$1 (")
+    .replace(/\)([가-힣])/g, ") $1")
     .replace(/([.!?])(?=[^\s\n])/g, "$1\n\n")
     .replace(/([다요죠니다]\.)\s*/g, "$1\n\n")
+    .replace(/(\d+\.)\s*(?=[가-힣A-Za-z])/g, "$1 ")
+    .replace(/([•-])\s*(?=[가-힣A-Za-z])/g, "$1 ")
     .replace(/\n{3,}/g, "\n\n");
 
   return normalizedContent
