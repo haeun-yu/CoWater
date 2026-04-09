@@ -6,6 +6,11 @@ INFRA_DIR="$ROOT_DIR/infra"
 
 MODE="${1:-host-ollama}"
 ACTION="${2:-up}"
+PRESET="${3:-full}"
+
+ENV_FILE_OVERRIDE="${COWATER_ENV_FILE:-}"
+NO_DEPS=false
+SERVICES=()
 
 case "$MODE" in
   host-ollama)
@@ -22,7 +27,61 @@ case "$MODE" in
     ;;
   *)
     printf 'Unknown mode: %s\n' "$MODE" >&2
-    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama]\n' >&2
+    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "$ENV_FILE_OVERRIDE" ]]; then
+  ENV_FILE="$ENV_FILE_OVERRIDE"
+fi
+
+case "$PRESET" in
+  full)
+    SERVICES=()
+    ;;
+  data-node)
+    NO_DEPS=true
+    SERVICES=(postgres redis)
+    ;;
+  core-node)
+    NO_DEPS=true
+    SERVICES=(core)
+    ;;
+  agents-node)
+    NO_DEPS=true
+    SERVICES=(agents)
+    if [[ "$MODE" == "docker-ollama" ]]; then
+      SERVICES+=(ollama ollama-init)
+    elif [[ "$MODE" == "vllm" ]]; then
+      SERVICES+=(vllm)
+    fi
+    ;;
+  frontend-node)
+    NO_DEPS=true
+    SERVICES=(frontend)
+    ;;
+  bridge-node)
+    NO_DEPS=true
+    SERVICES=(moth-bridge)
+    ;;
+  llm-node)
+    NO_DEPS=true
+    case "$MODE" in
+      host-ollama)
+        SERVICES=()
+        ;;
+      docker-ollama)
+        SERVICES=(ollama ollama-init)
+        ;;
+      vllm)
+        SERVICES=(vllm)
+        ;;
+    esac
+    ;;
+  *)
+    printf 'Unknown preset: %s\n' "$PRESET" >&2
+    printf 'Allowed presets: full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node\n' >&2
     exit 1
     ;;
 esac
@@ -86,11 +145,34 @@ stop_host_ollama() {
 }
 
 compose() {
-  if [[ ${#PROFILES[@]} -gt 0 ]]; then
-    docker compose --env-file "$ENV_FILE" -f "$INFRA_DIR/docker-compose.yml" "${PROFILES[@]}" "$@"
-  else
-    docker compose --env-file "$ENV_FILE" -f "$INFRA_DIR/docker-compose.yml" "$@"
+  local subcommand="$1"
+  local -a cmd=(docker compose --env-file "$ENV_FILE" -f "$INFRA_DIR/docker-compose.yml")
+  local -a no_deps_args=()
+  local -a service_args=()
+
+  if $NO_DEPS && [[ "$subcommand" == "up" ]]; then
+    no_deps_args=(--no-deps)
   fi
+
+  if [[ ${#SERVICES[@]} -gt 0 ]]; then
+    service_args=("${SERVICES[@]}")
+  fi
+
+  if [[ ${#PROFILES[@]} -gt 0 ]]; then
+    cmd+=("${PROFILES[@]}")
+  fi
+
+  cmd+=("$@")
+
+  if [[ ${#no_deps_args[@]} -gt 0 ]]; then
+    cmd+=("${no_deps_args[@]}")
+  fi
+
+  if [[ ${#service_args[@]} -gt 0 ]]; then
+    cmd+=("${service_args[@]}")
+  fi
+
+  "${cmd[@]}"
 }
 
 case "$ACTION" in
@@ -99,17 +181,29 @@ case "$ACTION" in
     compose up -d
     ;;
   down)
-    compose down
+    if [[ ${#SERVICES[@]} -gt 0 ]]; then
+      compose stop
+    else
+      compose down
+    fi
     ;;
   down-all)
-    compose down
+    if [[ ${#SERVICES[@]} -gt 0 ]]; then
+      compose stop
+    else
+      compose down
+    fi
     if [[ "$MODE" == "host-ollama" ]]; then
       stop_host_ollama
     fi
     ;;
   restart)
     ensure_host_ollama
-    compose down
+    if [[ ${#SERVICES[@]} -gt 0 ]]; then
+      compose stop
+    else
+      compose down
+    fi
     compose up -d
     ;;
   ps)
@@ -127,7 +221,7 @@ case "$ACTION" in
     ;;
   *)
     printf 'Unknown action: %s\n' "$ACTION" >&2
-    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama]\n' >&2
+    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
     exit 1
     ;;
 esac
