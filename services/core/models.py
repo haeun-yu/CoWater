@@ -29,8 +29,12 @@ class PlatformModel(Base):
     capabilities: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default="{}")
     dimensions: Mapped[dict | None] = mapped_column(JSONB)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
 
 
 class PlatformReportModel(Base):
@@ -54,20 +58,30 @@ class PlatformReportModel(Base):
 class ZoneModel(Base):
     __tablename__ = "zones"
 
-    zone_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()"))
+    zone_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     zone_type: Mapped[str] = mapped_column(Text, nullable=False)
-    geometry: Mapped[object] = mapped_column(Geometry("GEOMETRY", srid=4326), nullable=False)
+    geometry: Mapped[object] = mapped_column(
+        Geometry("GEOMETRY", srid=4326), nullable=False
+    )
     rules: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("TRUE"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
 
 
 class AlertModel(Base):
     __tablename__ = "alerts"
 
-    alert_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()"))
+    alert_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
     alert_type: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default=text("'new'"))
@@ -77,6 +91,26 @@ class AlertModel(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     recommendation: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    # dedup_key: 전용 컬럼으로 인덱스 지원 (JSONB metadata에서 추출하는 것보다 빠름)
+    dedup_key: Mapped[str | None] = mapped_column(Text, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuditLogModel(Base):
+    __tablename__ = "audit_logs"
+
+    log_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str | None] = mapped_column(Text)
+    entity_type: Mapped[str | None] = mapped_column(Text)
+    entity_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )

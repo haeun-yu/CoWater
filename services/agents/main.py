@@ -18,9 +18,10 @@ from typing import Any
 
 import redis.asyncio as aioredis
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 from ai.anomaly_ai import AnomalyAIAgent
@@ -28,12 +29,14 @@ from ai.chat_agent import ChatAgent
 from ai.distress_agent import DistressAgent
 from ai.llm_client import make_llm_client
 from ai.report_agent import ReportAgent
+from auth import require_command_role
 from base import Agent, PlatformReport
 from config import settings
 from registry import AgentRegistry
 from rule.anomaly_rule import AnomalyRuleAgent
 from rule.cpa_agent import CPAAgent
 from rule.zone_monitor import ZoneMonitorAgent
+from shared.command_auth import CommandActor
 from shared.events import alert_created_pattern, platform_report_pattern
 
 logging.basicConfig(
@@ -54,6 +57,44 @@ _RECONNECT_MAX_DELAY = settings.reconnect_max_delay_sec
 _SHUTDOWN_DRAIN_TIMEOUT = settings.shutdown_drain_timeout_sec
 
 
+def _looks_like_command_request(text: str) -> bool:
+    compact = " ".join(text.lower().split())
+    if not compact:
+        return False
+    subject_markers = [
+        "agent",
+        "에이전트",
+        "alert",
+        "경보",
+        "보좌관",
+        "report",
+        "cpa",
+        "zone",
+        "anomaly",
+        "distress",
+    ]
+    action_markers = [
+        "level",
+        "레벨",
+        "enable",
+        "disable",
+        "run",
+        "ack",
+        "resolve",
+        "켜",
+        "꺼",
+        "실행",
+        "인지",
+        "확인",
+        "해결",
+        "변경",
+        "설정",
+    ]
+    return any(marker in compact for marker in subject_markers) and any(
+        marker in compact for marker in action_markers
+    )
+
+
 # ── 초기화 ──────────────────────────────────────────────────────────────────
 
 
@@ -69,6 +110,16 @@ def _setup_agents(redis: aioredis.Redis) -> None:
     ]
     for agent in agents:
         _registry.register(agent)
+
+
+async def _restore_agent_states() -> None:
+    """재시작 시 Redis에서 에이전트 상태 복구."""
+    for agent in _registry.all():
+        if hasattr(agent, "restore_state"):
+            try:
+                await agent.restore_state()
+            except Exception:
+                logger.exception("Failed to restore state for agent %s", agent.agent_id)
 
 
 # ── AI 태스크 헬퍼 ──────────────────────────────────────────────────────────
@@ -107,6 +158,9 @@ async def _dispatch_report(report: PlatformReport) -> None:
     Rule Agent: 순차 await (빠름, 이벤트 루프 차단 없음)
     AI Agent:   백그라운드 태스크로 실행 (Claude API 호출이 다음 보고 처리를 블로킹하지 않음)
     """
+    if settings.ignore_simulator_reports and report.is_simulator:
+        return
+
     rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
     ai_agents = [a for a in _registry.enabled() if a.agent_type == "ai"]
 
@@ -236,6 +290,7 @@ async def lifespan(app: FastAPI):
     global _redis
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     _setup_agents(_redis)
+    await _restore_agent_states()
 
     tasks = [
         asyncio.create_task(
@@ -280,6 +335,8 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+Instrumentator().instrument(app).expose(app)
+
 
 # ── Agent 제어 API ────────────────────────────────────────────────────────────
 
@@ -298,14 +355,20 @@ async def get_agent(agent_id: str):
 
 
 @app.patch("/agents/{agent_id}/enable")
-async def enable_agent(agent_id: str):
+async def enable_agent(
+    agent_id: str,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.enable(agent_id):
         raise HTTPException(404)
     return {"agent_id": agent_id, "enabled": True}
 
 
 @app.patch("/agents/{agent_id}/disable")
-async def disable_agent(agent_id: str):
+async def disable_agent(
+    agent_id: str,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.disable(agent_id):
         raise HTTPException(404)
     return {"agent_id": agent_id, "enabled": False}
@@ -331,7 +394,11 @@ class ManualRunBody(BaseModel):
 
 
 @app.patch("/agents/{agent_id}/level")
-async def set_level(agent_id: str, body: LevelBody):
+async def set_level(
+    agent_id: str,
+    body: LevelBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if body.level not in ("L1", "L2", "L3"):
         raise HTTPException(400, "level must be L1, L2, or L3")
     if not _registry.set_level(agent_id, body.level):
@@ -340,7 +407,11 @@ async def set_level(agent_id: str, body: LevelBody):
 
 
 @app.patch("/agents/{agent_id}/model")
-async def set_agent_model(agent_id: str, body: ModelBody):
+async def set_agent_model(
+    agent_id: str,
+    body: ModelBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     """개별 AI 에이전트의 LLM 모델을 런타임 변경한다."""
     agent = _registry.get(agent_id)
     if not agent:
@@ -388,7 +459,11 @@ async def set_agent_model(agent_id: str, body: ModelBody):
 
 
 @app.patch("/agents/{agent_id}/config")
-async def set_config(agent_id: str, body: dict):
+async def set_config(
+    agent_id: str,
+    body: dict,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if not _registry.set_config(agent_id, body):
         raise HTTPException(404)
     return {"agent_id": agent_id, "config": body}
@@ -441,7 +516,10 @@ async def get_llm_config():
 
 
 @app.patch("/llm")
-async def set_llm_config(body: LLMConfigBody):
+async def set_llm_config(
+    body: LLMConfigBody,
+    actor: CommandActor = Depends(require_command_role("admin")),
+):
     if body.backend is not None:
         if body.backend not in ("claude", "ollama", "vllm"):
             raise HTTPException(400, "backend must be claude, ollama, or vllm")
@@ -476,7 +554,11 @@ async def _latest_report_from_redis(platform_id: str) -> PlatformReport | None:
 
 
 @app.post("/agents/{agent_id}/run")
-async def run_agent(agent_id: str, body: ManualRunBody):
+async def run_agent(
+    agent_id: str,
+    body: ManualRunBody,
+    actor: CommandActor = Depends(require_command_role("operator")),
+):
     agent = _registry.get(agent_id)
     if not agent:
         raise HTTPException(404, "agent not found")
@@ -540,6 +622,78 @@ class ChatRequest(BaseModel):
         None  # [{"role": "user"|"assistant", "content": "..."}, ...]
     )
     focus_platform_ids: list[str] | None = None  # 현재 주목 중인 선박 ID 목록
+
+
+class UnifiedRequest(BaseModel):
+    message: str
+    history: list[dict] | None = None
+    focus_platform_ids: list[str] | None = None
+    source: str = "text"  # "text" | "voice"
+    context: dict | None = None
+
+
+@app.post("/chat/unified")
+async def chat_unified(body: UnifiedRequest):
+    """통합 채팅+명령 엔드포인트.
+
+    - 명령어로 인식되면: command_preview 이벤트 → 프론트에서 확인 후 core에 실행 요청
+    - 일반 대화이면: 스트리밍 AI 응답 (chat_stream과 동일)
+    """
+    agent = _registry.get("chat-agent")
+    if not agent or not isinstance(agent, ChatAgent):
+        raise HTTPException(404, "Chat agent not available")
+    if not agent.enabled:
+        raise HTTPException(400, "Chat agent is disabled")
+
+    model_name = agent._llm.model_name
+
+    async def generate():
+        # ── 1단계: 명령어 분류 (core /commands/preview 호출) ────────────────
+        is_command = False
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{settings.core_api_url}/commands/preview",
+                    json={"text": body.message, "source": body.source},
+                )
+            if resp.status_code == 200:
+                is_command = True
+                parsed = resp.json()
+                yield f"data: {json.dumps({'type': 'command_preview', 'parsed': parsed})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            # 400 = 명령어 아님 → 대화로 처리
+            if resp.status_code == 400 and _looks_like_command_request(body.message):
+                clarification = {
+                    "type": "chunk",
+                    "chunk": "[명령 확인 필요]\n\n입력하신 문장이 작업 요청처럼 보이지만 현재 지원 형식으로 정확히 해석되지 않았습니다. 예: report 에이전트 레벨 L2, cpa 에이전트 켜줘, 경보 <UUID> 인지",
+                }
+                yield f"data: {json.dumps(clarification)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'model': model_name})}\n\n"
+                return
+        except Exception:
+            logger.warning("Command preview check failed, falling back to chat")
+
+        # ── 2단계: 일반 대화 — 스트리밍 응답 ───────────────────────────────
+        _ = is_command  # noqa: F841 — only used for clarity above
+        try:
+            async for chunk in agent.chat_stream(
+                message=body.message,
+                history=body.history,
+                focus_platform_ids=body.focus_platform_ids,
+            ):
+                yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"
+        except Exception:
+            logger.exception("Unified chat stream error")
+            yield f"data: {json.dumps({'type': 'chunk', 'chunk': '[응답 오류]'})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'type': 'done', 'model': model_name})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/chat")

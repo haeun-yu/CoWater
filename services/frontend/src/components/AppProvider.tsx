@@ -2,6 +2,7 @@
 
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useInitialData } from "@/hooks/useInitialData";
+import { useAlertNotifications } from "@/hooks/useAlertNotifications";
 import NavBar from "@/components/layout/NavBar";
 import AppErrorBoundary from "@/components/system/AppErrorBoundary";
 import ToastOverlay from "@/components/ui/ToastOverlay";
@@ -10,6 +11,7 @@ import ChatDrawer from "@/components/chat/ChatDrawer";
 export default function AppProvider({ children }: { children: React.ReactNode }) {
   useWebSocket();
   useInitialData();
+  useAlertNotifications();
   return (
     <>
       <NavBar />

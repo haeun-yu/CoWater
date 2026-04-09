@@ -247,8 +247,10 @@ const SEV = {
 const ALERT_TYPE_KR: Record<string, string> = {
   cpa: "충돌 위험",
   zone_intrusion: "구역 침입",
+  zone_exit: "구역 이탈",
   anomaly: "이상 행동",
   ais_off: "AIS 소실",
+  ais_recovered: "AIS 복구",
   distress: "조난",
   compliance: "상황 보고",
 };

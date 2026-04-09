@@ -7,7 +7,7 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 const NAV = [
   { href: "/", label: "대시보드", icon: "◈" },
@@ -37,13 +37,31 @@ export default function NavBar() {
     return () => clearInterval(id);
   }, []);
 
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  useEffect(() => {
+    setSoundEnabled(localStorage.getItem("cowater-alert-sound") !== "false");
+  }, []);
+  const toggleSound = useCallback(() => {
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      localStorage.setItem("cowater-alert-sound", String(next));
+      return next;
+    });
+  }, []);
+
   const platformValues = Object.values(platforms);
   const freshness = countPlatformsByFreshness(platformValues);
-  const allStreamsConnected = Object.values(streams).every((stream) => stream.status === "connected");
+  const STREAM_DATA_TIMEOUT_MS = 60_000;
+  const allStreamsConnected = Object.values(streams).every(
+    (s) =>
+      s.status === "connected" &&
+      s.lastMessageAt != null &&
+      Date.now() - new Date(s.lastMessageAt).getTime() < STREAM_DATA_TIMEOUT_MS,
+  );
 
   const streamSummary = [
-    `위치 ${streams.position.status === "connected" ? "정상" : "주의"}`,
-    `경보 ${streams.alert.status === "connected" ? "정상" : "주의"}`,
+    `위치 ${streams.position.status === "connected" ? (streams.position.lastMessageAt ? "정상" : "대기") : "주의"}`,
+    `경보 ${streams.alert.status === "connected" ? (streams.alert.lastMessageAt ? "정상" : "대기") : "주의"}`,
   ].join(" · ");
 
   return (
@@ -118,6 +136,14 @@ export default function NavBar() {
            <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
            <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
          </div>
+         <button
+           onClick={toggleSound}
+           title={soundEnabled ? "경보음 켜짐 — 클릭하여 끄기" : "경보음 꺼짐 — 클릭하여 켜기"}
+           aria-pressed={soundEnabled}
+           className={`text-sm transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
+         >
+           {soundEnabled ? "🔔" : "🔕"}
+         </button>
          <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
        </div>
       </header>

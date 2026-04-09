@@ -1,5 +1,11 @@
 export type PlatformType = "vessel" | "rov" | "usv" | "auv" | "drone" | "buoy";
 
+export interface PlatformDimensions {
+  length_m: number | null;
+  beam_m: number | null;
+  draft_m?: number | null;
+}
+
 export interface Platform {
   platform_id: string;
   platform_type: PlatformType;
@@ -8,6 +14,7 @@ export interface Platform {
   source_protocol: string;
   moth_channel: string | null;
   capabilities: string[];
+  dimensions?: PlatformDimensions | null;
   metadata: Record<string, unknown>;
 }
 
@@ -19,6 +26,61 @@ export interface PlatformState extends Platform {
   heading: number | null;
   nav_status: string | null;
   last_seen: string;   // ISO timestamp
+}
+
+export interface SpatialReferencePoint {
+  time: string;
+  lat: number;
+  lon: number;
+}
+
+export interface NearbyPlatform {
+  platform_id: string;
+  platform_type: PlatformType;
+  name: string;
+  lat: number;
+  lon: number;
+  sog: number | null;
+  cog: number | null;
+  heading: number | null;
+  nav_status: string | null;
+  distance_nm: number;
+}
+
+export interface NearbyZone {
+  zone_id: string;
+  name: string;
+  zone_type: string;
+  active: boolean;
+  contains_platform: boolean;
+  distance_nm: number;
+  rules: Record<string, unknown>;
+}
+
+export interface PlatformSpatialContext {
+  platform_id: string;
+  reference: SpatialReferencePoint;
+  nearby_platforms: NearbyPlatform[];
+  nearby_zones: NearbyZone[];
+  nearest_fairway: NearbyZone | null;
+  route_deviation_nm: number | null;
+  in_fairway: boolean;
+}
+
+export interface ZoneDwellSession {
+  zone_id: string;
+  zone_name: string;
+  zone_type: string | null;
+  entered_at: string;
+  exited_at: string | null;
+  dwell_minutes: number | null;
+  active: boolean;
+}
+
+export interface PlatformZoneDwell {
+  platform_id: string;
+  active_sessions: ZoneDwellSession[];
+  recent_sessions: ZoneDwellSession[];
 }
 
 export type AlertSeverity = "critical" | "warning" | "info";
@@ -71,3 +133,21 @@ export type WsMessage =
   | { type: "position_update"; platform_id: string; platform_type?: PlatformType; name?: string; timestamp: string; schema_version?: number; source?: string; source_protocol?: string; lat: number; lon: number; sog: number | null; cog: number | null; heading: number | null; nav_status: string | null }
   | ({ type: "alert_created" } & AlertWsFields)
   | ({ type: "alert_updated" } & AlertWsFields);
+
+export interface CommandParseResult {
+  intent: string;
+  summary: string;
+  required_role: "viewer" | "operator" | "admin";
+  target_type: "alert" | "agent";
+  target_id: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface CommandResponse {
+  status: "dry_run" | "executed";
+  source: "text" | "voice";
+  actor: string;
+  allowed: boolean;
+  parsed: CommandParseResult;
+  result: Record<string, unknown> | null;
+}

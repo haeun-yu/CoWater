@@ -32,6 +32,12 @@ export const MAP_SELECT_MIN_ZOOM = 11;
 export const MAP_SELECT_FLY_DURATION = 800;
 /** 실시간 추적 easeTo 애니메이션 시간 (ms) */
 export const MAP_TRACK_EASE_DURATION = 300;
+export const MAP_SELECTED_SAFETY_BUFFER_BASE_NM = 0.25;
+export const MAP_SELECTED_SAFETY_SPEED_LOOKAHEAD_MIN = 2;
+export const MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER = 1.35;
+export const MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG = 50;
+export const MAP_SELECTED_PREDICTION_MINUTES = 12;
+export const MAP_HISTORY_SIMPLIFY_TOLERANCE_DEGREES = 0.0003;
 
 // ── 항적(Trail) 시각화 ───────────────────────────────────────────────────────
 

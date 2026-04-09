@@ -82,8 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_zones_type
 CREATE TABLE IF NOT EXISTS alerts (
     alert_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     alert_type      TEXT NOT NULL CHECK (alert_type IN (
-                        'cpa','zone_intrusion','anomaly',
-                        'ais_off','distress','compliance','traffic'
+                        'cpa','zone_intrusion','zone_exit','anomaly',
+                        'ais_off','ais_recovered','distress','compliance','traffic'
                     )),
     severity        TEXT NOT NULL CHECK (severity IN ('info','warning','critical')),
     status          TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','acknowledged','resolved')),
@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     message         TEXT NOT NULL,
     recommendation  TEXT,               -- AI Agent 권고사항
     metadata        JSONB NOT NULL DEFAULT '{}',
+    -- dedup_key: 중복 경보 방지용 전용 컬럼 (JSONB 경로 쿼리 대비 빠른 인덱스 지원)
+    dedup_key       TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     acknowledged_at TIMESTAMPTZ,
     resolved_at     TIMESTAMPTZ
@@ -102,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_status     ON alerts (status);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity   ON alerts (severity);
 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_platforms  ON alerts USING GIN (platform_ids);
+CREATE INDEX IF NOT EXISTS idx_alerts_dedup_key  ON alerts (generated_by, dedup_key) WHERE status = 'new';
 
 -- ------------------------------------------------------------
 -- incidents

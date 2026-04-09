@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     core_api_url: str = "http://localhost:7700"
     log_level: str = "info"
+    command_tokens_json: str = '{"viewer-dev":{"actor":"viewer-dev","role":"viewer"},"operator-dev":{"actor":"operator-dev","role":"operator"},"admin-dev":{"actor":"admin-dev","role":"admin"}}'
 
     # ── LLM 백엔드 선택 ──────────────────────────────────────────────────────
     # "claude"  : Anthropic API 사용 (기본값)
@@ -61,6 +62,9 @@ class Settings(BaseSettings):
     ais_timeout_sec: int = 90  # 이 시간(초) 이상 AIS 미수신 → 소실 경보
     speed_drop_threshold: float = 5.0  # knots — 한 틱에 이 이상 감소 시 경보
     rot_threshold: float = 25.0  # degrees/min — 이 이상 선회 시 경보
+    sog_compare_max_gap_sec: int = (
+        300  # 두 SOG 보고 간 최대 허용 시간 간격 (초) — 초과 시 비교 스킵
+    )
     # CPAAgent 기본 임계값 (PATCH /agents/cpa-agent/config 로도 런타임 변경 가능)
     cpa_warning_nm: float = 0.5  # Warning CPA 거리 (해리)
     cpa_warning_tcpa_min: float = 30.0  # Warning TCPA (분)
@@ -73,6 +77,9 @@ class Settings(BaseSettings):
     shutdown_drain_timeout_sec: float = 15.0  # 종료 시 AI 태스크 drain 대기 (초)
     ais_check_interval_sec: int = 20  # AIS 타임아웃 체크 주기 (초)
     zone_reload_interval_sec: int = 300  # Zone 재로드 주기 (초)
+
+    # 시뮬레이터 격리 — True이면 is_simulator=True 보고를 에이전트에 전달하지 않음
+    ignore_simulator_reports: bool = False
 
 
 settings = Settings()
