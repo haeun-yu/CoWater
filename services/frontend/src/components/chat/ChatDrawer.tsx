@@ -5,7 +5,7 @@ import { getAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAgentStore } from "@/stores/agentStore";
 import { usePlatformStore } from "@/stores/platformStore";
-import type { AlertStatus, CommandResponse } from "@/types";
+import type { AlertStatus, CommandAuthStatus, CommandResponse, CommandRole } from "@/types";
 
 declare global {
   interface Window {
@@ -39,7 +39,7 @@ interface SpeechRecognitionConstructor {
 interface ParsedCommandPreview {
   intent: string;
   summary: string;
-  required_role: string;
+  required_role: CommandRole;
   target_type: string;
   target_id: string;
   arguments: Record<string, unknown>;
@@ -59,7 +59,14 @@ interface Message {
   commandSource?: "text" | "voice";
   commandStatus?: "pending" | "confirmed" | "cancelled" | "executed" | "failed";
   commandResult?: string;
+  commandBlockedReason?: string;
 }
+
+type CommandAuthState =
+  | { status: "missing"; actor: null; role: null; message: string }
+  | { status: "checking"; actor: null; role: null; message: string }
+  | { status: "ready"; actor: string; role: CommandRole; message: string }
+  | { status: "invalid"; actor: null; role: null; message: string };
 
 const QUICK_PROMPTS = [
   "현재 상황을 요약해줘",
@@ -67,6 +74,8 @@ const QUICK_PROMPTS = [
   "지금 어떤 조치가 필요해?",
   "선박 충돌 위험이 있어?",
 ];
+
+const ROLE_ORDER = { viewer: 0, operator: 1, admin: 2 } as const;
 
 export default function ChatDrawer() {
   const [open, setOpen] = useState(false);
@@ -77,6 +86,12 @@ export default function ChatDrawer() {
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [commandToken, setCommandToken] = useState("");
   const [showTokenInput, setShowTokenInput] = useState(false);
+  const [commandAuth, setCommandAuth] = useState<CommandAuthState>({
+    status: "missing",
+    actor: null,
+    role: null,
+    message: "명령 권한이 연결되지 않았습니다.",
+  });
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
@@ -106,8 +121,21 @@ export default function ChatDrawer() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setCommandToken(window.localStorage.getItem("cowater-command-token") || "");
+    const savedToken = window.localStorage.getItem("cowater-command-token") || "";
+    setCommandToken(savedToken);
     setVoiceSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
+
+    if (!savedToken.trim()) {
+      setCommandAuth({
+        status: "missing",
+        actor: null,
+        role: null,
+        message: "명령 권한이 연결되지 않았습니다.",
+      });
+      return;
+    }
+
+    void verifyCommandToken(savedToken);
   }, []);
 
   useEffect(() => {
@@ -184,6 +212,8 @@ export default function ChatDrawer() {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.type === "command_preview") {
+              const preview = data.parsed as ParsedCommandPreview;
+              const blockedReason = getCommandBlockedReason(preview.required_role);
               // 명령어 인식 — 확인 대기 카드로 교체
               setMessages((prev) =>
                 prev.map((m) =>
@@ -196,6 +226,7 @@ export default function ChatDrawer() {
                         commandOriginalText: trimmed,
                         commandSource: source,
                         commandStatus: "pending",
+                        commandBlockedReason: blockedReason ?? undefined,
                       }
                     : m,
                 ),
@@ -260,6 +291,24 @@ export default function ChatDrawer() {
         ),
       );
       setShowTokenInput(true);
+      return;
+    }
+
+    const blockedReason = getCommandBlockedReason(msg.commandPreview.required_role);
+    if (blockedReason) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                commandStatus: "failed",
+                commandBlockedReason: blockedReason ?? undefined,
+                commandResult: blockedReason,
+              }
+            : m,
+        ),
+      );
+      if (commandAuth.status !== "ready") setShowTokenInput(true);
       return;
     }
 
@@ -374,6 +423,71 @@ export default function ChatDrawer() {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("cowater-command-token", value);
     }
+
+    if (!value.trim()) {
+      setCommandAuth({
+        status: "missing",
+        actor: null,
+        role: null,
+        message: "명령 권한이 연결되지 않았습니다.",
+      });
+      return;
+    }
+
+    void verifyCommandToken(value);
+  }
+
+  async function verifyCommandToken(rawToken: string) {
+    const token = rawToken.trim();
+    if (!token) return;
+
+    setCommandAuth({
+      status: "checking",
+      actor: null,
+      role: null,
+      message: "명령 권한을 확인하는 중입니다.",
+    });
+
+    try {
+      const res = await fetch(`${getCoreApiUrl()}/commands/auth-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const payload = (await res.json()) as CommandAuthStatus;
+      if (!payload.authenticated || !payload.role || !payload.actor) {
+        throw new Error("invalid auth payload");
+      }
+
+      setCommandAuth({
+        status: "ready",
+        actor: payload.actor,
+        role: payload.role,
+        message: `${payload.actor} · ${payload.role} 권한 연결됨`,
+      });
+    } catch {
+      setCommandAuth({
+        status: "invalid",
+        actor: null,
+        role: null,
+        message: "명령 토큰이 없거나 유효하지 않습니다.",
+      });
+    }
+  }
+
+  function getCommandBlockedReason(requiredRole: CommandRole): string | null {
+    if (commandAuth.status !== "ready" || !commandAuth.role) {
+      return "명령 실행 권한 확인이 필요합니다. 먼저 토큰을 연결하세요.";
+    }
+
+    const actualRole: CommandRole = commandAuth.role;
+
+    if (ROLE_ORDER[actualRole] < ROLE_ORDER[requiredRole]) {
+      return `${requiredRole} 권한이 필요합니다. 현재 권한: ${actualRole}`;
+    }
+
+    return null;
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -418,13 +532,19 @@ export default function ChatDrawer() {
                 CoWater Assistant
               </span>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[11px] text-slate-500">대화·명령 통합 입력</span>
               {currentModel && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 font-mono">
                   {currentModel}
                 </span>
               )}
+            </div>
+            <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${commandAuth.status === "ready" ? "bg-green-400" : commandAuth.status === "checking" ? "bg-amber-400 animate-pulse" : "bg-slate-600"}`} />
+              <span className={commandAuth.status === "ready" ? "text-green-300" : commandAuth.status === "invalid" ? "text-red-300" : "text-slate-500"}>
+                {commandAuth.message}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -472,6 +592,11 @@ export default function ChatDrawer() {
             <p className="text-[10px] text-slate-600 mt-1">
               개발용: viewer-dev / operator-dev / admin-dev
             </p>
+            {commandAuth.status !== "ready" && (
+              <p className={`text-[10px] mt-1 ${commandAuth.status === "invalid" ? "text-red-300" : "text-slate-500"}`}>
+                {commandAuth.message}
+              </p>
+            )}
           </div>
         )}
 
@@ -571,6 +696,12 @@ export default function ChatDrawer() {
             <div className="mb-1.5 text-[10px] text-ocean-300 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-ocean-400 animate-pulse" />
               <span>질문 전송됨 · 응답이 올 때까지 추가 전송이 잠시 잠깁니다</span>
+            </div>
+          )}
+          {commandAuth.status !== "ready" && (
+            <div className="mb-1.5 text-[10px] text-slate-500 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+              <span>일반 대화는 사용 가능하지만 명령 실행은 권한 연결 후 활성화됩니다</span>
             </div>
           )}
           <div className="flex gap-2 items-end">
@@ -692,20 +823,26 @@ function ChatMessage({
           </div>
 
           {status === "pending" && (
-            <div className="flex gap-2">
-              <button
-                onClick={onConfirm}
-                className="flex-1 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-semibold transition-colors"
-              >
-                실행
-              </button>
-              <button
-                onClick={onCancel}
-                className="flex-1 py-1.5 rounded border border-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors"
-              >
-                취소
-              </button>
-            </div>
+            msg.commandBlockedReason ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400">
+                {msg.commandBlockedReason}
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={onConfirm}
+                  className="flex-1 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-semibold transition-colors"
+                >
+                  실행
+                </button>
+                <button
+                  onClick={onCancel}
+                  className="flex-1 py-1.5 rounded border border-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+                >
+                  취소
+                </button>
+              </div>
+            )
           )}
 
           {status === "confirmed" && (
