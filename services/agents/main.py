@@ -57,6 +57,44 @@ _RECONNECT_MAX_DELAY = settings.reconnect_max_delay_sec
 _SHUTDOWN_DRAIN_TIMEOUT = settings.shutdown_drain_timeout_sec
 
 
+def _looks_like_command_request(text: str) -> bool:
+    compact = " ".join(text.lower().split())
+    if not compact:
+        return False
+    subject_markers = [
+        "agent",
+        "에이전트",
+        "alert",
+        "경보",
+        "보좌관",
+        "report",
+        "cpa",
+        "zone",
+        "anomaly",
+        "distress",
+    ]
+    action_markers = [
+        "level",
+        "레벨",
+        "enable",
+        "disable",
+        "run",
+        "ack",
+        "resolve",
+        "켜",
+        "꺼",
+        "실행",
+        "인지",
+        "확인",
+        "해결",
+        "변경",
+        "설정",
+    ]
+    return any(marker in compact for marker in subject_markers) and any(
+        marker in compact for marker in action_markers
+    )
+
+
 # ── 초기화 ──────────────────────────────────────────────────────────────────
 
 
@@ -625,6 +663,14 @@ async def chat_unified(body: UnifiedRequest):
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             # 400 = 명령어 아님 → 대화로 처리
+            if resp.status_code == 400 and _looks_like_command_request(body.message):
+                clarification = {
+                    "type": "chunk",
+                    "chunk": "[명령 확인 필요]\n\n입력하신 문장이 작업 요청처럼 보이지만 현재 지원 형식으로 정확히 해석되지 않았습니다. 예: report 에이전트 레벨 L2, cpa 에이전트 켜줘, 경보 <UUID> 인지",
+                }
+                yield f"data: {json.dumps(clarification)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'model': model_name})}\n\n"
+                return
         except Exception:
             logger.warning("Command preview check failed, falling back to chat")
 

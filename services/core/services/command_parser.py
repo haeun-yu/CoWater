@@ -81,6 +81,15 @@ def _normalize_token(value: str) -> str:
     return re.sub(r"[\s_]+", "", value.strip().lower())
 
 
+def _normalize_level(raw: str) -> str:
+    compact = raw.strip().upper()
+    if compact in {"1", "2", "3"}:
+        return f"L{compact}"
+    if compact in {"L1", "L2", "L3"}:
+        return compact
+    raise HTTPException(400, f"Unsupported level: {raw}")
+
+
 def _resolve_agent_id(raw: str) -> str:
     normalized = _normalize_token(raw)
     agent_id = _AGENT_ALIAS_MAP.get(normalized)
@@ -135,14 +144,14 @@ def parse_command(text: str) -> ParsedCommand:
             ),
         ),
         (
-            re.compile(r"^agent\s+level\s+(.+?)\s+(L[123])$", re.IGNORECASE),
+            re.compile(r"^agent\s+level\s+(.+?)\s+(L?[123])$", re.IGNORECASE),
             lambda m: ParsedCommand(
                 intent="agent.set_level",
-                summary=f"Set agent {_resolve_agent_id(m.group(1))} level to {m.group(2).upper()}",
+                summary=f"Set agent {_resolve_agent_id(m.group(1))} level to {_normalize_level(m.group(2))}",
                 required_role="admin",
                 target_type="agent",
                 target_id=_resolve_agent_id(m.group(1)),
-                arguments={"level": m.group(2).upper()},
+                arguments={"level": _normalize_level(m.group(2))},
             ),
         ),
         (
@@ -209,7 +218,8 @@ def parse_command(text: str) -> ParsedCommand:
         ),
         (
             re.compile(
-                r"^(.+?)\s*(?:에이전트)?\s*(?:레벨|level)\s*(L[123])$", re.IGNORECASE
+                r"^(.+?)\s*(?:에이전트|agent)?\s*(?:레벨|level)\s*(L?[123])(?:로)?\s*(?:변경해줘|변경|설정해줘|설정)?$",
+                re.IGNORECASE,
             ),
             "agent.set_level",
         ),
@@ -253,7 +263,7 @@ def parse_command(text: str) -> ParsedCommand:
             )
         if intent == "agent.set_level":
             agent_id = _resolve_agent_id(match.group(1))
-            level = match.group(2).upper()
+            level = _normalize_level(match.group(2))
             return ParsedCommand(
                 intent=intent,
                 summary=f"Set agent {agent_id} level to {level}",

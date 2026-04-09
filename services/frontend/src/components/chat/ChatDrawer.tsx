@@ -51,6 +51,7 @@ interface Message {
   model?: string;
   timestamp: Date;
   error?: boolean;
+  pending?: boolean;
   // 명령어 미리보기 전용 필드
   commandPreview?: ParsedCommandPreview;
   commandOriginalText?: string;
@@ -81,6 +82,7 @@ export default function ChatDrawer() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const submitLockRef = useRef(false);
 
   const alerts = useAlertStore((s) => s.alerts);
   const platforms = usePlatformStore((s) => s.platforms);
@@ -122,7 +124,9 @@ export default function ChatDrawer() {
 
   async function sendUnified(text: string, source: "text" | "voice" = "text") {
     const trimmed = text.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || submitLockRef.current) return;
+
+    submitLockRef.current = true;
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -139,7 +143,7 @@ export default function ChatDrawer() {
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
-      { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+      { id: assistantId, role: "assistant", content: "", timestamp: new Date(), pending: true },
     ]);
 
     try {
@@ -183,6 +187,7 @@ export default function ChatDrawer() {
                     ? {
                         ...m,
                         content: "",
+                        pending: false,
                         commandPreview: data.parsed as ParsedCommandPreview,
                         commandOriginalText: trimmed,
                         commandSource: source,
@@ -195,7 +200,7 @@ export default function ChatDrawer() {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: m.content + data.chunk }
+                    ? { ...m, content: m.content + data.chunk, pending: false }
                     : m,
                 ),
               );
@@ -222,11 +227,13 @@ export default function ChatDrawer() {
                 ...m,
                 content: "에이전트 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하십시오.",
                 error: true,
+                pending: false,
               }
             : m,
         ),
       );
     } finally {
+      submitLockRef.current = false;
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
@@ -363,30 +370,22 @@ export default function ChatDrawer() {
   return (
     <>
       {/* ── 플로팅 버튼 ────────────────────────────────────────────────────────── */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={`fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
-          open
-            ? "bg-ocean-700 text-white"
-            : "bg-ocean-600 hover:bg-ocean-500 text-white"
-        } ${criticalCount > 0 && !open ? "ring-2 ring-red-500 ring-offset-2 ring-offset-slate-950" : ""}`}
-        title={open ? "보좌관 닫기" : "AI 보좌관 열기"}
-      >
-        {open ? (
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M2 2l14 14M16 2L2 16" />
-          </svg>
-        ) : (
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className={`fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all bg-ocean-600 hover:bg-ocean-500 text-white ${criticalCount > 0 ? "ring-2 ring-red-500 ring-offset-2 ring-offset-slate-950" : ""}`}
+          title="AI 보좌관 열기"
+        >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
           </svg>
-        )}
-        {criticalCount > 0 && !open && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-            {criticalCount}
-          </span>
-        )}
-      </button>
+          {criticalCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+              {criticalCount}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* ── 드로어 패널 ────────────────────────────────────────────────────────── */}
       <div
@@ -432,6 +431,15 @@ export default function ChatDrawer() {
                 초기화
               </button>
             )}
+            <button
+              onClick={() => setOpen(false)}
+              title="보좌관 닫기"
+              className="w-8 h-8 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-900 transition-colors flex items-center justify-center"
+            >
+              <svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.3">
+                <path d="M2 2l14 14M16 2L2 16" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -507,7 +515,8 @@ export default function ChatDrawer() {
                   <button
                     key={q}
                     onClick={() => sendUnified(q)}
-                    className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-slate-800 hover:border-ocean-700 text-slate-400 hover:text-ocean-300 hover:bg-ocean-900/30 transition-colors"
+                    disabled={isLoading}
+                    className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-slate-800 hover:border-ocean-700 text-slate-400 hover:text-ocean-300 hover:bg-ocean-900/30 transition-colors disabled:opacity-50 disabled:hover:border-slate-800 disabled:hover:text-slate-400 disabled:hover:bg-transparent"
                   >
                     {q}
                   </button>
@@ -525,19 +534,6 @@ export default function ChatDrawer() {
             />
           ))}
 
-          {isLoading && (
-            <div className="flex gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-ocean-700 flex items-center justify-center flex-shrink-0 text-sm">
-                ⬡
-              </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-lg rounded-tl-none px-3.5 py-3 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:300ms]" />
-              </div>
-            </div>
-          )}
-
           <div ref={bottomRef} />
         </div>
 
@@ -553,6 +549,12 @@ export default function ChatDrawer() {
             <div className="mb-1.5 text-[10px] text-amber-400 flex items-center gap-1">
               <span>🎤</span>
               <span>음성 전사 입력 — 검토 후 전송하세요</span>
+            </div>
+          )}
+          {isLoading && (
+            <div className="mb-1.5 text-[10px] text-ocean-300 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-ocean-400 animate-pulse" />
+              <span>질문 전송됨 · 응답이 올 때까지 추가 전송이 잠시 잠깁니다</span>
             </div>
           )}
           <div className="flex gap-2 items-end">
@@ -589,11 +591,16 @@ export default function ChatDrawer() {
             <button
               onClick={() => startTransition(() => sendUnified(input, inputSource))}
               disabled={isLoading || !input.trim()}
-              className="w-10 h-10 rounded-lg bg-ocean-600 hover:bg-ocean-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors flex-shrink-0"
+               className="min-w-[72px] h-10 rounded-lg bg-ocean-600 hover:bg-ocean-500 disabled:bg-slate-800 disabled:text-slate-500 text-white flex items-center justify-center transition-colors flex-shrink-0 px-3"
+               title={isLoading ? "응답을 기다리는 중" : "메시지 전송"}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
-              </svg>
+              {isLoading ? (
+                <span className="text-xs font-semibold">대기 중</span>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
+                </svg>
+              )}
             </button>
           </div>
           <p className="mt-1.5 text-[10px] text-slate-600">
@@ -655,7 +662,7 @@ function ChatMessage({
         <div className="w-7 h-7 rounded-full bg-amber-700 flex items-center justify-center flex-shrink-0 text-sm">
           ⌘
         </div>
-        <div className="rounded-lg rounded-tl-none border border-amber-800/50 bg-amber-950/20 px-3.5 py-2.5 max-w-[290px] w-full">
+        <div className="rounded-xl rounded-tl-none border border-amber-800/50 bg-amber-950/20 px-4 py-3 max-w-[320px] w-full shadow-[0_12px_30px_rgba(120,53,15,0.18)]">
           <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wide mb-2">
             명령어 감지됨
           </p>
@@ -726,19 +733,26 @@ function ChatMessage({
         ⬡
       </div>
       <div
-        className={`rounded-lg rounded-tl-none px-3.5 py-2.5 max-w-[290px] border ${
+        className={`rounded-xl rounded-tl-none px-4 py-3 max-w-[320px] border shadow-[0_14px_34px_rgba(15,23,42,0.32)] ${
           msg.error
             ? "bg-red-950/30 border-red-800/40"
             : "bg-slate-900 border-slate-800"
         }`}
       >
-        <p
-          className={`text-sm leading-relaxed whitespace-pre-wrap ${
-            msg.error ? "text-red-300" : "text-slate-200"
-          }`}
-        >
-          {msg.content}
-        </p>
+        {msg.pending && !msg.content ? (
+          <div>
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-ocean-400 rounded-full animate-bounce [animation-delay:300ms]" />
+            </div>
+            <p className="mt-2 text-[11px] text-ocean-300">응답 작성 중</p>
+          </div>
+        ) : (
+          <div className={`space-y-2 ${msg.error ? "text-red-300" : "text-slate-100"}`}>
+            {renderAssistantContent(msg.content, Boolean(msg.error))}
+          </div>
+        )}
         <div className="flex items-center justify-between mt-1.5 gap-2">
           {msg.model && (
             <span className="text-[10px] text-slate-600 font-mono truncate">
@@ -752,6 +766,42 @@ function ChatMessage({
       </div>
     </div>
   );
+}
+
+function renderAssistantContent(content: string, isError: boolean) {
+  const textClass = isError ? "text-red-300" : "text-slate-100";
+  const normalizedContent = content
+    .replace(/([.!?])(?=[^\s\n])/g, "$1\n\n")
+    .replace(/([다요죠니다]\.)\s*/g, "$1\n\n")
+    .replace(/\n{3,}/g, "\n\n");
+
+  return normalizedContent
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block, index) => {
+      const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+      const isList = lines.every((line) => /^([-•]|\d+\.)\s/.test(line));
+
+      if (isList) {
+        return (
+          <ul key={`${block}-${index}`} className={`space-y-1.5 text-sm leading-6 ${textClass}`}>
+            {lines.map((line, lineIndex) => (
+              <li key={`${line}-${lineIndex}`} className="flex gap-2">
+                <span className="mt-[7px] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-ocean-400" />
+                <span>{line.replace(/^([-•]|\d+\.)\s/, "")}</span>
+              </li>
+            ))}
+          </ul>
+        );
+      }
+
+      return (
+        <p key={`${block}-${index}`} className={`text-sm leading-6 whitespace-pre-wrap ${textClass}`}>
+          {block}
+        </p>
+      );
+    });
 }
 
 function formatTime(d: Date): string {
