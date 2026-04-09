@@ -798,16 +798,7 @@ function MaritimeMap() {
         filter: ["!", ["has", "point_count"]],
         minzoom: MAP_SHIP_LAYER_MIN_ZOOM + 1,
         layout: {
-          "text-field": [
-            "case",
-            ["==", ["get", "selected"], true],
-            ["get", "name"],
-            ["==", ["get", "alert"], true],
-            ["get", "name"],
-            [">=", ["zoom"], 12],
-            ["get", "name"],
-            "",
-          ],
+          "text-field": ["get", "name"],
           "text-size": 11,
           "text-offset": [0, 1.8],
           "text-anchor": "top",
@@ -817,6 +808,20 @@ function MaritimeMap() {
           "text-color": "#e2e8f0",
           "text-halo-color": "#020617",
           "text-halo-width": 1.2,
+          "text-opacity": [
+            "step",
+            ["zoom"],
+            [
+              "case",
+              ["==", ["get", "selected"], true],
+              1,
+              ["==", ["get", "alert"], true],
+              1,
+              0,
+            ],
+            12,
+            1,
+          ],
         },
       });
 
@@ -905,6 +910,7 @@ function MaritimeMap() {
         id: "zones-border",
         type: "line",
         source: "zones",
+        filter: ["!=", ["get", "zone_type"], "prohibited"],
         paint: {
           "line-color": [
             "match", ["get", "zone_type"],
@@ -915,12 +921,19 @@ function MaritimeMap() {
           ],
           "line-width": 1.8,
           "line-opacity": 0.75,
-          "line-dasharray": [
-            "case",
-            ["==", ["get", "zone_type"], "prohibited"],
-            ["literal", [1, 0]],
-            ["literal", [4, 2]],
-          ],
+          "line-dasharray": [4, 2],
+        },
+      });
+
+      map.addLayer({
+        id: "zones-border-prohibited",
+        type: "line",
+        source: "zones",
+        filter: ["==", ["get", "zone_type"], "prohibited"],
+        paint: {
+          "line-color": "#ef4444",
+          "line-width": 1.8,
+          "line-opacity": 0.9,
         },
       });
 
@@ -1190,8 +1203,10 @@ function MaritimeMap() {
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
     const vis = zoneVisible ? "visible" : "none";
-    for (const id of ["zones-fill", "zones-border", "zones-label"]) {
-      mapRef.current.setLayoutProperty(id, "visibility", vis);
+    for (const id of ["zones-fill", "zones-border", "zones-border-prohibited", "zones-label"]) {
+      if (mapRef.current.getLayer(id)) {
+        mapRef.current.setLayoutProperty(id, "visibility", vis);
+      }
     }
   }, [zoneVisible, mapLoaded]);
 

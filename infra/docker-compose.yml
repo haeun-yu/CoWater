@@ -132,10 +132,11 @@ services:
     entrypoint: >
       sh -c "
         ollama serve &
+        pid=$$! &&
         sleep 5 &&
         ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
         ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:3b} &&
-        kill %1
+        kill $$pid || true
       "
     environment:
       OLLAMA_HOST: "0.0.0.0"
