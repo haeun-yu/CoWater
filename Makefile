@@ -1,4 +1,4 @@
-.PHONY: up-host-ollama up-docker-ollama up-vllm down-host-ollama down-docker-ollama down-vllm downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd
+.PHONY: up-host-ollama up-docker-ollama up-vllm down-host-ollama down-docker-ollama down-vllm downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
 
 up-host-ollama:
 	bash infra/run.sh host-ollama up
@@ -47,3 +47,9 @@ install-host-ollama-launchd:
 
 uninstall-host-ollama-launchd:
 	bash infra/uninstall-host-ollama-launchd.sh
+
+docker-doctor:
+	bash infra/docker-doctor.sh
+
+docker-cleanup-safe:
+	bash infra/docker-cleanup-safe.sh
