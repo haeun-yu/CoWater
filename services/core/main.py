@@ -20,6 +20,7 @@ from api.zones import router as zones_router
 from redis_client import close_redis, get_redis
 from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
+from ws_hub import hub
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ async def health():
 
     return {
         "status": "ok" if redis_ok and database_ok else "degraded",
+        "websocket": hub.stats(),
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
             "database": "ok" if database_ok else "error",

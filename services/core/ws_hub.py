@@ -20,12 +20,24 @@ class WebSocketHub:
             "replay": set(),
         }
         self._lock = asyncio.Lock()
+        self._broadcast_success_count: dict[Topic, int] = {
+            "platforms": 0,
+            "alerts": 0,
+            "replay": 0,
+        }
+        self._broadcast_failure_count: dict[Topic, int] = {
+            "platforms": 0,
+            "alerts": 0,
+            "replay": 0,
+        }
 
     async def connect(self, ws: WebSocket, topic: Topic) -> None:
         await ws.accept()
         async with self._lock:
             self._connections[topic].add(ws)
-        logger.debug("WS connected: topic=%s total=%d", topic, len(self._connections[topic]))
+        logger.debug(
+            "WS connected: topic=%s total=%d", topic, len(self._connections[topic])
+        )
 
     async def disconnect(self, ws: WebSocket, topic: Topic) -> None:
         async with self._lock:
@@ -35,18 +47,34 @@ class WebSocketHub:
         message = json.dumps(payload)
         dead: set[WebSocket] = set()
 
-        for ws in list(self._connections[topic]):
+        async with self._lock:
+            connections = list(self._connections[topic])
+
+        for ws in connections:
             try:
                 await ws.send_text(message)
+                self._broadcast_success_count[topic] += 1
             except Exception:
                 dead.add(ws)
+                self._broadcast_failure_count[topic] += 1
 
         if dead:
             async with self._lock:
                 self._connections[topic] -= dead
+            logger.debug("WS removed %d dead client(s) for topic=%s", len(dead), topic)
 
     def connection_count(self, topic: Topic) -> int:
         return len(self._connections[topic])
+
+    def stats(self) -> dict[str, dict[str, int]]:
+        return {
+            topic: {
+                "connections": len(self._connections[topic]),
+                "broadcast_success": self._broadcast_success_count[topic],
+                "broadcast_failure": self._broadcast_failure_count[topic],
+            }
+            for topic in self._connections
+        }
 
 
 hub = WebSocketHub()
