@@ -1978,28 +1978,27 @@ function MaritimeMap() {
           {/* 텍스트 레이블 토글 */}
           <button
             onClick={() => setShowLabels((v) => !v)}
-            className="w-full mt-3 flex items-center gap-2 px-2.5 py-1.5 rounded text-xs font-medium text-ocean-200 hover:bg-ocean-800/30 transition-colors border border-ocean-700/40 hover:border-ocean-600/60"
+            className={`w-full mt-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
+              showLabels
+                ? "panel border-blue-500/40 text-blue-200 hover:border-blue-400 hover:bg-blue-500/10"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
+            }`}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
-              <text x="2" y="11" fontSize="8" fill="currentColor" opacity={showLabels ? 1 : 0.5}>텍스트</text>
-            </svg>
-            <span className="flex-1 text-left">텍스트 레이블</span>
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${showLabels ? "bg-blue-300" : "bg-ocean-700"}`} />
+            <span className={`w-2.5 h-2.5 rounded-full transition-colors ${showLabels ? "bg-blue-400" : "bg-ocean-700"}`} />
+            텍스트 레이블
           </button>
 
           {/* 정보 패널 토글 */}
           <button
             onClick={() => setShowInfoPanels((v) => !v)}
-            className="w-full mt-1.5 flex items-center gap-2 px-2.5 py-1.5 rounded text-xs font-medium text-ocean-200 hover:bg-ocean-800/30 transition-colors border border-ocean-700/40 hover:border-ocean-600/60"
+            className={`w-full mt-1.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
+              showInfoPanels
+                ? "panel border-cyan-500/40 text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/10"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
+            }`}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="flex-shrink-0" style={{ opacity: showInfoPanels ? 1 : 0.5 }}>
-              <rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2"/>
-              <line x1="2" y1="5" x2="14" y2="5" stroke="currentColor" strokeWidth="0.8" opacity="0.6"/>
-              <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="0.6" opacity="0.4"/>
-              <line x1="4" y1="10" x2="12" y2="10" stroke="currentColor" strokeWidth="0.6" opacity="0.4"/>
-            </svg>
-            <span className="flex-1 text-left">정보 패널</span>
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${showInfoPanels ? "bg-cyan-300" : "bg-ocean-700"}`} />
+            <span className={`w-2.5 h-2.5 rounded-full transition-colors ${showInfoPanels ? "bg-cyan-400" : "bg-ocean-700"}`} />
+            정보 패널
           </button>
 
           {/* 선택 선박 오버레이 */}
