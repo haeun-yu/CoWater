@@ -220,39 +220,62 @@ export default function DashboardAlertPanel() {
                 </button>
 
                 {isExpanded && (
-                  <div id={`dashboard-alert-${alert.alert_id}`} className="px-3 pb-2.5 space-y-2">
+                  <div id={`dashboard-alert-${alert.alert_id}`} className="px-3 pb-2.5 space-y-2.5">
+                    {/* 경보 내용 */}
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider">
+                        📍 경보 내용
+                      </div>
+                      <div className="text-xs text-ocean-200 bg-ocean-900/40 rounded p-2.5 leading-relaxed border-l-2 border-ocean-600">
+                        {alert.message}
+                      </div>
+                    </div>
+
+                    {/* 영향 대상 */}
                     {alert.platform_ids.length > 0 && (
-                      <div className="flex gap-1 flex-wrap">
-                        {alert.platform_ids.map((id) => (
-                          <span
-                            key={id}
-                            className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded font-mono"
-                          >
-                            {getPlatformName(id)}
-                          </span>
-                        ))}
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider">
+                          🚢 영향 대상
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {alert.platform_ids.map((id) => (
+                            <span
+                              key={id}
+                              className="text-xs px-2 py-1 bg-ocean-700/60 text-ocean-300 rounded-sm font-mono border border-ocean-600/50"
+                            >
+                              {getPlatformName(id)}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
+
+                    {/* AI 분석 및 제안 */}
                     {alert.recommendation && (
-                      <div className="text-xs text-ocean-300 bg-ocean-900/60 rounded p-2 leading-relaxed border border-ocean-800 line-clamp-4">
-                        {Boolean(
-                          (alert.metadata as Record<string, unknown> | null)
-                            ?.llm_fallback,
-                        ) && (
-                          <div className="mb-1 text-amber-300">
-                            LLM 실패 fallback
-                          </div>
-                        )}
-                        {alert.recommendation}
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider flex items-center gap-1">
+                          💡 분석 및 제안
+                          {Boolean(
+                            (alert.metadata as Record<string, unknown> | null)
+                              ?.llm_fallback,
+                          ) && (
+                            <span className="text-amber-300 text-[9px] font-normal">(LLM 폴백)</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-ocean-300 bg-ocean-900/50 rounded p-2.5 leading-relaxed border-l-2 border-cyan-600/60">
+                          {alert.recommendation}
+                        </div>
                       </div>
                     )}
+
+                    {/* 액션 버튼 */}
                     {canOperate && (
                       <button
                         onClick={() => acknowledge(alert.alert_id)}
                         disabled={pendingAlertId === alert.alert_id}
-                        className="text-xs px-2.5 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
+                        className="w-full text-xs px-2.5 py-1.5 bg-ocean-700 hover:bg-ocean-600 disabled:bg-ocean-800 disabled:text-ocean-500 text-ocean-200 rounded transition-colors font-medium"
                       >
-                        {pendingAlertId === alert.alert_id ? "처리 중..." : "인지 처리"}
+                        {pendingAlertId === alert.alert_id ? "처리 중..." : "✓ 인지 처리"}
                       </button>
                     )}
                   </div>
