@@ -249,9 +249,16 @@ case "$ACTION" in
     fi
     stop_host_ollama
     ;;
+  start-host-ollama)
+    if [[ "$MODE" != "host-ollama" ]]; then
+      printf 'start-host-ollama is only meaningful in host-ollama mode.\n' >&2
+      exit 1
+    fi
+    ensure_host_ollama
+    ;;
   *)
     printf 'Unknown action: %s\n' "$ACTION" >&2
-    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
+    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama|start-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
     exit 1
     ;;
 esac

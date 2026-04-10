@@ -1,4 +1,4 @@
-.PHONY: up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim rebuild-host-ollama-sim rebuild-docker-ollama-sim rebuild-vllm-sim down-host-ollama down-docker-ollama down-vllm down-host-ollama-sim down-docker-ollama-sim down-vllm-sim downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
+.PHONY: up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim rebuild-host-ollama-sim rebuild-docker-ollama-sim rebuild-vllm-sim down-host-ollama down-docker-ollama down-vllm down-host-ollama-sim down-docker-ollama-sim down-vllm-sim downall-host-ollama start-host-ollama stop-host-ollama restart-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
 
 up-host-ollama:
 	bash infra/run.sh host-ollama up
@@ -54,8 +54,14 @@ down-vllm-sim:
 downall-host-ollama:
 	bash infra/run.sh host-ollama down-all
 
+start-host-ollama:
+	bash infra/run.sh host-ollama start-host-ollama
+
 stop-host-ollama:
 	bash infra/run.sh host-ollama stop-host-ollama
+
+restart-host-ollama:
+	bash infra/run.sh host-ollama stop-host-ollama && bash infra/run.sh host-ollama start-host-ollama
 
 ps-host-ollama:
 	bash infra/run.sh host-ollama ps
