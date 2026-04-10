@@ -554,7 +554,7 @@ export default function AgentsPage() {
           </div>
 
           {/* 파이프라인 스텝 */}
-          <div className="flex-1 overflow-auto p-4 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
+          <div className="h-48 overflow-y-auto p-4 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
             <HorizontalPipeline
               steps={focusMeta.pipeline}
               routes={focusMeta.routes}
@@ -566,7 +566,7 @@ export default function AgentsPage() {
           </div>
 
           {/* 하단: Sub-Process + 이벤트 빈도 차트 */}
-          <div className="border-t border-slate-800 bg-slate-900/30 px-5 py-4 flex gap-6">
+          <div className="flex-1 border-t border-slate-800 bg-slate-900/30 px-5 py-4 flex gap-6 overflow-auto">
             {/* Sub-Process Trigger */}
             <div className="flex-none min-w-0">
               <div className="text-xs text-slate-500 font-bold uppercase mb-2">
