@@ -65,11 +65,23 @@ class ZoneMonitorAgent(Agent):
                 resp.raise_for_status()
                 self._zones = resp.json()
                 self._zone_shapes = {}
+                valid_zone_ids = set()
                 for zone in self._zones:
+                    zone_id = zone["zone_id"]
+                    valid_zone_ids.add(zone_id)
                     try:
-                        self._zone_shapes[zone["zone_id"]] = shape(zone["geometry"])
+                        self._zone_shapes[zone_id] = shape(zone["geometry"])
                     except Exception:
-                        logger.warning("Failed to parse geometry for zone %s", zone.get("zone_id"))
+                        logger.warning("Failed to parse geometry for zone %s", zone_id)
+
+                # 삭제되거나 비활성화된 zone에 대한 _inside 상태 정리
+                for platform_id in list(self._inside.keys()):
+                    invalid_zones = self._inside[platform_id] - valid_zone_ids
+                    if invalid_zones:
+                        self._inside[platform_id] -= invalid_zones
+                        if not self._inside[platform_id]:
+                            del self._inside[platform_id]
+
                 logger.info("Loaded %d zones", len(self._zones))
         except Exception:
             logger.exception("Failed to load zones")

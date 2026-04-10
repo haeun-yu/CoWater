@@ -64,8 +64,8 @@ class NMEAAdapter(ProtocolAdapter):
 
             lat = decoded.get("lat")
             lon = decoded.get("lon")
-            if lat is None or lon is None or lat == 91.0 or lon == 181.0:
-                # AIS 위치 미상 값 필터링
+            if lat is None or lon is None or abs(lat) > 90 or abs(lon) > 180:
+                # AIS 위치 미상 값 및 범위 벗어남 필터링 (위도: ±90, 경도: ±180)
                 return None
 
             sog = decoded.get("speed")

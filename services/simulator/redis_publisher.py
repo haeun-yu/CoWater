@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
@@ -43,7 +43,7 @@ class RedisPublisher:
             except Exception as e:
                 logger.warning("Redis publisher error: %s, reconnecting...", e)
                 self._connected = False
-            await asyncio.sleep(5.0)
+                await asyncio.sleep(settings.reconnect_delay_s)
 
     async def _publish_loop(self) -> None:
         """Redis 연결 유지 및 데이터 발행."""
@@ -75,7 +75,7 @@ class RedisPublisher:
                         payload = json.dumps(
                             {
                                 "nmea": sentence,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "source": "simulator",
                             }
                         )

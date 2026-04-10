@@ -79,9 +79,12 @@ export function useAlertNotifications() {
   const seenRef = useRef<Set<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // 최초 마운트 시 알림 권한 요청
+  // 최초 마운트 시 알림 권한 요청 및 언마운트 시 AudioContext 정리
   useEffect(() => {
     requestNotificationPermission();
+    return () => {
+      audioCtxRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {

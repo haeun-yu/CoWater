@@ -264,7 +264,7 @@ async def _ais_timeout_loop() -> None:
 
 async def _zone_reload_loop(redis: aioredis.Redis) -> None:
     """Zone 목록 주기적 재로드 (주기: zone_reload_interval_sec)."""
-    for agent in _registry.all():
+    for agent in _registry.enabled():
         if isinstance(agent, ZoneMonitorAgent):
             await agent.load_zones()
     while True:
@@ -606,6 +606,7 @@ async def run_agent(
             _track_task(
                 _safe_ai_dispatch(agent, report),
                 name=f"manual-ai-report-{agent.agent_id}",
+                agent=agent,
             )
         else:
             await agent.on_platform_report(report)
@@ -615,6 +616,7 @@ async def run_agent(
             _track_task(
                 _safe_ai_alert(agent, body.alert or {}),
                 name=f"manual-ai-alert-{agent.agent_id}",
+                agent=agent,
             )
         else:
             await agent.on_alert(body.alert or {})

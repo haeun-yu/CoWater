@@ -74,11 +74,11 @@ class MothPublisher:
 
             # 초기 MIME 전송 (한 번만)
             await ws.send(_MIME)
-            last_ping_at = asyncio.get_event_loop().time()
+            last_ping_at = asyncio.get_running_loop().time()
             sent_count = 0
 
             while True:
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
 
                 # 바이너리 ping 전송 (30초 idle 타임아웃 방지)
                 if now - last_ping_at >= _PING_INTERVAL:

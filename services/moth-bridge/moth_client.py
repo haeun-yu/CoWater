@@ -99,9 +99,11 @@ class MothChannelClient:
 
                 if isinstance(message, bytes):
                     if current_mime is None:
-                        raise RuntimeError(
-                            f"Binary payload received before MIME on channel '{self._config.name}'"
+                        logger.warning(
+                            "Binary payload received before MIME on channel '%s' — skipping",
+                            self._config.name,
                         )
+                        continue
                     report = self._config.adapter.parse(message, current_mime)
                     if report is not None:
                         report.platform_type = (

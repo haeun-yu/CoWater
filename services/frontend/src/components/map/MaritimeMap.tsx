@@ -531,7 +531,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
     return {
       safetyBuffer: emptyFeatureCollection(),
       dangerBuffer: emptyFeatureCollection(),
-      headingSector: emptyFeatureCollection(),
       predictedPath: emptyFeatureCollection(),
     };
   }
@@ -566,11 +565,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
     ),
     MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.28,
     forwardDomainNm * 0.72,
-  );
-  const headingSectorRadiusNm = clamp(
-    Math.max(forwardDomainNm * MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER, metersToNm(dimensions.length * 2)),
-    forwardDomainNm,
-    4.5,
   );
 
   const safetyBuffer = normalizedHeading == null
@@ -620,16 +614,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
         },
       ]);
 
-  const headingSector = normalizedHeading == null
-    ? emptyFeatureCollection()
-    : turfSector(
-        center,
-        nmToKm(headingSectorRadiusNm),
-        normalizeBearing(normalizedHeading - MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
-        normalizeBearing(normalizedHeading + MAP_SELECTED_HEADING_SECTOR_ANGLE_DEG / 2),
-        { units: "kilometers" },
-      );
-
   const predictedPath = normalizedHeading == null || !platform.sog || platform.sog <= 0
     ? emptyFeatureCollection()
     : turfLineString([
@@ -645,7 +629,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
   return {
     safetyBuffer: safetyBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
     dangerBuffer: dangerBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
-    headingSector: headingSector as maplibregl.GeoJSONSourceSpecification["data"] & object,
     predictedPath: predictedPath as maplibregl.GeoJSONSourceSpecification["data"] & object,
   };
 }
@@ -942,10 +925,6 @@ function MaritimeMap() {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
-          "selected-heading-sector": {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: [] },
-          },
           "selected-prediction": {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
@@ -1009,7 +988,7 @@ function MaritimeMap() {
         paint: {
           "line-color": "#92400e",
           "line-width": TRAIL_CASING_WIDTH,
-          "line-opacity": ["*", ["get", "opacity"], TRAIL_CASING_OPACITY_FACTOR],
+          "line-opacity": 0.28,
         },
       });
 
@@ -1021,7 +1000,7 @@ function MaritimeMap() {
         paint: {
           "line-color": "#f97316",
           "line-width": TRAIL_LINE_WIDTH,
-          "line-opacity": ["get", "opacity"],
+          "line-opacity": 0.65,
         },
       });
 
@@ -1688,7 +1667,7 @@ function MaritimeMap() {
     (mapRef.current.getSource("platform-points") as GeoJSONSource | undefined)?.setData(sourceData.points);
     (mapRef.current.getSource("platform-hulls") as GeoJSONSource | undefined)?.setData(sourceData.hulls);
     (mapRef.current.getSource("platform-bridges") as GeoJSONSource | undefined)?.setData(sourceData.bridges);
-  }, [platforms, alerts, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [platforms, selectedId, alertPlatformIds, mapLoaded]);
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
@@ -1706,6 +1685,13 @@ function MaritimeMap() {
     }
   }, [selectedId, mapLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 선택 선박 실시간 추적 재개 ───────────────────────────────────────────
+  useEffect(() => {
+    if (selectedId) {
+      followRef.current = true;
+    }
+  }, [selectedId]);
+
   // ── 선택 선박 실시간 추적 ─────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1722,7 +1708,6 @@ function MaritimeMap() {
     const spatialData = buildSelectedSpatialData(selectedPlatform, selectedEncounterRisk);
     (mapRef.current.getSource("selected-safety-buffer") as GeoJSONSource | undefined)?.setData(spatialData.safetyBuffer);
     (mapRef.current.getSource("selected-danger-buffer") as GeoJSONSource | undefined)?.setData(spatialData.dangerBuffer);
-    (mapRef.current.getSource("selected-heading-sector") as GeoJSONSource | undefined)?.setData(spatialData.headingSector);
     (mapRef.current.getSource("selected-prediction") as GeoJSONSource | undefined)?.setData(spatialData.predictedPath);
     (mapRef.current.getSource("selected-cpa-lines") as GeoJSONSource | undefined)?.setData(selectedEncounterData.lines);
     (mapRef.current.getSource("selected-cpa-points") as GeoJSONSource | undefined)?.setData(selectedEncounterData.points);
