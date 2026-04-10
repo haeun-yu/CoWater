@@ -826,6 +826,9 @@ function MaritimeMap() {
   const [encounterVisible, setEncounterVisible] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showInfoPanels, setShowInfoPanels] = useState(true);
+  const [labelsExpanded, setLabelsExpanded] = useState(false);
+  const [infoPanelsExpanded, setInfoPanelsExpanded] = useState(false);
+  const [legendExpanded, setLegendExpanded] = useState(true);
   const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
@@ -1976,30 +1979,74 @@ function MaritimeMap() {
           )}
 
           {/* 텍스트 레이블 토글 */}
+          {/* 텍스트 레이블 섹션 */}
           <button
-            onClick={() => setShowLabels((v) => !v)}
-            className={`w-full mt-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
-              showLabels
-                ? "panel border-blue-500/40 text-blue-200 hover:border-blue-400 hover:bg-blue-500/10"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
-            }`}
+            onClick={() => setLabelsExpanded((v) => !v)}
+            className="panel w-full mt-3 flex items-center gap-2 px-3 py-2 rounded text-xs font-medium border border-blue-600/60 text-blue-200 hover:border-blue-500 transition-colors"
           >
-            <span className={`w-2.5 h-2.5 rounded-full transition-colors ${showLabels ? "bg-blue-400" : "bg-ocean-700"}`} />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              className={`flex-shrink-0 transition-transform duration-200 ${labelsExpanded ? "rotate-90" : ""}`}
+            >
+              <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
             텍스트 레이블
+            <span className="ml-auto text-blue-400 text-[10px]">{showLabels ? "ON" : "OFF"}</span>
           </button>
 
-          {/* 정보 패널 토글 */}
+          {labelsExpanded && (
+            <div className="panel border border-blue-600/60 border-t-0 rounded-b px-2 py-2 space-y-1.5">
+              <button
+                onClick={() => {
+                  const newVis = !showLabels;
+                  setShowLabels(newVis);
+                  if (mapRef.current) {
+                    mapRef.current.setLayoutProperty("platform-labels", "visibility", newVis ? "visible" : "none");
+                  }
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <span className={`w-1.5 h-1.5 rounded flex-shrink-0 transition-colors ${showLabels ? "bg-blue-400" : "bg-ocean-700"}`} style={{ backgroundColor: showLabels ? "#60a5fa" : undefined }} />
+                <span className="flex-1 text-left">선박 이름 레이블</span>
+              </button>
+            </div>
+          )}
+
+          {/* 정보 패널 섹션 */}
           <button
-            onClick={() => setShowInfoPanels((v) => !v)}
-            className={`w-full mt-1.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
-              showInfoPanels
-                ? "panel border-cyan-500/40 text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/10"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
-            }`}
+            onClick={() => setInfoPanelsExpanded((v) => !v)}
+            className="panel w-full mt-1.5 flex items-center gap-2 px-3 py-2 rounded text-xs font-medium border border-cyan-600/60 text-cyan-200 hover:border-cyan-500 transition-colors"
           >
-            <span className={`w-2.5 h-2.5 rounded-full transition-colors ${showInfoPanels ? "bg-cyan-400" : "bg-ocean-700"}`} />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              className={`flex-shrink-0 transition-transform duration-200 ${infoPanelsExpanded ? "rotate-90" : ""}`}
+            >
+              <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
             정보 패널
+            <span className="ml-auto text-cyan-400 text-[10px]">{showInfoPanels ? "ON" : "OFF"}</span>
           </button>
+
+          {infoPanelsExpanded && (
+            <div className="panel border border-cyan-600/60 border-t-0 rounded-b px-2 py-2 space-y-1.5">
+              <button
+                onClick={() => {
+                  const newVis = !showInfoPanels;
+                  setShowInfoPanels(newVis);
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <span className={`w-1.5 h-1.5 rounded flex-shrink-0 transition-colors ${showInfoPanels ? "bg-cyan-400" : "bg-ocean-700"}`} style={{ backgroundColor: showInfoPanels ? "#06b6d4" : undefined }} />
+                <span className="flex-1 text-left">안내 텍스트 표시</span>
+              </button>
+            </div>
+          )}
 
           {/* 선택 선박 오버레이 */}
           <div className="flex flex-col gap-1.5 mt-3 pt-2 border-t border-ocean-700/40">
@@ -2129,80 +2176,101 @@ function MaritimeMap() {
       </div>
 
       {/* 범례 */}
-      <div className="absolute bottom-10 right-12 panel p-2.5 rounded text-xs space-y-1.5 pointer-events-none">
-        {Object.entries(PLATFORM_LABELS).map(([type, label]) => {
-          const colors: Record<string, string> = {
-            vessel: "#2e8dd4",
-            usv: "#22d3ee",
-            rov: "#a78bfa",
-            auv: "#818cf8",
-            drone: "#34d399",
-            buoy: "#fbbf24",
-          };
-          return (
-            <div key={type} className="flex items-center gap-2">
-              <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ background: colors[type] }}
-              />
-              <span className="text-ocean-300">{label}</span>
+      <div className="absolute bottom-10 right-12 pointer-events-none">
+        <button
+          onClick={() => setLegendExpanded((v) => !v)}
+          className="panel flex items-center gap-2 px-3 py-2 rounded text-xs font-medium border border-ocean-600/60 text-ocean-200 hover:border-ocean-500 transition-colors pointer-events-auto mb-1"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            className={`flex-shrink-0 transition-transform duration-200 ${legendExpanded ? "rotate-90" : ""}`}
+          >
+            <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          범례
+          <span className="ml-auto text-ocean-400 text-[10px]">{Object.keys(PLATFORM_LABELS).length}개</span>
+        </button>
+
+        {legendExpanded && (
+          <div className="panel border border-ocean-600/60 border-t-0 rounded-b p-2.5 text-xs space-y-1.5 pointer-events-auto">
+            {Object.entries(PLATFORM_LABELS).map(([type, label]) => {
+              const colors: Record<string, string> = {
+                vessel: "#2e8dd4",
+                usv: "#22d3ee",
+                rov: "#a78bfa",
+                auv: "#818cf8",
+                drone: "#34d399",
+                buoy: "#fbbf24",
+              };
+              return (
+                <div key={type} className="flex items-center gap-2">
+                  <span
+                    className="inline-block w-2 h-2 rounded-full"
+                    style={{ background: colors[type] }}
+                  />
+                  <span className="text-ocean-300">{label}</span>
+                </div>
+              );
+            })}
+            <div className="flex items-center gap-2 border-t border-ocean-800 pt-1.5 mt-0.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500/60" />
+              <span className="text-red-400">위험 경보</span>
             </div>
-          );
-        })}
-        <div className="flex items-center gap-2 border-t border-ocean-800 pt-1.5 mt-0.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-500/60" />
-          <span className="text-red-400">위험 경보</span>
-        </div>
-        <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">항로 보조</div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-cyan-300" />
-          <span className="text-cyan-200">주요 부표/등대/표지</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-px bg-emerald-300" />
-          <span className="text-emerald-200">Fairway 보조선</span>
-        </div>
-        <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">선택 선박</div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/50 bg-sky-400/10" />
-          <span className="text-sky-200">참고 기동 도메인</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-400/20" />
-          <span className="text-red-300">CPA/TCPA 위험 도메인</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-px bg-red-400" />
-          <span className="text-red-300">CPA/TCPA 조우선</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full border-2 border-red-400 bg-white" />
-          <span className="text-slate-100">최근접 예상 지점</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-400/20" />
-          <span className="text-amber-200">진행 방향 부채꼴</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-px bg-green-300" />
-          <span className="text-green-200">예측 경로</span>
-        </div>
-        {zoneVisible && (
-          <>
-            <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">구역</div>
+            <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">항로 보조</div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-500/20" />
-              <span className="text-red-300">금지</span>
+              <span className="inline-block w-2 h-2 rounded-full bg-cyan-300" />
+              <span className="text-cyan-200">주요 부표/등대/표지</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-500/20" />
-              <span className="text-amber-300">제한</span>
+              <span className="inline-block w-3 h-px bg-emerald-300" />
+              <span className="text-emerald-200">Fairway 보조선</span>
+            </div>
+            <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">선택 선박</div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/50 bg-sky-400/10" />
+              <span className="text-sky-200">참고 기동 도메인</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-3 h-2 rounded-sm border border-blue-400/70 bg-blue-500/20" />
-              <span className="text-blue-300">주의</span>
+              <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-400/20" />
+              <span className="text-red-300">CPA/TCPA 위험 도메인</span>
             </div>
-          </>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-px bg-red-400" />
+              <span className="text-red-300">CPA/TCPA 조우선</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full border-2 border-red-400 bg-white" />
+              <span className="text-slate-100">최근접 예상 지점</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-400/20" />
+              <span className="text-amber-200">진행 방향 부채꼴</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-3 h-px bg-green-300" />
+              <span className="text-green-200">예측 경로</span>
+            </div>
+            {zoneVisible && (
+              <>
+                <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">구역</div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-500/20" />
+                  <span className="text-red-300">금지</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-500/20" />
+                  <span className="text-amber-300">제한</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-2 rounded-sm border border-blue-400/70 bg-blue-500/20" />
+                  <span className="text-blue-300">주의</span>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>
