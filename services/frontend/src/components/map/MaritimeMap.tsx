@@ -1900,8 +1900,8 @@ function MaritimeMap() {
       </div>
 
       {/* 레이어 토글 */}
-      <div className="absolute top-3 right-12 z-10 flex flex-col items-end gap-2">
-        <div className="flex flex-wrap justify-end gap-2">
+      <div className="absolute top-3 right-12 z-10 flex flex-col items-end gap-2 pointer-events-none">
+        <div className="flex flex-wrap justify-end gap-2 pointer-events-auto">
           <button
             onClick={() => setZoneVisible((v) => !v)}
             title="설정된 금지·제한·주의 구역 표시"
@@ -2034,7 +2034,7 @@ function MaritimeMap() {
           </button>
         </div>
 
-        <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+        <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
           <div className="flex items-center justify-between gap-3 text-ocean-100">
             <span className="font-medium">해양 레이어</span>
             <span className="font-mono text-[10px] text-ocean-400">{activeNauticalLayerCount}/3 활성</span>
@@ -2052,7 +2052,7 @@ function MaritimeMap() {
         </div>
 
         {selectedId && (
-          <div className="panel max-w-[320px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+          <div className="panel max-w-[320px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
             <div className="flex items-center justify-between gap-3 text-ocean-100">
               <span className="font-medium">안전 영역 기준 안내</span>
               <span className="font-mono text-[10px] text-ocean-400">실시간</span>
@@ -2067,7 +2067,7 @@ function MaritimeMap() {
         )}
 
         {selectedId && selectedCpaEncounters.length > 0 && (
-          <div className="panel max-w-[300px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+          <div className="panel max-w-[300px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
             <div className="flex items-center justify-between gap-3 text-ocean-100">
               <span className="font-medium">활성 CPA/TCPA 조우</span>
               <span className="font-mono text-[10px] text-ocean-400">{selectedCpaEncounters.length}건</span>

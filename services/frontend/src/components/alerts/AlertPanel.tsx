@@ -143,6 +143,7 @@ function AlertRow({
   canOperate: boolean;
 }) {
   const isNew = alert.status === "new";
+  const isResolved = alert.status === "resolved";
   const source = String((alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime");
   const workflowState = getWorkflowState(alert);
   const actionHistory = getActionHistory(alert);
@@ -176,6 +177,9 @@ function AlertRow({
           <div className="mt-1 flex flex-wrap gap-1">
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
               {source}
+            </span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isResolved ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : isNew ? "bg-red-500/10 text-red-300 border-red-500/30" : "bg-ocean-800 text-ocean-300 border-ocean-700"}`}>
+              {alertStatusLabel(alert.status)}
             </span>
             {workflowState && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
@@ -295,4 +299,11 @@ function actionLabel(action: string) {
   if (action === "start_investigation") return "조사 시작";
   if (action === "escalate") return "상위 보고";
   return action;
+}
+
+function alertStatusLabel(status: Alert["status"]) {
+  if (status === "new") return "활성";
+  if (status === "acknowledged") return "인지됨";
+  if (status === "resolved") return "해결됨";
+  return status;
 }
