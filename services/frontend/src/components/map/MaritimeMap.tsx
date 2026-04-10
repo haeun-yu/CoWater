@@ -824,6 +824,7 @@ function MaritimeMap() {
   const [zoneVisible, setZoneVisible] = useState(true);
   const [predictionVisible, setPredictionVisible] = useState(true);
   const [encounterVisible, setEncounterVisible] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
@@ -1855,6 +1856,16 @@ function MaritimeMap() {
     }
   }, [encounterVisible, mapLoaded]);
 
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const visibility = showLabels ? "visible" : "none";
+    for (const id of ["platform-labels", "platform-cluster-count", "nav-aids-label"]) {
+      if (mapRef.current.getLayer(id)) {
+        mapRef.current.setLayoutProperty(id, "visibility", visibility);
+      }
+    }
+  }, [showLabels, mapLoaded]);
+
   const platformCount = Object.keys(platforms).length;
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
@@ -1962,6 +1973,18 @@ function MaritimeMap() {
               </button>
             </div>
           )}
+
+          {/* 텍스트 레이블 토글 */}
+          <button
+            onClick={() => setShowLabels((v) => !v)}
+            className="w-full mt-3 flex items-center gap-2 px-2.5 py-1.5 rounded text-xs font-medium text-ocean-200 hover:bg-ocean-800/30 transition-colors border border-ocean-700/40 hover:border-ocean-600/60"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
+              <text x="2" y="11" fontSize="8" fill="currentColor" opacity={showLabels ? 1 : 0.5}>텍스트</text>
+            </svg>
+            <span className="flex-1 text-left">텍스트 레이블</span>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${showLabels ? "bg-blue-300" : "bg-ocean-700"}`} />
+          </button>
 
           {/* 선택 선박 오버레이 */}
           <div className="flex flex-col gap-1.5 mt-3 pt-2 border-t border-ocean-700/40">
