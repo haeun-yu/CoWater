@@ -825,6 +825,7 @@ function MaritimeMap() {
   const [predictionVisible, setPredictionVisible] = useState(true);
   const [encounterVisible, setEncounterVisible] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [showInfoPanels, setShowInfoPanels] = useState(true);
   const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
@@ -1986,6 +1987,21 @@ function MaritimeMap() {
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${showLabels ? "bg-blue-300" : "bg-ocean-700"}`} />
           </button>
 
+          {/* 정보 패널 토글 */}
+          <button
+            onClick={() => setShowInfoPanels((v) => !v)}
+            className="w-full mt-1.5 flex items-center gap-2 px-2.5 py-1.5 rounded text-xs font-medium text-ocean-200 hover:bg-ocean-800/30 transition-colors border border-ocean-700/40 hover:border-ocean-600/60"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="flex-shrink-0" style={{ opacity: showInfoPanels ? 1 : 0.5 }}>
+              <rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="2" y1="5" x2="14" y2="5" stroke="currentColor" strokeWidth="0.8" opacity="0.6"/>
+              <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="0.6" opacity="0.4"/>
+              <line x1="4" y1="10" x2="12" y2="10" stroke="currentColor" strokeWidth="0.6" opacity="0.4"/>
+            </svg>
+            <span className="flex-1 text-left">정보 패널</span>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${showInfoPanels ? "bg-cyan-300" : "bg-ocean-700"}`} />
+          </button>
+
           {/* 선택 선박 오버레이 */}
           <div className="flex flex-col gap-1.5 mt-3 pt-2 border-t border-ocean-700/40">
             <button
@@ -2018,30 +2034,32 @@ function MaritimeMap() {
           </div>
         </div>
 
-        <div className="panel max-w-[280px] rounded px-3 py-2.5 text-[11px] leading-relaxed text-ocean-300 pointer-events-none select-none space-y-2.5">
-          <div>
-            <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
-              <span className="font-semibold text-sm">해양 레이어</span>
-              <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeNauticalLayerCount}/3</span>
+        {showInfoPanels && (
+          <div className="panel max-w-[280px] rounded px-3 py-2.5 text-[11px] leading-relaxed text-ocean-300 pointer-events-none select-none space-y-2.5">
+            <div>
+              <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
+                <span className="font-semibold text-sm">해양 레이어</span>
+                <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeNauticalLayerCount}/3</span>
+              </div>
+              <div className="text-ocean-400 text-[10px]">
+                주요 표지·Fairway는 지도 확대 레벨 {MAP_NAV_AID_FETCH_MIN_ZOOM} 이상에서 자동으로 표시됩니다.
+              </div>
             </div>
-            <div className="text-ocean-400 text-[10px]">
-              주요 표지·Fairway는 지도 확대 레벨 {MAP_NAV_AID_FETCH_MIN_ZOOM} 이상에서 자동으로 표시됩니다.
+            <div className="border-t border-ocean-700/50 pt-2">
+              <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
+                <span className="font-semibold text-sm">선택 선박 오버레이</span>
+                <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeSelectedOverlayCount}/4</span>
+              </div>
+              <div className="text-ocean-400 text-[10px] space-y-1">
+                <p>• 파란 점선: 참고 기동 영역</p>
+                <p>• 황색/적색: 실제 위험 도메인</p>
+                <p>• CPA/TCPA: 최근접거리·시간</p>
+              </div>
             </div>
           </div>
-          <div className="border-t border-ocean-700/50 pt-2">
-            <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
-              <span className="font-semibold text-sm">선택 선박 오버레이</span>
-              <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeSelectedOverlayCount}/4</span>
-            </div>
-            <div className="text-ocean-400 text-[10px] space-y-1">
-              <p>• 파란 점선: 참고 기동 영역</p>
-              <p>• 황색/적색: 실제 위험 도메인</p>
-              <p>• CPA/TCPA: 최근접거리·시간</p>
-            </div>
-          </div>
-        </div>
+        )}
 
-        {selectedId && (
+        {showInfoPanels && selectedId && (
           <div className="panel max-w-[320px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
             <div className="flex items-center justify-between gap-3 text-ocean-100">
               <span className="font-medium">안전 영역 기준 안내</span>
@@ -2056,7 +2074,7 @@ function MaritimeMap() {
           </div>
         )}
 
-        {selectedId && selectedCpaEncounters.length > 0 && (
+        {showInfoPanels && selectedId && selectedCpaEncounters.length > 0 && (
           <div className="panel max-w-[300px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
             <div className="flex items-center justify-between gap-3 text-ocean-100">
               <span className="font-medium">활성 CPA/TCPA 조우</span>
