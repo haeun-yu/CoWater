@@ -68,7 +68,7 @@ function showBrowserNotification(title: string, body: string) {
   if (Notification.permission !== "granted") return;
   if (document.visibilityState === "visible") return; // 탭 활성 시 생략
   try {
-    new Notification(title, { body, icon: "/favicon.ico", tag: "cowater-alert" });
+    new Notification(title, { body, icon: "/icon.svg", tag: "cowater-alert" });
   } catch {
     // 일부 브라우저에서 secure context 아닌 경우 실패 가능 — 무시
   }
