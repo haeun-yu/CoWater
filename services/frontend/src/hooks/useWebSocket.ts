@@ -8,6 +8,7 @@ import { useAILogStore, isAIAgent, type ActivityLogEntry } from "@/stores/aiLogS
 import { useSystemStore, type StreamKey } from "@/stores/systemStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { WsMessage, PlatformType } from "@/types";
+import { parseWsMessage } from "@/lib/wsMessage";
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
@@ -88,11 +89,18 @@ function createManagedWs(url: string, handlers: ManagedWsHandlers) {
       }
     };
     ws.onmessage = (event) => {
-      try {
-        handlers.onMessage(JSON.parse(event.data));
-      } catch {
-        handlers.onParseError?.(String(event.data));
+      if (typeof event.data !== "string") {
+        handlers.onParseError?.("[non-text websocket payload]");
+        return;
       }
+
+      const message = parseWsMessage(event.data);
+      if (message === null) {
+        handlers.onParseError?.(event.data);
+        return;
+      }
+
+      handlers.onMessage(message);
     };
   };
 
@@ -180,20 +188,7 @@ export function useWebSocket() {
         notifyParseIssue("position");
       },
       onMessage: (data) => {
-        const msg = data as {
-          type: string;
-          platform_id: string;
-          platform_type?: PlatformType;
-          name?: string;
-          timestamp: string;
-          source_protocol?: string;
-          lat: number;
-          lon: number;
-          sog: number | null;
-          cog: number | null;
-          heading: number | null;
-          nav_status: string | null;
-        };
+        const msg = data as Extract<WsMessage, { type: "position_update" }>;
         if (msg.type !== "position_update") return;
         markStreamMessage("position");
         upsert({
