@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import {
   MAP_CENTER,
+  MAP_GLYPHS_URL,
   MAP_OPENSEAMAP_ATTRIBUTION,
   MAP_OPENSEAMAP_SEAMARK_TILE_URL,
   MAP_OSM_ATTRIBUTION,
@@ -77,7 +78,7 @@ export default function ZoneMapPanel({
             layout: { visibility: "none" },
           },
         ],
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        glyphs: MAP_GLYPHS_URL,
       },
       center: MAP_CENTER,
       zoom: MAP_ZOOM - 1,
