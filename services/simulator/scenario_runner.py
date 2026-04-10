@@ -34,8 +34,8 @@ class ScenarioEvent:
 
 
 class ScenarioRunner:
-    def __init__(self, scenario_path: str, publisher: MothPublisher) -> None:
-        self._publisher = publisher
+    def __init__(self, scenario_path: str, publishers: list) -> None:
+        self._publishers = publishers
         self._vessels: dict[str, VesselSimulator] = {}
         self._events: list[ScenarioEvent] = []
         self._weather = WeatherGenerator()
@@ -136,7 +136,8 @@ class ScenarioRunner:
                 vessel.tick(dt_sim)
                 sentence = encode_position_report(vessel.state)
                 if sentence:
-                    await self._publisher.publish(sentence)
+                    for publisher in self._publishers:
+                        await publisher.publish(sentence)
                     sentence_count += 1
 
             if int(self._elapsed_s) % 30 == 0 and self._elapsed_s > 0:

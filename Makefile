@@ -1,4 +1,4 @@
-.PHONY: up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim down-host-ollama down-docker-ollama down-vllm down-host-ollama-sim down-docker-ollama-sim down-vllm-sim downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
+.PHONY: up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim rebuild-host-ollama-sim rebuild-docker-ollama-sim rebuild-vllm-sim down-host-ollama down-docker-ollama down-vllm down-host-ollama-sim down-docker-ollama-sim down-vllm-sim downall-host-ollama stop-host-ollama ps-host-ollama ps-docker-ollama ps-vllm logs-host-ollama logs-docker-ollama logs-vllm install-host-ollama-launchd uninstall-host-ollama-launchd docker-doctor docker-cleanup-safe
 
 up-host-ollama:
 	bash infra/run.sh host-ollama up
@@ -15,13 +15,23 @@ up-vllm:
 #     SCENARIO=collision_risk make up-host-ollama-sim
 # ─────────────────────────────────────────────────────
 up-host-ollama-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh host-ollama up
+	cd infra && docker compose --env-file env/local-host-ollama.env --profile simulation up -d
 
 up-docker-ollama-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh docker-ollama up
+	cd infra && docker compose --env-file env/local-docker-ollama.env --profile ollama --profile simulation up -d
 
 up-vllm-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh vllm up
+	cd infra && docker compose --env-file env/local-vllm.env --profile vllm --profile simulation up -d
+
+# 시뮬레이션 포함 + 재빌드
+rebuild-host-ollama-sim:
+	cd infra && SCENARIO=${SCENARIO:-demo} docker compose --env-file env/local-host-ollama.env --profile simulation build && docker compose --env-file env/local-host-ollama.env --profile simulation up -d
+
+rebuild-docker-ollama-sim:
+	cd infra && SCENARIO=${SCENARIO:-demo} docker compose --env-file env/local-docker-ollama.env --profile ollama --profile simulation build && docker compose --env-file env/local-docker-ollama.env --profile ollama --profile simulation up -d
+
+rebuild-vllm-sim:
+	cd infra && SCENARIO=${SCENARIO:-demo} docker compose --env-file env/local-vllm.env --profile vllm --profile simulation build && docker compose --env-file env/local-vllm.env --profile vllm --profile simulation up -d
 
 down-host-ollama:
 	bash infra/run.sh host-ollama down
@@ -33,13 +43,13 @@ down-vllm:
 	bash infra/run.sh vllm down
 
 down-host-ollama-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh host-ollama down
+	cd infra && docker compose --env-file env/local-host-ollama.env --profile simulation down
 
 down-docker-ollama-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh docker-ollama down
+	cd infra && docker compose --env-file env/local-docker-ollama.env --profile ollama --profile simulation down
 
 down-vllm-sim:
-	SCENARIO=${SCENARIO:-demo} bash infra/run.sh vllm down
+	cd infra && docker compose --env-file env/local-vllm.env --profile vllm --profile simulation down
 
 downall-host-ollama:
 	bash infra/run.sh host-ollama down-all
