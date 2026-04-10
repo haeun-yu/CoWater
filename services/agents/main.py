@@ -51,6 +51,7 @@ _redis: aioredis.Redis | None = None
 # AI 에이전트 백그라운드 태스크 추적 집합
 _pending_ai_tasks: set[asyncio.Task] = set()
 _ai_dispatch_semaphore = asyncio.Semaphore(settings.ai_max_concurrent_tasks)
+_dropped_ai_task_count = 0
 
 # 런타임 타이밍 상수 — settings에서 읽어 모듈 초기화 시 고정
 _AI_TASK_TIMEOUT = settings.ai_task_timeout_sec
@@ -128,9 +129,17 @@ async def _restore_agent_states() -> None:
 
 def _track_task(coro, *, name: str, agent: Agent) -> asyncio.Task | None:
     """태스크를 생성하고 상한을 넘지 않도록 추적. 완료 시 자동 제거."""
+    global _dropped_ai_task_count
+
+    finished = {task for task in _pending_ai_tasks if task.done()}
+    if finished:
+        _pending_ai_tasks.difference_update(finished)
+
     if len(_pending_ai_tasks) >= settings.ai_max_pending_tasks:
         msg = f"AI task queue full ({len(_pending_ai_tasks)}/{settings.ai_max_pending_tasks})"
         logger.warning("Dropping AI task for %s: %s", agent.agent_id, msg)
+        coro.close()
+        _dropped_ai_task_count += 1
         agent._record_error(msg)
         return None
 
@@ -138,9 +147,20 @@ def _track_task(coro, *, name: str, agent: Agent) -> asyncio.Task | None:
         async with _ai_dispatch_semaphore:
             await coro
 
+    def _cleanup_task(done_task: asyncio.Task) -> None:
+        _pending_ai_tasks.discard(done_task)
+        try:
+            exc = done_task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            msg = f"AI background task crashed: {exc}"
+            agent._record_error(msg)
+            logger.error(msg, exc_info=(type(exc), exc, exc.__traceback__))
+
     task = asyncio.create_task(_run_with_limit(), name=name)
     _pending_ai_tasks.add(task)
-    task.add_done_callback(_pending_ai_tasks.discard)
+    task.add_done_callback(_cleanup_task)
     return task
 
 
@@ -807,6 +827,7 @@ async def health():
             "enabled": len(_registry.enabled()),
         },
         "pending_ai_tasks": len(_pending_ai_tasks),
+        "dropped_ai_tasks": _dropped_ai_task_count,
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
             "core_api": "ok" if core_ok else "error",
