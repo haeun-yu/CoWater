@@ -1900,7 +1900,7 @@ function MaritimeMap() {
               height="14"
               viewBox="0 0 14 14"
               fill="none"
-              className={`flex-shrink-0 transition-transform ${nauticalLayersExpanded ? "rotate-90" : ""}`}
+              className={`flex-shrink-0 transition-transform duration-200 ${nauticalLayersExpanded ? "rotate-90" : ""}`}
             >
               <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -1928,46 +1928,54 @@ function MaritimeMap() {
                 onClick={() => setNavAidVisible((v) => !v)}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: navAidVisible ? 1 : 0.5 }}>
+                  <circle cx="6" cy="6" r="2" fill="none" stroke="currentColor" strokeWidth="1.2"/>
+                  <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="0.8" style={{ opacity: navAidVisible ? 0.7 : 0.3 }}/>
+                </svg>
                 <span className="flex-1 text-left">주요 표지</span>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
               </button>
 
               <button
                 onClick={() => setFairwayVisible((v) => !v)}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: fairwayVisible ? 1 : 0.5 }}>
+                  <line x1="2" y1="10" x2="10" y2="2" stroke="currentColor" strokeWidth="1.2"/>
+                  <circle cx="6" cy="6" r="0.5" fill="currentColor" style={{ opacity: fairwayVisible ? 0.8 : 0.4 }}/>
+                </svg>
                 <span className="flex-1 text-left">Fairway</span>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
               </button>
 
               <button
                 onClick={() => setSeamarkVisible((v) => !v)}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
-                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
-                  <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor" opacity="0.8"/>
-                  <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5"/>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: seamarkVisible ? 1 : 0.5 }}>
+                  <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor"/>
+                  <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" style={{ opacity: seamarkVisible ? 0.6 : 0.3 }}/>
                   <rect x="3" y="10" width="6" height="2" rx="0.5" fill="currentColor"/>
                 </svg>
                 <span className="flex-1 text-left">전체 seamark</span>
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`} />
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
               </button>
             </div>
           )}
 
           {/* 선택 선박 오버레이 */}
-          <div className="flex flex-col gap-1.5 mt-2">
+          <div className="flex flex-col gap-1.5 mt-3 pt-2 border-t border-ocean-700/40">
             <button
               onClick={() => setEncounterVisible((v) => !v)}
               title="선택 선박과 활성 CPA/TCPA 상대선 연결 표시"
               aria-pressed={encounterVisible}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
                 encounterVisible
-                  ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+                  ? "panel border-red-500/40 text-red-200 hover:border-red-400 hover:bg-red-500/10"
+                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${encounterVisible ? "bg-red-300" : "bg-ocean-700"}`} />
+              <span className={`w-2.5 h-2.5 rounded-full transition-colors ${encounterVisible ? "bg-red-400" : "bg-ocean-700"}`} />
               CPA/TCPA 조우선
             </button>
 
@@ -1975,32 +1983,38 @@ function MaritimeMap() {
               onClick={() => setPredictionVisible((v) => !v)}
               title="선택 선박 예상 진행선 표시"
               aria-pressed={predictionVisible}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
                 predictionVisible
-                  ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+                  ? "panel border-emerald-500/40 text-emerald-200 hover:border-emerald-400 hover:bg-emerald-500/10"
+                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${predictionVisible ? "bg-green-300" : "bg-ocean-700"}`} />
+              <span className={`w-2.5 h-2.5 rounded-full transition-colors ${predictionVisible ? "bg-emerald-400" : "bg-ocean-700"}`} />
               예측 경로
             </button>
           </div>
         </div>
 
-        <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
-          <div className="flex items-center justify-between gap-3 text-ocean-100">
-            <span className="font-medium">해양 레이어</span>
-            <span className="font-mono text-[10px] text-ocean-400">{activeNauticalLayerCount}/3 활성</span>
+        <div className="panel max-w-[280px] rounded px-3 py-2.5 text-[11px] leading-relaxed text-ocean-300 pointer-events-none select-none space-y-2.5">
+          <div>
+            <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
+              <span className="font-semibold text-sm">해양 레이어</span>
+              <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeNauticalLayerCount}/3</span>
+            </div>
+            <div className="text-ocean-400 text-[10px]">
+              주요 표지·Fairway는 지도 확대 레벨 {MAP_NAV_AID_FETCH_MIN_ZOOM} 이상에서 자동으로 표시됩니다.
+            </div>
           </div>
-          <div className="mt-1 text-ocean-400">
-            주요 표지·Fairway는 <span className="font-mono">zoom {MAP_NAV_AID_FETCH_MIN_ZOOM}+</span>에서 자동 조회됩니다.
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-3 text-ocean-100">
-            <span className="font-medium">선택 선박 오버레이</span>
-            <span className="font-mono text-[10px] text-ocean-400">{activeSelectedOverlayCount}/4 활성</span>
-          </div>
-          <div className="mt-1 text-ocean-400">
-            파란 점선 도메인은 참고 기동 영역입니다. 실제 위험 판단은 조우선과 황색/적색 위험 도메인, 그리고 CPA/TCPA 수치로 확인합니다.
+          <div className="border-t border-ocean-700/50 pt-2">
+            <div className="flex items-center justify-between gap-3 text-ocean-100 mb-1">
+              <span className="font-semibold text-sm">선택 선박 오버레이</span>
+              <span className="font-mono text-[10px] text-ocean-400 bg-ocean-900/40 px-2 py-0.5 rounded">{activeSelectedOverlayCount}/4</span>
+            </div>
+            <div className="text-ocean-400 text-[10px] space-y-1">
+              <p>• 파란 점선: 참고 기동 영역</p>
+              <p>• 황색/적색: 실제 위험 도메인</p>
+              <p>• CPA/TCPA: 최근접거리·시간</p>
+            </div>
           </div>
         </div>
 
