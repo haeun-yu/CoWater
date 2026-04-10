@@ -744,59 +744,73 @@ async function fetchNauticalOverlays(bounds: maplibregl.LngLatBounds) {
   const north = bounds.getNorth();
   const east = bounds.getEast();
 
-  const query = `[out:json][timeout:20];(
+  const query = `[out:json][timeout:25];(
     node["seamark:type"~"lighthouse|beacon_lateral|beacon_cardinal|buoy_lateral|buoy_cardinal"](${south},${west},${north},${east});
     way["waterway"="fairway"](${south},${west},${north},${east});
   );out body geom;`;
 
-  const response = await fetch(OVERPASS_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=UTF-8" },
-    body: query,
-  });
-  if (!response.ok) {
-    throw new OverpassRequestError(`Overpass request failed: ${response.status}`, response.status);
-  }
-  const data = (await response.json()) as { elements?: OverpassElement[] };
-  const elements = data.elements ?? [];
-
-  const navAidFeatures: PointFeature[] = [];
-  const fairwayFeatures: Array<{ type: "Feature"; geometry: { type: "LineString"; coordinates: LonLat[] }; properties: Record<string, string> }> = [];
-
-  for (const element of elements) {
-    if (element.type === "node" && element.lat != null && element.lon != null) {
-      const seamarkType = element.tags?.["seamark:type"];
-      if (!seamarkType) continue;
-      navAidFeatures.push({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [element.lon, element.lat] },
-        properties: {
-          seamark_type: seamarkType,
-          label: NAV_AID_LABELS[seamarkType] ?? seamarkType,
-          name: element.tags?.name ?? NAV_AID_LABELS[seamarkType] ?? seamarkType,
-        },
+  // 재시도 로직 (최대 3회)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(OVERPASS_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: query,
       });
-      continue;
-    }
+      if (!response.ok) {
+        throw new OverpassRequestError(`Overpass request failed: ${response.status}`, response.status);
+      }
+      const data = (await response.json()) as { elements?: OverpassElement[] };
+      const elements = data.elements ?? [];
 
-    if (element.type === "way" && element.geometry?.length) {
-      fairwayFeatures.push({
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: element.geometry.map((point) => [point.lon, point.lat] as LonLat),
-        },
-        properties: {
-          name: element.tags?.name ?? "Fairway",
-        },
-      });
+      // 조기 반환 - 성공
+      const navAidFeatures: PointFeature[] = [];
+      const fairwayFeatures: Array<{ type: "Feature"; geometry: { type: "LineString"; coordinates: LonLat[] }; properties: Record<string, string> }> = [];
+
+      for (const element of elements) {
+        if (element.type === "node" && element.lat != null && element.lon != null) {
+          const seamarkType = element.tags?.["seamark:type"];
+          if (!seamarkType) continue;
+          navAidFeatures.push({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [element.lon, element.lat] },
+            properties: {
+              seamark_type: seamarkType,
+              label: NAV_AID_LABELS[seamarkType] ?? seamarkType,
+              name: element.tags?.name ?? NAV_AID_LABELS[seamarkType] ?? seamarkType,
+            },
+          });
+          continue;
+        }
+
+        if (element.type === "way" && element.geometry?.length) {
+          fairwayFeatures.push({
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: element.geometry.map((point) => [point.lon, point.lat] as LonLat),
+            },
+            properties: {
+              name: element.tags?.name ?? "Fairway",
+            },
+          });
+        }
+      }
+
+      return {
+        navAids: toFeatureCollection(navAidFeatures),
+        fairways: toFeatureCollection(fairwayFeatures as LineFeature[]),
+      };
+    } catch (error) {
+      if (!isTemporaryOverpassFailure(error) || attempt === 3) {
+        throw error;
+      }
+      // 임시 실패면 1초 대기 후 재시도
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
-  return {
-    navAids: toFeatureCollection(navAidFeatures),
-    fairways: { type: "FeatureCollection" as const, features: fairwayFeatures },
-  };
+  throw new Error("Overpass fetch failed after 3 attempts");
 }
 
 function MaritimeMap() {
@@ -825,9 +839,9 @@ function MaritimeMap() {
   const [navAidVisible, setNavAidVisible] = useState(true);
   const [fairwayVisible, setFairwayVisible] = useState(false);
   const [zoneVisible, setZoneVisible] = useState(true);
-  const [headingSectorVisible, setHeadingSectorVisible] = useState(true);
   const [predictionVisible, setPredictionVisible] = useState(true);
   const [encounterVisible, setEncounterVisible] = useState(true);
+  const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
 
@@ -971,6 +985,15 @@ function MaritimeMap() {
       "bottom-left",
     );
 
+    // Suppress vector tile parsing errors (type 4 unimplemented)
+    map.on("error", (e) => {
+      if (e.error?.message?.includes("Unimplemented type")) {
+        // Silently ignore unimplemented vector tile types
+        return;
+      }
+      console.error("[map] Error:", e.error);
+    });
+
     map.on("load", () => {
       // ── 역사적 항적 소스 (선택된 선박 DB 이력) ─────────────────────────
       map.addSource("history-trail", {
@@ -1078,26 +1101,6 @@ function MaritimeMap() {
         },
       });
 
-      map.addLayer({
-        id: "selected-heading-sector-fill",
-        type: "fill",
-        source: "selected-heading-sector",
-        paint: {
-          "fill-color": "#f59e0b",
-          "fill-opacity": 0.12,
-        },
-      });
-
-      map.addLayer({
-        id: "selected-heading-sector-line",
-        type: "line",
-        source: "selected-heading-sector",
-        paint: {
-          "line-color": "#fbbf24",
-          "line-width": 1.2,
-          "line-opacity": 0.65,
-        },
-      });
 
       map.addLayer({
         id: "selected-prediction-line",
@@ -1295,7 +1298,7 @@ function MaritimeMap() {
         id: "fairway-lines",
         type: "line",
         source: "fairways",
-        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        layout: { visibility: "visible", "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#67e8f9",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 12, 3.4],
@@ -1761,13 +1764,22 @@ function MaritimeMap() {
         const url = `${getCoreApiUrl()}/platforms/${encodeURIComponent(selectedId)}/track?limit=500`;
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) return;
-        const points = (await res.json()) as Array<{ lon: number; lat: number }>;
+        const allPoints = (await res.json()) as Array<{ time: string; lon: number; lat: number }>;
         if (controller.signal.aborted) return;
-        if (points.length < 2) {
+
+        // 최신 5분 데이터만 필터링
+        const now = new Date();
+        const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+        const recentPoints = allPoints.filter((p) => {
+          const pointTime = new Date(p.time);
+          return pointTime >= fiveMinutesAgo && pointTime <= now;
+        });
+
+        if (recentPoints.length < 2) {
           src.setData({ type: "FeatureCollection", features: [] });
           return;
         }
-        const simplifiedCoordinates = simplifyHistoryLine(points);
+        const simplifiedCoordinates = simplifyHistoryLine(recentPoints);
         src.setData({
           type: "FeatureCollection",
           features: [
@@ -1839,13 +1851,6 @@ function MaritimeMap() {
     }
   }, [zoneVisible, mapLoaded]);
 
-  useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
-    const vis = headingSectorVisible ? "visible" : "none";
-    for (const id of ["selected-heading-sector-fill", "selected-heading-sector-line"]) {
-      mapRef.current.setLayoutProperty(id, "visibility", vis);
-    }
-  }, [headingSectorVisible, mapLoaded]);
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
@@ -1872,7 +1877,6 @@ function MaritimeMap() {
   ).length;
   const activeNauticalLayerCount = Number(navAidVisible) + Number(fairwayVisible) + Number(seamarkVisible);
   const activeSelectedOverlayCount = Number(Boolean(selectedPlatform))
-    + Number(headingSectorVisible)
     + Number(predictionVisible)
     + Number(encounterVisible && selectedCpaEncounters.length > 0);
 
@@ -1899,139 +1903,104 @@ function MaritimeMap() {
         )}
       </div>
 
-      {/* 레이어 토글 */}
-      <div className="absolute top-3 right-12 z-10 flex flex-col items-end gap-2 pointer-events-none">
-        <div className="flex flex-wrap justify-end gap-2 pointer-events-auto">
+      {/* 레이어 토글 (Notion toggle 스타일) */}
+      <div className="absolute top-3 right-12 z-10 pointer-events-none">
+        <div className="pointer-events-auto">
+          {/* 해양 레이어 토글 헤더 */}
           <button
-            onClick={() => setZoneVisible((v) => !v)}
-            title="설정된 금지·제한·주의 구역 표시"
-            aria-pressed={zoneVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              zoneVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
-              <polygon points="6,1 11,10 1,10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.8"/>
-              <line x1="6" y1="4" x2="6" y2="7" stroke="currentColor" strokeWidth="1.2"/>
-              <circle cx="6" cy="8.5" r="0.7" fill="currentColor"/>
-            </svg>
-            구역
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
-          </button>
-
-          <button
-            onClick={() => setNavAidVisible((v) => !v)}
-            title="주요 부표·등대·표지만 간추려 표시"
-            aria-pressed={navAidVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              navAidVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
-            주요 표지
-          </button>
-
-          <button
-            onClick={() => setFairwayVisible((v) => !v)}
-            title="항로 감각을 돕는 fairway 보조 레이어"
-            aria-pressed={fairwayVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              fairwayVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
-            Fairway
-          </button>
-
-          <button
-            onClick={() => setSeamarkVisible((v) => !v)}
-            title="OpenSeaMap 전체 seamark 오버레이 (세부 정보 많음)"
-            aria-pressed={seamarkVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              seamarkVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-400"
-            }`}
+            onClick={() => setNauticalLayersExpanded((v) => !v)}
+            className="panel flex items-center gap-2 px-3 py-2 rounded text-xs font-medium border border-ocean-600/60 text-ocean-200 hover:border-ocean-500 transition-colors mb-1"
           >
             <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
               fill="none"
-              className="flex-shrink-0"
+              className={`flex-shrink-0 transition-transform ${nauticalLayersExpanded ? "rotate-90" : ""}`}
             >
-              <rect
-                x="4.5"
-                y="0"
-                width="3"
-                height="2"
-                rx="0.5"
-                fill="currentColor"
-                opacity="0.8"
-              />
-              <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5" />
-              <rect
-                x="3"
-                y="10"
-                width="6"
-                height="2"
-                rx="0.5"
-                fill="currentColor"
-              />
+              <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            전체 seamark
-            <span
-              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`}
-            />
+            해양 레이어
+            <span className="ml-auto text-ocean-400 text-[10px]">{activeNauticalLayerCount}개</span>
           </button>
 
-          <button
-            onClick={() => setEncounterVisible((v) => !v)}
-            title="선택 선박과 활성 CPA/TCPA 상대선 연결 표시"
-            aria-pressed={encounterVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              encounterVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${encounterVisible ? "bg-red-300" : "bg-ocean-700"}`} />
-            CPA/TCPA 조우선
-          </button>
+          {/* 토글 내용 */}
+          {nauticalLayersExpanded && (
+            <div className="panel border border-ocean-600/60 border-t-0 rounded-b px-2 py-2 space-y-1.5">
+              <button
+                onClick={() => setZoneVisible((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+                  <polygon points="6,1 11,10 1,10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.8"/>
+                  <line x1="6" y1="4" x2="6" y2="7" stroke="currentColor" strokeWidth="1.2"/>
+                  <circle cx="6" cy="8.5" r="0.7" fill="currentColor"/>
+                </svg>
+                <span className="flex-1 text-left">구역</span>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${zoneVisible ? "bg-amber-400" : "bg-ocean-700"}`} />
+              </button>
 
-          <button
-            onClick={() => setHeadingSectorVisible((v) => !v)}
-            title="선택 선박 진행 방향 부채꼴 표시"
-            aria-pressed={headingSectorVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              headingSectorVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${headingSectorVisible ? "bg-amber-300" : "bg-ocean-700"}`} />
-            진행 방향 부채꼴
-          </button>
+              <button
+                onClick={() => setNavAidVisible((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${navAidVisible ? "bg-cyan-300" : "bg-ocean-700"}`} />
+                <span className="flex-1 text-left">주요 표지</span>
+              </button>
 
-          <button
-            onClick={() => setPredictionVisible((v) => !v)}
-            title="선택 선박 예상 진행선 표시"
-            aria-pressed={predictionVisible}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-              predictionVisible
-                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
-                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${predictionVisible ? "bg-green-300" : "bg-ocean-700"}`} />
-            예측 경로
-          </button>
+              <button
+                onClick={() => setFairwayVisible((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${fairwayVisible ? "bg-emerald-300" : "bg-ocean-700"}`} />
+                <span className="flex-1 text-left">Fairway</span>
+              </button>
+
+              <button
+                onClick={() => setSeamarkVisible((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
+                  <rect x="4.5" y="0" width="3" height="2" rx="0.5" fill="currentColor" opacity="0.8"/>
+                  <path d="M4 2h4l1 8H3L4 2Z" fill="currentColor" opacity="0.5"/>
+                  <rect x="3" y="10" width="6" height="2" rx="0.5" fill="currentColor"/>
+                </svg>
+                <span className="flex-1 text-left">전체 seamark</span>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${seamarkVisible ? "bg-cyan-400" : "bg-ocean-700"}`} />
+              </button>
+            </div>
+          )}
+
+          {/* 선택 선박 오버레이 */}
+          <div className="flex flex-col gap-1.5 mt-2">
+            <button
+              onClick={() => setEncounterVisible((v) => !v)}
+              title="선택 선박과 활성 CPA/TCPA 상대선 연결 표시"
+              aria-pressed={encounterVisible}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+                encounterVisible
+                  ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${encounterVisible ? "bg-red-300" : "bg-ocean-700"}`} />
+              CPA/TCPA 조우선
+            </button>
+
+            <button
+              onClick={() => setPredictionVisible((v) => !v)}
+              title="선택 선박 예상 진행선 표시"
+              aria-pressed={predictionVisible}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+                predictionVisible
+                  ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${predictionVisible ? "bg-green-300" : "bg-ocean-700"}`} />
+              예측 경로
+            </button>
+          </div>
         </div>
 
         <div className="panel max-w-[240px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300 pointer-events-none select-none">
