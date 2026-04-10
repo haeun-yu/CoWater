@@ -235,6 +235,27 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
             )}
           </section>
 
+          <section className="px-4 py-3 border-b border-ocean-900">
+            <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">안전 영역 기준</div>
+            <div className="space-y-2 text-xs text-ocean-300 leading-5">
+              <p>
+                지도에서 <span className="text-sky-300 font-medium">파란 타원형 도메인</span>은 선박 크기·속도·heading/COG를 기반으로 한
+                <span className="text-ocean-100"> 참고 기동 여유 영역</span>입니다.
+              </p>
+              <p>
+                <span className="text-amber-300 font-medium">황색/적색 위험 도메인</span>은 실제 충돌위험 경보가 있을 때만 나타나며,
+                CPA/TCPA 기준을 만족하는 상대선 조우 상황을 반영합니다.
+              </p>
+              <div className="rounded border border-ocean-800 bg-ocean-950/70 px-2.5 py-2 text-[11px] text-ocean-400">
+                warning: CPA &lt; 0.5NM · TCPA &lt; 30분<br />
+                critical: CPA &lt; 0.2NM · TCPA &lt; 10분
+              </div>
+              <p className="text-ocean-500">
+                즉, 파란 영역 자체가 위험 판정선은 아니고, 실제 위험 판단은 CPA/TCPA 경보와 위험 도메인으로 해석해야 합니다.
+              </p>
+            </div>
+          </section>
+
           {/* 역사적 항적 조회 */}
           <section className="px-4 py-3 border-b border-ocean-900">
             <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">

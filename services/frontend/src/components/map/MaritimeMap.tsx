@@ -3,7 +3,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import {
-  buffer as turfBuffer,
   destination as turfDestination,
   lineString as turfLineString,
   point as turfPoint,
@@ -14,13 +13,14 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
-import type { PlatformState } from "@/types";
+import type { Alert, PlatformState } from "@/types";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import {
   ALERT_HIGHLIGHT_SEVERITY,
   ALERT_TRAIL_COLOR,
   MAP_CENTER,
   MAP_CLUSTER_MAX_ZOOM,
+  MAP_GLYPHS_URL,
   MAP_NAV_AID_FETCH_MIN_ZOOM,
   MAP_OPENSEAMAP_ATTRIBUTION,
   MAP_OPENSEAMAP_SEAMARK_TILE_URL,
@@ -76,6 +76,35 @@ type TrailFeature = {
   type: "Feature";
   geometry: { type: "LineString"; coordinates: LonLat[] };
   properties: { opacity: number; color: string };
+};
+
+type LineFeature = {
+  type: "Feature";
+  geometry: { type: "LineString"; coordinates: LonLat[] };
+  properties: Record<string, string | number | boolean | null>;
+};
+
+type EncounterOverlayItem = {
+  alertId: string;
+  counterpartId: string;
+  counterpartName: string;
+  severity: Alert["severity"];
+  cpaNm: number | null;
+  tcpaMin: number | null;
+  createdAt: string;
+};
+
+type EncounterRiskState = {
+  severity: Alert["severity"];
+  cpaNm: number | null;
+  tcpaMin: number | null;
+  scale: number;
+};
+
+type EncounterProjection = {
+  point: LonLat;
+  tcpaMin: number;
+  cpaNm: number;
 };
 
 /** 항적 GeoJSON FeatureCollection 생성 — 3-opacity 밴드
@@ -135,7 +164,7 @@ const NAV_AID_LABELS: Record<string, string> = {
   buoy_cardinal: "방위부표",
 };
 
-function toFeatureCollection(features: Array<PointFeature | PolygonFeature>) {
+function toFeatureCollection(features: Array<PointFeature | PolygonFeature | LineFeature>) {
   return { type: "FeatureCollection" as const, features };
 }
 
@@ -242,10 +271,266 @@ function buildBridgePolygon(platform: PlatformState, heading: number) {
   });
 }
 
-function buildSelectedSpatialData(platform: PlatformState | null) {
+function projectOffset(platform: PlatformState, heading: number, forwardMeters: number, starboardMeters: number) {
+  const rad = (heading * Math.PI) / 180;
+  const forwardX = Math.sin(rad);
+  const forwardY = Math.cos(rad);
+  const starboardX = Math.cos(rad);
+  const starboardY = -Math.sin(rad);
+  const dxMeters = forwardX * forwardMeters + starboardX * starboardMeters;
+  const dyMeters = forwardY * forwardMeters + starboardY * starboardMeters;
+
+  return [
+    platform.lon + metersToLon(dxMeters, platform.lat),
+    platform.lat + metersToLat(dyMeters),
+  ] as LonLat;
+}
+
+function buildShipDomainPolygon(
+  platform: PlatformState,
+  heading: number,
+  extents: { forwardNm: number; aftNm: number; lateralNm: number },
+) {
+  const coordinates: LonLat[] = [];
+  const steps = 48;
+
+  for (let index = 0; index <= steps; index += 1) {
+    const theta = (index / steps) * Math.PI * 2;
+    const cosTheta = Math.cos(theta);
+    const sinTheta = Math.sin(theta);
+    const forwardNm = cosTheta >= 0 ? extents.forwardNm * cosTheta : extents.aftNm * cosTheta;
+    const starboardNm = extents.lateralNm * sinTheta;
+    coordinates.push(projectOffset(platform, heading, forwardNm * 1852, starboardNm * 1852));
+  }
+
+  return coordinates;
+}
+
+function getAlertSeverityRank(severity: Alert["severity"]) {
+  if (severity === "critical") return 3;
+  if (severity === "warning") return 2;
+  return 1;
+}
+
+function getNumericMeta(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function projectEncounterCpaPoint(selected: PlatformState, counterpart: PlatformState) {
+  const selectedCog = selected.cog;
+  const counterpartCog = counterpart.cog;
+  if (
+    selected.sog == null
+    || counterpart.sog == null
+    || selectedCog == null
+    || counterpartCog == null
+  ) {
+    return null;
+  }
+
+  const avgLat = (selected.lat + counterpart.lat) / 2;
+  const cosLat = Math.cos((avgLat * Math.PI) / 180);
+  const dx = (counterpart.lon - selected.lon) * cosLat * 60;
+  const dy = (counterpart.lat - selected.lat) * 60;
+  const vel = (sog: number, cog: number) => {
+    const rad = (cog * Math.PI) / 180;
+    return { x: sog * Math.sin(rad) / 60, y: sog * Math.cos(rad) / 60 };
+  };
+
+  const v1 = vel(selected.sog, selectedCog);
+  const v2 = vel(counterpart.sog, counterpartCog);
+  const dvx = v2.x - v1.x;
+  const dvy = v2.y - v1.y;
+  const dv2 = dvx ** 2 + dvy ** 2;
+  if (dv2 < 1e-9) return null;
+
+  const tcpaMin = -((dx * dvx) + (dy * dvy)) / dv2;
+  if (!Number.isFinite(tcpaMin) || tcpaMin <= 0) return null;
+
+  const selectedCpaX = v1.x * tcpaMin;
+  const selectedCpaY = v1.y * tcpaMin;
+  const counterpartCpaX = dx + v2.x * tcpaMin;
+  const counterpartCpaY = dy + v2.y * tcpaMin;
+  const midpointX = (selectedCpaX + counterpartCpaX) / 2;
+  const midpointY = (selectedCpaY + counterpartCpaY) / 2;
+
+  return {
+    point: [
+      selected.lon + midpointX / Math.max(cosLat * 60, 1e-6),
+      selected.lat + midpointY / 60,
+    ],
+    tcpaMin,
+    cpaNm: Math.hypot(counterpartCpaX - selectedCpaX, counterpartCpaY - selectedCpaY),
+  } satisfies EncounterProjection;
+}
+
+function buildSelectedEncounterItems(
+  selectedId: string | null,
+  alerts: Alert[],
+  platforms: Record<string, PlatformState>,
+) {
+  if (!selectedId) return [] as EncounterOverlayItem[];
+
+  const deduped = new Map<string, EncounterOverlayItem>();
+
+  for (const alert of alerts) {
+    if (alert.alert_type !== "cpa" || alert.status === "resolved" || !alert.platform_ids.includes(selectedId)) {
+      continue;
+    }
+
+    const counterpartId = alert.platform_ids.find((platformId) => platformId !== selectedId);
+    if (!counterpartId) continue;
+
+    const meta = alert.metadata ?? {};
+    const item: EncounterOverlayItem = {
+      alertId: alert.alert_id,
+      counterpartId,
+      counterpartName: platforms[counterpartId]?.name || counterpartId,
+      severity: alert.severity,
+      cpaNm: getNumericMeta(meta.cpa_nm),
+      tcpaMin: getNumericMeta(meta.tcpa_min),
+      createdAt: alert.created_at,
+    };
+
+    const existing = deduped.get(counterpartId);
+    if (!existing) {
+      deduped.set(counterpartId, item);
+      continue;
+    }
+
+    const isHigherSeverity = getAlertSeverityRank(item.severity) > getAlertSeverityRank(existing.severity);
+    const isNewer = new Date(item.createdAt).getTime() > new Date(existing.createdAt).getTime();
+    if (isHigherSeverity || (getAlertSeverityRank(item.severity) === getAlertSeverityRank(existing.severity) && isNewer)) {
+      deduped.set(counterpartId, item);
+    }
+  }
+
+  return [...deduped.values()].sort((left, right) => {
+    const severityDelta = getAlertSeverityRank(right.severity) - getAlertSeverityRank(left.severity);
+    if (severityDelta !== 0) return severityDelta;
+    const leftTcpa = left.tcpaMin ?? Number.POSITIVE_INFINITY;
+    const rightTcpa = right.tcpaMin ?? Number.POSITIVE_INFINITY;
+    if (leftTcpa !== rightTcpa) return leftTcpa - rightTcpa;
+    return right.createdAt.localeCompare(left.createdAt);
+  });
+}
+
+function buildSelectedEncounterData(
+  selectedPlatform: PlatformState | null,
+  encounters: EncounterOverlayItem[],
+  platforms: Record<string, PlatformState>,
+) {
+  if (!selectedPlatform) {
+    return {
+      lines: emptyFeatureCollection(),
+      points: emptyFeatureCollection(),
+      cpaProjection: emptyFeatureCollection(),
+    };
+  }
+
+  const lineFeatures: LineFeature[] = [];
+  const pointFeatures: PointFeature[] = [];
+  const cpaProjectionFeatures: PointFeature[] = [];
+
+  for (const [index, encounter] of encounters.entries()) {
+    const counterpart = platforms[encounter.counterpartId];
+    if (!counterpart || counterpart.lat == null || counterpart.lon == null) continue;
+    const isPrimary = index === 0;
+
+    lineFeatures.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [selectedPlatform.lon, selectedPlatform.lat],
+          [counterpart.lon, counterpart.lat],
+        ],
+      },
+      properties: {
+        severity: encounter.severity,
+        counterpartId: encounter.counterpartId,
+        isPrimary,
+      },
+    });
+
+    pointFeatures.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [counterpart.lon, counterpart.lat] },
+      properties: {
+        severity: encounter.severity,
+        counterpartId: encounter.counterpartId,
+        counterpartName: encounter.counterpartName,
+        isPrimary,
+      },
+    });
+
+    if (isPrimary) {
+      const projection = projectEncounterCpaPoint(selectedPlatform, counterpart);
+      if (projection) {
+        cpaProjectionFeatures.push({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: projection.point },
+          properties: {
+            severity: encounter.severity,
+            cpa_nm: Number(projection.cpaNm.toFixed(3)),
+            tcpa_min: Number(projection.tcpaMin.toFixed(1)),
+          },
+        });
+      }
+    }
+  }
+
+  return {
+    lines: toFeatureCollection(lineFeatures),
+    points: toFeatureCollection(pointFeatures),
+    cpaProjection: toFeatureCollection(cpaProjectionFeatures),
+  };
+}
+
+function buildEncounterRiskState(encounters: EncounterOverlayItem[]) {
+  if (encounters.length === 0) return null;
+
+  const sorted = [...encounters].sort((left, right) => {
+    const severityDelta = getAlertSeverityRank(right.severity) - getAlertSeverityRank(left.severity);
+    if (severityDelta !== 0) return severityDelta;
+    const leftTcpa = left.tcpaMin ?? Number.POSITIVE_INFINITY;
+    const rightTcpa = right.tcpaMin ?? Number.POSITIVE_INFINITY;
+    if (leftTcpa !== rightTcpa) return leftTcpa - rightTcpa;
+    const leftCpa = left.cpaNm ?? Number.POSITIVE_INFINITY;
+    const rightCpa = right.cpaNm ?? Number.POSITIVE_INFINITY;
+    return leftCpa - rightCpa;
+  });
+
+  const worst = sorted[0];
+  const tcpaFactor = worst.tcpaMin == null
+    ? 1
+    : worst.tcpaMin <= 10
+      ? 1.28
+      : worst.tcpaMin <= 20
+        ? 1.18
+        : 1.08;
+  const cpaFactor = worst.cpaNm == null
+    ? 1
+    : worst.cpaNm <= 0.2
+      ? 1.24
+      : worst.cpaNm <= 0.5
+        ? 1.12
+        : 1.04;
+  const severityBase = worst.severity === "critical" ? 1.26 : 1.12;
+
+  return {
+    severity: worst.severity,
+    cpaNm: worst.cpaNm,
+    tcpaMin: worst.tcpaMin,
+    scale: clamp(severityBase * tcpaFactor * cpaFactor, 1.08, 1.75),
+  } satisfies EncounterRiskState;
+}
+
+function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk: EncounterRiskState | null) {
   if (!platform || platform.lat == null || platform.lon == null) {
     return {
       safetyBuffer: emptyFeatureCollection(),
+      dangerBuffer: emptyFeatureCollection(),
       headingSector: emptyFeatureCollection(),
       predictedPath: emptyFeatureCollection(),
     };
@@ -258,18 +543,82 @@ function buildSelectedSpatialData(platform: PlatformState | null) {
   const speedKnots = Math.max(platform.sog ?? 0, 0);
   const hullFootprintNm = metersToNm(dimensions.length * 1.2 + dimensions.beam * 0.8);
   const speedAdvanceNm = speedKnots * (MAP_SELECTED_SAFETY_SPEED_LOOKAHEAD_MIN / 60);
-  const safetyRadiusNm = clamp(
-    Math.max(MAP_SELECTED_SAFETY_BUFFER_BASE_NM, hullFootprintNm + speedAdvanceNm),
+  const forwardDomainNm = clamp(
+    Math.max(
+      MAP_SELECTED_SAFETY_BUFFER_BASE_NM,
+      hullFootprintNm + speedAdvanceNm * 1.35 + metersToNm(dimensions.length * 0.35),
+    ),
     MAP_SELECTED_SAFETY_BUFFER_BASE_NM,
-    3.5,
+    4.2,
+  );
+  const lateralDomainNm = clamp(
+    Math.max(
+      MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.42,
+      metersToNm(dimensions.beam * 1.6 + dimensions.length * 0.12) + speedAdvanceNm * 0.28,
+    ),
+    MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.35,
+    1.6,
+  );
+  const aftDomainNm = clamp(
+    Math.max(
+      MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.3,
+      metersToNm(dimensions.length * 0.55) + speedAdvanceNm * 0.5,
+    ),
+    MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.28,
+    forwardDomainNm * 0.72,
   );
   const headingSectorRadiusNm = clamp(
-    Math.max(safetyRadiusNm * MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER, metersToNm(dimensions.length * 2)),
-    safetyRadiusNm,
+    Math.max(forwardDomainNm * MAP_SELECTED_HEADING_SECTOR_RADIUS_MULTIPLIER, metersToNm(dimensions.length * 2)),
+    forwardDomainNm,
     4.5,
   );
 
-  const safetyBuffer = turfBuffer(center, nmToKm(safetyRadiusNm), { units: "kilometers" });
+  const safetyBuffer = normalizedHeading == null
+    ? emptyFeatureCollection()
+    : toFeatureCollection([
+        {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[
+              ...buildShipDomainPolygon(platform, normalizedHeading, {
+                forwardNm: forwardDomainNm,
+                aftNm: aftDomainNm,
+                lateralNm: lateralDomainNm,
+              }),
+            ]],
+          },
+          properties: {
+            forward_nm: Number(forwardDomainNm.toFixed(2)),
+            lateral_nm: Number(lateralDomainNm.toFixed(2)),
+            aft_nm: Number(aftDomainNm.toFixed(2)),
+          },
+        },
+      ]);
+
+  const dangerBuffer = normalizedHeading == null || encounterRisk == null
+    ? emptyFeatureCollection()
+    : toFeatureCollection([
+        {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[
+              ...buildShipDomainPolygon(platform, normalizedHeading, {
+                forwardNm: forwardDomainNm * encounterRisk.scale,
+                aftNm: aftDomainNm * Math.max(1.02, encounterRisk.scale * 0.9),
+                lateralNm: lateralDomainNm * Math.max(1.04, encounterRisk.scale * 0.94),
+              }),
+            ]],
+          },
+          properties: {
+            severity: encounterRisk.severity,
+            cpa_nm: encounterRisk.cpaNm != null ? Number(encounterRisk.cpaNm.toFixed(3)) : null,
+            tcpa_min: encounterRisk.tcpaMin != null ? Number(encounterRisk.tcpaMin.toFixed(1)) : null,
+            scale: Number(encounterRisk.scale.toFixed(2)),
+          },
+        },
+      ]);
 
   const headingSector = normalizedHeading == null
     ? emptyFeatureCollection()
@@ -295,6 +644,7 @@ function buildSelectedSpatialData(platform: PlatformState | null) {
 
   return {
     safetyBuffer: safetyBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
+    dangerBuffer: dangerBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
     headingSector: headingSector as maplibregl.GeoJSONSourceSpecification["data"] & object,
     predictedPath: predictedPath as maplibregl.GeoJSONSourceSpecification["data"] & object,
   };
@@ -371,6 +721,23 @@ type OverpassElement = {
   geometry?: Array<{ lat: number; lon: number }>;
 };
 
+const OVERPASS_FETCH_DEBOUNCE_MS = 600;
+const OVERPASS_RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+class OverpassRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "OverpassRequestError";
+  }
+}
+
+function isTemporaryOverpassFailure(error: unknown) {
+  return error instanceof OverpassRequestError && [429, 502, 503, 504].includes(error.status);
+}
+
 async function fetchNauticalOverlays(bounds: maplibregl.LngLatBounds) {
   const south = bounds.getSouth();
   const west = bounds.getWest();
@@ -388,7 +755,7 @@ async function fetchNauticalOverlays(bounds: maplibregl.LngLatBounds) {
     body: query,
   });
   if (!response.ok) {
-    throw new Error(`Overpass request failed: ${response.status}`);
+    throw new OverpassRequestError(`Overpass request failed: ${response.status}`, response.status);
   }
   const data = (await response.json()) as { elements?: OverpassElement[] };
   const elements = data.elements ?? [];
@@ -441,6 +808,9 @@ function MaritimeMap() {
   const lastOverlayBoundsRef = useRef<string | null>(null);
   const overlayCacheRef = useRef(new Map<string, Awaited<ReturnType<typeof fetchNauticalOverlays>>>());
   const overlayFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const overlayFetchInFlightRef = useRef(false);
+  const overlayCooldownUntilRef = useRef<number>(0);
+  const overlayRateLimitLoggedRef = useRef(false);
   const overlayVisibilityRef = useRef({ navAidVisible: true, fairwayVisible: false });
 
   const platforms = usePlatformStore((s) => s.platforms);
@@ -457,6 +827,7 @@ function MaritimeMap() {
   const [zoneVisible, setZoneVisible] = useState(true);
   const [headingSectorVisible, setHeadingSectorVisible] = useState(true);
   const [predictionVisible, setPredictionVisible] = useState(true);
+  const [encounterVisible, setEncounterVisible] = useState(true);
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
 
@@ -468,6 +839,19 @@ function MaritimeMap() {
           .flatMap((a) => a.platform_ids),
       ),
     [alerts],
+  );
+  const selectedPlatform = selectedId ? (platforms[selectedId] ?? null) : null;
+  const selectedCpaEncounters = useMemo(
+    () => buildSelectedEncounterItems(selectedId, alerts, platforms),
+    [selectedId, alerts, platforms],
+  );
+  const selectedEncounterRisk = useMemo(
+    () => buildEncounterRiskState(selectedCpaEncounters),
+    [selectedCpaEncounters],
+  );
+  const selectedEncounterData = useMemo(
+    () => buildSelectedEncounterData(selectedPlatform, selectedCpaEncounters, platforms),
+    [selectedPlatform, selectedCpaEncounters, platforms],
   );
 
   function updateTrail(p: PlatformState) {
@@ -517,7 +901,7 @@ function MaritimeMap() {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
             cluster: true,
-            clusterRadius: 46,
+            clusterRadius: 58,
             clusterMaxZoom: MAP_CLUSTER_MAX_ZOOM,
           },
           "platform-hulls": {
@@ -540,11 +924,27 @@ function MaritimeMap() {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
+          "selected-danger-buffer": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
           "selected-heading-sector": {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
           "selected-prediction": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "selected-cpa-lines": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "selected-cpa-points": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          },
+          "selected-cpa-projection": {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
@@ -558,7 +958,7 @@ function MaritimeMap() {
           },
           { id: "seamark-layer", type: "raster", source: "seamark", layout: { visibility: "none" } },
         ],
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        glyphs: MAP_GLYPHS_URL,
       },
       center: MAP_CENTER,
       zoom: MAP_ZOOM,
@@ -604,6 +1004,81 @@ function MaritimeMap() {
       });
 
       map.addLayer({
+        id: "selected-safety-buffer-fill",
+        type: "fill",
+        source: "selected-safety-buffer",
+        paint: {
+          "fill-color": "#38bdf8",
+          "fill-opacity": 0.05,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-safety-buffer-line",
+        type: "line",
+        source: "selected-safety-buffer",
+        paint: {
+          "line-color": "#67e8f9",
+          "line-width": 1,
+          "line-opacity": 0.42,
+          "line-dasharray": [2, 2],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-danger-buffer-fill",
+        type: "fill",
+        source: "selected-danger-buffer",
+        paint: {
+          "fill-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#ef4444",
+            "warning",
+            "#f59e0b",
+            "#f59e0b",
+          ],
+          "fill-opacity": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            0.22,
+            "warning",
+            0.16,
+            0.1,
+          ],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-danger-buffer-line",
+        type: "line",
+        source: "selected-danger-buffer",
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#f87171",
+            "warning",
+            "#fbbf24",
+            "#fbbf24",
+          ],
+          "line-width": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            2.8,
+            "warning",
+            2.2,
+            1.6,
+          ],
+          "line-opacity": 0.95,
+        },
+      });
+
+      map.addLayer({
         id: "selected-heading-sector-fill",
         type: "fill",
         source: "selected-heading-sector",
@@ -634,6 +1109,153 @@ function MaritimeMap() {
           "line-width": 2,
           "line-opacity": 0.7,
           "line-dasharray": [2, 2],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-cpa-line-primary",
+        type: "line",
+        source: "selected-cpa-lines",
+        filter: ["==", ["get", "isPrimary"], true],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#ef4444",
+            "warning",
+            "#f59e0b",
+            "#38bdf8",
+          ],
+          "line-width": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            3.4,
+            "warning",
+            2.8,
+            2.2,
+          ],
+          "line-opacity": 0.92,
+          "line-dasharray": [2, 1.5],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-cpa-line-secondary",
+        type: "line",
+        source: "selected-cpa-lines",
+        filter: ["!=", ["get", "isPrimary"], true],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#ef4444",
+            "warning",
+            "#f59e0b",
+            "#38bdf8",
+          ],
+          "line-width": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            2.1,
+            "warning",
+            1.7,
+            1.4,
+          ],
+          "line-opacity": 0.54,
+          "line-dasharray": [3, 3],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-cpa-point",
+        type: "circle",
+        source: "selected-cpa-points",
+        paint: {
+          "circle-radius": [
+            "case",
+            ["==", ["get", "isPrimary"], true],
+            [
+              "match",
+              ["get", "severity"],
+              "critical",
+              10,
+              "warning",
+              9,
+              8,
+            ],
+            [
+              "match",
+              ["get", "severity"],
+              "critical",
+              7,
+              "warning",
+              6,
+              5,
+            ],
+          ],
+          "circle-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#ef4444",
+            "warning",
+            "#f59e0b",
+            "#38bdf8",
+          ],
+          "circle-opacity": ["case", ["==", ["get", "isPrimary"], true], 0.22, 0.12],
+          "circle-stroke-width": ["case", ["==", ["get", "isPrimary"], true], 2.4, 1.4],
+          "circle-stroke-color": [
+            "match",
+            ["get", "severity"],
+            "critical",
+            "#fca5a5",
+            "warning",
+            "#fcd34d",
+            "#bae6fd",
+          ],
+        },
+      });
+
+      map.addLayer({
+        id: "selected-cpa-projection-point",
+        type: "circle",
+        source: "selected-cpa-projection",
+        paint: {
+          "circle-radius": 4,
+          "circle-color": "#f8fafc",
+          "circle-opacity": 0.82,
+          "circle-stroke-width": 1.4,
+          "circle-stroke-color": "#94a3b8",
+        },
+      });
+
+      map.addLayer({
+        id: "selected-cpa-projection-label",
+        type: "symbol",
+        source: "selected-cpa-projection",
+        layout: {
+          "text-field": [
+            "concat",
+            "최근접 ",
+            ["to-string", ["get", "cpa_nm"]],
+            "NM / ",
+            ["to-string", ["get", "tcpa_min"]],
+            "분",
+          ],
+          "text-size": 10,
+          "text-offset": [0, 1.4],
+          "text-anchor": "top",
+        },
+        paint: {
+          "text-color": "#e2e8f0",
+          "text-halo-color": "#0f172a",
+          "text-halo-width": 1.2,
         },
       });
 
@@ -694,13 +1316,13 @@ function MaritimeMap() {
           "circle-radius": [
             "step",
             ["get", "point_count"],
-            16,
+            18,
             10,
-            20,
-            30,
             24,
-            100,
             30,
+            30,
+            100,
+            36,
           ],
         },
       });
@@ -717,6 +1339,8 @@ function MaritimeMap() {
         },
         paint: {
           "text-color": "#dbeafe",
+          "text-halo-color": "#020617",
+          "text-halo-width": 1.2,
         },
       });
 
@@ -951,7 +1575,7 @@ function MaritimeMap() {
         const feature = event.features?.[0];
         const platformId = feature?.properties?.platform_id;
         if (typeof platformId !== "string") return;
-        followRef.current = true;
+        followRef.current = false;
         select(platformId);
       };
 
@@ -979,20 +1603,28 @@ function MaritimeMap() {
           const { navAidVisible: navVisible, fairwayVisible: fairwayLayerVisible } = overlayVisibilityRef.current;
           if (!navVisible && !fairwayLayerVisible) return;
           if (map.getZoom() < MAP_NAV_AID_FETCH_MIN_ZOOM) return;
+          if (overlayFetchInFlightRef.current) return;
+
+          const now = Date.now();
+          if (overlayCooldownUntilRef.current > now) return;
+
           const bounds = map.getBounds();
           const key = `${bounds.getSouth().toFixed(2)}:${bounds.getWest().toFixed(2)}:${bounds.getNorth().toFixed(2)}:${bounds.getEast().toFixed(2)}`;
           if (lastOverlayBoundsRef.current === key) return;
-          lastOverlayBoundsRef.current = key;
 
           const cached = overlayCacheRef.current.get(key);
           if (cached) {
+            lastOverlayBoundsRef.current = key;
             (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(cached.navAids);
             (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(cached.fairways);
             return;
           }
 
+          overlayFetchInFlightRef.current = true;
           try {
             const overlayData = await fetchNauticalOverlays(bounds);
+            lastOverlayBoundsRef.current = key;
+            overlayRateLimitLoggedRef.current = false;
             overlayCacheRef.current.set(key, overlayData);
             if (overlayCacheRef.current.size > 12) {
               const oldestKey = overlayCacheRef.current.keys().next().value;
@@ -1001,17 +1633,35 @@ function MaritimeMap() {
             (map.getSource("nav-aids") as GeoJSONSource | undefined)?.setData(overlayData.navAids);
             (map.getSource("fairways") as GeoJSONSource | undefined)?.setData(overlayData.fairways);
           } catch (error) {
+            if (isTemporaryOverpassFailure(error)) {
+              overlayCooldownUntilRef.current = Date.now() + OVERPASS_RATE_LIMIT_COOLDOWN_MS;
+              if (!overlayRateLimitLoggedRef.current) {
+                console.warn("[map] Overpass temporarily unavailable; nautical overlays paused briefly");
+                overlayRateLimitLoggedRef.current = true;
+              }
+              return;
+            }
+
             console.error("[map] failed to fetch nautical overlays", error);
+          } finally {
+            overlayFetchInFlightRef.current = false;
           }
-        }, 250);
+        }, OVERPASS_FETCH_DEBOUNCE_MS);
       });
 
       setMapLoaded(true);
     });
 
-    map.on("dragstart", () => {
-      followRef.current = false;
-    });
+      const stopFollow = () => {
+        followRef.current = false;
+      };
+
+      map.on("dragstart", stopFollow);
+      map.on("zoomstart", stopFollow);
+      map.on("rotatestart", stopFollow);
+      map.on("pitchstart", stopFollow);
+      map.on("wheel", stopFollow);
+      map.on("touchstart", stopFollow);
 
     mapRef.current = map;
     return () => {
@@ -1042,7 +1692,6 @@ function MaritimeMap() {
     if (!mapLoaded || !mapRef.current) return;
 
     if (selectedId) {
-      followRef.current = true;
       const p = platforms[selectedId];
       if (p?.lat != null && p?.lon != null) {
         mapRef.current.flyTo({
@@ -1068,12 +1717,15 @@ function MaritimeMap() {
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
-    const selectedPlatform = selectedId ? (platforms[selectedId] ?? null) : null;
-    const spatialData = buildSelectedSpatialData(selectedPlatform);
+    const spatialData = buildSelectedSpatialData(selectedPlatform, selectedEncounterRisk);
     (mapRef.current.getSource("selected-safety-buffer") as GeoJSONSource | undefined)?.setData(spatialData.safetyBuffer);
+    (mapRef.current.getSource("selected-danger-buffer") as GeoJSONSource | undefined)?.setData(spatialData.dangerBuffer);
     (mapRef.current.getSource("selected-heading-sector") as GeoJSONSource | undefined)?.setData(spatialData.headingSector);
     (mapRef.current.getSource("selected-prediction") as GeoJSONSource | undefined)?.setData(spatialData.predictedPath);
-  }, [platforms, selectedId, mapLoaded]);
+    (mapRef.current.getSource("selected-cpa-lines") as GeoJSONSource | undefined)?.setData(selectedEncounterData.lines);
+    (mapRef.current.getSource("selected-cpa-points") as GeoJSONSource | undefined)?.setData(selectedEncounterData.points);
+    (mapRef.current.getSource("selected-cpa-projection") as GeoJSONSource | undefined)?.setData(selectedEncounterData.cpaProjection);
+  }, [selectedPlatform, selectedEncounterRisk, selectedEncounterData, mapLoaded]);
 
   // ── 선택 선박 역사적 항적 (DB 조회 또는 외부 override) ───────────────────
 
@@ -1204,12 +1856,25 @@ function MaritimeMap() {
     );
   }, [predictionVisible, mapLoaded]);
 
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const visibility = encounterVisible ? "visible" : "none";
+    for (const id of ["selected-cpa-line-primary", "selected-cpa-line-secondary", "selected-cpa-point", "selected-cpa-projection-point", "selected-cpa-projection-label", "selected-danger-buffer-fill", "selected-danger-buffer-line"]) {
+      if (mapRef.current.getLayer(id)) {
+        mapRef.current.setLayoutProperty(id, "visibility", visibility);
+      }
+    }
+  }, [encounterVisible, mapLoaded]);
+
   const platformCount = Object.keys(platforms).length;
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
   const activeNauticalLayerCount = Number(navAidVisible) + Number(fairwayVisible) + Number(seamarkVisible);
-  const activeSelectedOverlayCount = Number(headingSectorVisible) + Number(predictionVisible);
+  const activeSelectedOverlayCount = Number(Boolean(selectedPlatform))
+    + Number(headingSectorVisible)
+    + Number(predictionVisible)
+    + Number(encounterVisible && selectedCpaEncounters.length > 0);
 
   return (
     <div className="relative w-full h-full">
@@ -1327,6 +1992,20 @@ function MaritimeMap() {
           </button>
 
           <button
+            onClick={() => setEncounterVisible((v) => !v)}
+            title="선택 선박과 활성 CPA/TCPA 상대선 연결 표시"
+            aria-pressed={encounterVisible}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              encounterVisible
+                ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
+                : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${encounterVisible ? "bg-red-300" : "bg-ocean-700"}`} />
+            CPA/TCPA 조우선
+          </button>
+
+          <button
             onClick={() => setHeadingSectorVisible((v) => !v)}
             title="선택 선박 진행 방향 부채꼴 표시"
             aria-pressed={headingSectorVisible}
@@ -1365,12 +2044,81 @@ function MaritimeMap() {
           </div>
           <div className="mt-2 flex items-center justify-between gap-3 text-ocean-100">
             <span className="font-medium">선택 선박 오버레이</span>
-            <span className="font-mono text-[10px] text-ocean-400">{activeSelectedOverlayCount}/3 활성</span>
+            <span className="font-mono text-[10px] text-ocean-400">{activeSelectedOverlayCount}/4 활성</span>
           </div>
           <div className="mt-1 text-ocean-400">
-            선박 크기·속도 기반 안전 반경, 진행 방향 부채꼴, {MAP_SELECTED_PREDICTION_MINUTES}분 예측 경로를 표시합니다.
+            파란 점선 도메인은 참고 기동 영역입니다. 실제 위험 판단은 조우선과 황색/적색 위험 도메인, 그리고 CPA/TCPA 수치로 확인합니다.
           </div>
         </div>
+
+        {selectedId && (
+          <div className="panel max-w-[320px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+            <div className="flex items-center justify-between gap-3 text-ocean-100">
+              <span className="font-medium">안전 영역 기준 안내</span>
+              <span className="font-mono text-[10px] text-ocean-400">실시간</span>
+            </div>
+            <div className="mt-1 space-y-1 text-ocean-400">
+              <p>파란 점선 도메인: 선박 크기·속도·heading/COG 기반 참고 기동 여유 영역</p>
+              <p>황색/적색 위험 도메인: 활성 CPA/TCPA 경보가 있을 때만 표시되는 실제 위험 상태 강조</p>
+              <p>흰색 점: 현재 속력·침로를 유지할 경우 가장 가까워지는 최근접 예상 위치</p>
+              <p className="text-ocean-500">현재 경보 기준: warning CPA&lt;0.5NM · TCPA&lt;30분 / critical CPA&lt;0.2NM · TCPA&lt;10분</p>
+            </div>
+          </div>
+        )}
+
+        {selectedId && selectedCpaEncounters.length > 0 && (
+          <div className="panel max-w-[300px] rounded px-3 py-2 text-[11px] leading-4 text-ocean-300">
+            <div className="flex items-center justify-between gap-3 text-ocean-100">
+              <span className="font-medium">활성 CPA/TCPA 조우</span>
+              <span className="font-mono text-[10px] text-ocean-400">{selectedCpaEncounters.length}건</span>
+            </div>
+            {selectedCpaEncounters[0] && (
+              <div className={`mt-2 rounded border px-2.5 py-2 ${selectedCpaEncounters[0].severity === "critical" ? "border-red-500/45 bg-red-500/12 text-red-100" : "border-amber-500/45 bg-amber-500/12 text-amber-100"}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] opacity-80">Primary encounter</span>
+                  <span className="font-mono text-[10px] uppercase tracking-wide opacity-90">{selectedCpaEncounters[0].severity}</span>
+                </div>
+                <div className="mt-1 text-sm font-semibold">{selectedCpaEncounters[0].counterpartName}</div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="rounded bg-black/15 px-2 py-1">
+                    <div className="opacity-70">CPA</div>
+                    <div className="font-mono text-[12px]">{selectedCpaEncounters[0].cpaNm !== null ? `${selectedCpaEncounters[0].cpaNm.toFixed(3)} NM` : "—"}</div>
+                  </div>
+                  <div className="rounded bg-black/15 px-2 py-1">
+                    <div className="opacity-70">TCPA</div>
+                    <div className="font-mono text-[12px]">{selectedCpaEncounters[0].tcpaMin !== null ? `${selectedCpaEncounters[0].tcpaMin.toFixed(1)}분` : "—"}</div>
+                  </div>
+                </div>
+                {selectedEncounterRisk && (
+                  <div className="mt-2 text-[10px] opacity-80">
+                    위험 도메인 배율 ×{selectedEncounterRisk.scale.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="mt-2 space-y-2">
+              {selectedCpaEncounters.map((encounter, index) => {
+                const tone = encounter.severity === "critical"
+                  ? "border-red-500/40 bg-red-500/10 text-red-200"
+                  : "border-amber-500/35 bg-amber-500/10 text-amber-100";
+                return (
+                  <div key={encounter.alertId} className={`rounded border px-2 py-1.5 ${tone} ${index === 0 ? "hidden" : "opacity-90"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{encounter.counterpartName}</span>
+                      <span className="font-mono text-[10px] uppercase tracking-wide opacity-80">
+                        {encounter.severity}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-current/90">
+                      <span>CPA {encounter.cpaNm !== null ? `${encounter.cpaNm.toFixed(3)} NM` : "—"}</span>
+                      <span>TCPA {encounter.tcpaMin !== null ? `${encounter.tcpaMin.toFixed(1)}분` : "—"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 범례 */}
@@ -1409,8 +2157,20 @@ function MaritimeMap() {
         </div>
         <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">선택 선박</div>
         <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/70 bg-sky-400/20" />
-          <span className="text-sky-200">안전 반경</span>
+          <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/50 bg-sky-400/10" />
+          <span className="text-sky-200">참고 기동 도메인</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-400/20" />
+          <span className="text-red-300">CPA/TCPA 위험 도메인</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-3 h-px bg-red-400" />
+          <span className="text-red-300">CPA/TCPA 조우선</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full border-2 border-red-400 bg-white" />
+          <span className="text-slate-100">최근접 예상 지점</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-block w-3 h-2 rounded-sm border border-amber-400/70 bg-amber-400/20" />
