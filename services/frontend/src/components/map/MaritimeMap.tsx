@@ -1007,9 +1007,9 @@ function MaritimeMap() {
         source: "history-trail",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#0f172a",
-          "line-width": 4,
-          "line-opacity": 0.5,
+          "line-color": "#92400e",
+          "line-width": TRAIL_CASING_WIDTH,
+          "line-opacity": ["*", ["get", "opacity"], TRAIL_CASING_OPACITY_FACTOR],
         },
       });
 
@@ -1019,10 +1019,9 @@ function MaritimeMap() {
         source: "history-trail",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#fbbf24",
-          "line-width": 2,
-          "line-opacity": 0.65,
-          "line-dasharray": [3, 2],
+          "line-color": "#f97316",
+          "line-width": TRAIL_LINE_WIDTH,
+          "line-opacity": ["get", "opacity"],
         },
       });
 
