@@ -59,6 +59,7 @@ async def _handle_alert(data: dict) -> None:
     )
     resolve_dedup_key: str | None = data.get("resolve_dedup_key")
     generated_by: str = data.get("generated_by", "")
+    resolve_only: bool = bool(data.get("metadata", {}).get("resolve_only"))
 
     created_at_raw = data.get("created_at")
     created_at = None
@@ -78,7 +79,7 @@ async def _handle_alert(data: dict) -> None:
         async with session.begin():
             existing: AlertModel | None = None
 
-            if dedup_key:
+            if dedup_key and not resolve_only:
                 # 같은 dedup_key + 같은 에이전트의 활성 경보 조회 (잠금 획득)
                 result = await session.execute(
                     select(AlertModel)
@@ -115,7 +116,7 @@ async def _handle_alert(data: dict) -> None:
                 else:
                     logger.debug("Alert dedup: no change for key=%s", dedup_key)
 
-            else:
+            elif not resolve_only:
                 # 신규 삽입
                 alert = AlertModel(
                     alert_id=data["alert_id"],
@@ -186,6 +187,12 @@ async def _handle_alert(data: dict) -> None:
             )
             await hub.broadcast("alerts", ws_payload)
             logger.info("Alert created: id=%s key=%s", data["alert_id"], dedup_key)
+        elif resolve_only:
+            logger.info(
+                "Alert resolve-only event processed: resolve_dedup_key=%s by=%s",
+                resolve_dedup_key,
+                data.get("alert_type"),
+            )
 
         # 자동 해제된 경보들 WS 브로드캐스트
         for row in auto_resolved:

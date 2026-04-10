@@ -56,6 +56,36 @@ class CPAAgent(Agent):
         self._alerted_critical: set[frozenset] = set()
         self._alerted_warning: set[frozenset] = set()
 
+    @staticmethod
+    def _pair_and_key(id1: str, id2: str) -> tuple[frozenset[str], str, list[str]]:
+        ids = sorted([id1, id2])
+        return frozenset(ids), f"cpa:{ids[0]}:{ids[1]}", ids
+
+    async def _resolve_pair(self, id1: str, id2: str, reason: str) -> None:
+        pair, dedup_key, ids = self._pair_and_key(id1, id2)
+        if pair not in self._alerted_warning and pair not in self._alerted_critical:
+            return
+
+        self._alerted_critical.discard(pair)
+        self._alerted_warning.discard(pair)
+        await self.emit_alert(AlertPayload(
+            alert_type="cpa_cleared",
+            severity="info",
+            message=f"CPA 위험 해소: {ids[0]} ↔ {ids[1]} ({reason})",
+            platform_ids=ids,
+            metadata={"resolve_only": True, "reason": reason},
+            resolve_dedup_key=dedup_key,
+        ))
+
+    async def _resolve_pairs_for_platform(self, platform_id: str, reason: str) -> None:
+        affected_pairs = [
+            pair for pair in (self._alerted_warning | self._alerted_critical)
+            if platform_id in pair
+        ]
+        for pair in affected_pairs:
+            ids = sorted(pair)
+            await self._resolve_pair(ids[0], ids[1], reason)
+
     def _is_active(self, report: PlatformReport) -> bool:
         """CPA 계산 대상 선박 여부 판단."""
         # 정박·계류 상태 제외
@@ -69,7 +99,7 @@ class CPAAgent(Agent):
             return False
         return True
 
-    def _purge_stale_reports(self) -> None:
+    async def _purge_stale_reports(self) -> None:
         """오래된 보고 제거하여 메모리 누수 방지."""
         now = datetime.now(tz=timezone.utc)
         stale = [
@@ -77,14 +107,8 @@ class CPAAgent(Agent):
             if (now - r.timestamp).total_seconds() > _MAX_REPORT_AGE_SEC
         ]
         for pid in stale:
+            await self._resolve_pairs_for_platform(pid, "stale_report")
             self._reports.pop(pid, None)
-            # 이 선박과 관련된 alerted 쌍도 정리
-            self._alerted_critical = {
-                pair for pair in self._alerted_critical if pid not in pair
-            }
-            self._alerted_warning = {
-                pair for pair in self._alerted_warning if pid not in pair
-            }
 
     async def on_platform_report(self, report: PlatformReport) -> None:
         self._reports[report.platform_id] = report
@@ -92,10 +116,12 @@ class CPAAgent(Agent):
         # 주기적 메모리 정리 (10% 확률 — 매 보고마다 하면 오버헤드)
         import random
         if random.random() < 0.1:
-            self._purge_stale_reports()
+            await self._purge_stale_reports()
 
         if self._is_active(report):
             await self._check_all(report.platform_id)
+        else:
+            await self._resolve_pairs_for_platform(report.platform_id, "inactive_target")
 
     async def _check_all(self, changed_id: str) -> None:
         r1 = self._reports[changed_id]
@@ -106,13 +132,16 @@ class CPAAgent(Agent):
                 continue
             # 상대방 선박도 활성 조건 확인
             if not self._is_active(r2):
+                await self._resolve_pair(changed_id, other_id, "inactive_target")
                 continue
             # 상대방 보고가 너무 오래됐으면 스킵
             if (now - r2.timestamp).total_seconds() > _MAX_REPORT_AGE_SEC:
+                await self._resolve_pair(changed_id, other_id, "stale_report")
                 continue
 
             cpa, tcpa = _compute_cpa_tcpa(r1, r2)
             if cpa is None or tcpa is None or tcpa < 0 or not math.isfinite(tcpa):
+                await self._resolve_pair(changed_id, other_id, "risk_cleared")
                 continue
             await self._evaluate(r1, r2, cpa, tcpa)
 
@@ -120,11 +149,7 @@ class CPAAgent(Agent):
         self, r1: PlatformReport, r2: PlatformReport, cpa: float, tcpa: float
     ) -> None:
         cfg = self.config
-        pair = frozenset({r1.platform_id, r2.platform_id})
-
-        # dedup_key: 쌍 기반 (정렬하여 방향 무관)
-        ids = sorted([r1.platform_id, r2.platform_id])
-        dedup_key = f"cpa:{ids[0]}:{ids[1]}"
+        pair, dedup_key, ids = self._pair_and_key(r1.platform_id, r2.platform_id)
 
         if cpa < cfg["critical_cpa_nm"] and tcpa < cfg["critical_tcpa_min"]:
             self._alerted_warning.discard(pair)
@@ -172,8 +197,7 @@ class CPAAgent(Agent):
 
         else:
             # 위험 해소
-            self._alerted_critical.discard(pair)
-            self._alerted_warning.discard(pair)
+            await self._resolve_pair(r1.platform_id, r2.platform_id, "risk_cleared")
 
 
 # ── CPA/TCPA 계산 (벡터 방식) ────────────────────────────────────────────
