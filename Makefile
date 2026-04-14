@@ -27,7 +27,7 @@ help:
 	@echo "로컬 개발 (PYTHONPATH=.:..로 실행):"
 	@echo "  make dev-core         - Core (FastAPI + WebSocket hub)"
 	@echo "  make dev-detection    - Detection (CPA, Anomaly, Zone, Distress agents)"
-	@echo "  make dev-analysis     - Analysis (Claude API 분석)"
+	@echo "  make dev-analysis     - Analysis (Ollama 로컬 LLM 분석)"
 	@echo "  make dev-response     - Response (Alert 생성)"
 	@echo "  make dev-learning     - Learning (거짓 경보율 추적)"
 	@echo "  make dev-supervision  - Supervision (에이전트 모니터링)"

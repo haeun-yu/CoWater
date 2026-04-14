@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     core_api_url: str = "http://localhost:8000"
     log_level: str = "info"
 
-    # Ollama (로컬 LLM)
-    ollama_url: str = "http://localhost:11434"
+    # Ollama (호스트 시스템의 로컬 LLM)
+    # Mac/Windows Docker Desktop: http://host.docker.internal:11434
+    # Linux (호스트 직접 실행): http://localhost:11434
+    ollama_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "qwen2.5:3b"
 
     # Heartbeat

@@ -253,7 +253,11 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Analysis Service (신규 — AI 기반 분석, Ollama 사용)
+  # Analysis Service (신규 — AI 기반 분석, 호스트 Ollama 사용)
+  # ─────────────────────────────────────────────────────
+  # 참고: 호스트 시스템의 Ollama 서버가 실행 중이어야 함
+  # Mac/Windows Docker Desktop: host.docker.internal:11434 (기본)
+  # Linux: localhost:11434 또는 docker0 IP
   # ─────────────────────────────────────────────────────
   analysis:
     build:
@@ -264,6 +268,7 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
+      # Mac/Windows: host.docker.internal / Linux: localhost 또는 172.17.0.1
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       LOG_LEVEL: ${LOG_LEVEL:-info}

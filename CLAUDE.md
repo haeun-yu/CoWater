@@ -11,24 +11,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cd infra
 
+# ⚠️ 사전 요구사항: 호스트 시스템에서 Ollama 실행 필요
+# Mac/Windows: ollama serve (또는 Ollama 앱 실행)
+# Linux: ollama serve
+
 # 핵심 서비스 (postgres, redis, core, moth-bridge, agents, frontend)
+# Analysis Service는 호스트의 Ollama에 연결 (host.docker.internal:11434)
 docker compose up -d
 
 # 시뮬레이터 포함 실행
 SCENARIO=collision_risk docker compose --profile simulation up -d
 
-# Ollama(로컬 LLM) 포함 실행
+# Ollama를 Docker 컨테이너에서도 실행하고 싶으면 (선택)
 LLM_BACKEND=ollama docker compose --profile ollama up -d
 # 최초 실행 시 ollama-init이 모델(qwen2.5:3b)을 자동 pull (~2GB)
 
-# vLLM(고성능 로컬 LLM) 포함 실행
+# vLLM(고성능 로컬 LLM) 포함 실행 (선택)
 LLM_BACKEND=vllm docker compose --profile vllm up -d
 # 최초 실행 시 HuggingFace에서 모델 자동 다운로드 (~2GB)
-# Apple Silicon: MPS 백엔드 (실험적), NVIDIA: deploy.resources 주석 해제 필요
 
-# 전체 실행
-LLM_BACKEND=ollama SCENARIO=demo docker compose --profile ollama --profile simulation up -d
-
+# 기본 실행 (호스트 Ollama 사용)
+docker compose up -d
 
 # 서비스별 재빌드
 docker compose build core && docker compose up -d core
