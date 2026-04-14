@@ -2,11 +2,12 @@
 Analysis - Report Agent
 
 경보 데이터를 종합해서 자동 보고서 생성.
-Claude를 사용해서 자연어 보고서 작성.
+Ollama (로컬 LLM)를 사용해서 자연어 보고서 작성.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -101,86 +102,51 @@ class AnalysisReportAgent(AnalysisAgent):
         alerts: list[dict],
         report_type: str,
     ) -> str:
-        """Claude로 보고서 생성"""
+        """Ollama로 보고서 생성 (로컬 LLM)"""
 
         alerts_text = json.dumps(alerts, indent=2, ensure_ascii=False)
 
         if report_type == "summary":
-            prompt = f"""
-다음 해양 경보들을 요약해주세요.
+            prompt = f"""다음 해양 경보들을 요약해주세요.
 
-경보 정보:
-{alerts_text}
+경보: {alerts_text}
 
-요약 형식:
-- 발생 시간
-- 영향받은 선박
-- 주요 문제
-- 현재 상태
-
-간결하게 2-3문장으로 작성해주세요.
-"""
+요약 (2-3문장):"""
         elif report_type == "detailed":
-            prompt = f"""
-다음 해양 경보들에 대한 상세 보고서를 작성해주세요.
+            prompt = f"""다음 해양 경보들의 상세 보고서를 작성하세요.
 
-경보 정보:
-{alerts_text}
+경보: {alerts_text}
 
-보고서 구성:
-1. 개요 (발생 시간, 관련 선박)
-2. 상황 분석 (각 경보의 상세)
-3. 영향 평가
-4. 권고사항
-
-500자 이상의 상세한 보고서를 작성해주세요.
-"""
+보고서 (개요, 상황분석, 영향평가, 권고사항 포함):"""
         else:  # incident
-            prompt = f"""
-다음 경보들이 나타내는 해양 사건의 조사 보고서를 작성해주세요.
+            prompt = f"""다음 경보들에 대한 해양 사건 조사보고서를 작성하세요.
 
-경보 정보:
-{alerts_text}
+경보: {alerts_text}
 
-사건 보고서 구성:
-1. 사건 개요
-2. 시간 순서별 사건 진행
-3. 관련 당사자 및 영향
-4. 원인 분석
-5. 권고 조치
-
-전문적인 톤으로 작성해주세요.
-"""
+보고서 (사건개요, 시간순서, 원인분석, 권고조치 포함):"""
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
-                    f"{settings.anthropic_api_url}/messages",
-                    headers={
-                        "x-api-key": settings.anthropic_api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
+                    f"{settings.ollama_url}/api/generate",
                     json={
-                        "model": settings.claude_model,
-                        "max_tokens": 1500,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": prompt,
-                            }
-                        ],
+                        "model": settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "temperature": 0.5,
                     },
+                    timeout=60.0,
                 )
 
             resp.raise_for_status()
             data = resp.json()
 
-            # Claude 응답 추출
-            content = data.get("content", [{}])[0].get("text", "")
-            return content
+            # Ollama 응답 추출
+            content = data.get("response", "")
+            return content if content else self._fallback_report(alerts, report_type)
 
         except Exception as e:
-            logger.error("Claude API call failed: %s", e)
+            logger.error("Ollama API call failed: %s", e)
 
             # Fallback: 간단한 요약
             return self._fallback_report(alerts, report_type)

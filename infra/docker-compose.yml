@@ -253,7 +253,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Analysis Service (신규 — AI 기반 분석)
+  # Analysis Service (신규 — AI 기반 분석, Ollama 사용)
   # ─────────────────────────────────────────────────────
   analysis:
     build:
@@ -264,8 +264,8 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "7705:8001"

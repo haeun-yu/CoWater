@@ -107,10 +107,9 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
         anomaly_type: str,
         reason: str,
     ) -> dict:
-        """Claude API를 사용해서 비정상 분석"""
+        """Ollama를 사용해서 비정상 분석 (로컬 LLM)"""
 
-        prompt = f"""
-해양 선박의 비정상 항적이 감지되었습니다.
+        prompt = f"""해양 선박의 비정상 항적이 감지되었습니다.
 
 선박 ID: {platform_id}
 비정상 타입: {anomaly_type}
@@ -122,50 +121,49 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
 3. 권고사항
 
 JSON 형식으로 응답해주세요:
-{{
-    "possible_causes": ["원인1", "원인2", ...],
-    "risk_level": "low|medium|high",
-    "recommendation": "권고사항",
-    "confidence": 0.0-1.0
-}}
-"""
+{{"possible_causes": ["원인1", "원인2"], "risk_level": "low|medium|high", "recommendation": "권고사항", "confidence": 0.0-1.0}}"""
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
-                    f"{settings.anthropic_api_url}/messages",
-                    headers={
-                        "x-api-key": settings.anthropic_api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
+                    f"{settings.ollama_url}/api/generate",
                     json={
-                        "model": settings.claude_model,
-                        "max_tokens": 500,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": prompt,
-                            }
-                        ],
+                        "model": settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "temperature": 0.3,  # 더 일관된 결과
                     },
+                    timeout=30.0,
                 )
 
             resp.raise_for_status()
             data = resp.json()
 
-            # Claude 응답 파싱
-            content = data.get("content", [{}])[0].get("text", "{}")
-            analysis = json.loads(content)
+            # Ollama 응답 파싱
+            content = data.get("response", "{}")
+
+            # JSON 추출 (응답에 마크다운 포맷팅이 있을 수 있음)
+            try:
+                # ```json ... ``` 형식이면 추출
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+
+                analysis = json.loads(content)
+            except (json.JSONDecodeError, IndexError):
+                # JSON 파싱 실패 → 규칙 기반으로 폴백
+                return self._fallback_analysis(anomaly_type)
 
             return {
                 "result": f"원인: {', '.join(analysis.get('possible_causes', []))}",
-                "recommendation": analysis.get("recommendation"),
+                "recommendation": analysis.get("recommendation", "추가 확인 필요"),
                 "confidence": analysis.get("confidence", 0.5),
-                "execution_time_ms": 0,  # 실제로는 측정 필요
+                "execution_time_ms": 0,
             }
 
         except Exception as e:
-            logger.error("Claude API call failed: %s", e)
+            logger.error("Ollama API call failed: %s", e)
 
             # Fallback: 규칙 기반 분석
             return self._fallback_analysis(anomaly_type)
