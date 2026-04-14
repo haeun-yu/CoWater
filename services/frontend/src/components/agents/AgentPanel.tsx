@@ -20,6 +20,7 @@ const AGENT_DESC: Record<
   string,
   { role: string; input: string; output: string }
 > = {
+  // ── 기존 에이전트들 ──────────────────────────────────────────────────────
   "cpa-agent": {
     role: "충돌 위험 감지",
     input: "모든 선박 위치·속도",
@@ -49,6 +50,61 @@ const AGENT_DESC: Record<
     role: "사건 보고서",
     input: "사건(Incident) ID",
     output: "AI 종합 보고서 자동 생성",
+  },
+
+  // ── 이벤트 드리븐 아키텍처 (Detection Service) ──────────────────────────
+  "detection-cpa": {
+    role: "Redis CPA 감지",
+    input: "platform.report.* → Haversine 계산",
+    output: "detect.cpa 이벤트",
+  },
+  "detection-anomaly": {
+    role: "Redis 이상 감지",
+    input: "platform.report.* → ROT/Speed 변화",
+    output: "detect.anomaly 이벤트",
+  },
+  "detection-zone": {
+    role: "Redis 구역 침입",
+    input: "platform.report.* → PostGIS 공간 쿼리",
+    output: "detect.zone 이벤트",
+  },
+  "detection-distress": {
+    role: "Redis 조난 감지",
+    input: "platform.report.* → nav_status 확인",
+    output: "detect.distress 이벤트",
+  },
+
+  // ── 이벤트 드리븐 아키텍처 (Analysis Service) ──────────────────────────
+  "analysis-anomaly-ai": {
+    role: "Redis 이상 분석",
+    input: "detect.anomaly 이벤트 → Claude API",
+    output: "analyze.anomaly 이벤트",
+  },
+  "analysis-report": {
+    role: "Redis 보고서",
+    input: "detect.* / analyze.* 이벤트",
+    output: "learn.report 이벤트",
+  },
+
+  // ── 이벤트 드리븐 아키텍처 (Response Service) ──────────────────────────
+  "response-alert-creator": {
+    role: "Redis 경보 생성",
+    input: "analyze.* 이벤트 → Core API",
+    output: "respond.alert 이벤트",
+  },
+
+  // ── 이벤트 드리븐 아키텍처 (Supervision Service) ──────────────────────
+  "supervision-supervisor": {
+    role: "Redis 헬스 모니터링",
+    input: "system.heartbeat.* → 타임아웃 확인",
+    output: "system.alert 이벤트",
+  },
+
+  // ── 이벤트 드리븐 아키텍처 (Learning Service) ──────────────────────────
+  "learning-agent": {
+    role: "Redis 거짓경보 학습",
+    input: "system.ack.* 피드백 → 통계 계산",
+    output: "learn.feedback 이벤트",
   },
 };
 

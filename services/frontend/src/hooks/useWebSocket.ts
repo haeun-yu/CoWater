@@ -16,12 +16,24 @@ import {
 } from "@/config";
 
 const AGENT_NAMES: Record<string, string> = {
+  // 기존 에이전트
   "cpa-agent": "CPA/TCPA Agent",
   "zone-monitor": "Zone Monitor",
   "anomaly-rule": "Anomaly Rule",
   "anomaly-ai": "Anomaly AI",
   "distress-agent": "Distress Agent",
   "report-agent": "Report Agent",
+
+  // 이벤트 드리븐 에이전트
+  "detection-cpa": "Detection CPA",
+  "detection-anomaly": "Detection Anomaly",
+  "detection-zone": "Detection Zone",
+  "detection-distress": "Detection Distress",
+  "analysis-anomaly-ai": "Analysis Anomaly",
+  "analysis-report": "Analysis Report",
+  "response-alert-creator": "Response Alert",
+  "supervision-supervisor": "Supervision",
+  "learning-agent": "Learning",
 };
 
 type ManagedWsHandlers = {

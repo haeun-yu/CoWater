@@ -7,6 +7,7 @@ import DashboardAlertPanel from "@/components/alerts/DashboardAlertPanel";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
+import { useEventStore } from "@/stores/eventStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import MetricCard from "@/components/ui/MetricCard";
 
@@ -25,6 +26,7 @@ export default function DashboardPage() {
   const alerts = useAlertStore((s) => s.alerts);
   const streams = useSystemStore((s) => s.streams);
   const initialData = useSystemStore((s) => s.initialData);
+  const events = useEventStore((s) => s.events);
 
   const platformValues = Object.values(platforms);
   const freshness = useMemo(
@@ -42,6 +44,14 @@ export default function DashboardPage() {
   const degradedStreams = streamStatusSummary.filter(
     (status) => status !== "connected",
   ).length;
+
+  // 이벤트 흐름 통계
+  const eventStats = useMemo(() => {
+    const detectCount = events.filter((e) => e.type.startsWith("detect")).length;
+    const analyzeCount = events.filter((e) => e.type.startsWith("analyze")).length;
+    const respondCount = events.filter((e) => e.type.startsWith("respond")).length;
+    return { detectCount, analyzeCount, respondCount };
+  }, [events]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#0b2f57_0%,#051427_42%,#020d1a_100%)]">
@@ -93,6 +103,30 @@ export default function DashboardPage() {
             tone={
               freshness.stale > 0 || freshness.lost > 0 ? "warning" : "neutral"
             }
+          />
+        </div>
+
+        <div className="mt-3 text-[11px] uppercase tracking-widest text-ocean-600 px-1">
+          이벤트 흐름 (실시간 처리)
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <MetricCard
+            label="탐지 (Detection)"
+            value={eventStats.detectCount}
+            detail="CPA/Anomaly/Zone/Distress"
+            tone="info"
+          />
+          <MetricCard
+            label="분석 (Analysis)"
+            value={eventStats.analyzeCount}
+            detail="Claude AI 분석 중"
+            tone="info"
+          />
+          <MetricCard
+            label="응답 (Response)"
+            value={eventStats.respondCount}
+            detail="경보 자동 생성"
+            tone={eventStats.respondCount > 0 ? "success" : "neutral"}
           />
         </div>
       </section>
