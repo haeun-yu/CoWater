@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useEventWebSocket } from "@/hooks/useEventWebSocket";
 import { useInitialData } from "@/hooks/useInitialData";
 import { useAlertNotifications } from "@/hooks/useAlertNotifications";
 import NavBar from "@/components/layout/NavBar";
@@ -19,6 +20,7 @@ export default function AppProvider({ children }: { children: React.ReactNode })
   const initialize = useAuthStore((s) => s.initialize);
 
   useWebSocket();
+  useEventWebSocket();
   useInitialData();
   useAlertNotifications();
 

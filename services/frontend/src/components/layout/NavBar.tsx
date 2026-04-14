@@ -16,6 +16,7 @@ const NAV = [
   { href: "/zones", label: "구역", icon: "▦" },
   { href: "/alerts", label: "경보", icon: "⚡" },
   { href: "/agents", label: "에이전트", icon: "⬡" },
+  { href: "/events", label: "이벤트", icon: "📊" },
 ];
 
 export default function NavBar() {

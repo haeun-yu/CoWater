@@ -9,7 +9,7 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
-Topic = Literal["platforms", "alerts", "replay"]
+Topic = Literal["platforms", "alerts", "replay", "events"]
 
 
 class WebSocketHub:
@@ -18,17 +18,20 @@ class WebSocketHub:
             "platforms": set(),
             "alerts": set(),
             "replay": set(),
+            "events": set(),
         }
         self._lock = asyncio.Lock()
         self._broadcast_success_count: dict[Topic, int] = {
             "platforms": 0,
             "alerts": 0,
             "replay": 0,
+            "events": 0,
         }
         self._broadcast_failure_count: dict[Topic, int] = {
             "platforms": 0,
             "alerts": 0,
             "replay": 0,
+            "events": 0,
         }
 
     async def connect(self, ws: WebSocket, topic: Topic) -> None:

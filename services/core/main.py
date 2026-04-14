@@ -20,6 +20,7 @@ from api.zones import router as zones_router
 from redis_client import close_redis, get_redis
 from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
+from services.event_consumer import consume_events
 from ws_hub import hub
 
 logging.basicConfig(level=logging.INFO)
@@ -90,6 +91,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(
             _run_with_reconnect(consume_alerts, "alert-consumer", redis),
             name="alert-consumer",
+        ),
+        asyncio.create_task(
+            _run_with_reconnect(consume_events, "event-consumer", redis),
+            name="event-consumer",
         ),
     ]
     logger.info("CoWater Core Backend started")
