@@ -5,7 +5,7 @@ import { useEventStore } from "@/stores/eventStore";
 import { useEventWebSocket } from "@/hooks/useEventWebSocket";
 import PageHeader from "@/components/ui/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
-import DetailSection from "@/components/ui/DetailSection";
+import { DetailSection } from "@/components/ui/DetailSection";
 
 const EVENT_ICONS: Record<string, string> = {
   detect: "🔍",
@@ -87,7 +87,7 @@ export default function EventsPage() {
     <div className="min-h-screen bg-ocean-950 text-white p-4 md:p-8">
       <PageHeader
         title="이벤트 모니터링"
-        description="실시간 이벤트 흐름 및 서비스 상태 추적"
+        subtitle="실시간 이벤트 흐름 및 서비스 상태 추적"
       />
 
       {/* Stats */}
@@ -95,22 +95,22 @@ export default function EventsPage() {
         <MetricCard
           label="전체 이벤트"
           value={stats.total}
-          trend={stats.total > 0 ? "up" : "neutral"}
+          tone={stats.total > 0 ? "info" : "neutral"}
         />
         <MetricCard
           label="심각 이벤트"
           value={stats.criticalCount}
-          trend={stats.criticalCount > 0 ? "down" : "neutral"}
+          tone={stats.criticalCount > 0 ? "critical" : "neutral"}
         />
         <MetricCard
           label="활성 에이전트"
           value={stats.agents.length}
-          trend={stats.agents.length > 0 ? "up" : "neutral"}
+          tone={stats.agents.length > 0 ? "success" : "neutral"}
         />
         <MetricCard
           label="이벤트 유형"
           value={stats.types.length}
-          trend="neutral"
+          tone="info"
         />
       </div>
 
@@ -158,39 +158,42 @@ export default function EventsPage() {
 
                 {/* Event details on hover/expand */}
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-ocean-300">
-                  {flow.map((event) => (
-                    <div
-                      key={event.id}
-                      className="bg-ocean-950 p-2 rounded border border-ocean-700"
-                    >
-                      <div className="flex justify-between mb-1">
-                        <span className="font-mono text-ocean-400">
-                          {event.agent_id}
-                        </span>
-                        <span className="text-ocean-500">
-                          {event.type.split(".")[0]}
-                        </span>
+                  {flow.map((event) => {
+                    const payload = event.payload as Record<string, unknown>;
+                    return (
+                      <div
+                        key={event.id}
+                        className="bg-ocean-950 p-2 rounded border border-ocean-700"
+                      >
+                        <div className="flex justify-between mb-1">
+                          <span className="font-mono text-ocean-400">
+                            {event.agent_id}
+                          </span>
+                          <span className="text-ocean-500">
+                            {event.type.split(".")[0]}
+                          </span>
+                        </div>
+                        {payload?.platform_name ? (
+                          <div className="text-ocean-400">
+                            Platform: {String(payload.platform_name)}
+                          </div>
+                        ) : null}
+                        {payload?.severity ? (
+                          <div
+                            className={
+                              payload.severity === "critical"
+                                ? "text-red-400"
+                                : payload.severity === "warning"
+                                  ? "text-orange-400"
+                                  : "text-green-400"
+                            }
+                          >
+                            Severity: {String(payload.severity)}
+                          </div>
+                        ) : null}
                       </div>
-                      {event.payload?.platform_name && (
-                        <div className="text-ocean-400">
-                          Platform: {event.payload.platform_name}
-                        </div>
-                      )}
-                      {event.payload?.severity && (
-                        <div
-                          className={
-                            event.payload.severity === "critical"
-                              ? "text-red-400"
-                              : event.payload.severity === "warning"
-                                ? "text-orange-400"
-                                : "text-green-400"
-                          }
-                        >
-                          Severity: {event.payload.severity}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
