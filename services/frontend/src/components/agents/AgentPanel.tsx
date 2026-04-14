@@ -6,6 +6,8 @@ import { useAgentStore } from "@/stores/agentStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import type { AgentInfo, AgentLevel } from "@/types";
+import StatusBadge from "@/components/ui/StatusBadge";
+import EmptyState from "@/components/ui/EmptyState";
 
 const LEVEL_COLORS: Record<AgentLevel, string> = {
   L1: "text-blue-400",
@@ -188,10 +190,7 @@ export default function AgentPanel() {
 
       <div className="flex-1 overflow-y-auto">
         {agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-16 text-ocean-400 text-xs gap-1">
-            <span>Agent Runtime 연결 대기 중...</span>
-            <span className="text-ocean-500">:{new URL(getAgentsApiUrl()).port}</span>
-          </div>
+          <EmptyState title="Agent Runtime 연결 대기 중..." description={`:${new URL(getAgentsApiUrl()).port}`} compact />
         ) : (
           <>
             <AgentGroup
@@ -346,20 +345,17 @@ function AgentRow({
 
         {/* 레벨 선택 */}
         {agent.enabled && (
-          <div className="flex gap-0.5 flex-shrink-0">
+          <div className="flex gap-1 flex-shrink-0">
             {(["L1", "L2", "L3"] as AgentLevel[]).map((lvl) => (
-              <button
+              <StatusBadge
                 key={lvl}
-                onClick={() => onLevel(agent, lvl)}
-                title={LEVEL_DESC[lvl]}
-                className={`text-xs px-1 py-0.5 rounded transition-colors ${
-                  agent.level === lvl
-                    ? `${LEVEL_COLORS[lvl]} bg-ocean-800 font-bold`
-                    : "text-ocean-400 hover:text-ocean-400"
-                }`}
+                tone={lvl === "L3" ? "critical" : lvl === "L2" ? "warning" : "info"}
+                className={agent.level === lvl ? "opacity-100" : "opacity-50"}
               >
-                {lvl}
-              </button>
+                <button onClick={() => onLevel(agent, lvl)} title={LEVEL_DESC[lvl]} className="leading-none">
+                  {lvl}
+                </button>
+              </StatusBadge>
             ))}
           </div>
         )}

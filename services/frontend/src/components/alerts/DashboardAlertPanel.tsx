@@ -68,9 +68,17 @@ export default function DashboardAlertPanel() {
   // 대시보드: 미확인만, 최신 30건
   const displayed = useMemo(
     () =>
-      (filter === "all" ? newAlerts : newAlerts.filter((alert) => alert.severity === filter)).slice(0, 30),
+      (filter === "all" ? newAlerts : newAlerts.filter((alert) => alert.severity === filter))
+        .sort((a, b) => {
+          const severityRank = { critical: 0, warning: 1, info: 2 };
+          return severityRank[a.severity] - severityRank[b.severity]
+            || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        })
+        .slice(0, 30),
     [filter, newAlerts],
   );
+
+  const topCritical = displayed.find((alert) => alert.severity === "critical");
 
   async function acknowledge(alertId: string) {
     if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
@@ -110,52 +118,49 @@ export default function DashboardAlertPanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* 헤더 */}
-      <div className="flex-shrink-0 px-3 py-2.5 border-b border-ocean-800">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-ocean-200 tracking-wider">
-            실시간 경보
-          </span>
+      <div className="flex-shrink-0 border-b border-ocean-800/80 px-4 py-4">
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-ocean-400">조치 패널</div>
+            <span className="mt-1 block text-sm font-semibold text-ocean-100">실시간 경보</span>
+            <div className="mt-1 text-xs text-ocean-500">긴급도 기준으로 우선 정렬하고, 세부 판단은 펼쳐서 확인합니다.</div>
+          </div>
           <Link
             href="/alerts"
-            className="text-xs text-ocean-500 hover:text-ocean-300 transition-colors"
+            className="rounded-full border border-ocean-700 px-2.5 py-1 text-[11px] text-ocean-400 transition-colors hover:border-ocean-500 hover:text-ocean-200"
           >
-            전체 보기 →
+            전체 보기
           </Link>
         </div>
-        <div className="mb-2 text-[11px] text-ocean-500">
+        <div className="mb-3 text-[11px] text-ocean-500">
           경보 스트림: {alertStream.status === "connected" ? "정상" : alertStream.status === "reconnecting" ? "재연결 중" : alertStream.status === "error" ? "오류" : "연결 중"}
         </div>
-        {/* 카운트 배지 */}
-        <div className="flex gap-2">
-          {critical > 0 && (
-            <span className="flex items-center gap-1 text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" />
-              위험 {critical}
-            </span>
-          )}
-          {warning > 0 && (
-            <span className="flex items-center gap-1 text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/30 px-2 py-0.5 rounded">
-              주의 {warning}
-            </span>
-          )}
-          {info > 0 && (
-            <span className="flex items-center gap-1 text-xs text-blue-400 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded">
-              정보 {info}
-            </span>
-          )}
-          {newAlerts.length === 0 && (
-            <span className="text-xs text-green-400">경보 없음 ✓</span>
-          )}
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <AlertCountCard label="위험" value={critical} tone="critical" />
+          <AlertCountCard label="주의" value={warning} tone="warning" />
+          <AlertCountCard label="정보" value={info} tone="info" />
         </div>
+
+        {topCritical ? (
+          <div className="mt-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-red-200">우선 확인</div>
+            <div className="mt-1 text-sm font-medium text-red-100 line-clamp-2">{topCritical.message}</div>
+            <div className="mt-1 text-[11px] text-red-200/80">{ALERT_TYPE_KR[topCritical.alert_type] ?? topCritical.alert_type}</div>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
+            현재 즉시 대응이 필요한 긴급 경보는 없습니다.
+          </div>
+        )}
+
         {newAlerts.length > 0 && (
-          <div className="mt-2 flex gap-1">
+          <div className="mt-3 flex flex-wrap gap-2">
             {(["all", "critical", "warning", "info"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setFilter(value)}
-                className={`rounded px-2 py-0.5 text-[11px] transition-colors ${filter === value ? "bg-ocean-700 text-ocean-100" : "bg-ocean-900/70 text-ocean-500 hover:text-ocean-300"}`}
+                className={`rounded-full border px-3 py-1 text-[11px] transition-colors ${filter === value ? "border-ocean-500 bg-ocean-700 text-ocean-100" : "border-ocean-700/80 bg-ocean-900/55 text-ocean-400 hover:border-ocean-500 hover:text-ocean-200"}`}
               >
                 {value === "all" ? "전체" : SEVERITY_LABEL[value]}
               </button>
@@ -164,7 +169,6 @@ export default function DashboardAlertPanel() {
         )}
       </div>
 
-      {/* 경보 목록 */}
       <div className="flex-1 overflow-y-auto">
         {displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 gap-2 text-ocean-400">
@@ -186,7 +190,7 @@ export default function DashboardAlertPanel() {
                 className="border-b border-ocean-900/80"
               >
                 <button
-                  className="w-full text-left px-3 py-2.5 hover:bg-ocean-800/30 transition-colors"
+                  className="w-full px-4 py-3 text-left transition-colors hover:bg-ocean-800/30"
                   onClick={() =>
                     setExpanded(isExpanded ? null : alert.alert_id)
                   }
@@ -194,11 +198,9 @@ export default function DashboardAlertPanel() {
                   aria-controls={`dashboard-alert-${alert.alert_id}`}
                 >
                   <div className="flex items-start gap-2">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1 ${SEVERITY_DOT[alert.severity]} ${alert.severity === "critical" ? "animate-pulse" : ""}`}
-                    />
+                    <span className={`mt-1.5 h-2 w-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[alert.severity]} ${alert.severity === "critical" ? "animate-pulse" : ""}`} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="mb-1 flex items-center gap-1.5">
                         <span
                           className={`text-xs font-bold ${SEVERITY_TEXT[alert.severity]}`}
                         >
@@ -208,10 +210,12 @@ export default function DashboardAlertPanel() {
                           {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
                         </span>
                       </div>
-                      <div className="text-xs text-ocean-300 leading-snug line-clamp-2">
+                      <div className="text-sm text-ocean-200 leading-snug line-clamp-2">
                         {alert.message}
                       </div>
-                      <div className="text-xs text-ocean-400 mt-0.5">
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ocean-400">
+                        <span>{alert.platform_ids.length}개 대상</span>
+                        <span>·</span>
                         {formatDistanceToNow(new Date(alert.created_at), {
                           addSuffix: true,
                           locale: ko,
@@ -222,22 +226,20 @@ export default function DashboardAlertPanel() {
                 </button>
 
                 {isExpanded && (
-                  <div id={`dashboard-alert-${alert.alert_id}`} className="px-3 pb-2.5 space-y-2.5">
-                    {/* 경보 내용 */}
+                  <div id={`dashboard-alert-${alert.alert_id}`} className="space-y-3 px-4 pb-4">
                     <div className="space-y-1">
                       <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider">
-                        📍 경보 내용
+                        경보 내용
                       </div>
-                      <div className="text-xs text-ocean-200 bg-ocean-900/40 rounded p-2.5 leading-relaxed border-l-2 border-ocean-600">
+                      <div className="rounded-xl border border-ocean-800/80 bg-ocean-900/50 p-3 text-xs leading-relaxed text-ocean-200">
                         {alert.message}
                       </div>
                     </div>
 
-                    {/* 영향 대상 */}
                     {alert.platform_ids.length > 0 && (
                       <div className="space-y-1">
                         <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider">
-                          🚢 영향 대상
+                          영향 대상
                         </div>
                         <div className="flex gap-1.5 flex-wrap">
                           {alert.platform_ids.map((id) => (
@@ -253,11 +255,10 @@ export default function DashboardAlertPanel() {
                       </div>
                     )}
 
-                    {/* AI 분석 및 제안 */}
                     {alert.recommendation && (
                       <div className="space-y-1">
                         <div className="text-[10px] font-semibold text-ocean-500 uppercase tracking-wider flex items-center gap-1">
-                          💡 분석 및 제안
+                          분석 및 제안
                           {Boolean(
                             (alert.metadata as Record<string, unknown> | null)
                               ?.llm_fallback,
@@ -265,18 +266,17 @@ export default function DashboardAlertPanel() {
                             <span className="text-amber-300 text-[9px] font-normal">(LLM 폴백)</span>
                           )}
                         </div>
-                        <div className="text-xs text-ocean-300 bg-ocean-900/50 rounded p-2.5 leading-relaxed border-l-2 border-cyan-600/60">
+                        <div className="rounded-xl border border-cyan-700/40 bg-ocean-900/55 p-3 text-xs leading-relaxed text-ocean-300">
                           {alert.recommendation}
                         </div>
                       </div>
                     )}
 
-                    {/* 액션 버튼 */}
                     {canOperate && (
                       <button
                         onClick={() => acknowledge(alert.alert_id)}
                         disabled={pendingAlertId === alert.alert_id}
-                        className="w-full text-xs px-2.5 py-1.5 bg-ocean-700 hover:bg-ocean-600 disabled:bg-ocean-800 disabled:text-ocean-500 text-ocean-200 rounded transition-colors font-medium"
+                        className="w-full rounded-xl bg-ocean-700 px-3 py-2 text-xs font-medium text-ocean-200 transition-colors hover:bg-ocean-600 disabled:bg-ocean-800 disabled:text-ocean-500"
                       >
                         {pendingAlertId === alert.alert_id ? "처리 중..." : "✓ 인지 처리"}
                       </button>
@@ -288,6 +288,22 @@ export default function DashboardAlertPanel() {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function AlertCountCard({ label, value, tone }: { label: string; value: number; tone: AlertSeverity }) {
+  const toneClass =
+    tone === "critical"
+      ? "border-red-400/25 bg-red-400/10 text-red-200"
+      : tone === "warning"
+        ? "border-amber-400/25 bg-amber-400/10 text-amber-200"
+        : "border-blue-400/25 bg-blue-400/10 text-blue-200";
+
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${toneClass}`}>
+      <div className="text-[10px] uppercase tracking-[0.16em] opacity-80">{label}</div>
+      <div className="mt-1 font-mono text-sm">{value}</div>
     </div>
   );
 }

@@ -10,6 +10,9 @@ import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import { AlertButton, PlatformButton } from "./AlertButton";
 import { AlertBadge } from "./AlertBadge";
+import FilterChip from "@/components/ui/FilterChip";
+import EmptyState from "@/components/ui/EmptyState";
+import StatusBadge from "@/components/ui/StatusBadge";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -83,19 +86,14 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
         {/* 필터 탭 */}
         <div className="flex gap-1">
           {(["all", "critical", "warning", "info"] as const).map((f) => (
-            <button
+            <FilterChip
               key={f}
               onClick={() => setFilter(f)}
-              className={`text-xs px-2 py-0.5 rounded transition-colors ${
-                filter === f
-                  ? f === "all"
-                    ? "bg-ocean-700 text-ocean-100"
-                    : `bg-severity-${f} text-white border`
-                  : "text-ocean-500 hover:text-ocean-300"
-              }`}
+              active={filter === f}
+              tone={f === "critical" ? "critical" : f === "warning" ? "warning" : f === "info" ? "info" : "neutral"}
             >
               {f === "all" ? "전체" : SEVERITY_LABEL[f]}
-            </button>
+            </FilterChip>
           ))}
         </div>
       </div>
@@ -103,9 +101,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
       {/* 경보 목록 */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-ocean-400 text-xs">
-            경보 없음
-          </div>
+          <EmptyState title="경보 없음" compact />
         ) : (
           filtered.map((alert) => (
             <AlertRow
@@ -187,6 +183,7 @@ function AlertRow({
               {alertStatusLabel(alert.status)}
             </AlertBadge>
             {workflowState && <AlertBadge variant="workflow">{workflowLabel(workflowState)}</AlertBadge>}
+            {isNew && <StatusBadge tone={alert.severity === "critical" ? "critical" : alert.severity === "warning" ? "warning" : "info"}>신규</StatusBadge>}
           </div>
         </div>
         {isNew && (

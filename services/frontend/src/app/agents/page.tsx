@@ -12,6 +12,9 @@ import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
+import PageHeader from "@/components/ui/PageHeader";
+import MetricCard from "@/components/ui/MetricCard";
+import EmptyState from "@/components/ui/EmptyState";
 
 const AGENTS_URL = getAgentsApiUrl();
 const ROLE_ORDER = { viewer: 0, operator: 1, admin: 2 } as const;
@@ -504,32 +507,22 @@ export default function AgentsPage() {
   const maxCount = Math.max(1, ...allAgentIds.map((id) => logCount(id)));
 
   return (
-    <div className="h-full overflow-hidden bg-slate-950 text-slate-200">
-      {/* 헤더 */}
-      <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-base font-bold tracking-wide text-white">통합 에이전트 관제</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Rule 동기 처리 → AI 비동기 처리 파이프라인
-          </p>
-        </div>
-        <div className="flex items-center gap-5 text-xs">
-          <Stat label="관제 중" value={`${Object.keys(platforms).length}척`} />
-          <Stat label="Rule 이벤트" value={ruleCount} color="text-blue-400" />
-          <Stat label="AI 이벤트" value={aiCount} color="text-violet-400" />
-          {criticalCount > 0 && (
-            <Stat label="위험 경보" value={criticalCount} color="text-red-400" pulse />
-          )}
-          {warningCount > 0 && (
-            <Stat label="주의 경보" value={warningCount} color="text-amber-400" />
-          )}
-        </div>
-      </header>
+    <div className="page-shell bg-slate-950 text-slate-200">
+      <PageHeader
+        title="통합 에이전트 관제"
+        stats={[
+          <MetricCard key="tracked" label="관제 중" value={`${Object.keys(platforms).length}척`} valueClassName="text-xl" className="bg-slate-900/70" />,
+          <MetricCard key="rule" label="Rule 이벤트" value={ruleCount} tone="info" valueClassName="text-xl" className="bg-slate-900/70" />,
+          <MetricCard key="ai" label="AI 이벤트" value={aiCount} valueClassName="text-xl" className="bg-slate-900/70" />,
+          criticalCount > 0 ? <MetricCard key="critical" label="위험 경보" value={criticalCount} tone="critical" valueClassName="text-xl" className="bg-slate-900/70" /> : null,
+          warningCount > 0 ? <MetricCard key="warning" label="주의 경보" value={warningCount} tone="warning" valueClassName="text-xl" className="bg-slate-900/70" /> : null,
+        ]}
+      />
 
-      <main className="h-[calc(100%-56px)] grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_440px] overflow-hidden">
+      <main className="grid flex-1 min-h-0 grid-cols-1 overflow-auto xl:grid-cols-[260px_minmax(0,1fr)_440px] xl:overflow-hidden">
 
         {/* ── 왼쪽: 에이전트 목록 + 컨트롤 ───────────────────────────────────── */}
-        <section className="border-r border-slate-800 flex flex-col overflow-hidden">
+        <section className="border-r border-slate-800/80 bg-slate-950/55 flex min-h-[260px] flex-col overflow-hidden xl:min-h-0">
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
             <span className="text-xs text-slate-400 uppercase tracking-widest font-bold">
               Agent Orchestrator
@@ -695,7 +688,7 @@ export default function AgentsPage() {
         </section>
 
         {/* ── 가운데: 파이프라인 흐름 + 이벤트 빈도 ──────────────────────────── */}
-        <section className="border-r border-slate-800 flex flex-col overflow-hidden">
+        <section className="border-r border-slate-800/80 bg-slate-950/35 flex min-h-[320px] flex-col overflow-hidden xl:min-h-0">
           <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-bold text-white tracking-tight">
@@ -727,7 +720,7 @@ export default function AgentsPage() {
           </div>
 
           {/* 파이프라인 스텝 */}
-          <div className="h-48 overflow-y-auto p-4 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
+          <div className="h-40 overflow-y-auto p-3 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
             <HorizontalPipeline
               steps={focusMeta.pipeline}
               routes={focusMeta.routes}
@@ -739,7 +732,7 @@ export default function AgentsPage() {
           </div>
 
           {/* 하단: Sub-Process + 이벤트 빈도 차트 */}
-          <div className="flex-1 border-t border-slate-800 bg-slate-900/30 px-5 py-4 flex gap-6 overflow-auto">
+          <div className="flex-1 border-t border-slate-800 bg-slate-900/30 px-5 py-3 flex gap-4 overflow-auto">
             {/* Sub-Process Trigger */}
             <div className="flex-none min-w-0">
               <div className="text-xs text-slate-500 font-bold uppercase mb-2">
@@ -811,7 +804,7 @@ export default function AgentsPage() {
         </section>
 
         {/* ── 오른쪽: 에이전트 상세 + 이벤트 로그 ───────────────────────────── */}
-        <section className="bg-slate-950 flex flex-col overflow-hidden">
+        <section className="bg-slate-950 flex min-h-[320px] flex-col overflow-hidden xl:min-h-0">
           <div className="p-4 border-b border-slate-800 space-y-3">
             {/* 에이전트 요약 */}
             <div className="flex items-start justify-between gap-2">
@@ -1065,12 +1058,10 @@ export default function AgentsPage() {
           {/* 이벤트 로그 */}
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {filteredLogs.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-sm text-slate-500 gap-2">
-                <span className="text-2xl opacity-30">◎</span>
-                <span>처리 기록 없음</span>
-                <span className="text-xs text-slate-600">
-                  {agentFilter !== "all" ? `${focusMeta.name}의 이벤트가 없습니다` : "에이전트 이벤트를 기다리는 중"}
-                </span>
+              <div className="h-full flex items-center justify-center">
+                <div className="w-full max-w-sm">
+                  <EmptyState title="처리 기록 없음" description={agentFilter !== "all" ? `${focusMeta.name}의 이벤트가 없습니다` : "에이전트 이벤트를 기다리는 중"} />
+                </div>
               </div>
             ) : (
               filteredLogs.map((log) => (

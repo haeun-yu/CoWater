@@ -6,6 +6,11 @@ import { area as turfArea, bbox as turfBbox, booleanValid as turfBooleanValid, f
 import ZoneMapPanel from "@/components/map/ZoneMapPanel";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useZoneStore, type Zone } from "@/stores/zoneStore";
+import PageHeader from "@/components/ui/PageHeader";
+import MetricCard from "@/components/ui/MetricCard";
+import StatusBadge from "@/components/ui/StatusBadge";
+import EmptyState from "@/components/ui/EmptyState";
+import { DetailSection } from "@/components/ui/DetailSection";
 
 type ZoneType = "prohibited" | "restricted" | "caution";
 
@@ -76,6 +81,9 @@ export default function ZonesPage() {
 
   // store의 zones를 로컬 상태로 사용 (페이지 내 변경도 store에 반영)
   const zones = zonesFromStore;
+  const activeZones = zones.filter((z) => z.active);
+  const inactiveZones = zones.length - activeZones.length;
+  const selectedZone = selectedZoneId ? zones.find((zone) => zone.zone_id === selectedZoneId) ?? null : null;
 
   async function loadZones() {
     setLoading(true);
@@ -128,33 +136,35 @@ export default function ZonesPage() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 헤더 */}
-      <div className="px-5 py-3 border-b border-ocean-800 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-base font-bold text-ocean-200 tracking-wider">구역 관리</h1>
-          <p className="text-xs text-ocean-500 mt-0.5">
-            Zone Monitor가 참조하는 금지·제한·주의 구역을 관리합니다.
-          </p>
-        </div>
-        <button
-          onClick={loadZones}
-          disabled={loading}
-          className="text-xs px-3 py-1.5 border border-ocean-700 rounded text-ocean-300 hover:border-ocean-500 disabled:opacity-40"
-        >
-          {loading ? "로딩 중..." : "새로고침"}
-        </button>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        title="구역 관리"
+        actions={
+          <button
+            onClick={loadZones}
+            disabled={loading}
+            className="filter-chip px-3 py-1.5 text-xs text-ocean-300 hover:text-ocean-100 disabled:opacity-40"
+          >
+            {loading ? "로딩 중..." : "새로고침"}
+          </button>
+        }
+        stats={[
+          <MetricCard key="all" label="전체 구역" value={zones.length} valueClassName="text-xl" />,
+          <MetricCard key="active" label="활성" value={activeZones.length} tone={activeZones.length > 0 ? "success" : "neutral"} valueClassName="text-xl" />,
+          <MetricCard key="inactive" label="비활성" value={inactiveZones} tone={inactiveZones > 0 ? "warning" : "neutral"} valueClassName="text-xl" />,
+          <MetricCard key="selected" label="선택 구역" value={selectedZone ? selectedZone.name : "없음"} detail={selectedZone ? selectedZone.zone_type : "지도 또는 목록에서 선택"} valueClassName="text-lg" />,
+        ]}
+      />
 
       {/* 본문: 왼쪽(폼+목록) | 오른쪽(지도) */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)] gap-3 p-4">
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4 p-4 lg:p-5">
 
         {/* ── 왼쪽: 생성 폼 + 구역 목록 ─────────────────────────────────────── */}
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
 
           {/* 생성 폼 */}
-          <section className="rounded border border-ocean-800 bg-ocean-900/30 p-3 flex-shrink-0">
-            <h2 className="text-sm font-bold text-ocean-200 mb-2">구역 생성</h2>
+          <section className="content-surface rounded-2xl p-0 flex-shrink-0 overflow-hidden">
+            <DetailSection title="구역 생성" className="border-b-0 p-3.5">
             {error && <div className="text-xs text-red-400 mb-2 px-2 py-1 bg-red-950/30 border border-red-800/40 rounded">{error}</div>}
             <div className="space-y-2">
               <input
@@ -177,10 +187,10 @@ export default function ZonesPage() {
                 <textarea
                   value={geometryText}
                   onChange={(e) => setGeometryText(e.target.value)}
-                  rows={6}
+                  rows={5}
                   className="w-full text-xs px-2 py-1.5 rounded border border-ocean-700 bg-ocean-950 text-ocean-200 font-mono leading-relaxed focus:outline-none focus:border-ocean-500"
                 />
-                <div className={`mt-2 rounded border px-2.5 py-2 text-xs ${geometryPreview.valid ? "border-emerald-500/30 bg-emerald-500/8 text-emerald-200" : "border-amber-500/30 bg-amber-500/8 text-amber-200"}`}>
+                <div className={`mt-2 rounded border px-2 py-1.5 text-xs ${geometryPreview.valid ? "border-emerald-500/30 bg-emerald-500/8 text-emerald-200" : "border-amber-500/30 bg-amber-500/8 text-amber-200"}`}>
                   <div className="font-medium">Turf.js preview {geometryPreview.valid ? "유효" : "검토 필요"}</div>
                   {geometryPreview.error ? (
                     <div className="mt-1 text-[11px] opacity-90">{geometryPreview.error}</div>
@@ -201,16 +211,15 @@ export default function ZonesPage() {
                 {creating ? "생성 중..." : "구역 생성"}
               </button>
             </div>
+            </DetailSection>
           </section>
 
           {/* 구역 목록 */}
-          <section className="rounded border border-ocean-800 bg-ocean-900/30 p-3 flex-1 min-h-0 overflow-auto">
-            <h2 className="text-sm font-bold text-ocean-200 mb-2">
-              구역 목록
-              <span className="ml-2 text-xs text-ocean-500 font-normal">
-                활성 {zones.filter((z) => z.active).length} / 전체 {zones.length}
-              </span>
-            </h2>
+          <section className="content-surface rounded-2xl p-4 flex-1 min-h-0 overflow-auto">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-bold text-ocean-200">구역 목록</h2>
+              <StatusBadge>활성 {zones.filter((z) => z.active).length} / 전체 {zones.length}</StatusBadge>
+            </div>
             <div className="space-y-1.5">
               {zones.map((z) => {
                 const c = TYPE_COLOR[z.zone_type] ?? { badge: "text-ocean-300 border-ocean-700", text: "text-ocean-300", border: "border-ocean-700" };
@@ -231,16 +240,12 @@ export default function ZonesPage() {
                         <div className="text-xs text-ocean-500 font-mono truncate">{z.zone_id}</div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span className={`text-xs px-2 py-0.5 rounded border ${c.badge}`}>
+                        <StatusBadge className={c.badge}>
                           {TYPE_LABEL[z.zone_type] ?? z.zone_type}
-                        </span>
-                        <span className={`text-xs px-2 py-0.5 rounded border ${
-                          z.active
-                            ? "text-green-300 border-green-500/30 bg-green-500/10"
-                            : "text-ocean-400 border-ocean-700"
-                        }`}>
+                        </StatusBadge>
+                        <StatusBadge tone={z.active ? "success" : "neutral"}>
                           {z.active ? "활성" : "비활성"}
-                        </span>
+                        </StatusBadge>
                       </div>
                     </div>
                     {z.active && (
@@ -255,14 +260,14 @@ export default function ZonesPage() {
                 );
               })}
               {!loading && zones.length === 0 && (
-                <div className="text-xs text-ocean-500 py-8 text-center">등록된 구역이 없습니다.</div>
+                <EmptyState title="등록된 구역이 없습니다." compact />
               )}
             </div>
           </section>
         </div>
 
         {/* ── 오른쪽: 구역 지도 ──────────────────────────────────────────────── */}
-        <section className="min-h-0 hidden xl:block">
+        <section className="content-surface min-h-[340px] xl:min-h-0 overflow-hidden rounded-2xl">
           <ZoneMapPanel
             zones={zones}
             selectedZoneId={selectedZoneId}

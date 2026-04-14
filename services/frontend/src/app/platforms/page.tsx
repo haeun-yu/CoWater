@@ -6,6 +6,11 @@ import { useAlertStore } from "@/stores/alertStore";
 import type { PlatformState } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
+import { countPlatformsByFreshness } from "@/lib/platformStatus";
+import PageHeader from "@/components/ui/PageHeader";
+import MetricCard from "@/components/ui/MetricCard";
+import StatusBadge from "@/components/ui/StatusBadge";
+import { DataTable, DataTableEmpty } from "@/components/ui/DataTable";
 
 const TYPE_ICON: Record<string, string> = {
   vessel: "▲", usv: "◆", rov: "●", auv: "◈", drone: "✦", buoy: "◉",
@@ -61,39 +66,24 @@ export default function PlatformsPage() {
   });
 
   const totalAlerts = alerts.filter((a) => a.status === "new").length;
+  const freshness = countPlatformsByFreshness(platforms);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 헤더 */}
-      <div className="flex-shrink-0 px-5 py-3 border-b border-ocean-800">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-base font-bold text-ocean-200 tracking-wider">플랫폼 현황</h1>
-            <p className="text-xs text-ocean-500 mt-0.5">선박 클릭 시 개별 관제 페이지로 이동</p>
-          </div>
-          <div className="flex gap-4 text-xs">
-            <div className="text-center">
-              <div className="text-ocean-200 font-bold text-base">{platforms.length}</div>
-              <div className="text-ocean-500">관제 중</div>
-            </div>
-            <div className="text-center">
-              <div className={`font-bold text-base ${totalAlerts > 0 ? "text-red-400" : "text-green-400"}`}>{totalAlerts}</div>
-              <div className="text-ocean-500">미확인 경보</div>
-            </div>
-            <div className="text-center">
-              <div className="text-ocean-200 font-bold text-base">
-                {platforms.filter((p) => p.nav_status === "underway_engine").length}
-              </div>
-              <div className="text-ocean-500">항행 중</div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        title="플랫폼 현황"
+        stats={[
+          <MetricCard key="tracked" label="관제 중" value={platforms.length} />,
+          <MetricCard key="alerts" label="미확인 경보" value={totalAlerts} tone={totalAlerts > 0 ? "critical" : "neutral"} />,
+          <MetricCard key="live" label="정상 수신" value={freshness.live} />,
+          <MetricCard key="issues" label="지연·유실" value={freshness.stale + freshness.lost} tone={freshness.stale + freshness.lost > 0 ? "warning" : "neutral"} />,
+        ]}
+      />
 
-      {/* 테이블 */}
-      <div className="flex-1 overflow-auto px-5">
+      <div className="flex-1 overflow-auto p-5">
+        <DataTable>
         <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 bg-ocean-950 z-10">
+          <thead className="sticky top-0 bg-ocean-950/95 z-10 backdrop-blur-sm">
             <tr className="border-b border-ocean-800 text-ocean-500 text-left">
               <th className="py-2.5 pr-3 font-medium w-8">유형</th>
               <th className="py-2.5 pr-3 font-medium">이름 / ID</th>
@@ -108,11 +98,7 @@ export default function PlatformsPage() {
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="py-16 text-center text-ocean-400">
-                  수신된 플랫폼 없음 — 시뮬레이터를 시작하세요
-                </td>
-              </tr>
+              <DataTableEmpty colSpan={9}>수신된 플랫폼 없음 — 시뮬레이터를 시작하세요</DataTableEmpty>
             ) : (
               sorted.map((p) => {
                 const type = p.platform_type ?? "vessel";
@@ -126,8 +112,11 @@ export default function PlatformsPage() {
                     key={p.platform_id}
                     onClick={() => router.push(`/platforms/${encodeURIComponent(p.platform_id)}`)}
                     className={`border-b border-ocean-900 cursor-pointer transition-colors hover:bg-ocean-800/40 ${
-                      alertInfo?.maxSeverity === "critical" ? "bg-red-500/5" :
-                      alertInfo?.maxSeverity === "warning"  ? "bg-yellow-500/3" : ""
+                      alertInfo?.maxSeverity === "critical"
+                        ? "border-l-2 border-l-red-500/60 bg-red-500/7"
+                        : alertInfo?.maxSeverity === "warning"
+                          ? "border-l-2 border-l-amber-500/35 bg-amber-500/3"
+                          : ""
                     }`}
                   >
                     <td className="py-2.5 pr-3">
@@ -149,7 +138,7 @@ export default function PlatformsPage() {
                       {p.cog != null ? `${p.cog.toFixed(0)}°` : "—"}
                     </td>
                     <td className="py-2.5 pr-3">
-                      <span className={`px-1.5 py-0.5 rounded border text-xs ${navBadge}`}>
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${navBadge}`}>
                         {NAV_STATUS_KR[p.nav_status ?? ""] ?? p.nav_status ?? "—"}
                         {isDistress && " ⚠"}
                       </span>
@@ -162,13 +151,9 @@ export default function PlatformsPage() {
                     </td>
                     <td className="py-2.5">
                       {alertInfo ? (
-                        <span className={`px-1.5 py-0.5 rounded font-bold border ${
-                          alertInfo.maxSeverity === "critical"
-                            ? "bg-red-500/20 text-red-400 border-red-500/30"
-                            : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
-                        }`}>
+                        <StatusBadge tone={alertInfo.maxSeverity === "critical" ? "critical" : "warning"} className="font-bold">
                           {alertInfo.count}
-                        </span>
+                        </StatusBadge>
                       ) : (
                         <span className="text-ocean-500">—</span>
                       )}
@@ -179,6 +164,7 @@ export default function PlatformsPage() {
             )}
           </tbody>
         </table>
+        </DataTable>
       </div>
     </div>
   );
