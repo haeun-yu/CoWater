@@ -7,6 +7,7 @@ Claude API를 사용해서 AI 기반 분석.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from uuid import uuid4
@@ -32,7 +33,7 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
         self._client = None
 
     async def on_detect_event(self, event: Event) -> None:
-        """detect.anomaly.* 이벤트 수신"""
+        """detect.anomaly.* 이벤트 수신 (빠른 반환, 분석은 백그라운드)"""
 
         if event.type != EventType.DETECT_ANOMALY:
             return
@@ -43,13 +44,32 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
         reason = payload.get("reason", "")
 
         logger.info(
-            "Analyzing anomaly: platform=%s, type=%s",
+            "Queued anomaly analysis: platform=%s, type=%s",
             platform_id,
             anomaly_type,
         )
 
-        # AI 분석
+        # AI 분석을 백그라운드 태스크로 실행 (이벤트 처리를 블로킹하지 않음)
+        asyncio.create_task(
+            self._analyze_and_emit(
+                event=event,
+                platform_id=platform_id,
+                anomaly_type=anomaly_type,
+                reason=reason,
+            )
+        )
+
+    async def _analyze_and_emit(
+        self,
+        event: Event,
+        platform_id: str,
+        anomaly_type: str,
+        reason: str,
+    ) -> None:
+        """백그라운드에서 AI 분석 후 이벤트 발행"""
+
         try:
+            # AI 분석 (시간이 걸릴 수 있음)
             analysis_result = await self._analyze_with_ai(
                 platform_id=platform_id,
                 anomaly_type=anomaly_type,
