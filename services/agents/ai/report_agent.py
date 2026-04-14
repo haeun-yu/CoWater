@@ -19,21 +19,19 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-_SYSTEM_PROMPT = """당신은 해양 운항 사고 분석 전문가입니다.
-제공된 사건 데이터를 기반으로 공식 보고서를 작성하십시오.
+_SYSTEM_PROMPT = """You are a maritime incident analysis expert.
+Write a formal incident report based on the provided alert information.
 
-**중요: 한글 응답시 반드시 정확한 띄어쓰기와 문법을 사용하세요. 모든 단어 사이에 띄어쓰기를 포함하세요.**
+Report format:
+# Maritime Incident Report
 
-보고서 형식:
-# 해양 사건 보고서
-
-## 1. 사건 개요
-## 2. 관련 선박 정보
-## 3. 사건 경위 (시간 순)
-## 4. 원인 분석
-## 5. 조치 사항
-## 6. 재발 방지 권고
-## 7. 결론"""
+## 1. Alert Overview
+## 2. Affected Vessels
+## 3. Incident Timeline
+## 4. Root Cause Analysis
+## 5. Actions Taken
+## 6. Preventive Measures
+## 7. Conclusions"""
 
 
 class ReportAgent(Agent):
@@ -113,16 +111,16 @@ class ReportAgent(Agent):
             "\n위 해양 사건에 대한 운항 보고서를 작성하십시오."
         )
 
-    async def generate_report(self, incident_id: str) -> str | None:
+    async def generate_report(self, alert_id: str) -> str | None:
         """
-        incident_id에 해당하는 사건 데이터를 Core API에서 조회하여 보고서 생성.
-        외부에서 직접 호출하거나 API 엔드포인트를 통해 트리거.
+        alert_id에 해당하는 경보 데이터를 Core API에서 조회하여 보고서 생성.
+        Alert의 정보(메시지, 관련 선박, 생성 시간)를 기반으로 보고서 작성.
         """
-        incident = await self._fetch_incident(incident_id)
-        if not incident:
+        alert = await self._fetch_alert(alert_id)
+        if not alert:
             return None
 
-        context = _build_incident_context(incident)
+        context = _build_alert_context(alert)
         try:
             report_text = await self._llm.chat(
                 system=_SYSTEM_PROMPT,
@@ -130,46 +128,63 @@ class ReportAgent(Agent):
                 max_tokens=settings.report_incident_max_tokens,
             )
         except Exception:
-            logger.exception("Report generation failed for incident %s", incident_id)
+            logger.exception("Report generation failed for alert %s", alert_id)
             return None
 
-        await self._save_report(incident_id, report_text)
+        await self._save_report(alert_id, report_text)
         return report_text
 
-    async def _fetch_incident(self, incident_id: str) -> dict | None:
+    async def _fetch_alert(self, alert_id: str) -> dict | None:
+        """Core API에서 alert 조회"""
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"{settings.core_api_url}/incidents/{incident_id}", timeout=5
+                    f"{settings.core_api_url}/alerts/{alert_id}", timeout=5
                 )
                 resp.raise_for_status()
                 return resp.json()
         except Exception:
-            logger.exception("Failed to fetch incident %s", incident_id)
+            logger.exception("Failed to fetch alert %s", alert_id)
             return None
 
-    async def _save_report(self, incident_id: str, report: str) -> None:
+    async def _save_report(self, alert_id: str, report: str) -> None:
+        """Core API를 통해 alert.metadata.report에 보고서 저장"""
         try:
             async with httpx.AsyncClient() as client:
-                await client.patch(
-                    f"{settings.core_api_url}/incidents/{incident_id}",
-                    json={"report": report},
-                    timeout=5,
+                # alert.metadata 업데이트로 report 저장
+                # 실제로는 Core API에서 report 저장 엔드포인트를 따로 제공하거나
+                # metadata update 엔드포인트를 사용해야 함
+                # 현재는 redis에 저장하는 방식으로 간단히 구현
+                await self._redis.hset(
+                    f"alert:{alert_id}:report",
+                    mapping={"content": report, "generated_at": str(__import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ).isoformat())}
                 )
         except Exception:
-            logger.exception("Failed to save report for incident %s", incident_id)
+            logger.exception("Failed to save report for alert %s", alert_id)
 
 
-def _build_incident_context(incident: dict) -> str:
-    timeline = "\n".join(
-        f"  - {e.get('timestamp', '')}: {e.get('description', '')}"
-        for e in incident.get("timeline", [])
+def _build_alert_context(alert: dict) -> str:
+    """Build context for report generation based on alert information"""
+    severity = alert.get("severity", "unknown")
+    alert_type = alert.get("alert_type", "unknown")
+    platform_ids = alert.get("platform_ids", [])
+    message = alert.get("message", "")
+    created_at = alert.get("created_at", "")
+    recommendation = alert.get("recommendation", "")
+
+    context = (
+        f"Alert ID: {alert.get('alert_id')}\n"
+        f"Severity: {severity}\n"
+        f"Alert Type: {alert_type}\n"
+        f"Affected Vessels: {', '.join(platform_ids) if platform_ids else 'None'}\n"
+        f"Time: {created_at}\n\n"
+        f"Alert Message:\n{message}\n"
     )
-    return (
-        f"사건 ID: {incident.get('incident_id')}\n"
-        f"사건 유형: {incident.get('incident_type')}\n"
-        f"관련 선박: {', '.join(incident.get('platform_ids', []))}\n"
-        f"해결 여부: {'해결됨' if incident.get('resolved') else '미해결'}\n\n"
-        f"사건 타임라인:\n{timeline}\n\n"
-        f"위 정보를 바탕으로 공식 해양 사건 보고서를 작성하십시오."
-    )
+
+    if recommendation:
+        context += f"\nAI Recommendation:\n{recommendation}\n"
+
+    context += "\nBased on the above alert information, generate a formal maritime incident report."
+    return context

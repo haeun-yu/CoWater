@@ -268,6 +268,7 @@ interface AgentStatus {
   failure_count?: number;
   last_error?: string | null;
   model_name?: string;
+  config?: Record<string, unknown>;
 }
 
 // ── 페이지 ────────────────────────────────────────────────────────────────────
@@ -286,6 +287,26 @@ export default function AgentsPage() {
   const [apiStatus, setApiStatus] = useState<"ok" | "fallback" | "unknown">("unknown");
   const [modelEditing, setModelEditing] = useState<string | null>(null);
   const [modelInput, setModelInput] = useState<string>("");
+
+  // LLM 전역 설정
+  const [llmConfig, setLlmConfig] = useState<{ backend: string; model: string } | null>(null);
+  const [llmEditing, setLlmEditing] = useState(false);
+  const [llmBackendInput, setLlmBackendInput] = useState<string>("");
+  const [llmModelInput, setLlmModelInput] = useState<string>("");
+  const [llmUpdating, setLlmUpdating] = useState(false);
+
+  // 에이전트 config 편집
+  const [configEditing, setConfigEditing] = useState<string | null>(null);
+  const [configInput, setConfigInput] = useState<string>("");
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  // 보고서 생성
+  const [reportIncidentId, setReportIncidentId] = useState<string>("");
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportResult, setReportResult] = useState<{ alert_id: string; report: string } | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportExpanded, setReportExpanded] = useState(false);
+
   const token = useAuthStore((s) => s.token);
   const role = useAuthStore((s) => s.role);
   const canManageAgents = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.admin;
@@ -302,6 +323,13 @@ export default function AgentsPage() {
     else if (logs.some((l) => l.model && !l.model.includes("fallback") && isAIAgent(l.agent_id)))
       setApiStatus("ok");
   }, [logs]);
+
+  useEffect(() => {
+    fetch(`${AGENTS_URL}/llm`)
+      .then((r) => r.json())
+      .then((data: { backend: string; model: string }) => setLlmConfig(data))
+      .catch(() => {});
+  }, []);
 
   async function toggleAgent(id: string, enable: boolean) {
     if (!token || !canManageAgents) return;
@@ -352,6 +380,84 @@ export default function AgentsPage() {
       }
     } finally {
       setUpdating(null);
+    }
+  }
+
+  async function applyConfig(id: string) {
+    if (!token || !canManageAgents) return;
+    setConfigError(null);
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(configInput);
+    } catch {
+      setConfigError("JSON 형식이 올바르지 않습니다");
+      return;
+    }
+    setUpdating(id);
+    try {
+      const res = await fetch(`${AGENTS_URL}/agents/${id}/config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(parsed),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStatuses((p) =>
+          p.map((a) => (a.agent_id === id ? { ...a, config: data.config } : a)),
+        );
+        setConfigEditing(null);
+        setConfigInput("");
+      }
+    } finally {
+      setUpdating(null);
+    }
+  }
+
+  async function applyLLM() {
+    if (!token || !canManageAgents) return;
+    const backend = llmBackendInput.trim();
+    const model = llmModelInput.trim();
+    if (!backend || !model) return;
+    setLlmUpdating(true);
+    try {
+      const res = await fetch(`${AGENTS_URL}/llm`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ backend, model }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLlmConfig({ backend: data.backend, model: data.model });
+        setLlmEditing(false);
+        setLlmBackendInput("");
+        setLlmModelInput("");
+      }
+    } finally {
+      setLlmUpdating(false);
+    }
+  }
+
+  async function generateReport() {
+    const id = reportIncidentId.trim();
+    if (!id) return;
+    setReportGenerating(true);
+    setReportError(null);
+    setReportResult(null);
+    try {
+      const res = await fetch(`${AGENTS_URL}/agents/report-agent/generate/${encodeURIComponent(id)}`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setReportError(`요청 실패: ${res.status}`);
+        return;
+      }
+      const data = await res.json();
+      setReportResult(data);
+      setReportExpanded(true);
+    } catch {
+      setReportError("네트워크 오류가 발생했습니다");
+    } finally {
+      setReportGenerating(false);
     }
   }
 
@@ -440,6 +546,73 @@ export default function AgentsPage() {
           </div>
 
           <div className="flex-1 overflow-auto">
+            {/* LLM 전역 설정 */}
+            {llmConfig && (
+              <div className="px-3 pt-3 pb-2 border-b border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-violet-400 font-bold uppercase tracking-wider">
+                    LLM 설정
+                  </span>
+                  {!llmEditing && canManageAgents && (
+                    <button
+                      onClick={() => {
+                        setLlmEditing(true);
+                        setLlmBackendInput(llmConfig.backend);
+                        setLlmModelInput(llmConfig.model);
+                      }}
+                      className="text-xs text-ocean-400 hover:text-ocean-300"
+                    >
+                      변경
+                    </button>
+                  )}
+                </div>
+                {llmEditing ? (
+                  <div className="space-y-2">
+                    <select
+                      value={llmBackendInput}
+                      onChange={(e) => setLlmBackendInput(e.target.value)}
+                      className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-ocean-600"
+                    >
+                      <option value="claude">Claude (Anthropic)</option>
+                      <option value="ollama">Ollama (로컬)</option>
+                      <option value="vllm">vLLM (고성능)</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={llmModelInput}
+                      onChange={(e) => setLlmModelInput(e.target.value)}
+                      placeholder="모델명 입력"
+                      className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-ocean-600 font-mono"
+                    />
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => applyLLM()}
+                        disabled={llmUpdating || !llmBackendInput.trim() || !llmModelInput.trim()}
+                        className="flex-1 text-xs py-1 rounded bg-ocean-700 hover:bg-ocean-600 text-white disabled:opacity-40 font-medium"
+                      >
+                        {llmUpdating ? "적용 중…" : "적용"}
+                      </button>
+                      <button
+                        onClick={() => setLlmEditing(false)}
+                        className="flex-1 text-xs py-1 rounded border border-slate-700 text-slate-400 hover:border-slate-500 font-medium"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-300 space-y-0.5">
+                    <div>
+                      <span className="text-slate-500">Backend:</span> <span className="text-violet-300 font-mono">{llmConfig.backend}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Model:</span> <span className="text-violet-300 font-mono">{llmConfig.model}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Rule 에이전트 */}
             <div className="px-3 pt-3 pb-1">
               <div className="flex items-center justify-between mb-2">
@@ -740,6 +913,69 @@ export default function AgentsPage() {
               </div>
             )}
 
+            {/* 에이전트 Config 편집 */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded p-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-slate-500 uppercase font-bold">Config</span>
+                {configEditing === focusAgentId ? (
+                  <button
+                    onClick={() => { setConfigEditing(null); setConfigError(null); }}
+                    className="text-xs text-slate-500 hover:text-slate-300"
+                  >
+                    취소
+                  </button>
+                ) : (
+                  canManageAgents ? (
+                    <button
+                      onClick={() => {
+                        setConfigEditing(focusAgentId);
+                        const currentConfig = focusStatus?.config ?? {};
+                        setConfigInput(JSON.stringify(currentConfig, null, 2));
+                        setConfigError(null);
+                      }}
+                      className="text-xs text-ocean-400 hover:text-ocean-300"
+                    >
+                      편집
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-slate-600">admin 필요</span>
+                  )
+                )}
+              </div>
+
+              {configEditing === focusAgentId ? (
+                <div className="space-y-1.5">
+                  <textarea
+                    value={configInput}
+                    onChange={(e) => setConfigInput(e.target.value)}
+                    rows={5}
+                    placeholder='{"key": "value"}'
+                    className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-ocean-600 font-mono resize-none"
+                  />
+                  {configError && (
+                    <div className="text-xs text-red-400">{configError}</div>
+                  )}
+                  <button
+                    onClick={() => applyConfig(focusAgentId)}
+                    disabled={updating === focusAgentId || !configInput.trim()}
+                    className="w-full text-xs py-1 rounded bg-ocean-700 hover:bg-ocean-600 text-white disabled:opacity-40"
+                  >
+                    적용
+                  </button>
+                </div>
+              ) : (
+                <div className="font-mono text-xs text-slate-400">
+                  {focusStatus?.config && Object.keys(focusStatus.config).length > 0 ? (
+                    <pre className="whitespace-pre-wrap break-all text-[10px]">
+                      {JSON.stringify(focusStatus.config, null, 2)}
+                    </pre>
+                  ) : (
+                    <span className="text-slate-600 italic">설정 없음</span>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* 마지막 오류 */}
             {focusStatus?.last_error && (
               <div className="px-2.5 py-2 bg-red-950/30 border border-red-800/40 rounded text-xs text-red-300 font-mono leading-snug line-clamp-2">
@@ -760,6 +996,50 @@ export default function AgentsPage() {
               <FlowRow icon="→" label="입력" value={focusMeta.input} color="text-slate-400" />
               <FlowRow icon="⬡" label="출력" value={focusMeta.output} color="text-green-400" />
             </div>
+
+            {/* 보고서 생성 — report-agent 선택 시만 표시 */}
+            {focusAgentId === "report-agent" && (
+              <div className="bg-slate-900/50 border border-slate-800 rounded p-2.5 space-y-2">
+                <div className="text-xs text-slate-500 uppercase font-bold">Alert 기반 보고서</div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={reportIncidentId}
+                    onChange={(e) => setReportIncidentId(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") generateReport(); }}
+                    placeholder="Alert ID 입력"
+                    className="flex-1 text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-ocean-600 font-mono"
+                  />
+                  <button
+                    onClick={generateReport}
+                    disabled={reportGenerating || !reportIncidentId.trim()}
+                    className="text-xs px-3 py-1 rounded bg-emerald-700/70 hover:bg-emerald-700 text-white disabled:opacity-40 flex-shrink-0"
+                  >
+                    {reportGenerating ? "생성 중…" : "생성"}
+                  </button>
+                </div>
+
+                {reportError && (
+                  <div className="text-xs text-red-400">{reportError}</div>
+                )}
+
+                {reportResult && (
+                  <div>
+                    <button
+                      onClick={() => setReportExpanded(!reportExpanded)}
+                      className="w-full flex items-center justify-between text-xs text-emerald-400 hover:text-emerald-300 py-1"
+                    >
+                      <span>보고서: {reportResult.alert_id}</span>
+                      <span>{reportExpanded ? "▲ 접기" : "▼ 펼치기"}</span>
+                    </button>
+                    {reportExpanded && (
+                      <pre className="mt-1 text-xs text-slate-300 bg-slate-950 border border-slate-700 rounded p-2.5 whitespace-pre-wrap break-words max-h-64 overflow-y-auto font-mono leading-relaxed">
+                        {reportResult.report}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 로그 필터 */}
             <div className="flex items-center gap-1.5 flex-wrap pt-0.5">

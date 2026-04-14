@@ -529,7 +529,6 @@ function buildEncounterRiskState(encounters: EncounterOverlayItem[]) {
 function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk: EncounterRiskState | null) {
   if (!platform || platform.lat == null || platform.lon == null) {
     return {
-      safetyBuffer: emptyFeatureCollection(),
       dangerBuffer: emptyFeatureCollection(),
       predictedPath: emptyFeatureCollection(),
     };
@@ -566,29 +565,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
     MAP_SELECTED_SAFETY_BUFFER_BASE_NM * 0.28,
     forwardDomainNm * 0.72,
   );
-
-  const safetyBuffer = normalizedHeading == null
-    ? emptyFeatureCollection()
-    : toFeatureCollection([
-        {
-          type: "Feature",
-          geometry: {
-            type: "Polygon",
-            coordinates: [[
-              ...buildShipDomainPolygon(platform, normalizedHeading, {
-                forwardNm: forwardDomainNm,
-                aftNm: aftDomainNm,
-                lateralNm: lateralDomainNm,
-              }),
-            ]],
-          },
-          properties: {
-            forward_nm: Number(forwardDomainNm.toFixed(2)),
-            lateral_nm: Number(lateralDomainNm.toFixed(2)),
-            aft_nm: Number(aftDomainNm.toFixed(2)),
-          },
-        },
-      ]);
 
   const dangerBuffer = normalizedHeading == null || encounterRisk == null
     ? emptyFeatureCollection()
@@ -627,7 +603,6 @@ function buildSelectedSpatialData(platform: PlatformState | null, encounterRisk:
       ]);
 
   return {
-    safetyBuffer: safetyBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
     dangerBuffer: dangerBuffer as maplibregl.GeoJSONSourceSpecification["data"] & object,
     predictedPath: predictedPath as maplibregl.GeoJSONSourceSpecification["data"] & object,
   };
@@ -826,7 +801,6 @@ function MaritimeMap() {
   const [encounterVisible, setEncounterVisible] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showInfoPanels, setShowInfoPanels] = useState(true);
-  const [labelsExpanded, setLabelsExpanded] = useState(false);
   const [infoPanelsExpanded, setInfoPanelsExpanded] = useState(false);
   const [legendExpanded, setLegendExpanded] = useState(true);
   const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
@@ -903,8 +877,8 @@ function MaritimeMap() {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
             cluster: true,
-            clusterRadius: 58,
-            clusterMaxZoom: MAP_CLUSTER_MAX_ZOOM,
+            clusterRadius: 50,
+            clusterMaxZoom: 12,  // zoom 12까지 클러스터 유지 (개별 선박이 보일 크기가 될 때까지)
           },
           "platform-hulls": {
             type: "geojson",
@@ -919,10 +893,6 @@ function MaritimeMap() {
             data: { type: "FeatureCollection", features: [] },
           },
           fairways: {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: [] },
-          },
-          "selected-safety-buffer": {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
           },
@@ -994,6 +964,7 @@ function MaritimeMap() {
           "line-color": "#92400e",
           "line-width": TRAIL_CASING_WIDTH,
           "line-opacity": 0.28,
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -1006,27 +977,6 @@ function MaritimeMap() {
           "line-color": "#f97316",
           "line-width": TRAIL_LINE_WIDTH,
           "line-opacity": 0.65,
-        },
-      });
-
-      map.addLayer({
-        id: "selected-safety-buffer-fill",
-        type: "fill",
-        source: "selected-safety-buffer",
-        paint: {
-          "fill-color": "#38bdf8",
-          "fill-opacity": 0.05,
-        },
-      });
-
-      map.addLayer({
-        id: "selected-safety-buffer-line",
-        type: "line",
-        source: "selected-safety-buffer",
-        paint: {
-          "line-color": "#67e8f9",
-          "line-width": 1,
-          "line-opacity": 0.42,
           "line-dasharray": [2, 2],
         },
       });
@@ -1081,6 +1031,7 @@ function MaritimeMap() {
             1.6,
           ],
           "line-opacity": 0.95,
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -1261,6 +1212,7 @@ function MaritimeMap() {
           "line-color": TRAIL_CASING_COLOR,
           "line-width": TRAIL_CASING_WIDTH,
           "line-opacity": ["*", ["get", "opacity"], TRAIL_CASING_OPACITY_FACTOR],
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -1274,6 +1226,7 @@ function MaritimeMap() {
           "line-color": ["get", "color"],
           "line-width": TRAIL_LINE_WIDTH,
           "line-opacity": ["get", "opacity"],
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -1382,32 +1335,26 @@ function MaritimeMap() {
         id: "platform-labels",
         type: "symbol",
         source: "platform-points",
-        filter: ["!", ["has", "point_count"]],
-        minzoom: MAP_SHIP_LAYER_MIN_ZOOM + 1,
+        minzoom: MAP_SHIP_LAYER_MIN_ZOOM + 2,  // zoom 11+ 에서만 표시
         layout: {
           "text-field": ["get", "name"],
           "text-size": 11,
           "text-offset": [0, 1.8],
           "text-anchor": "top",
           "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+          "visibility": "none",  // 기본은 숨김, showLabels 토글로 제어
         },
         paint: {
           "text-color": "#e2e8f0",
           "text-halo-color": "#020617",
           "text-halo-width": 1.2,
           "text-opacity": [
-            "step",
-            ["zoom"],
-            [
-              "case",
-              ["==", ["get", "selected"], true],
-              1,
-              ["==", ["get", "alert"], true],
-              1,
-              0,
-            ],
-            12,
+            "case",
+            ["==", ["get", "selected"], true],
             1,
+            ["==", ["get", "alert"], true],
+            0.9,
+            0.6,
           ],
         },
       });
@@ -1711,7 +1658,6 @@ function MaritimeMap() {
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
     const spatialData = buildSelectedSpatialData(selectedPlatform, selectedEncounterRisk);
-    (mapRef.current.getSource("selected-safety-buffer") as GeoJSONSource | undefined)?.setData(spatialData.safetyBuffer);
     (mapRef.current.getSource("selected-danger-buffer") as GeoJSONSource | undefined)?.setData(spatialData.dangerBuffer);
     (mapRef.current.getSource("selected-prediction") as GeoJSONSource | undefined)?.setData(spatialData.predictedPath);
     (mapRef.current.getSource("selected-cpa-lines") as GeoJSONSource | undefined)?.setData(selectedEncounterData.lines);
@@ -1980,40 +1926,32 @@ function MaritimeMap() {
 
           {/* 텍스트 레이블 토글 */}
           {/* 텍스트 레이블 섹션 */}
-          <button
-            onClick={() => setLabelsExpanded((v) => !v)}
-            className="panel w-full mt-3 flex items-center gap-2 px-3 py-2 rounded text-xs font-medium border border-blue-600/60 text-blue-200 hover:border-blue-500 transition-colors"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              className={`flex-shrink-0 transition-transform duration-200 ${labelsExpanded ? "rotate-90" : ""}`}
+          <div className="flex flex-col gap-1.5 mt-3 pt-2 border-t border-ocean-700/40">
+            <button
+              onClick={() => {
+                const newVis = !showLabels;
+                setShowLabels(newVis);
+                if (mapRef.current) {
+                  mapRef.current.setLayoutProperty("platform-labels", "visibility", newVis ? "visible" : "none");
+                }
+              }}
+              title={showLabels ? "선박 이름 레이블 숨기기" : "선박 이름 레이블 표시"}
+              aria-pressed={showLabels}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all border ${
+                showLabels
+                  ? "panel border-blue-500/40 text-blue-200 hover:border-blue-400 hover:bg-blue-500/10"
+                  : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:bg-ocean-800/50 hover:text-ocean-200"
+              }`}
             >
-              <polyline points="5 2 10 7 5 12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            텍스트 레이블
-            <span className="ml-auto text-blue-400 text-[10px]">{showLabels ? "ON" : "OFF"}</span>
-          </button>
-
-          {labelsExpanded && (
-            <div className="panel border border-blue-600/60 border-t-0 rounded-b px-2 py-2 space-y-1.5">
-              <button
-                onClick={() => {
-                  const newVis = !showLabels;
-                  setShowLabels(newVis);
-                  if (mapRef.current) {
-                    mapRef.current.setLayoutProperty("platform-labels", "visibility", newVis ? "visible" : "none");
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
-              >
-                <span className={`w-1.5 h-1.5 rounded flex-shrink-0 transition-colors ${showLabels ? "bg-blue-400" : "bg-ocean-700"}`} style={{ backgroundColor: showLabels ? "#60a5fa" : undefined }} />
-                <span className="flex-1 text-left">선박 이름 레이블</span>
-              </button>
-            </div>
-          )}
+              <span className={`w-2.5 h-2.5 rounded-full transition-colors ${showLabels ? "bg-blue-400" : "bg-ocean-700"}`} />
+              선박 이름 레이블
+            </button>
+            {showLabels && (
+              <div className="text-xs text-ocean-400 bg-ocean-950/40 rounded px-2 py-1.5 border border-ocean-800/40">
+                선박 이름이 지도에 표시됩니다
+              </div>
+            )}
+          </div>
 
           {/* 정보 패널 섹션 */}
           <button
@@ -2230,12 +2168,11 @@ function MaritimeMap() {
             </div>
             <div className="border-t border-ocean-800 pt-1.5 mt-0.5 text-ocean-500 text-[10px] uppercase tracking-wider">선택 선박</div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-3 h-2 rounded-sm border border-sky-400/50 bg-sky-400/10" />
-              <span className="text-sky-200">참고 기동 도메인</span>
-            </div>
-            <div className="flex items-center gap-2">
               <span className="inline-block w-3 h-2 rounded-sm border border-red-400/70 bg-red-400/20" />
-              <span className="text-red-300">CPA/TCPA 위험 도메인</span>
+              <div className="flex-1">
+                <span className="text-red-300">위험 도메인</span>
+                <div className="text-[9px] text-ocean-400 mt-0.5">CPA ≤ 0.5nm 또는 TCPA ≤ 30분</div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-block w-3 h-px bg-red-400" />

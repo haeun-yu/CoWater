@@ -67,9 +67,9 @@ class Settings(BaseSettings):
     )
     # CPAAgent 기본 임계값 (PATCH /agents/cpa-agent/config 로도 런타임 변경 가능)
     cpa_warning_nm: float = 0.5  # Warning CPA 거리 (해리)
-    cpa_warning_tcpa_min: float = 30.0  # Warning TCPA (분)
+    cpa_warning_tcpa_min: float = 15.0  # Warning TCPA (분) — 30분에서 15분으로 단축
     cpa_critical_nm: float = 0.2  # Critical CPA 거리 (해리)
-    cpa_critical_tcpa_min: float = 10.0  # Critical TCPA (분)
+    cpa_critical_tcpa_min: float = 5.0  # Critical TCPA (분) — 10분에서 5분으로 단축
 
     # ── 런타임 타이밍 ─────────────────────────────────────────────────────────
     ai_task_timeout_sec: float = 120.0  # AI 에이전트 단일 호출 최대 시간 (초)

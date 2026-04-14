@@ -11,6 +11,7 @@ import type { Alert, AlertSeverity, CommandRole } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import Link from "next/link";
+import { PlatformButton } from "./AlertButton";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -50,6 +51,7 @@ export default function DashboardAlertPanel() {
   const token = useAuthStore((s) => s.token);
   const role = useAuthStore((s) => s.role);
   const platforms = usePlatformStore((s) => s.platforms);
+  const select = usePlatformStore((s) => s.select);
   const alertStream = useSystemStore((s) => s.streams.alert);
   const alertLoad = useSystemStore((s) => s.initialData.alerts);
   const toastPush = useToastStore((s) => s.push);
@@ -239,12 +241,13 @@ export default function DashboardAlertPanel() {
                         </div>
                         <div className="flex gap-1.5 flex-wrap">
                           {alert.platform_ids.map((id) => (
-                            <span
+                            <PlatformButton
                               key={id}
-                              className="text-xs px-2 py-1 bg-ocean-700/60 text-ocean-300 rounded-sm font-mono border border-ocean-600/50"
+                              onClick={() => select(id)}
+                              title="클릭하여 지도에서 선박 선택"
                             >
                               {getPlatformName(id)}
-                            </span>
+                            </PlatformButton>
                           ))}
                         </div>
                       </div>

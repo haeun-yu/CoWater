@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
@@ -9,6 +10,7 @@ import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, AlertSeverity, AlertStatus, CommandRole } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
+import { AlertButton, PlatformButton } from "@/components/alerts/AlertButton";
 
 const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
 
@@ -80,6 +82,7 @@ const STATUS_LABEL: Record<AlertStatus, string> = {
 type TimeFilter = "all" | "1h" | "6h" | "24h";
 
 export default function AlertsPage() {
+  const router = useRouter();
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const removeAlerts = useAlertStore((s) => s.removeAlerts);
@@ -410,6 +413,7 @@ export default function AlertsPage() {
                     }
                     onAck={() => runAction(a.alert_id, "acknowledge")}
                     getPlatformName={getPlatformName}
+                    onSelectPlatform={(id) => router.push(`/platforms/${id}`)}
                     isActive
                     canOperate={canOperate}
                     canAdmin={canAdmin}
@@ -447,6 +451,7 @@ export default function AlertsPage() {
                   }
                   onAck={() => runAction(a.alert_id, "acknowledge")}
                   getPlatformName={getPlatformName}
+                  onSelectPlatform={(id) => router.push(`/platforms/${id}`)}
                   isActive={false}
                   canOperate={canOperate}
                   canAdmin={canAdmin}
@@ -521,6 +526,7 @@ function AlertRow({
   onToggle,
   onAck,
   getPlatformName,
+  onSelectPlatform,
   isActive,
   canOperate,
   canAdmin,
@@ -535,6 +541,7 @@ function AlertRow({
   onToggle: () => void;
   onAck: () => void;
   getPlatformName: (id: string) => string;
+  onSelectPlatform: (id: string) => void;
   isActive: boolean;
   canOperate: boolean;
   canAdmin: boolean;
@@ -630,12 +637,13 @@ function AlertRow({
             {alert.platform_ids.length > 0 && (
               <div className="flex gap-1 mt-1 flex-wrap">
                 {alert.platform_ids.map((id) => (
-                  <span
+                  <PlatformButton
                     key={id}
-                    className="text-xs px-1.5 py-0.5 bg-ocean-800/70 text-ocean-400 rounded font-mono"
+                    onClick={() => onSelectPlatform(id)}
+                    title="클릭하여 선박 상세 페이지로 이동"
                   >
                     {getPlatformName(id)}
-                  </span>
+                  </PlatformButton>
                 ))}
               </div>
             )}
@@ -707,64 +715,61 @@ function AlertRow({
           {/* 액션 (operator 이상 전용) */}
           {isActive && canOperate && (
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={onAck}
-                className="text-xs px-3 py-1.5 bg-ocean-700 hover:bg-ocean-600 text-ocean-100 rounded transition-colors"
-              >
+              <AlertButton variant="primary" onClick={onAck}>
                 인지 처리
-              </button>
+              </AlertButton>
               {alert.alert_type === "cpa" && (
-                <button
+                <AlertButton
+                  variant="info"
                   onClick={() =>
                     onAction(alert.alert_id, "request_course_change")
                   }
                   disabled={
                     acting === `${alert.alert_id}:request_course_change`
                   }
-                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
                 >
                   변침 요청 자동처리
-                </button>
+                </AlertButton>
               )}
               {alert.alert_type === "zone_intrusion" && (
-                <button
+                <AlertButton
+                  variant="info"
                   onClick={() => onAction(alert.alert_id, "request_zone_exit")}
                   disabled={acting === `${alert.alert_id}:request_zone_exit`}
-                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
                 >
                   구역 이탈 요청
-                </button>
+                </AlertButton>
               )}
               {(alert.alert_type === "distress" ||
                 alert.alert_type === "ais_off") && (
-                <button
+                <AlertButton
+                  variant="danger"
                   onClick={() => onAction(alert.alert_id, "notify_guard")}
                   disabled={acting === `${alert.alert_id}:notify_guard`}
-                  className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
                 >
                   관계기관 통보
-                </button>
+                </AlertButton>
               )}
-              <button
+              <AlertButton
+                variant="violet"
                 onClick={() => onAction(alert.alert_id, "start_investigation")}
                 disabled={acting === `${alert.alert_id}:start_investigation`}
-                className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
               >
                 조사 시작
-              </button>
-              <button
+              </AlertButton>
+              <AlertButton
+                variant="warning"
                 onClick={() => onAction(alert.alert_id, "escalate")}
                 disabled={acting === `${alert.alert_id}:escalate`}
-                className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
               >
                 상위 보고
-              </button>
-              <button
+              </AlertButton>
+              <AlertButton
+                variant="secondary"
                 onClick={onOpenModal}
-                className="text-xs px-3 py-1.5 rounded border border-ocean-700 text-ocean-300"
               >
                 상세 모달
-              </button>
+              </AlertButton>
             </div>
           )}
         </div>

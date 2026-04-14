@@ -8,6 +8,8 @@ import { usePlatformStore } from "@/stores/platformStore";
 import type { Alert, AlertSeverity, CommandRole } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
+import { AlertButton, PlatformButton } from "./AlertButton";
+import { AlertBadge } from "./AlertBadge";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -175,17 +177,16 @@ function AlertRow({
             <span className="text-ocean-500">{alert.generated_by}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
+            {/* 정보성 뱃지 - 클릭 불가 */}
+            <AlertBadge variant="source" title={source}>
               {source}
-            </span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isResolved ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : isNew ? "bg-red-500/10 text-red-300 border-red-500/30" : "bg-ocean-800 text-ocean-300 border-ocean-700"}`}>
+            </AlertBadge>
+            <AlertBadge
+              variant={isResolved ? "resolved" : isNew ? "active" : "acknowledged"}
+            >
               {alertStatusLabel(alert.status)}
-            </span>
-            {workflowState && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
-                {workflowLabel(workflowState)}
-              </span>
-            )}
+            </AlertBadge>
+            {workflowState && <AlertBadge variant="workflow">{workflowLabel(workflowState)}</AlertBadge>}
           </div>
         </div>
         {isNew && (
@@ -196,17 +197,18 @@ function AlertRow({
       {/* 확장 상세 */}
       {expanded && (
         <div className="px-3 pb-2 space-y-2">
-          {/* 관련 선박 */}
+          {/* 관련 선박 - 클릭 가능한 버튼 */}
           {alert.platform_ids.length > 0 && (
             <div className="flex flex-wrap gap-1">
+              <span className="text-xs text-ocean-500">관련 선박:</span>
               {alert.platform_ids.map((id) => (
-                <button
+                <PlatformButton
                   key={id}
                   onClick={() => onSelectPlatform(id)}
-                  className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded hover:bg-ocean-700"
+                  title="클릭하여 지도에서 선박 선택"
                 >
                   {id}
-                </button>
+                </PlatformButton>
               ))}
             </div>
           )}
@@ -219,9 +221,11 @@ function AlertRow({
                 (alert.metadata as Record<string, unknown> | null)
                   ?.llm_fallback,
               ) && (
-                <span className="text-amber-300 text-xs block mb-1">
-                  LLM 실패 fallback
-                </span>
+                <div className="block mb-1">
+                  <AlertBadge variant="fallback" className="text-xs">
+                    LLM 실패 fallback
+                  </AlertBadge>
+                </div>
               )}
               {alert.recommendation}
             </div>
@@ -233,27 +237,90 @@ function AlertRow({
             </div>
           )}
 
-          {/* 인지 버튼 */}
-          {alert.status === "new" && canOperate && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={onAck}
-                className="text-xs px-2 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
-              >
-                인지 처리
-              </button>
-              <button
-                onClick={() => onAction("start_investigation")}
-                className="text-xs px-2 py-1 rounded border border-violet-500/40 text-violet-300"
-              >
-                조사 시작
-              </button>
-              <button
-                onClick={() => onAction("escalate")}
-                className="text-xs px-2 py-1 rounded border border-amber-500/40 text-amber-300"
-              >
-                상위 보고
-              </button>
+          {/* 작업 버튼 */}
+          {canOperate && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {/* 기존 3개: new 상태에서만 */}
+              {isNew && (
+                <>
+                  <AlertButton
+                    variant="primary"
+                    onClick={onAck}
+                    title="경보를 인지 처리합니다"
+                  >
+                    인지 처리
+                  </AlertButton>
+                  <AlertButton
+                    variant="violet"
+                    onClick={() => onAction("start_investigation")}
+                    title="조사를 시작합니다"
+                  >
+                    조사 시작
+                  </AlertButton>
+                  <AlertButton
+                    variant="warning"
+                    onClick={() => onAction("escalate")}
+                    title="상위 부서에 보고합니다"
+                  >
+                    상위 보고
+                  </AlertButton>
+                </>
+              )}
+
+              {/* 신규 1: resolve — resolved 아닐 때 */}
+              {!isResolved && (
+                <AlertButton
+                  variant="success"
+                  onClick={() => onAction("resolve")}
+                  title="경보를 해결 처리합니다"
+                >
+                  해결 처리
+                </AlertButton>
+              )}
+
+              {/* 신규 2: notify_guard — new + distress/ais_off */}
+              {isNew && (alert.alert_type === "distress" || alert.alert_type === "ais_off") && (
+                <AlertButton
+                  variant="danger"
+                  onClick={() => onAction("notify_guard")}
+                  title="관계 기관에 통보합니다"
+                >
+                  관계기관 통보
+                </AlertButton>
+              )}
+
+              {/* 신규 3: request_course_change — new + cpa */}
+              {isNew && alert.alert_type === "cpa" && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_course_change")}
+                  title="선박에 변침을 요청합니다"
+                >
+                  변침 요청
+                </AlertButton>
+              )}
+
+              {/* 신규 4: request_speed_reduction — new */}
+              {isNew && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_speed_reduction")}
+                  title="선박에 감속을 요청합니다"
+                >
+                  감속 요청
+                </AlertButton>
+              )}
+
+              {/* 신규 5: request_zone_exit — new + zone_intrusion */}
+              {isNew && alert.alert_type === "zone_intrusion" && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_zone_exit")}
+                  title="선박이 구역을 이탈하도록 요청합니다"
+                >
+                  구역 이탈 요청
+                </AlertButton>
+              )}
             </div>
           )}
         </div>
