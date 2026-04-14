@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 _MIME = "text/plain"
 _PING_INTERVAL = 25.0  # seconds - send ping before 30s idle timeout
-_PING_BYTE = b"\x00"   # binary ping
 
 
 class MothPublisher:
@@ -82,7 +81,7 @@ class MothPublisher:
 
                 # 바이너리 ping 전송 (30초 idle 타임아웃 방지)
                 if now - last_ping_at >= _PING_INTERVAL:
-                    await ws.send(_PING_BYTE)
+                    await ws.ping()
                     last_ping_at = now
                     logger.debug("Moth publisher sent ping")
 

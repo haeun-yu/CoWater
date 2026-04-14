@@ -788,14 +788,17 @@ async def chat_stream(body: ChatRequest):
 
 
 @app.post("/agents/report-agent/generate/{alert_id}")
-async def generate_report(alert_id: str):
+async def generate_report(
+    alert_id: str,
+    actor: CommandActor = Depends(require_command_role("operator")),
+):
     """Alert 기반 보고서 생성 (Alert ID 필요)"""
     agent = _registry.get("report-agent")
     if not agent or not isinstance(agent, ReportAgent):
         raise HTTPException(404)
     report = await agent.generate_report(alert_id)
     if report is None:
-        raise HTTPException(500, {"detail": "Report generation failed"})
+        raise HTTPException(500, "Report generation failed")
     return {"alert_id": alert_id, "report": report}
 
 
