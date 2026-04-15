@@ -1,89 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  getCoreApiUrl,
-  getDetectionAgentsApiUrl,
-  getAnalysisAgentsApiUrl,
-  getResponseAgentsApiUrl,
-  getReportAgentsApiUrl,
-  getLearningAgentsApiUrl,
-  getSupervisionAgentsApiUrl,
-  getControlAgentsApiUrl,
-} from "@/lib/publicUrl";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import EmptyState from "@/components/ui/EmptyState";
-
-// ── Container Definition ──────────────────────────────────────────────────────
-
-interface Container {
-  id: string;
-  name: string;
-  port: number;
-  url: string;
-  icon: string;
-  agents: string[];
-}
-
-const CONTAINERS: Container[] = [
-  {
-    id: "detection",
-    name: "Detection",
-    port: 7704,
-    url: getDetectionAgentsApiUrl(),
-    icon: "🔍",
-    agents: ["CPA", "Anomaly", "Zone", "Distress"],
-  },
-  {
-    id: "analysis",
-    name: "Analysis",
-    port: 7705,
-    url: getAnalysisAgentsApiUrl(),
-    icon: "🧠",
-    agents: ["Anomaly AI", "Distress AI"],
-  },
-  {
-    id: "response",
-    name: "Response",
-    port: 7706,
-    url: getResponseAgentsApiUrl(),
-    icon: "⚡",
-    agents: ["Alert Creator"],
-  },
-  {
-    id: "report",
-    name: "Report",
-    port: 7709,
-    url: getReportAgentsApiUrl(),
-    icon: "📋",
-    agents: ["AI Report Agent"],
-  },
-  {
-    id: "control",
-    name: "Control",
-    port: 7701,
-    url: getControlAgentsApiUrl(),
-    icon: "💬",
-    agents: ["Chat Agent"],
-  },
-  {
-    id: "learning",
-    name: "Learning",
-    port: 7708,
-    url: getLearningAgentsApiUrl(),
-    icon: "📚",
-    agents: ["Learning Agent"],
-  },
-  {
-    id: "supervision",
-    name: "Supervision",
-    port: 7707,
-    url: getSupervisionAgentsApiUrl(),
-    icon: "👁",
-    agents: ["Supervisor"],
-  },
-];
+import { CONTAINERS } from "@/config/containers";
 
 // ── Main Component ────────────────────────────────────────────────────────────
 

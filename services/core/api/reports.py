@@ -67,24 +67,24 @@ async def list_reports(
     - flow_id: flow_id로 필터 (선택)
     - report_type: report_type으로 필터 (선택: summary, detailed, incident)
     """
+    # Build query with filters
     query = select(ReportModel)
-
     if flow_id:
         query = query.where(ReportModel.flow_id == flow_id)
     if report_type:
         query = query.where(ReportModel.report_type == report_type)
 
-    # 전체 개수 조회
-    count_result = await db.execute(
-        select(func.count()).select_from(ReportModel).where(
-            (ReportModel.flow_id == flow_id) if flow_id else True
-        ).where(
-            (ReportModel.report_type == report_type) if report_type else True
-        )
-    )
+    # Get total count using same filter conditions
+    count_query = select(func.count()).select_from(ReportModel)
+    if flow_id:
+        count_query = count_query.where(ReportModel.flow_id == flow_id)
+    if report_type:
+        count_query = count_query.where(ReportModel.report_type == report_type)
+
+    count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
-    # 최신순 정렬 + 페이지네이션
+    # Apply ordering and pagination
     query = query.order_by(desc(ReportModel.created_at))
     query = query.offset((page - 1) * page_size).limit(page_size)
 

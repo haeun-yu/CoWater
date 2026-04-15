@@ -1,102 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import {
-  getCoreApiUrl,
-  getDetectionAgentsApiUrl,
-  getAnalysisAgentsApiUrl,
-  getResponseAgentsApiUrl,
-  getReportAgentsApiUrl,
-  getLearningAgentsApiUrl,
-  getSupervisionAgentsApiUrl,
-  getControlAgentsApiUrl,
-} from "@/lib/publicUrl";
+import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAuthStore } from "@/stores/authStore";
 import PageHeader from "@/components/ui/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import EmptyState from "@/components/ui/EmptyState";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
+import { CONTAINERS, ContainerDef } from "@/config/containers";
 
 const ROLE_ORDER = { viewer: 0, operator: 1, admin: 2 } as const;
-
-// ── Container 정의 ────────────────────────────────────────────────────────────
-
-interface ContainerDef {
-  id: string;
-  name: string;
-  port: number;
-  url: string;
-  color: string;
-  icon: string;
-  agents: string[];
-}
-
-const CONTAINERS: ContainerDef[] = [
-  {
-    id: "detection",
-    name: "Detection",
-    port: 7704,
-    url: getDetectionAgentsApiUrl(),
-    color: "#2e8dd4",
-    icon: "🔍",
-    agents: ["CPA", "Anomaly", "Zone", "Distress"],
-  },
-  {
-    id: "analysis",
-    name: "Analysis",
-    port: 7705,
-    url: getAnalysisAgentsApiUrl(),
-    color: "#a78bfa",
-    icon: "🧠",
-    agents: ["Anomaly AI", "Distress AI"],
-  },
-  {
-    id: "response",
-    name: "Response",
-    port: 7706,
-    url: getResponseAgentsApiUrl(),
-    color: "#f87171",
-    icon: "⚡",
-    agents: ["Alert Creator"],
-  },
-  {
-    id: "report",
-    name: "Report",
-    port: 7709,
-    url: getReportAgentsApiUrl(),
-    color: "#34d399",
-    icon: "📋",
-    agents: ["AI Report Agent"],
-  },
-  {
-    id: "control",
-    name: "Control",
-    port: 7701,
-    url: getControlAgentsApiUrl(),
-    color: "#38bdf8",
-    icon: "💬",
-    agents: ["Chat Agent"],
-  },
-  {
-    id: "learning",
-    name: "Learning",
-    port: 7708,
-    url: getLearningAgentsApiUrl(),
-    color: "#fbbf24",
-    icon: "📚",
-    agents: ["Learning Agent"],
-  },
-  {
-    id: "supervision",
-    name: "Supervision",
-    port: 7707,
-    url: getSupervisionAgentsApiUrl(),
-    color: "#8b5cf6",
-    icon: "👁",
-    agents: ["Supervisor"],
-  },
-];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -133,59 +47,51 @@ function EventPipelineVisualization() {
     <div className="mb-8 overflow-x-auto">
       <div className="flex items-center gap-2 min-w-max p-4 bg-gradient-to-r from-ocean-950 to-ocean-900 rounded-lg border border-ocean-800/50">
         {/* Step 1: platform.report.* */}
-        <div className="flex flex-col items-center gap-2">
-          <div className="px-3 py-2 bg-ocean-800 rounded text-center">
-            <div className="text-xs font-bold text-ocean-300">moth-bridge</div>
-            <div className="text-[10px] text-ocean-400">platform.report.*</div>
-          </div>
+        <div className="px-3 py-2 bg-ocean-800 rounded text-center">
+          <div className="text-xs font-bold text-ocean-300">moth-bridge</div>
+          <div className="text-[10px] text-ocean-400">platform.report.*</div>
         </div>
 
         {/* Arrow */}
         <div className="text-ocean-600">→</div>
 
         {/* Step 2: Detection */}
-        <div className="flex flex-col items-center gap-2">
-          <div
-            className="px-3 py-2 rounded text-center border"
-            style={{ borderColor: "#2e8dd4", backgroundColor: "#1e3a5f" }}
-          >
-            <div className="text-xs font-bold" style={{ color: "#2e8dd4" }}>
-              Detection
-            </div>
-            <div className="text-[10px] text-ocean-400">detect.*</div>
+        <div
+          className="px-3 py-2 rounded text-center border"
+          style={{ borderColor: "#2e8dd4", backgroundColor: "#1e3a5f" }}
+        >
+          <div className="text-xs font-bold" style={{ color: "#2e8dd4" }}>
+            Detection
           </div>
+          <div className="text-[10px] text-ocean-400">detect.*</div>
         </div>
 
         {/* Arrow */}
         <div className="text-ocean-600">→</div>
 
         {/* Step 3: Analysis */}
-        <div className="flex flex-col items-center gap-2">
-          <div
-            className="px-3 py-2 rounded text-center border"
-            style={{ borderColor: "#a78bfa", backgroundColor: "#2d1b4e" }}
-          >
-            <div className="text-xs font-bold" style={{ color: "#a78bfa" }}>
-              Analysis
-            </div>
-            <div className="text-[10px] text-ocean-400">analyze.*</div>
+        <div
+          className="px-3 py-2 rounded text-center border"
+          style={{ borderColor: "#a78bfa", backgroundColor: "#2d1b4e" }}
+        >
+          <div className="text-xs font-bold" style={{ color: "#a78bfa" }}>
+            Analysis
           </div>
+          <div className="text-[10px] text-ocean-400">analyze.*</div>
         </div>
 
         {/* Arrow */}
         <div className="text-ocean-600">→</div>
 
         {/* Step 4: Response */}
-        <div className="flex flex-col items-center gap-2">
-          <div
-            className="px-3 py-2 rounded text-center border"
-            style={{ borderColor: "#f87171", backgroundColor: "#4d1f26" }}
-          >
-            <div className="text-xs font-bold" style={{ color: "#f87171" }}>
-              Response
-            </div>
-            <div className="text-[10px] text-ocean-400">respond.*</div>
+        <div
+          className="px-3 py-2 rounded text-center border"
+          style={{ borderColor: "#f87171", backgroundColor: "#4d1f26" }}
+        >
+          <div className="text-xs font-bold" style={{ color: "#f87171" }}>
+            Response
           </div>
+          <div className="text-[10px] text-ocean-400">respond.*</div>
         </div>
 
         {/* Arrow */}
@@ -534,12 +440,16 @@ export default function AgentsPage() {
       }
     };
 
-    // Fetch all containers in parallel
-    Promise.all(CONTAINERS.map(fetchContainerStatus));
+    // Fetch all containers in parallel (initial load)
+    Promise.all(CONTAINERS.map(fetchContainerStatus)).catch((error) => {
+      console.error("Failed to fetch initial container status:", error);
+    });
 
     // Poll every 5 seconds
     const interval = setInterval(() => {
-      Promise.all(CONTAINERS.map(fetchContainerStatus));
+      Promise.all(CONTAINERS.map(fetchContainerStatus)).catch((error) => {
+        console.error("Failed to fetch container status during polling:", error);
+      });
     }, 5000);
 
     return () => clearInterval(interval);

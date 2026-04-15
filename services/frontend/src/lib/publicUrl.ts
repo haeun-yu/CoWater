@@ -44,34 +44,47 @@ export function getPositionWsUrl() {
   return normalizePublicUrl(process.env.NEXT_PUBLIC_POSITION_WS_URL, "ws", 7703);
 }
 
-export function getAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_AGENTS_URL, "http", 7701);
+// Agent service URL factory
+const AGENT_SERVICES = {
+  detection: { env: "NEXT_PUBLIC_DETECTION_AGENTS_URL", port: 7704 },
+  analysis: { env: "NEXT_PUBLIC_ANALYSIS_AGENTS_URL", port: 7705 },
+  response: { env: "NEXT_PUBLIC_RESPONSE_AGENTS_URL", port: 7706 },
+  report: { env: "NEXT_PUBLIC_REPORT_AGENTS_URL", port: 7709 },
+  learning: { env: "NEXT_PUBLIC_LEARNING_AGENTS_URL", port: 7708 },
+  supervision: { env: "NEXT_PUBLIC_SUPERVISION_AGENTS_URL", port: 7707 },
+  control: { env: "NEXT_PUBLIC_CONTROL_AGENTS_URL", port: 7701 },
+} as const;
+
+function getAgentApiUrl(service: keyof typeof AGENT_SERVICES) {
+  const config = AGENT_SERVICES[service];
+  return normalizePublicUrl(process.env[config.env], "http", config.port);
 }
 
+// Exported functions for backwards compatibility
 export function getDetectionAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_DETECTION_AGENTS_URL, "http", 7704);
+  return getAgentApiUrl("detection");
 }
 
 export function getAnalysisAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_ANALYSIS_AGENTS_URL, "http", 7705);
+  return getAgentApiUrl("analysis");
 }
 
 export function getResponseAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_RESPONSE_AGENTS_URL, "http", 7706);
+  return getAgentApiUrl("response");
 }
 
 export function getReportAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_REPORT_AGENTS_URL, "http", 7709);
+  return getAgentApiUrl("report");
 }
 
 export function getLearningAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_LEARNING_AGENTS_URL, "http", 7708);
+  return getAgentApiUrl("learning");
 }
 
 export function getSupervisionAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_SUPERVISION_AGENTS_URL, "http", 7707);
+  return getAgentApiUrl("supervision");
 }
 
 export function getControlAgentsApiUrl() {
-  return normalizePublicUrl(process.env.NEXT_PUBLIC_CONTROL_AGENTS_URL, "http", 7701);
+  return getAgentApiUrl("control");
 }
