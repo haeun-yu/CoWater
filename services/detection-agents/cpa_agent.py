@@ -2,47 +2,38 @@
 Detection - CPA/TCPA Agent
 
 선박 간 최근접거리(CPA)와 최근접시간(TCPA)을 계산하여
-충돌 위험을 감지하고 detect.cpa Event 발행.
-
-COLREGS 기반:
-- CPA < warning_nm  AND TCPA < warning_min  → warning
-- CPA < critical_nm AND TCPA < critical_min → critical
+충돌 위험을 감지하고 detect.cpa Event를 발행한다.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
 
 import redis.asyncio as aioredis
 
+from shared.events import EventType
 from shared.schemas.report import PlatformReport
-from shared.events import EventType, DetectCPAPayload
-from shared.config import settings
 
 from .base import DetectionAgent
 
 logger = logging.getLogger(__name__)
 
-# CPA 계산에서 제외할 항법 상태
-_SKIP_NAV_STATUSES = frozenset({
-    "at_anchor",
-    "moored",
-    "aground",
-    "not_under_command",
-    "restricted_maneuverability",
-})
-
-# 보고 유효 기간(초)
-_MAX_REPORT_AGE_SEC = 300  # 5분
+_SKIP_NAV_STATUSES = frozenset(
+    {
+        "at_anchor",
+        "moored",
+        "aground",
+        "not_under_command",
+        "restricted_maneuverability",
+    }
+)
+_MAX_REPORT_AGE_SEC = 300
 
 
 class DetectionCPAAgent(DetectionAgent):
-    """Detection 단계: CPA 위험 감지"""
+    """Detection 단계: CPA 위험 감지."""
 
     agent_id = "detection-cpa"
 
@@ -63,227 +54,198 @@ class DetectionCPAAgent(DetectionAgent):
             "critical_cpa_nm": critical_cpa_nm,
             "critical_tcpa_min": critical_tcpa_min,
         }
-
-        # 최근 보고 캐시
         self._reports: dict[str, PlatformReport] = {}
-
-        # 이미 경고된 쌍 (중복 방지)
-        self._alerted_critical: set[frozenset] = set()
-        self._alerted_warning: set[frozenset] = set()
+        self._alerted_critical: set[frozenset[str]] = set()
+        self._alerted_warning: set[frozenset[str]] = set()
 
     async def on_platform_report(self, report: PlatformReport) -> None:
-        """선박 위치 보고 수신"""
-
-        # 1. 이 선박이 CPA 계산 대상인가?
-        if not self._is_active(report):
-            logger.debug(
-                "Platform %s skipped (nav_status=%s, sog=%s)",
-                report.platform_id,
-                report.nav_status,
-                report.sog,
-            )
-            self._reports.pop(report.platform_id, None)
-            return
-
-        # 2. 이전 보고와의 시간 차이 확인
-        prev_report = self._reports.get(report.platform_id)
-        if prev_report:
-            age_sec = (report.time - prev_report.time).total_seconds()
-            if age_sec > _MAX_REPORT_AGE_SEC:
-                logger.debug(
-                    "Stale data for %s: %.0fs old",
-                    report.platform_id,
-                    age_sec,
-                )
-                return
-
-        # 3. 최근 보고 저장
         self._reports[report.platform_id] = report
 
-        # 4. 다른 모든 선박과 CPA 계산
-        for other_id, other_report in list(self._reports.items()):
-            if other_id >= report.platform_id:  # 중복 방지
-                continue
+        if self._is_active(report):
+            await self._check_all(report.platform_id)
+        else:
+            await self._resolve_pairs_for_platform(report.platform_id, "inactive_target")
 
+    @staticmethod
+    def _pair_and_key(id1: str, id2: str) -> tuple[frozenset[str], str]:
+        platform_ids = sorted([id1, id2])
+        return frozenset(platform_ids), f"detect-cpa:{platform_ids[0]}:{platform_ids[1]}"
+
+    async def _resolve_pairs_for_platform(self, platform_id: str, reason: str) -> None:
+        affected_pairs = [
+            pair
+            for pair in (self._alerted_warning | self._alerted_critical)
+            if platform_id in pair
+        ]
+        for pair in affected_pairs:
+            platform_ids = sorted(pair)
+            await self._emit_cpa_event(
+                self._reports.get(platform_ids[0]),
+                self._reports.get(platform_ids[1]),
+                cpa_nm=None,
+                tcpa_min=None,
+                severity="info",
+                event_state="cleared",
+                reason=reason,
+            )
+            self._alerted_warning.discard(pair)
+            self._alerted_critical.discard(pair)
+
+    async def _purge_stale_reports(self) -> None:
+        now = datetime.now(tz=timezone.utc)
+        stale_platform_ids = [
+            platform_id
+            for platform_id, report in self._reports.items()
+            if (now - report.timestamp).total_seconds() > _MAX_REPORT_AGE_SEC
+        ]
+        for platform_id in stale_platform_ids:
+            await self._resolve_pairs_for_platform(platform_id, "stale_report")
+            self._reports.pop(platform_id, None)
+
+    async def _check_all(self, changed_platform_id: str) -> None:
+        await self._purge_stale_reports()
+
+        report = self._reports.get(changed_platform_id)
+        if report is None:
+            return
+
+        now = datetime.now(tz=timezone.utc)
+        for other_platform_id, other_report in list(self._reports.items()):
+            if other_platform_id == changed_platform_id:
+                continue
             if not self._is_active(other_report):
+                await self._resolve_pairs_for_platform(other_platform_id, "inactive_target")
+                continue
+            if (now - other_report.timestamp).total_seconds() > _MAX_REPORT_AGE_SEC:
+                await self._resolve_pairs_for_platform(other_platform_id, "stale_report")
                 continue
 
-            # 보고 타이밍 확인
-            age_sec = (report.time - other_report.time).total_seconds()
-            if age_sec > _MAX_REPORT_AGE_SEC:
-                continue
-
-            # CPA/TCPA 계산
-            cpa_nm, tcpa_min = self._calculate_cpa_tcpa(report, other_report)
-
-            if cpa_nm is None or tcpa_min is None:
-                continue
-
-            # 5. 위험 판정
-            severity = self._classify_risk(cpa_nm, tcpa_min)
-
-            if severity:
+            cpa_nm, tcpa_min = _compute_cpa_tcpa(report, other_report)
+            if cpa_nm is None or tcpa_min is None or tcpa_min < 0 or not math.isfinite(tcpa_min):
                 await self._emit_cpa_event(
                     report,
                     other_report,
-                    cpa_nm,
-                    tcpa_min,
-                    severity,
+                    cpa_nm=None,
+                    tcpa_min=None,
+                    severity="info",
+                    event_state="cleared",
+                    reason="risk_cleared",
                 )
+                pair, _ = self._pair_and_key(report.platform_id, other_report.platform_id)
+                self._alerted_warning.discard(pair)
+                self._alerted_critical.discard(pair)
+                continue
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # CPA/TCPA 계산
-    # ─────────────────────────────────────────────────────────────────────────
+            await self._evaluate(report, other_report, cpa_nm, tcpa_min)
 
-    @staticmethod
-    def _nautical_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Haversine 공식으로 거리 계산 (해리)"""
-        R = 3440.065  # Earth radius in nautical miles
+    async def _evaluate(
+        self,
+        report: PlatformReport,
+        other_report: PlatformReport,
+        cpa_nm: float,
+        tcpa_min: float,
+    ) -> None:
+        pair, _ = self._pair_and_key(report.platform_id, other_report.platform_id)
 
-        lat1_rad = math.radians(lat1)
-        lat2_rad = math.radians(lat2)
-        delta_lat = math.radians(lat2 - lat1)
-        delta_lon = math.radians(lon2 - lon1)
-
-        a = (
-            math.sin(delta_lat / 2) ** 2
-            + math.cos(lat1_rad)
-            * math.cos(lat2_rad)
-            * math.sin(delta_lon / 2) ** 2
-        )
-        c = 2 * math.asin(math.sqrt(a))
-
-        return R * c
-
-    def _calculate_cpa_tcpa(
-        self, report1: PlatformReport, report2: PlatformReport
-    ) -> tuple[Optional[float], Optional[float]]:
-        """
-        CPA(Closest Point of Approach)와 TCPA(Time to CPA) 계산.
-
-        반환: (cpa_nm, tcpa_minutes) 또는 (None, None)
-        """
-
-        # 현재 거리
-        dist_nm = self._nautical_distance(
-            report1.lat, report1.lon, report2.lat, report2.lon
-        )
-
-        # 상대 위치 벡터 (보트 1 → 보트 2, 해리)
-        dx = self._nautical_distance(report1.lat, report1.lon, report1.lat, report2.lon)
-        dy = self._nautical_distance(report1.lat, report1.lon, report2.lat, report1.lon)
-
-        # 방향 보정
-        if report2.lon < report1.lon:
-            dx = -dx
-        if report2.lat < report1.lat:
-            dy = -dy
-
-        # 속도 벡터 (knots)
-        if report1.cog is None or report1.sog is None:
-            return None, None
-        if report2.cog is None or report2.sog is None:
-            return None, None
-
-        v1x = report1.sog * math.sin(math.radians(report1.cog))
-        v1y = report1.sog * math.cos(math.radians(report1.cog))
-
-        v2x = report2.sog * math.sin(math.radians(report2.cog))
-        v2y = report2.sog * math.cos(math.radians(report2.cog))
-
-        # 상대 속도 벡터
-        dvx = v1x - v2x
-        dvy = v1y - v2y
-        dv_mag_sq = dvx ** 2 + dvy ** 2
-
-        if dv_mag_sq == 0:
-            # 평행 운동
-            return dist_nm, float('inf')
-
-        # 최근접까지의 시간
-        dot = dx * dvx + dy * dvy
-        tcpa_hours = -dot / dv_mag_sq
-
-        if tcpa_hours < 0:
-            # 이미 멀어지는 중
-            return dist_nm, float('inf')
-
-        # 최근접 거리
-        cpa_nm_sq = (dx + tcpa_hours * dvx) ** 2 + (dy + tcpa_hours * dvy) ** 2
-        cpa_nm = math.sqrt(max(0, cpa_nm_sq))
-
-        tcpa_min = tcpa_hours * 60
-
-        return cpa_nm, tcpa_min
-
-    def _classify_risk(self, cpa_nm: float, tcpa_min: float) -> Optional[str]:
-        """
-        CPA/TCPA에 따라 위험도 분류.
-
-        Returns: "critical" | "warning" | None
-        """
         if (
             cpa_nm < self.config["critical_cpa_nm"]
             and tcpa_min < self.config["critical_tcpa_min"]
         ):
-            return "critical"
+            self._alerted_warning.discard(pair)
+            self._alerted_critical.add(pair)
+            await self._emit_cpa_event(
+                report,
+                other_report,
+                cpa_nm=cpa_nm,
+                tcpa_min=tcpa_min,
+                severity="critical",
+                event_state="active",
+                reason="collision_risk",
+            )
+            return
 
         if (
             cpa_nm < self.config["warning_cpa_nm"]
             and tcpa_min < self.config["warning_tcpa_min"]
         ):
-            return "warning"
+            if pair not in self._alerted_warning and pair not in self._alerted_critical:
+                self._alerted_warning.add(pair)
+                await self._emit_cpa_event(
+                    report,
+                    other_report,
+                    cpa_nm=cpa_nm,
+                    tcpa_min=tcpa_min,
+                    severity="warning",
+                    event_state="active",
+                    reason="collision_risk",
+                )
+            return
 
-        return None
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Event 발행
-    # ─────────────────────────────────────────────────────────────────────────
+        if pair in self._alerted_warning or pair in self._alerted_critical:
+            self._alerted_warning.discard(pair)
+            self._alerted_critical.discard(pair)
+            await self._emit_cpa_event(
+                report,
+                other_report,
+                cpa_nm=None,
+                tcpa_min=None,
+                severity="info",
+                event_state="cleared",
+                reason="risk_cleared",
+            )
 
     async def _emit_cpa_event(
         self,
-        report1: PlatformReport,
-        report2: PlatformReport,
-        cpa_nm: float,
-        tcpa_min: float,
+        report: PlatformReport | None,
+        other_report: PlatformReport | None,
+        *,
+        cpa_nm: float | None,
+        tcpa_min: float | None,
         severity: str,
+        event_state: str,
+        reason: str,
     ) -> None:
-        """CPA 위험 Event 발행"""
+        if report is None and other_report is None:
+            return
 
-        # Event payload 구성 (필수 데이터만 포함)
+        primary = report or other_report
+        counterpart = other_report if report is not None else report
+        assert primary is not None
+
         payload = {
-            "platform_id": report1.platform_id,
-            "target_platform_id": report2.platform_id,
-            "cpa_minutes": tcpa_min,
+            "platform_id": primary.platform_id,
+            "target_platform_id": counterpart.platform_id if counterpart else None,
+            "cpa_nm": cpa_nm,
+            "cpa_minutes": cpa_nm,
             "tcpa_minutes": tcpa_min,
-            "latitude": report1.lat,
-            "longitude": report1.lon,
-            "platform_name": report1.platform_id,  # DB에서 실제 이름 미리 로드 필요
-            "target_name": report2.platform_id,
-            "platform_sog": report1.sog,
-            "platform_cog": report1.cog,
-            "target_sog": report2.sog,
-            "target_cog": report2.cog,
+            "latitude": primary.lat,
+            "longitude": primary.lon,
+            "platform_name": primary.name or primary.platform_id,
+            "target_name": (
+                (counterpart.name or counterpart.platform_id)
+                if counterpart is not None
+                else None
+            ),
+            "platform_sog": primary.sog,
+            "platform_cog": primary.cog,
+            "target_sog": counterpart.sog if counterpart else None,
+            "target_cog": counterpart.cog if counterpart else None,
             "severity": severity,
-            "timestamp": report1.time.isoformat(),
+            "event_state": event_state,
+            "reason": reason,
+            "timestamp": primary.timestamp.isoformat(),
         }
 
-        # Event 발행
-        event_type = EventType.DETECT_CPA
-        flow_id = f"cpa:{sorted([report1.platform_id, report2.platform_id])[0]}"
+        target_platform_id = payload.get("target_platform_id") or "unknown"
+        flow_platforms = sorted([payload["platform_id"], target_platform_id])
 
         await self.emit_event(
-            event_type=event_type,
+            event_type=EventType.DETECT_CPA,
             payload=payload,
-            flow_id=flow_id,
+            flow_id=f"detect-cpa:{flow_platforms[0]}:{flow_platforms[1]}",
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # 유틸
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _is_active(self, report: PlatformReport) -> bool:
-        """CPA 계산 대상인가?"""
         if report.nav_status in _SKIP_NAV_STATUSES:
             return False
         if report.sog is None or report.sog <= 0:
@@ -292,17 +254,44 @@ class DetectionCPAAgent(DetectionAgent):
             return False
         return True
 
-    def _can_process_with_partial_data(
-        self, payload: dict, missing: list[str]
-    ) -> bool:
-        """
-        platform_history, zone_context 없이도 처리 가능.
-        필수 필드(platform_id, target_id, lat, lon 등)만 있으면 됨.
-        """
-        critical_fields = [
-            "platform_id",
-            "target_platform_id",
-            "latitude",
-            "longitude",
-        ]
-        return all(f in payload for f in critical_fields)
+
+_NM_PER_DEG_LAT = 60.0
+_KNOTS_TO_NM_PER_MIN = 1 / 60
+
+
+def _compute_cpa_tcpa(
+    report: PlatformReport, other_report: PlatformReport
+) -> tuple[float | None, float | None]:
+    """두 선박의 위치/속도 벡터로 CPA(NM)와 TCPA(분)를 계산."""
+    if report.sog is None or other_report.sog is None:
+        return None, None
+    if report.cog is None or other_report.cog is None:
+        return None, None
+
+    avg_lat = (report.lat + other_report.lat) / 2
+    cos_lat = math.cos(math.radians(avg_lat))
+
+    dx = (other_report.lon - report.lon) * cos_lat * _NM_PER_DEG_LAT
+    dy = (other_report.lat - report.lat) * _NM_PER_DEG_LAT
+
+    def velocity(sog: float, cog: float) -> tuple[float, float]:
+        radians = math.radians(cog)
+        return (
+            sog * math.sin(radians) * _KNOTS_TO_NM_PER_MIN,
+            sog * math.cos(radians) * _KNOTS_TO_NM_PER_MIN,
+        )
+
+    vx1, vy1 = velocity(report.sog, report.cog)
+    vx2, vy2 = velocity(other_report.sog, other_report.cog)
+
+    dvx = vx2 - vx1
+    dvy = vy2 - vy1
+    dv2 = dvx**2 + dvy**2
+    if dv2 < 1e-9:
+        return math.hypot(dx, dy), float("inf")
+
+    tcpa_min = -((dx * dvx) + (dy * dvy)) / dv2
+    cpa_x = dx + dvx * tcpa_min
+    cpa_y = dy + dvy * tcpa_min
+    cpa_nm = math.hypot(cpa_x, cpa_y)
+    return cpa_nm, tcpa_min

@@ -81,6 +81,36 @@ async def _heartbeat_loop(redis: aioredis.Redis) -> None:
                 logger.error("Failed to send heartbeat for %s: %s", agent.agent_id, e)
 
 
+async def _ais_timeout_loop() -> None:
+    """주기적으로 AIS timeout 기반 anomaly 탐지 수행"""
+    while True:
+        await asyncio.sleep(settings.ais_check_interval_sec)
+
+        for agent in _agents:
+            check_timeout = getattr(agent, "check_ais_timeout", None)
+            if check_timeout is None:
+                continue
+            try:
+                await check_timeout()
+            except Exception as e:
+                logger.error("Failed AIS timeout check for %s: %s", agent.agent_id, e)
+
+
+async def _zone_reload_loop() -> None:
+    """주기적으로 Zone 캐시를 reload"""
+    while True:
+        await asyncio.sleep(settings.zone_reload_interval_sec)
+
+        for agent in _agents:
+            load_zones = getattr(agent, "load_zones", None)
+            if load_zones is None:
+                continue
+            try:
+                await load_zones()
+            except Exception as e:
+                logger.error("Failed zone reload for %s: %s", agent.agent_id, e)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI app lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
@@ -117,12 +147,32 @@ async def lifespan(app: FastAPI):
         ),
     ]
 
+    for agent in _agents:
+        restore_state = getattr(agent, "restore_state", None)
+        if restore_state is None:
+            continue
+        try:
+            await restore_state()
+        except Exception:
+            logger.exception("Failed to restore state for %s", agent.agent_id)
+
+    for agent in _agents:
+        load_zones = getattr(agent, "load_zones", None)
+        if load_zones is None:
+            continue
+        try:
+            await load_zones()
+        except Exception:
+            logger.exception("Failed to preload zones for %s", agent.agent_id)
+
     logger.info("Detection service started with %d agent(s)", len(_agents))
 
     # 백그라운드 타스크 시작
     tasks = [
         asyncio.create_task(_consume_platform_reports(_redis), name="platform-consumer"),
         asyncio.create_task(_heartbeat_loop(_redis), name="heartbeat-loop"),
+        asyncio.create_task(_ais_timeout_loop(), name="ais-timeout-loop"),
+        asyncio.create_task(_zone_reload_loop(), name="zone-reload-loop"),
     ]
 
     yield

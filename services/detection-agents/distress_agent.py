@@ -90,11 +90,11 @@ class DetectionDistressAgent(DetectionAgent):
 
         payload = {
             "platform_id": report.platform_id,
-            "platform_name": report.platform_id,
+            "platform_name": report.name or report.platform_id,
             "distress_type": distress_type,
             "latitude": report.lat,
             "longitude": report.lon,
-            "timestamp": report.time.isoformat(),
+            "timestamp": report.timestamp.isoformat(),
         }
 
         await self.emit_event(

@@ -18,11 +18,15 @@ class Settings(BaseSettings):
     cpa_critical_tcpa_min: float = 10.0
 
     # Anomaly Agent 임계값
+    ais_timeout_sec: int = 90
+    speed_drop_threshold: float = 5.0
+    sog_compare_max_gap_sec: int = 300
     anomaly_rot_threshold: float = 20.0  # degrees/min
     anomaly_heading_threshold: float = 45.0  # degrees
     anomaly_speed_threshold: float = 5.0  # knots
 
     # Zone Agent
+    ais_check_interval_sec: int = 20
     zone_reload_interval_sec: int = 300
 
     # Heartbeat
