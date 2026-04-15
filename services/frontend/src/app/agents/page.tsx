@@ -458,7 +458,7 @@ export default function AgentsPage() {
   if (role && ROLE_ORDER[role as keyof typeof ROLE_ORDER] < ROLE_ORDER.operator) {
     return (
       <div className="p-6">
-        <PageHeader title="에이전트" description="시스템 에이전트 상태" />
+        <PageHeader title="에이전트" subtitle="시스템 에이전트 상태" />
         <EmptyState
           title="권한 부족"
           description="operator 이상의 권한이 필요합니다"
@@ -470,7 +470,7 @@ export default function AgentsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="에이전트" description="마이크로서비스 아키텍처" />
+      <PageHeader title="에이전트" subtitle="마이크로서비스 아키텍처" />
 
       {/* Event Pipeline */}
       <EventPipelineVisualization />

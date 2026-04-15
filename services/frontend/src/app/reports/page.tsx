@@ -302,7 +302,7 @@ export default function ReportsPage() {
       <div className="p-6">
         <PageHeader
           title="리포트"
-          description="AI 생성 분석 보고서"
+          subtitle="AI 생성 분석 보고서"
         />
         <EmptyState
           title="권한 부족"
@@ -319,7 +319,7 @@ export default function ReportsPage() {
     <div className="p-6 space-y-6">
       <PageHeader
         title="리포트"
-        description="AI 생성 분석 보고서 목록"
+        subtitle="AI 생성 분석 보고서 목록"
       />
 
       {/* Summary Cards */}
