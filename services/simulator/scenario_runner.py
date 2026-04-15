@@ -34,8 +34,8 @@ class ScenarioEvent:
 
 
 class ScenarioRunner:
-    def __init__(self, scenario_path: str, publisher: MothPublisher) -> None:
-        self._publisher = publisher
+    def __init__(self, scenario_path: str, publishers: list) -> None:
+        self._publishers = publishers
         self._vessels: dict[str, VesselSimulator] = {}
         self._events: list[ScenarioEvent] = []
         self._weather = WeatherGenerator()
@@ -130,17 +130,21 @@ class ScenarioRunner:
                         logger.warning("Event target not found: %s", event.mmsi)
                     event._fired = True
 
-            # 모든 선박 틱 + AIS 퍼블리시
+            # 모든 선박 틱 + AIS 퍼블리시 (매 틱마다 1개 이상 문장 보내기)
+            sentence_count = 0
             for vessel in self._vessels.values():
                 vessel.tick(dt_sim)
                 sentence = encode_position_report(vessel.state)
                 if sentence:
-                    await self._publisher.publish(sentence)
+                    for publisher in self._publishers:
+                        await publisher.publish(sentence)
+                    sentence_count += 1
 
             if int(self._elapsed_s) % 30 == 0 and self._elapsed_s > 0:
                 logger.info(
-                    "t=%.0fs vessels=%d weather=wind%.1fkts",
+                    "t=%.0fs vessels=%d weather=wind%.1fkts sentences=%d/tick",
                     self._elapsed_s,
                     len(self._vessels),
                     self._weather.current_state().wind_speed_knots,
+                    sentence_count,
                 )

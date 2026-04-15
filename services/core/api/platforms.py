@@ -206,7 +206,7 @@ async def get_track(
     platform_id: str,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: datetime | None = None,
-    limit: int = 1000,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
     db: AsyncSession = Depends(get_db),
 ):
     # 시간 범위 조건을 먼저 적용한 뒤 최신 N개를 역순으로 가져와 다시 정렬

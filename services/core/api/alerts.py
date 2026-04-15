@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import ProgrammingError
+from uuid import uuid4
 
 from auth import require_command_role
 from db import get_db
@@ -62,6 +64,98 @@ class AlertResponse(BaseModel):
         )
 
 
+class CreateAlertBody(BaseModel):
+    alert_type: str
+    severity: str
+    platform_ids: list[str] = []
+    zone_id: str | None = None
+    generated_by: str
+    message: str
+    recommendation: str | None = None
+    metadata: dict = {}
+    dedup_key: str | None = None
+    resolve_dedup_key: str | None = None
+    resolve_only: bool = False
+    status: str = "new"
+
+
+@router.post("")
+async def create_alert(
+    body: CreateAlertBody,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    created_row: AlertModel | None = None
+    updated_row: AlertModel | None = None
+    resolved_rows: list[AlertModel] = []
+
+    async with db.begin():
+        if body.dedup_key and not body.resolve_only:
+            result = await db.execute(
+                select(AlertModel)
+                .where(
+                    AlertModel.status == "new",
+                    AlertModel.generated_by == body.generated_by,
+                    AlertModel.dedup_key == body.dedup_key,
+                )
+                .order_by(AlertModel.created_at.desc())
+                .limit(1)
+                .with_for_update()
+            )
+            updated_row = result.scalar_one_or_none()
+
+        if updated_row:
+            updated_row.alert_type = body.alert_type
+            updated_row.severity = body.severity
+            updated_row.platform_ids = body.platform_ids
+            updated_row.zone_id = body.zone_id
+            updated_row.message = body.message
+            updated_row.recommendation = body.recommendation
+            updated_row.metadata_ = body.metadata
+        elif not body.resolve_only:
+            created_row = AlertModel(
+                alert_id=str(uuid4()),
+                alert_type=body.alert_type,
+                severity=body.severity,
+                status=body.status,
+                platform_ids=body.platform_ids,
+                zone_id=body.zone_id,
+                generated_by=body.generated_by,
+                message=body.message,
+                recommendation=body.recommendation,
+                metadata_=body.metadata,
+                dedup_key=body.dedup_key,
+            )
+            db.add(created_row)
+
+        if body.resolve_dedup_key:
+            resolve_result = await db.execute(
+                select(AlertModel)
+                .where(
+                    AlertModel.status.in_(["new", "acknowledged"]),
+                    AlertModel.generated_by == body.generated_by,
+                    AlertModel.dedup_key == body.resolve_dedup_key,
+                )
+                .with_for_update()
+            )
+            for row in resolve_result.scalars().all():
+                row.status = "resolved"
+                row.resolved_at = datetime.now(timezone.utc)
+                resolved_rows.append(row)
+
+    if created_row:
+        await db.refresh(created_row)
+        await _broadcast_alert_create(created_row)
+        return {"alert_id": created_row.alert_id, "status": "created"}
+    if updated_row:
+        await db.refresh(updated_row)
+        await _broadcast_and_publish_alert_update(updated_row)
+        return {"alert_id": updated_row.alert_id, "status": "updated"}
+    for row in resolved_rows:
+        await db.refresh(row)
+        await _broadcast_and_publish_alert_update(row)
+    return {"alert_id": None, "status": "resolved", "resolved_count": len(resolved_rows)}
+
+
 @router.get("", response_model=list[AlertResponse])
 async def list_alerts(
     status: Annotated[str | None, Query()] = None,
@@ -82,8 +176,13 @@ async def list_alerts(
         stmt = stmt.where(
             AlertModel.metadata_["workflow_state"].astext == workflow_state
         )
-    result = await db.execute(stmt)
-    return [AlertResponse.from_model(r) for r in result.scalars().all()]
+    try:
+        result = await db.execute(stmt)
+        return [AlertResponse.from_model(r) for r in result.scalars().all()]
+    except ProgrammingError:
+        # During local bootstrap, schema init can lag behind API startup.
+        logger.warning("alerts table is not ready yet; returning empty list")
+        return []
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
@@ -303,3 +402,14 @@ async def _broadcast_and_publish_alert_update(row: AlertModel) -> None:
         await redis.publish(channel, json.dumps(payload))
     except Exception:
         logger.exception("Failed to publish alert update event: %s", row.alert_id)
+
+
+async def _broadcast_alert_create(row: AlertModel) -> None:
+    payload = AlertResponse.from_model(row).model_dump(mode="json")
+    payload["type"] = "alert_created"
+    payload["event"] = build_event(
+        "alert_created",
+        "core",
+        produced_at=payload.get("created_at"),
+    )
+    await hub.broadcast("alerts", payload)

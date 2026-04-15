@@ -21,7 +21,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 _MIME = "text/plain"
-_MIME_RESEND_INTERVAL = 1.0     # seconds
+_PING_INTERVAL = 25.0  # seconds - send ping before 30s idle timeout
 
 
 class MothPublisher:
@@ -71,21 +71,27 @@ class MothPublisher:
             self._connected = True
             logger.info("Moth publisher connected")
 
-            # 초기 MIME 전송
+            # 초기 MIME 전송 (한 번만)
             await ws.send(_MIME)
-            last_mime_at = asyncio.get_event_loop().time()
+            last_ping_at = asyncio.get_running_loop().time()
+            sent_count = 0
 
             while True:
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
 
-                # MIME 주기적 재전송
-                if now - last_mime_at >= _MIME_RESEND_INTERVAL:
-                    await ws.send(_MIME)
-                    last_mime_at = now
+                # 바이너리 ping 전송 (30초 idle 타임아웃 방지)
+                if now - last_ping_at >= _PING_INTERVAL:
+                    await ws.ping()
+                    last_ping_at = now
+                    logger.debug("Moth publisher sent ping")
 
                 # 큐에서 메시지 꺼내기 (최대 100ms 대기)
                 try:
                     sentence = await asyncio.wait_for(self._queue.get(), timeout=0.1)
                     await ws.send(sentence.encode("ascii"))
+                    last_ping_at = now  # reset ping timer on data
+                    sent_count += 1
+                    if sent_count % 15 == 0:
+                        logger.debug("Moth publisher sent %d sentences", sent_count)
                 except asyncio.TimeoutError:
                     pass

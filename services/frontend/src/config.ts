@@ -19,11 +19,12 @@ export const MAP_OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 export const MAP_OSM_ATTRIBUTION = "© OpenStreetMap contributors";
 export const MAP_OPENSEAMAP_SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
 export const MAP_OPENSEAMAP_ATTRIBUTION = "© OpenSeaMap contributors";
+export const MAP_GLYPHS_URL = "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf";
 
 /** OSM 기본 타일 불투명도 (0~1) */
 export const MAP_OSM_OPACITY = 0.35;
 export const MAP_SHIP_LAYER_MIN_ZOOM = 9;
-export const MAP_CLUSTER_MAX_ZOOM = 8;
+export const MAP_CLUSTER_MAX_ZOOM = 10;
 export const MAP_NAV_AID_FETCH_MIN_ZOOM = 9;
 
 /** 선박 선택 시 최소 줌 레벨 */

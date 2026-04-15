@@ -114,3 +114,79 @@ class AuditLogModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()")
     )
+
+
+class ReportModel(Base):
+    """보고서 저장 (flow 단위의 일련된 이벤트에 대한 AI 분석 보고서)"""
+
+    __tablename__ = "reports"
+
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    flow_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    alert_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default="{}")
+    report_type: Mapped[str] = mapped_column(
+        Text, server_default="summary"
+    )  # "summary" | "detailed" | "incident"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    ai_model: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+
+
+class LearningParameterModel(Base):
+    """학습된 파라미터 (Detection, Analysis, Response 단계의 조정 가능한 파라미터)"""
+
+    __tablename__ = "learning_parameters"
+
+    param_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    param_name: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    category: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # "detection" | "analysis" | "response"
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)  # 어떤 agent의 파라미터인가
+    current_value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON string
+    previous_value: Mapped[str | None] = mapped_column(Text)
+    source_flow_id: Mapped[str | None] = mapped_column(Text)  # 어떤 flow에서 학습했는가
+    effectiveness_score: Mapped[float] = mapped_column(
+        Float, server_default="0.5"
+    )  # 0~1, 효과도
+    description: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+
+
+class LearningInsightModel(Base):
+    """학습 인사이트 (제안된 파라미터 조정 내역)"""
+
+    __tablename__ = "learning_insights"
+
+    insight_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    flow_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # "detection" | "analysis" | "response"
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    param_name: Mapped[str] = mapped_column(Text, nullable=False)
+    finding: Mapped[str] = mapped_column(Text, nullable=False)  # 발견사항 설명
+    recommended_value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON string
+    current_value: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float)  # 0~1
+    implemented: Mapped[bool] = mapped_column(Boolean, server_default=text("FALSE"))
+    implementation_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )

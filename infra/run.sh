@@ -9,6 +9,7 @@ ACTION="${2:-up}"
 PRESET="${3:-full}"
 
 ENV_FILE_OVERRIDE="${COWATER_ENV_FILE:-}"
+SCENARIO="${SCENARIO:-}"
 NO_DEPS=false
 SERVICES=()
 
@@ -31,6 +32,11 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+# SCENARIO이 설정되면 simulation 프로필 활성화
+if [[ -n "$SCENARIO" ]]; then
+  PROFILES+=(--profile simulation)
+fi
 
 if [[ -n "$ENV_FILE_OVERRIDE" ]]; then
   ENV_FILE="$ENV_FILE_OVERRIDE"
@@ -115,6 +121,23 @@ ensure_host_ollama() {
   exit 1
 }
 
+warn_if_disk_low() {
+  local data_line used_pct avail_kb
+  data_line="$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print $5" "$4}')"
+  if [[ -z "$data_line" ]]; then
+    return 0
+  fi
+
+  used_pct="${data_line%% *}"
+  used_pct="${used_pct%%%}"
+  avail_kb="${data_line##* }"
+
+  if [[ "$used_pct" -ge 95 || "$avail_kb" -le 20971520 ]]; then
+    printf 'WARNING: Low disk headroom detected on /System/Volumes/Data (%s%% used, %s KB available).\n' "$used_pct" "$avail_kb" >&2
+    printf 'Postgres previously crashed with "No space left on device" in this condition.\n' >&2
+  fi
+}
+
 stop_host_ollama() {
   if ! command -v lsof >/dev/null 2>&1; then
     printf 'lsof not available; cannot detect host Ollama listener.\n' >&2
@@ -162,6 +185,11 @@ compose() {
     cmd+=("${PROFILES[@]}")
   fi
 
+  # SCENARIO 환경변수 전달
+  if [[ -n "$SCENARIO" ]]; then
+    cmd+=(-e SCENARIO="$SCENARIO")
+  fi
+
   cmd+=("$@")
 
   if [[ ${#no_deps_args[@]} -gt 0 ]]; then
@@ -177,6 +205,7 @@ compose() {
 
 case "$ACTION" in
   up)
+    warn_if_disk_low
     ensure_host_ollama
     compose up -d
     ;;
@@ -198,6 +227,7 @@ case "$ACTION" in
     fi
     ;;
   restart)
+    warn_if_disk_low
     ensure_host_ollama
     if [[ ${#SERVICES[@]} -gt 0 ]]; then
       compose stop
@@ -219,9 +249,16 @@ case "$ACTION" in
     fi
     stop_host_ollama
     ;;
+  start-host-ollama)
+    if [[ "$MODE" != "host-ollama" ]]; then
+      printf 'start-host-ollama is only meaningful in host-ollama mode.\n' >&2
+      exit 1
+    fi
+    ensure_host_ollama
+    ;;
   *)
     printf 'Unknown action: %s\n' "$ACTION" >&2
-    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
+    printf 'Usage: bash infra/run.sh [host-ollama|docker-ollama|vllm] [up|down|down-all|restart|ps|logs|stop-host-ollama|start-host-ollama] [full|data-node|core-node|agents-node|frontend-node|bridge-node|llm-node]\n' >&2
     exit 1
     ;;
 esac

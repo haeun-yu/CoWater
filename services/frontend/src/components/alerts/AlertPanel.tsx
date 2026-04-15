@@ -3,10 +3,16 @@
 import { useState } from "react";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
-import type { Alert, AlertSeverity } from "@/types";
+import type { Alert, AlertSeverity, CommandRole } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
+import { AlertButton, PlatformButton } from "./AlertButton";
+import { AlertBadge } from "./AlertBadge";
+import FilterChip from "@/components/ui/FilterChip";
+import EmptyState from "@/components/ui/EmptyState";
+import StatusBadge from "@/components/ui/StatusBadge";
 
 const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   critical: "위험",
@@ -14,12 +20,17 @@ const SEVERITY_LABEL: Record<AlertSeverity, string> = {
   info: "정보",
 };
 
+const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
 export default function AlertPanel({ compact }: { compact?: boolean }) {
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const [filter, setFilter] = useState<AlertSeverity | "all">("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const select = usePlatformStore((s) => s.select);
+  const canOperate = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.operator;
 
   const newCount = alerts.filter((a) => a.status === "new").length;
   const criticalCount = alerts.filter(
@@ -32,9 +43,10 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
     .filter((a) => !compact || a.status === "new");
 
   async function acknowledge(alertId: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "acknowledge" }),
     });
     if (!res.ok) return;
@@ -43,9 +55,10 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
   }
 
   async function runAction(alertId: string, action: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action }),
     });
     if (!res.ok) return;
@@ -73,19 +86,14 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
         {/* 필터 탭 */}
         <div className="flex gap-1">
           {(["all", "critical", "warning", "info"] as const).map((f) => (
-            <button
+            <FilterChip
               key={f}
               onClick={() => setFilter(f)}
-              className={`text-xs px-2 py-0.5 rounded transition-colors ${
-                filter === f
-                  ? f === "all"
-                    ? "bg-ocean-700 text-ocean-100"
-                    : `bg-severity-${f} text-white border`
-                  : "text-ocean-500 hover:text-ocean-300"
-              }`}
+              active={filter === f}
+              tone={f === "critical" ? "critical" : f === "warning" ? "warning" : f === "info" ? "info" : "neutral"}
             >
               {f === "all" ? "전체" : SEVERITY_LABEL[f]}
-            </button>
+            </FilterChip>
           ))}
         </div>
       </div>
@@ -93,9 +101,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
       {/* 경보 목록 */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-ocean-400 text-xs">
-            경보 없음
-          </div>
+          <EmptyState title="경보 없음" compact />
         ) : (
           filtered.map((alert) => (
             <AlertRow
@@ -108,6 +114,7 @@ export default function AlertPanel({ compact }: { compact?: boolean }) {
               onAck={() => acknowledge(alert.alert_id)}
               onAction={(action) => runAction(alert.alert_id, action)}
               onSelectPlatform={(id) => select(id)}
+              canOperate={canOperate}
             />
           ))
         )}
@@ -123,6 +130,7 @@ function AlertRow({
   onAck,
   onAction,
   onSelectPlatform,
+  canOperate,
 }: {
   alert: Alert;
   expanded: boolean;
@@ -130,8 +138,10 @@ function AlertRow({
   onAck: () => void;
   onAction: (action: string) => void;
   onSelectPlatform: (id: string) => void;
+  canOperate: boolean;
 }) {
   const isNew = alert.status === "new";
+  const isResolved = alert.status === "resolved";
   const source = String((alert.metadata as Record<string, unknown> | null)?.source ?? "agent-runtime");
   const workflowState = getWorkflowState(alert);
   const actionHistory = getActionHistory(alert);
@@ -163,14 +173,17 @@ function AlertRow({
             <span className="text-ocean-500">{alert.generated_by}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
+            {/* 정보성 뱃지 - 클릭 불가 */}
+            <AlertBadge variant="source" title={source}>
               {source}
-            </span>
-            {workflowState && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
-                {workflowLabel(workflowState)}
-              </span>
-            )}
+            </AlertBadge>
+            <AlertBadge
+              variant={isResolved ? "resolved" : isNew ? "active" : "acknowledged"}
+            >
+              {alertStatusLabel(alert.status)}
+            </AlertBadge>
+            {workflowState && <AlertBadge variant="workflow">{workflowLabel(workflowState)}</AlertBadge>}
+            {isNew && <StatusBadge tone={alert.severity === "critical" ? "critical" : alert.severity === "warning" ? "warning" : "info"}>신규</StatusBadge>}
           </div>
         </div>
         {isNew && (
@@ -181,17 +194,18 @@ function AlertRow({
       {/* 확장 상세 */}
       {expanded && (
         <div className="px-3 pb-2 space-y-2">
-          {/* 관련 선박 */}
+          {/* 관련 선박 - 클릭 가능한 버튼 */}
           {alert.platform_ids.length > 0 && (
             <div className="flex flex-wrap gap-1">
+              <span className="text-xs text-ocean-500">관련 선박:</span>
               {alert.platform_ids.map((id) => (
-                <button
+                <PlatformButton
                   key={id}
                   onClick={() => onSelectPlatform(id)}
-                  className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-300 rounded hover:bg-ocean-700"
+                  title="클릭하여 지도에서 선박 선택"
                 >
                   {id}
-                </button>
+                </PlatformButton>
               ))}
             </div>
           )}
@@ -204,9 +218,11 @@ function AlertRow({
                 (alert.metadata as Record<string, unknown> | null)
                   ?.llm_fallback,
               ) && (
-                <span className="text-amber-300 text-xs block mb-1">
-                  LLM 실패 fallback
-                </span>
+                <div className="block mb-1">
+                  <AlertBadge variant="fallback" className="text-xs">
+                    LLM 실패 fallback
+                  </AlertBadge>
+                </div>
               )}
               {alert.recommendation}
             </div>
@@ -218,27 +234,90 @@ function AlertRow({
             </div>
           )}
 
-          {/* 인지 버튼 */}
-          {alert.status === "new" && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={onAck}
-                className="text-xs px-2 py-1 bg-ocean-700 hover:bg-ocean-600 text-ocean-200 rounded transition-colors"
-              >
-                인지 처리
-              </button>
-              <button
-                onClick={() => onAction("start_investigation")}
-                className="text-xs px-2 py-1 rounded border border-violet-500/40 text-violet-300"
-              >
-                조사 시작
-              </button>
-              <button
-                onClick={() => onAction("escalate")}
-                className="text-xs px-2 py-1 rounded border border-amber-500/40 text-amber-300"
-              >
-                상위 보고
-              </button>
+          {/* 작업 버튼 */}
+          {canOperate && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {/* 기존 3개: new 상태에서만 */}
+              {isNew && (
+                <>
+                  <AlertButton
+                    variant="primary"
+                    onClick={onAck}
+                    title="경보를 인지 처리합니다"
+                  >
+                    인지 처리
+                  </AlertButton>
+                  <AlertButton
+                    variant="violet"
+                    onClick={() => onAction("start_investigation")}
+                    title="조사를 시작합니다"
+                  >
+                    조사 시작
+                  </AlertButton>
+                  <AlertButton
+                    variant="warning"
+                    onClick={() => onAction("escalate")}
+                    title="상위 부서에 보고합니다"
+                  >
+                    상위 보고
+                  </AlertButton>
+                </>
+              )}
+
+              {/* 신규 1: resolve — resolved 아닐 때 */}
+              {!isResolved && (
+                <AlertButton
+                  variant="success"
+                  onClick={() => onAction("resolve")}
+                  title="경보를 해결 처리합니다"
+                >
+                  해결 처리
+                </AlertButton>
+              )}
+
+              {/* 신규 2: notify_guard — new + distress/ais_off */}
+              {isNew && (alert.alert_type === "distress" || alert.alert_type === "ais_off") && (
+                <AlertButton
+                  variant="danger"
+                  onClick={() => onAction("notify_guard")}
+                  title="관계 기관에 통보합니다"
+                >
+                  관계기관 통보
+                </AlertButton>
+              )}
+
+              {/* 신규 3: request_course_change — new + cpa */}
+              {isNew && alert.alert_type === "cpa" && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_course_change")}
+                  title="선박에 변침을 요청합니다"
+                >
+                  변침 요청
+                </AlertButton>
+              )}
+
+              {/* 신규 4: request_speed_reduction — new */}
+              {isNew && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_speed_reduction")}
+                  title="선박에 감속을 요청합니다"
+                >
+                  감속 요청
+                </AlertButton>
+              )}
+
+              {/* 신규 5: request_zone_exit — new + zone_intrusion */}
+              {isNew && alert.alert_type === "zone_intrusion" && (
+                <AlertButton
+                  variant="info"
+                  onClick={() => onAction("request_zone_exit")}
+                  title="선박이 구역을 이탈하도록 요청합니다"
+                >
+                  구역 이탈 요청
+                </AlertButton>
+              )}
             </div>
           )}
         </div>
@@ -284,4 +363,11 @@ function actionLabel(action: string) {
   if (action === "start_investigation") return "조사 시작";
   if (action === "escalate") return "상위 보고";
   return action;
+}
+
+function alertStatusLabel(status: Alert["status"]) {
+  if (status === "new") return "활성";
+  if (status === "acknowledged") return "인지됨";
+  if (status === "resolved") return "해결됨";
+  return status;
 }

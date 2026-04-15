@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import {
   MAP_CENTER,
+  MAP_GLYPHS_URL,
   MAP_OPENSEAMAP_ATTRIBUTION,
   MAP_OPENSEAMAP_SEAMARK_TILE_URL,
   MAP_OSM_ATTRIBUTION,
@@ -77,7 +78,7 @@ export default function ZoneMapPanel({
             layout: { visibility: "none" },
           },
         ],
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        glyphs: MAP_GLYPHS_URL,
       },
       center: MAP_CENTER,
       zoom: MAP_ZOOM - 1,
@@ -256,11 +257,11 @@ export default function ZoneMapPanel({
     <div className="relative w-full h-full rounded overflow-hidden border border-ocean-800">
       <div ref={containerRef} className="w-full h-full" />
 
-      <div className="absolute top-3 right-3 z-10 flex gap-2">
+      <div className="absolute top-3 right-3 z-10 flex gap-2 pointer-events-none">
         <button
           onClick={() => setZoneVisible((visible) => !visible)}
           title="구역 시각화 토글"
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+          className={`pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             zoneVisible
               ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
               : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"
@@ -279,7 +280,7 @@ export default function ZoneMapPanel({
           onClick={() => setSeamarkVisible((visible) => !visible)}
           title="OpenSeaMap seamark 오버레이 토글"
           aria-pressed={seamarkVisible}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+          className={`pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             seamarkVisible
               ? "panel border-ocean-600/60 text-ocean-200 hover:border-ocean-500"
               : "bg-ocean-900/40 border-ocean-800/40 text-ocean-400 hover:text-ocean-300"

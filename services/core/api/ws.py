@@ -26,3 +26,14 @@ async def ws_alerts(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         await hub.disconnect(ws, "alerts")
+
+
+@router.websocket("/ws/events")
+async def ws_events(ws: WebSocket):
+    """실시간 이벤트 스트림 (detection → analysis → response → learning)."""
+    await hub.connect(ws, "events")
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        await hub.disconnect(ws, "events")

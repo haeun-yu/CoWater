@@ -44,6 +44,8 @@ _publish_success_count = 0
 _publish_failure_count = 0
 _last_report_at: str | None = None
 _last_broadcast_at: str | None = None
+_broadcast_success_count = 0
+_broadcast_failure_count = 0
 
 
 def attach_redis(redis: aioredis.Redis) -> None:
@@ -110,12 +112,19 @@ async def broadcast(report: "ParsedReport") -> None:
         }
     )
 
+    global _broadcast_success_count, _broadcast_failure_count
+
+    async with _lock:
+        clients = list(_clients)
+
     dead: set[WebSocket] = set()
-    for ws in list(_clients):
+    for ws in clients:
         try:
             await ws.send_text(payload)
+            _broadcast_success_count += 1
         except Exception:
             dead.add(ws)
+            _broadcast_failure_count += 1
 
     if dead:
         async with _lock:
@@ -162,6 +171,10 @@ async def health() -> dict:
         "publish_counts": {
             "success": _publish_success_count,
             "failure": _publish_failure_count,
+        },
+        "broadcast_counts": {
+            "success": _broadcast_success_count,
+            "failure": _broadcast_failure_count,
         },
         "last_report_at": _last_report_at,
         "last_broadcast_at": _last_broadcast_at,

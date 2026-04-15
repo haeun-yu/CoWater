@@ -110,6 +110,8 @@ Useful commands:
 ```bash
 make uninstall-host-ollama-launchd
 make stop-host-ollama
+make docker-doctor
+make docker-cleanup-safe
 ```
 
 Notes:
@@ -158,6 +160,7 @@ bash infra/run.sh host-ollama stop-host-ollama
 - On macOS, host Ollama is usually the fastest/easiest path because Metal acceleration works outside Docker.
 - On Linux + NVIDIA, Docker Ollama or vLLM are more realistic production GPU options.
 - `OLLAMA_FLASH_ATTENTION=1` is already configured for the Docker Ollama container, but whether it helps depends on the underlying runtime/hardware path.
+- `make docker-cleanup-safe` only prunes build cache and dangling images; it deliberately does **not** prune volumes.
 
 ## Swarm / multi-server naming guidance
 

@@ -1,28 +1,39 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAlertStore } from "@/stores/alertStore";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { getCoreApiUrl } from "@/lib/publicUrl";
-import type { Alert, AlertSeverity, AlertStatus } from "@/types";
+import type { Alert, AlertSeverity, AlertStatus, CommandRole } from "@/types";
 import { formatDistanceToNow, format, isAfter, subHours } from "date-fns";
 import { ko } from "date-fns/locale";
+import { AlertButton, PlatformButton } from "@/components/alerts/AlertButton";
+import PageHeader from "@/components/ui/PageHeader";
+import MetricCard from "@/components/ui/MetricCard";
+import FilterChip from "@/components/ui/FilterChip";
+import SectionHeading from "@/components/ui/SectionHeading";
+import StatusBadge from "@/components/ui/StatusBadge";
+import EmptyState from "@/components/ui/EmptyState";
 
-async function apiDeleteAlerts(alertIds: string[]) {
+const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
+
+async function apiDeleteAlerts(alertIds: string[], token: string) {
   const res = await fetch(`${getCoreApiUrl()}/alerts`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ alert_ids: alertIds }),
   });
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json() as Promise<{ deleted: number }>;
 }
 
-async function apiRunAlertAction(alertId: string, action: string) {
+async function apiRunAlertAction(alertId: string, action: string, token: string) {
   const res = await fetch(`${getCoreApiUrl()}/alerts/${alertId}/action`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ action }),
   });
   if (!res.ok) throw new Error(`Action failed: ${res.status}`);
@@ -77,11 +88,14 @@ const STATUS_LABEL: Record<AlertStatus, string> = {
 type TimeFilter = "all" | "1h" | "6h" | "24h";
 
 export default function AlertsPage() {
+  const router = useRouter();
   const alerts = useAlertStore((s) => s.alerts);
   const updateAlert = useAlertStore((s) => s.updateAlert);
   const removeAlerts = useAlertStore((s) => s.removeAlerts);
   const platforms = usePlatformStore((s) => s.platforms);
   const alertLoad = useSystemStore((s) => s.initialData.alerts);
+  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">(
     "all",
   );
@@ -98,6 +112,9 @@ export default function AlertsPage() {
   const [deleting, setDeleting] = useState(false);
   const [pastPage, setPastPage] = useState(1);
   const PAST_PAGE_SIZE = 30;
+
+  const canOperate = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.operator;
+  const canAdmin = !!token && !!role && ROLE_ORDER[role] >= ROLE_ORDER.admin;
 
   const agentFilters = Array.from(new Set(alerts.map((alert) => alert.generated_by))).sort();
   const workflowFilters = Array.from(new Set(alerts.map((alert) => getWorkflowState(alert)).filter((state): state is string => state !== null))).sort();
@@ -158,7 +175,8 @@ export default function AlertsPage() {
     setDeleting(true);
     try {
       const ids = Array.from(selected);
-      await apiDeleteAlerts(ids);
+      if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.admin) return;
+      await apiDeleteAlerts(ids, token);
       removeAlerts(ids);
       setSelected(new Set());
     } catch (e) {
@@ -177,9 +195,10 @@ export default function AlertsPage() {
   }
 
   async function runAction(alertId: string, action: string) {
+    if (!token || !role || ROLE_ORDER[role] < ROLE_ORDER.operator) return;
     setActing(`${alertId}:${action}`);
     try {
-      const updated = await apiRunAlertAction(alertId, action);
+      const updated = await apiRunAlertAction(alertId, action, token);
       updateAlert(updated);
     } catch (e) {
       console.error(e);
@@ -193,73 +212,47 @@ export default function AlertsPage() {
     : null;
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 상단 요약 바 */}
-      <div className="flex-shrink-0 px-5 py-3 border-b border-ocean-800">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-base font-bold text-ocean-200 tracking-wider">
-            경보 현황
-          </h1>
-          <div className="flex items-center gap-3">
-            {someSelected && (
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-red-500/50 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
-              >
-                {deleting ? "삭제 중…" : `선택 삭제 (${selected.size}건)`}
-              </button>
-            )}
-            <div className="text-xs text-ocean-500">전체 {alerts.length}건</div>
-          </div>
-        </div>
+    <div className="page-shell">
+      <PageHeader
+        title="경보 현황"
+        actions={[
+          someSelected && role && ROLE_ORDER[role] >= ROLE_ORDER.admin ? (
+            <button
+              key="delete"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1.5 rounded border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+            >
+              {deleting ? "삭제 중…" : `선택 삭제 (${selected.size}건)`}
+            </button>
+          ) : null,
+          <div key="count" className="text-xs text-ocean-500">전체 {alerts.length}건</div>,
+        ]}
+        stats={[
+          <MetricCard key="critical" label="미확인 위험" value={criticalNew} tone={criticalNew > 0 ? "critical" : "neutral"} valueClassName="text-xl" />,
+          <MetricCard key="warning" label="미확인 주의" value={warningNew} tone={warningNew > 0 ? "warning" : "neutral"} valueClassName="text-xl" />,
+          <MetricCard key="info" label="미확인 정보" value={infoNew} tone="info" valueClassName="text-xl" />,
+          <MetricCard key="ack" label="확인 완료" value={acknowledgedAll} valueClassName="text-xl" />,
+          <MetricCard key="new" label="전체 미확인" value={newAlerts.length} tone={newAlerts.length > 0 ? "warning" : "neutral"} valueClassName="text-xl" />,
+        ]}
+      />
 
-        {/* 통계 카드 */}
-        <div className="grid grid-cols-5 gap-2 mb-3">
-          <StatCard
-            label="미확인 위험"
-            value={criticalNew}
-            color="text-red-400"
-            urgent={criticalNew > 0}
-          />
-          <StatCard
-            label="미확인 주의"
-            value={warningNew}
-            color="text-yellow-400"
-          />
-          <StatCard label="미확인 정보" value={infoNew} color="text-blue-400" />
-          <StatCard
-            label="확인 완료"
-            value={acknowledgedAll}
-            color="text-ocean-400"
-          />
-          <StatCard
-            label="전체 미확인"
-            value={newAlerts.length}
-            color="text-ocean-200"
-          />
-        </div>
-
-        {/* 필터 */}
-        <div className="flex flex-wrap gap-2">
+      <div className="flex-shrink-0 px-5 pb-4">
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-ocean-800/70 bg-ocean-950/35 p-3">
           {/* 심각도 */}
           <div className="flex gap-1">
             {(["all", "critical", "warning", "info"] as const).map((f) => {
               const s = f !== "all" ? SEVERITY_STYLE[f] : null;
               return (
-                <button
+                <FilterChip
                   key={f}
                   onClick={() => setSeverityFilter(f)}
-                  className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                    severityFilter === f
-                      ? f === "all"
-                        ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                        : `${s!.pill} border-current`
-                      : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                  }`}
+                  active={severityFilter === f}
+                  tone={f === "critical" ? "critical" : f === "warning" ? "warning" : f === "info" ? "info" : "neutral"}
+                  className={severityFilter === f && f !== "all" ? `${s!.pill} border-current` : ""}
                 >
                   {f === "all" ? "전체" : SEVERITY_LABEL[f]}
-                </button>
+                </FilterChip>
               );
             })}
           </div>
@@ -267,91 +260,67 @@ export default function AlertsPage() {
           {/* 상태 */}
           <div className="flex gap-1">
             {(["all", "new", "acknowledged"] as const).map((f) => (
-              <button
+              <FilterChip
                 key={f}
                 onClick={() => setStatusFilter(f)}
-                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                  statusFilter === f
-                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}
+                active={statusFilter === f}
               >
                 {f === "all" ? "전체 상태" : STATUS_LABEL[f as AlertStatus]}
-              </button>
+              </FilterChip>
             ))}
           </div>
 
           <div className="flex gap-1">
-            <button
+            <FilterChip
               onClick={() => setAgentFilter("all")}
-              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                agentFilter === "all"
-                  ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                  : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-              }`}
+              active={agentFilter === "all"}
             >
               전체 에이전트
-            </button>
+            </FilterChip>
             {agentFilters.map((agentId) => (
-              <button
+              <FilterChip
                 key={agentId}
                 onClick={() => setAgentFilter(agentId)}
-                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                  agentFilter === agentId
-                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}
+                active={agentFilter === agentId}
               >
                 {agentId}
-              </button>
+              </FilterChip>
             ))}
           </div>
 
           <div className="flex gap-1">
-            <button
+            <FilterChip
               onClick={() => setWorkflowFilter("all")}
-              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                workflowFilter === "all"
-                  ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                  : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-              }`}
+              active={workflowFilter === "all"}
             >
               전체 워크플로우
-            </button>
+            </FilterChip>
             {workflowFilters.map((workflow) => (
-              <button
+              <FilterChip
                 key={workflow}
                 onClick={() => setWorkflowFilter(workflow)}
-                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                  workflowFilter === workflow
-                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}
+                active={workflowFilter === workflow}
               >
                 {workflowLabel(workflow)}
-              </button>
+              </FilterChip>
             ))}
           </div>
 
           {/* 시간 */}
           <div className="flex gap-1 ml-auto">
             {(["all", "1h", "6h", "24h"] as const).map((f) => (
-              <button
+              <FilterChip
                 key={f}
                 onClick={() => setTimeFilter(f)}
-                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                  timeFilter === f
-                    ? "bg-ocean-700 text-ocean-100 border-ocean-600"
-                    : "text-ocean-400 border-ocean-800 hover:border-ocean-600"
-                }`}
+                active={timeFilter === f}
               >
                 {f === "all" ? "전체 시간" : `최근 ${f}`}
-              </button>
+              </FilterChip>
             ))}
           </div>
 
-          {/* 전체 선택 */}
-          {filtered.length > 0 && (
+          {/* 전체 선택 (admin 전용 — 삭제 기능에만 사용) */}
+          {canAdmin && filtered.length > 0 && (
             <label className="flex items-center gap-1.5 cursor-pointer ml-2 select-none">
               <input
                 type="checkbox"
@@ -366,28 +335,13 @@ export default function AlertsPage() {
       </div>
 
       {/* 목록 */}
-      <div className="flex-1 overflow-auto px-5 py-3 space-y-4">
+      <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
         {/* ── 활성 경보 ── */}
         {statusFilter !== "acknowledged" && (
-          <section>
-            <div className="flex items-center gap-2 mb-2">
-              <div className="text-xs font-bold text-ocean-300 tracking-wider uppercase">
-                미확인 경보
-              </div>
-              {active.length > 0 && (
-                <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded font-bold">
-                  {active.length}
-                </span>
-              )}
-            </div>
+          <section className="content-surface rounded-2xl p-4">
+            <SectionHeading title="미확인 경보" count={active.length > 0 ? active.length : undefined} tone={active.length > 0 ? "critical" : "neutral"} />
             {active.length === 0 ? (
-              <div className="text-xs text-green-400 py-4">
-                {alertLoad.status === "loading"
-                  ? "경보 로딩 중..."
-                  : alertLoad.status === "error"
-                    ? "경보 로드 실패"
-                    : "미확인 경보 없음 ✓"}
-              </div>
+              <EmptyState title={alertLoad.status === "loading" ? "경보 로딩 중..." : alertLoad.status === "error" ? "경보 로드 실패" : "미확인 경보 없음 ✓"} compact />
             ) : (
               <div className="space-y-1.5">
                 {active.map((a) => (
@@ -400,7 +354,10 @@ export default function AlertsPage() {
                     }
                     onAck={() => runAction(a.alert_id, "acknowledge")}
                     getPlatformName={getPlatformName}
+                    onSelectPlatform={(id) => router.push(`/platforms/${id}`)}
                     isActive
+                    canOperate={canOperate}
+                    canAdmin={canAdmin}
                     checked={selected.has(a.alert_id)}
                     onCheck={() => toggleOne(a.alert_id)}
                     onOpenModal={() => setModalAlertId(a.alert_id)}
@@ -415,15 +372,8 @@ export default function AlertsPage() {
 
         {/* ── 과거 경보 ── */}
         {statusFilter !== "new" && past.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-2">
-              <div className="text-xs font-bold text-ocean-400 tracking-wider uppercase">
-                확인 / 해결된 경보
-              </div>
-              <span className="text-xs px-1.5 py-0.5 bg-ocean-800 text-ocean-500 rounded">
-                {past.length}
-              </span>
-            </div>
+          <section className="content-surface rounded-2xl p-4">
+            <SectionHeading title="확인 / 해결된 경보" count={past.length} />
             <div className="space-y-1">
               {past.slice(0, pastPage * PAST_PAGE_SIZE).map((a) => (
                 <AlertRow
@@ -435,7 +385,10 @@ export default function AlertsPage() {
                   }
                   onAck={() => runAction(a.alert_id, "acknowledge")}
                   getPlatformName={getPlatformName}
+                  onSelectPlatform={(id) => router.push(`/platforms/${id}`)}
                   isActive={false}
+                  canOperate={canOperate}
+                  canAdmin={canAdmin}
                   checked={selected.has(a.alert_id)}
                   onCheck={() => toggleOne(a.alert_id)}
                   onOpenModal={() => setModalAlertId(a.alert_id)}
@@ -456,9 +409,7 @@ export default function AlertsPage() {
         )}
 
         {filtered.length === 0 && (
-          <div className="flex items-center justify-center h-40 text-ocean-400 text-sm">
-            조건에 맞는 경보 없음
-          </div>
+          <EmptyState title="조건에 맞는 경보 없음" description="필터를 조정해보세요" />
         )}
       </div>
 
@@ -468,34 +419,10 @@ export default function AlertsPage() {
           onClose={() => setModalAlertId(null)}
           onAction={runAction}
           acting={acting}
+          canOperate={canOperate}
           getPlatformName={getPlatformName}
         />
       )}
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  color,
-  urgent,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  urgent?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded border px-3 py-2 ${urgent ? "border-red-500/40 bg-red-500/5" : "border-ocean-800 bg-ocean-900/40"}`}
-    >
-      <div
-        className={`text-lg font-bold font-mono ${color} ${urgent ? "animate-pulse" : ""}`}
-      >
-        {value}
-      </div>
-      <div className="text-xs text-ocean-500 mt-0.5">{label}</div>
     </div>
   );
 }
@@ -506,7 +433,10 @@ function AlertRow({
   onToggle,
   onAck,
   getPlatformName,
+  onSelectPlatform,
   isActive,
+  canOperate,
+  canAdmin,
   checked,
   onCheck,
   onOpenModal,
@@ -518,7 +448,10 @@ function AlertRow({
   onToggle: () => void;
   onAck: () => void;
   getPlatformName: (id: string) => string;
+  onSelectPlatform: (id: string) => void;
   isActive: boolean;
+  canOperate: boolean;
+  canAdmin: boolean;
   checked: boolean;
   onCheck: () => void;
   onOpenModal: () => void;
@@ -539,18 +472,20 @@ function AlertRow({
     >
       {/* 요약 행 */}
       <div className="px-3 py-2.5 flex items-start gap-3">
-        {/* 체크박스 */}
-        <div
-          className="flex-shrink-0 pt-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={onCheck}
-            className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
-          />
-        </div>
+        {/* 체크박스 (admin 전용 — 삭제 기능에만 사용) */}
+        {canAdmin && (
+          <div
+            className="flex-shrink-0 pt-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={onCheck}
+              className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+            />
+          </div>
+        )}
         <div
           className="flex-1 cursor-pointer flex items-start gap-3"
           onClick={onToggle}
@@ -570,25 +505,23 @@ function AlertRow({
           {/* 내용 */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-              <span className="text-xs px-1.5 py-0.5 bg-ocean-800/80 text-ocean-400 rounded">
-                {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
-              </span>
-              <span
-                className={`text-xs px-1.5 py-0.5 rounded border ${s.pill}`}
-              >
-                {STATUS_LABEL[alert.status]}
-              </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-800/80 text-ocean-400 border border-ocean-700">
-                {alert.generated_by}
-              </span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-ocean-900 text-ocean-500 border border-ocean-800">
-                {source}
-              </span>
-              {workflowState && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/30">
-                  {workflowLabel(workflowState)}
-                </span>
-              )}
+                <StatusBadge>
+                  {ALERT_TYPE_KR[alert.alert_type] ?? alert.alert_type}
+                </StatusBadge>
+                <StatusBadge tone={alert.status === "resolved" ? "success" : alert.status === "acknowledged" ? "info" : alert.severity === "critical" ? "critical" : alert.severity === "warning" ? "warning" : "neutral"}>
+                  {STATUS_LABEL[alert.status]}
+                </StatusBadge>
+                <StatusBadge>
+                  {alert.generated_by}
+                </StatusBadge>
+                <StatusBadge>
+                  {source}
+                </StatusBadge>
+                {workflowState && (
+                  <StatusBadge tone="info" className="bg-violet-500/10 border-violet-500/30 text-violet-300">
+                    {workflowLabel(workflowState)}
+                  </StatusBadge>
+                )}
               <span className="text-xs text-ocean-400 ml-auto">
                 {formatDistanceToNow(new Date(alert.created_at), {
                   addSuffix: true,
@@ -609,12 +542,13 @@ function AlertRow({
             {alert.platform_ids.length > 0 && (
               <div className="flex gap-1 mt-1 flex-wrap">
                 {alert.platform_ids.map((id) => (
-                  <span
+                  <PlatformButton
                     key={id}
-                    className="text-xs px-1.5 py-0.5 bg-ocean-800/70 text-ocean-400 rounded font-mono"
+                    onClick={() => onSelectPlatform(id)}
+                    title="클릭하여 선박 상세 페이지로 이동"
                   >
                     {getPlatformName(id)}
-                  </span>
+                  </PlatformButton>
                 ))}
               </div>
             )}
@@ -683,67 +617,64 @@ function AlertRow({
             </div>
           )}
 
-          {/* 액션 */}
-          {isActive && (
+          {/* 액션 (operator 이상 전용) */}
+          {isActive && canOperate && (
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={onAck}
-                className="text-xs px-3 py-1.5 bg-ocean-700 hover:bg-ocean-600 text-ocean-100 rounded transition-colors"
-              >
+              <AlertButton variant="primary" onClick={onAck}>
                 인지 처리
-              </button>
+              </AlertButton>
               {alert.alert_type === "cpa" && (
-                <button
+                <AlertButton
+                  variant="info"
                   onClick={() =>
                     onAction(alert.alert_id, "request_course_change")
                   }
                   disabled={
                     acting === `${alert.alert_id}:request_course_change`
                   }
-                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
                 >
                   변침 요청 자동처리
-                </button>
+                </AlertButton>
               )}
               {alert.alert_type === "zone_intrusion" && (
-                <button
+                <AlertButton
+                  variant="info"
                   onClick={() => onAction(alert.alert_id, "request_zone_exit")}
                   disabled={acting === `${alert.alert_id}:request_zone_exit`}
-                  className="text-xs px-3 py-1.5 rounded border border-cyan-500/40 text-cyan-300 disabled:opacity-40"
                 >
                   구역 이탈 요청
-                </button>
+                </AlertButton>
               )}
               {(alert.alert_type === "distress" ||
                 alert.alert_type === "ais_off") && (
-                <button
+                <AlertButton
+                  variant="danger"
                   onClick={() => onAction(alert.alert_id, "notify_guard")}
                   disabled={acting === `${alert.alert_id}:notify_guard`}
-                  className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
                 >
                   관계기관 통보
-                </button>
+                </AlertButton>
               )}
-              <button
+              <AlertButton
+                variant="violet"
                 onClick={() => onAction(alert.alert_id, "start_investigation")}
                 disabled={acting === `${alert.alert_id}:start_investigation`}
-                className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
               >
                 조사 시작
-              </button>
-              <button
+              </AlertButton>
+              <AlertButton
+                variant="warning"
                 onClick={() => onAction(alert.alert_id, "escalate")}
                 disabled={acting === `${alert.alert_id}:escalate`}
-                className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
               >
                 상위 보고
-              </button>
-              <button
+              </AlertButton>
+              <AlertButton
+                variant="secondary"
                 onClick={onOpenModal}
-                className="text-xs px-3 py-1.5 rounded border border-ocean-700 text-ocean-300"
               >
                 상세 모달
-              </button>
+              </AlertButton>
             </div>
           )}
         </div>
@@ -757,12 +688,14 @@ function AlertActionModal({
   onClose,
   onAction,
   acting,
+  canOperate,
   getPlatformName,
 }: {
   alert: Alert;
   onClose: () => void;
   onAction: (alertId: string, action: string) => void;
   acting: string | null;
+  canOperate: boolean;
   getPlatformName: (id: string) => string;
 }) {
   const fallback = Boolean(alert.metadata?.llm_fallback);
@@ -837,43 +770,49 @@ function AlertActionModal({
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => onAction(alert.alert_id, "acknowledge")}
-            disabled={acting === `${alert.alert_id}:acknowledge`}
-            className="text-xs px-3 py-1.5 rounded border border-ocean-600 text-ocean-200 disabled:opacity-40"
-          >
-            인지 처리
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "resolve")}
-            disabled={acting === `${alert.alert_id}:resolve`}
-            className="text-xs px-3 py-1.5 rounded border border-green-500/40 text-green-300 disabled:opacity-40"
-          >
-            해결 처리
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "notify_guard")}
-            disabled={acting === `${alert.alert_id}:notify_guard`}
-            className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
-          >
-            관계기관 통보
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "start_investigation")}
-            disabled={acting === `${alert.alert_id}:start_investigation`}
-            className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
-          >
-            조사 시작
-          </button>
-          <button
-            onClick={() => onAction(alert.alert_id, "escalate")}
-            disabled={acting === `${alert.alert_id}:escalate`}
-            className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
-          >
-            상위 보고
-          </button>
-        </div>
+        {canOperate ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => onAction(alert.alert_id, "acknowledge")}
+              disabled={acting === `${alert.alert_id}:acknowledge`}
+              className="text-xs px-3 py-1.5 rounded border border-ocean-600 text-ocean-200 disabled:opacity-40"
+            >
+              인지 처리
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "resolve")}
+              disabled={acting === `${alert.alert_id}:resolve`}
+              className="text-xs px-3 py-1.5 rounded border border-green-500/40 text-green-300 disabled:opacity-40"
+            >
+              해결 처리
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "notify_guard")}
+              disabled={acting === `${alert.alert_id}:notify_guard`}
+              className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 disabled:opacity-40"
+            >
+              관계기관 통보
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "start_investigation")}
+              disabled={acting === `${alert.alert_id}:start_investigation`}
+              className="text-xs px-3 py-1.5 rounded border border-violet-500/40 text-violet-300 disabled:opacity-40"
+            >
+              조사 시작
+            </button>
+            <button
+              onClick={() => onAction(alert.alert_id, "escalate")}
+              disabled={acting === `${alert.alert_id}:escalate`}
+              className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 disabled:opacity-40"
+            >
+              상위 보고
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 text-xs text-ocean-500">
+            경보 처리 권한이 없습니다. operator 이상 로그인이 필요합니다.
+          </div>
+        )}
       </div>
     </div>
   );

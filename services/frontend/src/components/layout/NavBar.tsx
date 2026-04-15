@@ -6,6 +6,7 @@ import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
 import { useSystemStore } from "@/stores/systemStore";
+import { useAuthStore } from "@/stores/authStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import { useEffect, useState, useCallback } from "react";
 
@@ -15,6 +16,8 @@ const NAV = [
   { href: "/zones", label: "구역", icon: "▦" },
   { href: "/alerts", label: "경보", icon: "⚡" },
   { href: "/agents", label: "에이전트", icon: "⬡" },
+  { href: "/reports", label: "리포트", icon: "📋" },
+  { href: "/events", label: "이벤트", icon: "📊" },
 ];
 
 export default function NavBar() {
@@ -24,6 +27,9 @@ export default function NavBar() {
   const aiLogs = useAILogStore((s) => s.logs);
   const streams = useSystemStore((s) => s.streams);
   const newAlerts = alerts.filter((a) => a.status === "new").length;
+  const actor = useAuthStore((s) => s.actor);
+  const role = useAuthStore((s) => s.role);
+  const logout = useAuthStore((s) => s.logout);
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
@@ -65,7 +71,7 @@ export default function NavBar() {
   ].join(" · ");
 
   return (
-    <header className="h-11 flex-shrink-0 flex items-center border-b border-ocean-800 bg-ocean-900 px-4 gap-6">
+    <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center gap-3 border-b border-ocean-800/80 bg-[linear-gradient(180deg,rgba(4,20,40,0.96),rgba(4,20,40,0.82))] px-3 py-2 backdrop-blur-sm lg:flex-nowrap lg:gap-6 lg:px-4">
       {/* 로고 */}
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-ocean-400 font-bold tracking-widest text-sm">
@@ -77,7 +83,7 @@ export default function NavBar() {
       </div>
 
       {/* 네비게이션 */}
-      <nav className="flex items-center gap-1" aria-label="주요 메뉴">
+      <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto rounded-full border border-ocean-800/80 bg-ocean-950/45 px-1 py-1 lg:order-none lg:w-auto" aria-label="주요 메뉴">
         {NAV.map(({ href, label, icon }) => {
           const isActive =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -85,14 +91,14 @@ export default function NavBar() {
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors ${
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors ${
                 isActive
-                  ? "bg-ocean-700 text-ocean-100"
+                  ? "bg-ocean-700 text-ocean-100 shadow-[0_8px_24px_rgba(2,13,26,0.24)]"
                   : "text-ocean-500 hover:text-ocean-300 hover:bg-ocean-800/50"
               }`}
             >
               <span>{icon}</span>
-              <span>{label}</span>
+              <span className="whitespace-nowrap">{label}</span>
               {href === "/alerts" && newAlerts > 0 && (
                 <span
                   className={`ml-0.5 px-1 rounded-full text-xs font-bold ${
@@ -113,39 +119,52 @@ export default function NavBar() {
       </nav>
 
       {/* 우측 상태 */}
-       <div className="ml-auto flex items-center gap-5 text-xs">
-         <div className="flex items-center gap-1.5 text-ocean-400">
-            <span className="font-mono text-ocean-200">
-             {platformValues.length}
-            </span>
-           <span>척 관제</span>
-         </div>
-         {freshness.stale > 0 && (
-           <div className="text-amber-300">지연 {freshness.stale}</div>
-         )}
-         {freshness.lost > 0 && (
-           <div className="text-red-300">유실 {freshness.lost}</div>
-         )}
-         {criticalCount > 0 && (
-           <div className="flex items-center gap-1 text-red-400 font-bold animate-pulse">
-             <span>⚠</span>
-             <span>CRITICAL {criticalCount}</span>
-           </div>
-         )}
-         <div className="flex items-center gap-1.5" title={streamSummary} aria-label={streamSummary}>
-           <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
-           <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
-         </div>
+        <div className="ml-auto flex items-center gap-2 text-xs lg:gap-3">
+          <div className="hidden xl:flex items-center gap-2 rounded-full border border-ocean-800/80 bg-ocean-950/45 px-3 py-1.5 text-ocean-400">
+             <span className="font-mono text-ocean-200">
+              {platformValues.length}
+             </span>
+            <span>척 관제</span>
+          </div>
+          {freshness.stale > 0 && (
+            <div className="hidden lg:block text-amber-300">지연 {freshness.stale}</div>
+          )}
+          {freshness.lost > 0 && (
+            <div className="hidden lg:block text-red-300">유실 {freshness.lost}</div>
+          )}
+          {criticalCount > 0 && (
+            <div className="flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-red-400 font-bold animate-pulse">
+              <span>⚠</span>
+              <span>CRITICAL {criticalCount}</span>
+            </div>
+          )}
+          <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-ocean-800/80 bg-ocean-950/45 px-3 py-1.5" title={streamSummary} aria-label={streamSummary}>
+            <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
+            <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
+          </div>
          <button
-           onClick={toggleSound}
+            onClick={toggleSound}
            title={soundEnabled ? "경보음 켜짐 — 클릭하여 끄기" : "경보음 꺼짐 — 클릭하여 켜기"}
            aria-pressed={soundEnabled}
            className={`text-sm transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
-         >
-           {soundEnabled ? "🔔" : "🔕"}
-         </button>
-         <span className="text-ocean-400 font-mono hidden lg:block">{now}</span>
-       </div>
+          >
+            {soundEnabled ? "🔔" : "🔕"}
+          </button>
+          {actor && role && (
+             <div className="hidden lg:flex items-center gap-2 rounded-full border border-ocean-800/80 bg-ocean-950/45 px-3 py-1.5 text-[11px]">
+               <span className="text-ocean-300">{actor}</span>
+              <span className="text-ocean-600">·</span>
+              <span className="text-ocean-500 uppercase">{role}</span>
+            </div>
+          )}
+          <button
+            onClick={logout}
+            className="text-[11px] text-slate-400 hover:text-red-300 transition-colors"
+          >
+            로그아웃
+          </button>
+          <span className="text-ocean-400 font-mono hidden xl:block">{now}</span>
+        </div>
       </header>
   );
 }

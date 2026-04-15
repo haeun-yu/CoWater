@@ -52,6 +52,12 @@ class CommandResponse(BaseModel):
     result: dict | None = None
 
 
+class CommandAuthStatusResponse(BaseModel):
+    authenticated: bool
+    actor: str | None = None
+    role: Literal["viewer", "operator", "admin"] | None = None
+
+
 def _request_meta(request: Request) -> dict:
     client = request.client.host if request.client else None
     return {
@@ -180,4 +186,15 @@ async def run_command(
         allowed=True,
         parsed=ParsedCommandResponse.from_parsed(parsed),
         result=result,
+    )
+
+
+@router.get("/auth-status", response_model=CommandAuthStatusResponse)
+async def command_auth_status(
+    actor: Annotated[CommandActor, Depends(require_command_role("viewer"))],
+):
+    return CommandAuthStatusResponse(
+        authenticated=True,
+        actor=actor.actor,
+        role=actor.role,
     )

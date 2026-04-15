@@ -137,11 +137,13 @@ export type WsMessage =
 export interface CommandParseResult {
   intent: string;
   summary: string;
-  required_role: "viewer" | "operator" | "admin";
+  required_role: CommandRole;
   target_type: "alert" | "agent";
   target_id: string;
   arguments: Record<string, unknown>;
 }
+
+export type CommandRole = "viewer" | "operator" | "admin";
 
 export interface CommandResponse {
   status: "dry_run" | "executed";
@@ -150,4 +152,16 @@ export interface CommandResponse {
   allowed: boolean;
   parsed: CommandParseResult;
   result: Record<string, unknown> | null;
+}
+
+export interface CommandAuthStatus {
+  authenticated: boolean;
+  actor: string | null;
+  role: CommandRole | null;
+}
+
+export interface AuthMeResponse {
+  authenticated: boolean;
+  actor: string;
+  role: CommandRole;
 }

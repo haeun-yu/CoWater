@@ -18,7 +18,13 @@ export interface ActivityLogEntry {
 // 하위 호환 alias
 export type AILogEntry = ActivityLogEntry;
 
-const AI_AGENT_IDS = new Set(["anomaly-ai", "distress-agent", "report-agent"]);
+const AI_AGENT_IDS = new Set([
+  "anomaly-ai",
+  "analysis-anomaly-ai",
+  "distress-agent",
+  "response-distress-agent",
+  "report-agent",
+]);
 
 interface AILogStore {
   logs: ActivityLogEntry[];

@@ -9,6 +9,11 @@ import { getCoreApiUrl } from "@/lib/publicUrl";
 import type { Alert, AlertSeverity, PlatformSpatialContext, PlatformZoneDwell } from "@/types";
 import { formatDistanceToNow, format } from "date-fns";
 import { ko } from "date-fns/locale";
+import PageHeader from "@/components/ui/PageHeader";
+import MetricCard from "@/components/ui/MetricCard";
+import StatusBadge from "@/components/ui/StatusBadge";
+import EmptyState from "@/components/ui/EmptyState";
+import { DetailField, DetailSection } from "@/components/ui/DetailSection";
 
 const MaritimeMap = dynamic(() => import("@/components/map/MaritimeMap"), {
   ssr: false,
@@ -181,17 +186,28 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
   const isDistress = p.nav_status === "not_under_command" || p.nav_status === "aground";
 
   return (
-    <div className="h-full flex overflow-hidden">
-      {/* 좌측: 선박 상세 정보 */}
-      <div className="w-80 flex-shrink-0 border-r border-ocean-800 flex flex-col overflow-hidden">
-        {/* 선박 헤더 */}
-        <div className="flex-shrink-0 px-4 py-3 border-b border-ocean-800">
+    <div className="page-shell">
+      <PageHeader
+        title={p.name && p.name !== p.platform_id ? p.name : formatId(p.platform_id)}
+        actions={
           <button
             onClick={() => router.push("/platforms")}
-            className="text-xs text-ocean-500 hover:text-ocean-300 mb-2 transition-colors"
+            className="filter-chip px-3 py-1.5 text-[11px] text-ocean-300 hover:text-ocean-100"
           >
             ← 플랫폼 목록
           </button>
+        }
+        stats={[
+          <MetricCard key="active" label="활성 경보" value={activeAlerts.length} tone={activeAlerts.length > 0 ? "critical" : "neutral"} valueClassName="text-xl" />,
+          <MetricCard key="history" label="과거 경보" value={pastAlerts.length} valueClassName="text-xl" />,
+          <MetricCard key="nearby" label="주변 선박" value={nearbyPlatforms.length} valueClassName="text-xl" />,
+          <MetricCard key="zones" label="주변 구역" value={nearbyZones.length} valueClassName="text-xl" />,
+        ]}
+      />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden xl:flex-row">
+      <div className="w-full xl:w-80 xl:flex-shrink-0 border-r border-ocean-800/80 flex flex-col overflow-hidden bg-ocean-950/70">
+        {/* 선박 헤더 */}
+        <div className="flex-shrink-0 px-4 py-3 border-b border-ocean-800">
           <div className="flex items-center gap-3">
             <span style={{ color }} className="text-2xl">{TYPE_ICON[type] ?? "?"}</span>
             <div className="flex-1 min-w-0">
@@ -214,32 +230,46 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
 
         <div className="flex-1 overflow-y-auto">
           {/* 운항 정보 */}
-          <section className="px-4 py-3 border-b border-ocean-900">
-            <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">운항 정보</div>
+          <DetailSection title="운항 정보">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <InfoRow label="속도(SOG)" value={p.sog != null ? `${p.sog.toFixed(1)} kt` : "—"} />
-              <InfoRow label="침로(COG)" value={p.cog != null ? `${p.cog.toFixed(0)}°` : "—"} />
-              <InfoRow label="선수" value={p.heading != null ? `${p.heading.toFixed(0)}°` : "—"} />
-              <InfoRow label="위도" value={p.lat?.toFixed(5) ?? "—"} mono />
-              <InfoRow label="경도" value={p.lon?.toFixed(5) ?? "—"} mono />
-              <InfoRow label="국적" value={p.flag ?? "—"} />
+              <DetailField label="속도(SOG)" value={p.sog != null ? `${p.sog.toFixed(1)} kt` : "—"} />
+              <DetailField label="침로(COG)" value={p.cog != null ? `${p.cog.toFixed(0)}°` : "—"} />
+              <DetailField label="선수" value={p.heading != null ? `${p.heading.toFixed(0)}°` : "—"} />
+              <DetailField label="위도" value={p.lat?.toFixed(5) ?? "—"} mono />
+              <DetailField label="경도" value={p.lon?.toFixed(5) ?? "—"} mono />
+              <DetailField label="국적" value={p.flag ?? "—"} />
             </div>
-            <div className={`mt-2 text-xs font-medium ${isDistress ? "text-red-400" : "text-ocean-300"}`}>
-              <span className="text-ocean-500 font-normal">상태 </span>
-              {NAV_STATUS_KR[p.nav_status ?? ""] ?? p.nav_status ?? "미상"}
+            <div className="mt-2">
+              <StatusBadge tone={isDistress ? "critical" : "success"}>{NAV_STATUS_KR[p.nav_status ?? ""] ?? p.nav_status ?? "미상"}</StatusBadge>
             </div>
             {p.last_seen && (
               <div className="text-xs text-ocean-400 mt-1">
                 최근 수신 {formatDistanceToNow(new Date(p.last_seen), { addSuffix: true, locale: ko })}
               </div>
             )}
-          </section>
+          </DetailSection>
 
-          {/* 역사적 항적 조회 */}
-          <section className="px-4 py-3 border-b border-ocean-900">
-            <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">
-              역사적 항적 조회
+          <DetailSection title="안전 영역 기준">
+            <div className="space-y-2 text-xs text-ocean-300 leading-5">
+              <p>
+                지도에서 <span className="text-sky-300 font-medium">파란 타원형 도메인</span>은 선박 크기·속도·heading/COG를 기반으로 한
+                <span className="text-ocean-100"> 참고 기동 여유 영역</span>입니다.
+              </p>
+              <p>
+                <span className="text-amber-300 font-medium">황색/적색 위험 도메인</span>은 실제 충돌위험 경보가 있을 때만 나타나며,
+                CPA/TCPA 기준을 만족하는 상대선 조우 상황을 반영합니다.
+              </p>
+              <div className="rounded border border-ocean-800 bg-ocean-950/70 px-2.5 py-2 text-[11px] text-ocean-400">
+                warning: CPA &lt; 0.5NM · TCPA &lt; 30분<br />
+                critical: CPA &lt; 0.2NM · TCPA &lt; 10분
+              </div>
+              <p className="text-ocean-500">
+                즉, 파란 영역 자체가 위험 판정선은 아니고, 실제 위험 판단은 CPA/TCPA 경보와 위험 도메인으로 해석해야 합니다.
+              </p>
             </div>
+          </DetailSection>
+
+          <DetailSection title="역사적 항적 조회">
             <div className="space-y-2">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-ocean-500">시작</label>
@@ -285,18 +315,11 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               )}
             </div>
-          </section>
+          </DetailSection>
 
-          {/* 활성 경보 */}
-          <section className="px-4 py-3 border-b border-ocean-900">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-medium text-ocean-500 tracking-wider uppercase">활성 경보</div>
-              {activeAlerts.length > 0 && (
-                <span className="text-xs text-red-400 font-bold">{activeAlerts.length}건</span>
-              )}
-            </div>
+          <DetailSection title="활성 경보" action={activeAlerts.length > 0 ? <StatusBadge tone="critical">{activeAlerts.length}건</StatusBadge> : undefined}>
             {activeAlerts.length === 0 ? (
-              <div className="text-xs text-green-400">정상 ✓</div>
+              <EmptyState title="정상 ✓" compact />
             ) : (
               <div className="space-y-2">
                 {activeAlerts.map((a) => (
@@ -304,7 +327,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                 ))}
               </div>
             )}
-          </section>
+          </DetailSection>
 
           {/* 주변 선박 */}
           {(spatialLoading || nearbyPlatforms.length > 0) && (
@@ -422,10 +445,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
 
           {/* 과거 경보 이력 */}
           {pastAlerts.length > 0 && (
-            <section className="px-4 py-3">
-              <div className="text-xs font-medium text-ocean-500 mb-2 tracking-wider uppercase">
-                경보 이력 ({pastAlerts.length}건)
-              </div>
+            <DetailSection title="경보 이력" action={<StatusBadge>{pastAlerts.length}건</StatusBadge>} className="border-b-0">
               <div className="space-y-1.5">
                 {pastAlerts.slice(0, 10).map((a) => {
                   const s = SEVERITY_STYLE[a.severity];
@@ -441,13 +461,13 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
                   );
                 })}
               </div>
-            </section>
+            </DetailSection>
           )}
         </div>
       </div>
 
       {/* 우측: 지도 관제 뷰 */}
-      <div className="flex-1 relative min-w-0">
+      <div className="flex-1 relative min-h-[320px] min-w-0 bg-ocean-950/35">
         <MaritimeMap />
         {/* 선박 이름 오버레이 */}
         <div className="absolute top-3 left-1/2 -translate-x-1/2 pointer-events-none">
@@ -460,15 +480,7 @@ export default function PlatformDetailPage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <span className="text-ocean-500">{label} </span>
-      <span className={`text-ocean-200 ${mono ? "font-mono" : ""}`}>{value}</span>
+      </div>
     </div>
   );
 }

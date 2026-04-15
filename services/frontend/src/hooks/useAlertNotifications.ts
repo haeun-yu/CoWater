@@ -68,7 +68,7 @@ function showBrowserNotification(title: string, body: string) {
   if (Notification.permission !== "granted") return;
   if (document.visibilityState === "visible") return; // 탭 활성 시 생략
   try {
-    new Notification(title, { body, icon: "/favicon.ico", tag: "cowater-alert" });
+    new Notification(title, { body, icon: "/icon.svg", tag: "cowater-alert" });
   } catch {
     // 일부 브라우저에서 secure context 아닌 경우 실패 가능 — 무시
   }
@@ -78,10 +78,39 @@ export function useAlertNotifications() {
   const alerts = useAlertStore((s) => s.alerts);
   const seenRef = useRef<Set<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioEnabledRef = useRef(false);
 
-  // 최초 마운트 시 알림 권한 요청
   useEffect(() => {
     requestNotificationPermission();
+
+    const enableAudio = () => {
+      if (audioEnabledRef.current) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = getAudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+
+      if (ctx.state === "suspended") {
+        void ctx.resume()
+          .then(() => {
+            audioEnabledRef.current = ctx.state === "running";
+          })
+          .catch(() => {});
+        return;
+      }
+
+      audioEnabledRef.current = ctx.state === "running";
+    };
+
+    window.addEventListener("pointerdown", enableAudio, { passive: true });
+    window.addEventListener("keydown", enableAudio);
+
+    return () => {
+      window.removeEventListener("pointerdown", enableAudio);
+      window.removeEventListener("keydown", enableAudio);
+      audioCtxRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -101,16 +130,10 @@ export function useAlertNotifications() {
     // 사운드 재생 (localStorage로 음소거 여부 확인)
     const soundEnabled = localStorage.getItem(SOUND_ENABLED_KEY) !== "false";
     if (soundEnabled) {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = getAudioContext();
-      }
       const ctx = audioCtxRef.current;
-      if (ctx) {
-        // suspended 상태면 resume (사용자 인터랙션 이후 처음 재생 시)
-        void ctx.resume().then(() => {
-          if (critical.length > 0) playCriticalSound(ctx);
-          else if (warning.length > 0) playWarningSound(ctx);
-        });
+      if (ctx && audioEnabledRef.current && ctx.state === "running") {
+        if (critical.length > 0) playCriticalSound(ctx);
+        else if (warning.length > 0) playWarningSound(ctx);
       }
     }
 

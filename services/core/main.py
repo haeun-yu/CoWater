@@ -12,18 +12,45 @@ from sqlalchemy import text
 
 from db import AsyncSessionLocal
 from api.alerts import router as alerts_router
+from api.auth import router as auth_router
 from api.commands import router as commands_router
 from api.platforms import router as platforms_router
+from api.reports import router as reports_router
 from api.ws import router as ws_router
 from api.zones import router as zones_router
 from redis_client import close_redis, get_redis
 from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
+from services.event_consumer import consume_events
+from ws_hub import hub
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _RECONNECT_MAX_DELAY = 60.0  # 최대 재연결 대기 시간(초)
+_DB_STARTUP_MAX_WAIT = 90.0
+
+
+async def _wait_for_database_ready() -> None:
+    """Postgres가 recovery/startup 중일 수 있어 실제 쿼리 성공까지 대기."""
+    deadline = asyncio.get_running_loop().time() + _DB_STARTUP_MAX_WAIT
+    delay = 1.0
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            logger.info("Database is ready")
+            return
+        except Exception:
+            if asyncio.get_running_loop().time() >= deadline:
+                logger.exception(
+                    "Database did not become ready within %.1fs", _DB_STARTUP_MAX_WAIT
+                )
+                raise
+            logger.warning("Waiting for database readiness; retrying in %.1fs", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 5.0)
 
 
 async def _run_with_reconnect(
@@ -55,6 +82,7 @@ async def _run_with_reconnect(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis = await get_redis()
+    await _wait_for_database_ready()
 
     tasks = [
         asyncio.create_task(
@@ -64,6 +92,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(
             _run_with_reconnect(consume_alerts, "alert-consumer", redis),
             name="alert-consumer",
+        ),
+        asyncio.create_task(
+            _run_with_reconnect(consume_events, "event-consumer", redis),
+            name="event-consumer",
         ),
     ]
     logger.info("CoWater Core Backend started")
@@ -92,6 +124,8 @@ app.add_middleware(
 
 app.include_router(platforms_router)
 app.include_router(alerts_router)
+app.include_router(reports_router)
+app.include_router(auth_router)
 app.include_router(commands_router)
 app.include_router(zones_router)
 app.include_router(ws_router)
@@ -119,6 +153,7 @@ async def health():
 
     return {
         "status": "ok" if redis_ok and database_ok else "degraded",
+        "websocket": hub.stats(),
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
             "database": "ok" if database_ok else "error",
