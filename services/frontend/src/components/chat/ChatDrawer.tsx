@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { getAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
+import { getControlAgentsApiUrl, getCoreApiUrl } from "@/lib/publicUrl";
 import { useAlertStore } from "@/stores/alertStore";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -109,7 +109,7 @@ export default function ChatDrawer() {
       : { status: "missing" as const, actor: null, role: null, message: "로그인이 필요합니다." };
 
   useEffect(() => {
-    fetch(`${getAgentsApiUrl()}/agents/chat-agent`)
+    fetch(`${getControlAgentsApiUrl()}/agents/chat-agent`)
       .then((r) => r.json())
       .then((d) => { if (d.model_name) setCurrentModel(d.model_name); })
       .catch(() => {});
@@ -166,7 +166,7 @@ export default function ChatDrawer() {
         content: m.content,
       }));
 
-      const res = await fetch(`${getAgentsApiUrl()}/chat/unified`, {
+      const res = await fetch(`${getControlAgentsApiUrl()}/chat/unified`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

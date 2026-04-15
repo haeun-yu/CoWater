@@ -78,11 +78,37 @@ export function useAlertNotifications() {
   const alerts = useAlertStore((s) => s.alerts);
   const seenRef = useRef<Set<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioEnabledRef = useRef(false);
 
-  // 최초 마운트 시 알림 권한 요청 및 언마운트 시 AudioContext 정리
   useEffect(() => {
     requestNotificationPermission();
+
+    const enableAudio = () => {
+      if (audioEnabledRef.current) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = getAudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+
+      if (ctx.state === "suspended") {
+        void ctx.resume()
+          .then(() => {
+            audioEnabledRef.current = ctx.state === "running";
+          })
+          .catch(() => {});
+        return;
+      }
+
+      audioEnabledRef.current = ctx.state === "running";
+    };
+
+    window.addEventListener("pointerdown", enableAudio, { passive: true });
+    window.addEventListener("keydown", enableAudio);
+
     return () => {
+      window.removeEventListener("pointerdown", enableAudio);
+      window.removeEventListener("keydown", enableAudio);
       audioCtxRef.current?.close();
     };
   }, []);
@@ -104,16 +130,10 @@ export function useAlertNotifications() {
     // 사운드 재생 (localStorage로 음소거 여부 확인)
     const soundEnabled = localStorage.getItem(SOUND_ENABLED_KEY) !== "false";
     if (soundEnabled) {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = getAudioContext();
-      }
       const ctx = audioCtxRef.current;
-      if (ctx) {
-        // suspended 상태면 resume (사용자 인터랙션 이후 처음 재생 시)
-        void ctx.resume().then(() => {
-          if (critical.length > 0) playCriticalSound(ctx);
-          else if (warning.length > 0) playWarningSound(ctx);
-        });
+      if (ctx && audioEnabledRef.current && ctx.state === "running") {
+        if (critical.length > 0) playCriticalSound(ctx);
+        else if (warning.length > 0) playWarningSound(ctx);
       }
     }
 
