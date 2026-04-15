@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     local_llm_timeout_sec: float = 120.0
     local_llm_max_attempts: int = 2
     local_llm_base_delay_sec: float = 2.0
+    distress_alert_cooldown_sec: int = 300
 
     # Heartbeat
     heartbeat_interval_sec: int = 60

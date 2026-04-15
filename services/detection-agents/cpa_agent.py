@@ -218,6 +218,7 @@ class DetectionCPAAgent(DetectionAgent):
             "cpa_nm": cpa_nm,
             "cpa_minutes": cpa_nm,
             "tcpa_minutes": tcpa_min,
+            "tcpa_min": tcpa_min,
             "latitude": primary.lat,
             "longitude": primary.lon,
             "platform_name": primary.name or primary.platform_id,

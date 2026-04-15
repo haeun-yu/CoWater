@@ -80,6 +80,8 @@ async def _consume_detect_events(redis: aioredis.Redis) -> None:
         try:
             data = json.loads(msg["data"])
             event = Event.from_json(json.dumps(data))
+            if _alert_creator_agent:
+                await _alert_creator_agent.on_detect_event(event)
             if _distress_agent:
                 await _distress_agent.on_detect_event(event)
         except Exception as e:

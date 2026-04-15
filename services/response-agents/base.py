@@ -47,6 +47,10 @@ class ResponseAgent(ABC):
         message: str,
         recommendation: Optional[str] = None,
         metadata: Optional[dict] = None,
+        zone_id: Optional[str] = None,
+        dedup_key: Optional[str] = None,
+        resolve_dedup_key: Optional[str] = None,
+        resolve_only: bool = False,
     ) -> Optional[str]:
         """
         Core API를 통해 Alert 생성.
@@ -58,9 +62,14 @@ class ResponseAgent(ABC):
             "alert_type": alert_type,
             "severity": severity,
             "platform_ids": platform_ids,
+            "zone_id": zone_id,
+            "generated_by": self.agent_id,
             "message": message,
             "recommendation": recommendation,
             "metadata": metadata or {},
+            "dedup_key": dedup_key,
+            "resolve_dedup_key": resolve_dedup_key,
+            "resolve_only": resolve_only,
         }
 
         try:

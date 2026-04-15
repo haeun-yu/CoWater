@@ -7,6 +7,7 @@ Response - Distress Agent
 from __future__ import annotations
 
 import logging
+import time
 
 import redis.asyncio as aioredis
 
@@ -36,7 +37,7 @@ class ResponseDistressAgent(ResponseAgent):
     def __init__(self, redis: aioredis.Redis, core_api_url: str) -> None:
         super().__init__(redis, core_api_url)
         self._llm = make_llm_client(settings)
-        self._handled: set[str] = set()
+        self._last_handled_at: dict[str, float] = {}
 
     async def on_analyze_event(self, event: Event) -> None:
         return
@@ -54,10 +55,11 @@ class ResponseDistressAgent(ResponseAgent):
             return
 
         platform_id = payload.get("platform_id")
-        if not platform_id or platform_id in self._handled:
+        cooldown_key = f"ais_off:{platform_id}"
+        if not platform_id or self._is_in_cooldown(cooldown_key):
             return
 
-        self._handled.add(platform_id)
+        self._mark_handled(cooldown_key)
         alert_id = await self.create_alert(
             alert_type="distress",
             severity="warning",
@@ -68,6 +70,7 @@ class ResponseDistressAgent(ResponseAgent):
                 "source_event_type": event.type.value,
                 "source_anomaly_type": payload.get("anomaly_type"),
             },
+            dedup_key=f"distress-ais-off:{platform_id}",
         )
         if alert_id:
             await self.emit_response_event(
@@ -87,9 +90,10 @@ class ResponseDistressAgent(ResponseAgent):
     async def _handle_detect_distress(self, event: Event) -> None:
         payload = event.payload
         platform_id = payload.get("platform_id")
-        if not platform_id or platform_id in self._handled:
+        cooldown_key = f"distress:{platform_id}"
+        if not platform_id or self._is_in_cooldown(cooldown_key):
             return
-        self._handled.add(platform_id)
+        self._mark_handled(cooldown_key)
 
         recommendation = (
             f"{platform_id} 위치 ({payload.get('latitude')}, {payload.get('longitude')}) "
@@ -123,6 +127,7 @@ class ResponseDistressAgent(ResponseAgent):
                 "ai_model": self._llm.model_name,
                 "llm_fallback": llm_fallback,
             },
+            dedup_key=f"distress:{platform_id}",
         )
         if alert_id:
             await self.emit_response_event(
@@ -138,6 +143,16 @@ class ResponseDistressAgent(ResponseAgent):
                 flow_id=event.flow_id,
                 causation_id=event.event_id,
             )
+
+    def _is_in_cooldown(self, key: str) -> bool:
+        last_ts = self._last_handled_at.get(key)
+        return (
+            last_ts is not None
+            and (time.time() - last_ts) < settings.distress_alert_cooldown_sec
+        )
+
+    def _mark_handled(self, key: str) -> None:
+        self._last_handled_at[key] = time.time()
 
 
 def _build_context(payload: dict) -> str:
