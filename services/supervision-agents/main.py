@@ -1,9 +1,9 @@
 """
-Learning 서비스 진입점.
+Supervision 서비스 진입점.
 
-- Redis pub/sub 구독 (system.alert_acknowledge)
-- Learning Agent 초기화
-- 거짓 경보율 추적 및 규칙 조정 제안
+- 모든 Agent의 heartbeat 모니터링
+- 장애 감지 및 알림
+- 사용자 명령 추적 (user.* 이벤트)
 """
 
 import asyncio
@@ -16,9 +16,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from shared.events import Event, EventType
 from config import settings
-from learning_agent import LearningAgent
+from supervisor import Supervisor
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -31,20 +30,39 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _redis: aioredis.Redis | None = None
-_learning_agent: LearningAgent | None = None
+_supervisor: Supervisor | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Consumer loop
+# Monitoring loop
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def _consume_feedback_events(redis: aioredis.Redis) -> None:
-    """사용자 피드백 이벤트 구독"""
+async def _health_check_loop(supervisor: Supervisor) -> None:
+    """주기적으로 모든 Agent 상태 확인"""
+    while True:
+        await asyncio.sleep(settings.health_check_interval_sec)
+
+        health_status = await supervisor.check_health()
+
+        # 장애 있는 Agent 찾기
+        unhealthy = [aid for aid, status in health_status.items() if status != "healthy"]
+
+        if unhealthy:
+            logger.warning("Unhealthy agents: %s", unhealthy)
+            await supervisor.emit_system_alert(
+                alert_type="agent_health",
+                message=f"{len(unhealthy)}개 Agent가 응답하지 않음",
+                details={"unhealthy_agents": unhealthy},
+            )
+
+
+async def _consume_user_events(redis: aioredis.Redis) -> None:
+    """user.* 이벤트 구독 (사용자 명령 추적)"""
     pubsub = redis.pubsub()
-    pattern = "system.ack.*"
+    pattern = "user.*"
     await pubsub.psubscribe(pattern)
-    logger.info("Learning service: subscribed to %s", pattern)
+    logger.info("Supervision service: subscribed to %s", pattern)
 
     async for msg in pubsub.listen():
         if msg["type"] != "pmessage":
@@ -52,20 +70,16 @@ async def _consume_feedback_events(redis: aioredis.Redis) -> None:
 
         try:
             data = json.loads(msg["data"])
-            event = Event.from_json(json.dumps(data))
+            user_id = data.get("user_id", "unknown")
+            event_type = data.get("type", "unknown")
 
-            # 피드백 이벤트를 Learning Agent에게 전달
-            if _learning_agent:
-                await _learning_agent.on_alert_feedback(event)
+            logger.info("User activity: %s by %s", event_type, user_id)
 
-                # 피드백 통계 추적
-                agent_id = event.payload.get("generated_by")
-                feedback = event.payload.get("feedback")
-                if agent_id and feedback:
-                    await _learning_agent.track_feedback(agent_id, feedback)
+            # 사용자 활동 기록 (선택적)
+            # 예: 사용자가 명령을 실행했거나 피드백을 제출했을 때
 
         except Exception as e:
-            logger.exception("Error processing feedback event: %s", e)
+            logger.exception("Error processing user event: %s", e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,21 +89,19 @@ async def _consume_feedback_events(redis: aioredis.Redis) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _redis, _learning_agent
+    global _redis, _supervisor
 
     # Startup
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    _supervisor = Supervisor(_redis)
 
-    _learning_agent = LearningAgent(
-        redis=_redis,
-        core_api_url=settings.core_api_url,
-    )
-
-    logger.info("Learning service started")
+    logger.info("Supervision service started")
 
     # 백그라운드 타스크 시작
     tasks = [
-        asyncio.create_task(_consume_feedback_events(_redis), name="feedback-consumer"),
+        asyncio.create_task(_supervisor.start_monitoring(), name="heartbeat-monitor"),
+        asyncio.create_task(_health_check_loop(_supervisor), name="health-check"),
+        asyncio.create_task(_consume_user_events(_redis), name="user-consumer"),
     ]
 
     yield
@@ -102,14 +114,14 @@ async def lifespan(app: FastAPI):
     if _redis:
         await _redis.aclose()
 
-    logger.info("Learning service stopped")
+    logger.info("Supervision service stopped")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="CoWater Learning Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="CoWater Supervision Service", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -141,18 +153,16 @@ async def health():
     }
 
 
-@app.get("/agents/{agent_id}/fp-rate")
-async def get_fp_rate(agent_id: str):
-    """Agent의 거짓 경보율 조회"""
-    if not _learning_agent:
-        return {"error": "Learning agent not available"}, 503
+@app.get("/agents")
+async def list_agents_health():
+    """모든 Agent 상태 조회"""
+    if not _supervisor:
+        return {"error": "Supervisor not ready"}, 503
 
-    fp_rate = await _learning_agent._calculate_fp_rate(agent_id)
-
+    health_status = await _supervisor.check_health()
     return {
-        "agent_id": agent_id,
-        "fp_rate": fp_rate,
-        "percentage": f"{fp_rate*100:.1f}%",
+        "timestamp": asyncio.get_event_loop().time(),
+        "agents": health_status,
     }
 
 

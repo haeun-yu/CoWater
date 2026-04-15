@@ -19,7 +19,6 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from shared.events import Event, EventType
 from config import settings
 from anomaly_ai import AnalysisAnomalyAIAgent
-from report_agent import AnalysisReportAgent
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -33,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 _anomaly_ai_agent: AnalysisAnomalyAIAgent | None = None
-_report_agent: AnalysisReportAgent | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,17 +81,12 @@ async def _heartbeat_loop(redis: aioredis.Redis) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _redis, _anomaly_ai_agent, _report_agent
+    global _redis, _anomaly_ai_agent
 
     # Startup
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
 
     _anomaly_ai_agent = AnalysisAnomalyAIAgent(
-        redis=_redis,
-        core_api_url=settings.core_api_url,
-    )
-
-    _report_agent = AnalysisReportAgent(
         redis=_redis,
         core_api_url=settings.core_api_url,
     )
@@ -149,32 +142,15 @@ async def health():
 
     return {
         "status": "ok" if redis_ok else "degraded",
-        "agents": 2,  # anomaly-ai, report
+        "agents": 1,  # anomaly-ai only
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
         },
     }
 
 
-@app.post("/agents/report-agent/generate")
-async def generate_report(request: dict):
-    """보고서 생성"""
-    if not _report_agent:
-        raise HTTPException(503, "Report agent not available")
-
-    alert_ids = request.get("alert_ids", [])
-    report_type = request.get("report_type", "summary")
-
-    if not alert_ids:
-        raise HTTPException(400, "alert_ids is required")
-
-    report = await _report_agent.generate_report(alert_ids, report_type)
-
-    return {
-        "alert_ids": alert_ids,
-        "report_type": report_type,
-        "report": report,
-    }
+# Report Agent는 이제 report 서비스에서 관리합니다
+# @app.post("/agents/report-agent/generate") 는 report 서비스로 이전됨
 
 
 if __name__ == "__main__":

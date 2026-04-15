@@ -1,5 +1,5 @@
 .PHONY: help up up-sim up-ollama down logs status \
-	dev-core dev-detection dev-analysis dev-response dev-learning dev-supervision dev-frontend dev-simulator \
+	dev-core dev-control-agents dev-detection-agents dev-analysis-agents dev-response-agents dev-learning-agents dev-supervision-agents dev-report-agents dev-frontend dev-simulator \
 	test-e2e test-unit test-all \
 	install setup clean \
 	up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim \
@@ -25,14 +25,16 @@ help:
 	@echo "  make status           - 서비스 상태 확인"
 	@echo ""
 	@echo "로컬 개발 (PYTHONPATH=.:..로 실행):"
-	@echo "  make dev-core         - Core (FastAPI + WebSocket hub)"
-	@echo "  make dev-detection    - Detection (CPA, Anomaly, Zone, Distress agents)"
-	@echo "  make dev-analysis     - Analysis (Ollama 로컬 LLM 분석)"
-	@echo "  make dev-response     - Response (Alert 생성)"
-	@echo "  make dev-learning     - Learning (거짓 경보율 추적)"
-	@echo "  make dev-supervision  - Supervision (에이전트 모니터링)"
-	@echo "  make dev-frontend     - Frontend (Next.js 대시보드)"
-	@echo "  make dev-simulator    - Simulator (AIS 데이터 시뮬레이션)"
+	@echo "  make dev-core                  - Core (FastAPI + WebSocket hub)"
+	@echo "  make dev-control-agents        - Control (Chat Agent)"
+	@echo "  make dev-detection-agents      - Detection (CPA, Anomaly, Zone, Distress agents)"
+	@echo "  make dev-analysis-agents       - Analysis (Ollama 로컬 LLM 분석)"
+	@echo "  make dev-response-agents       - Response (Alert 생성)"
+	@echo "  make dev-learning-agents       - Learning (거짓 경보율 추적)"
+	@echo "  make dev-supervision-agents    - Supervision (에이전트 모니터링)"
+	@echo "  make dev-report-agents         - Report (AI 리포트 생성)"
+	@echo "  make dev-frontend              - Frontend (Next.js 대시보드)"
+	@echo "  make dev-simulator             - Simulator (AIS 데이터 시뮬레이션)"
 	@echo ""
 	@echo "테스트:"
 	@echo "  make test-e2e         - E2E 이벤트 흐름 테스트"
@@ -73,20 +75,26 @@ build:
 dev-core:
 	cd services/core && PYTHONPATH=../.. uvicorn main:app --reload --port 7700
 
-dev-detection:
-	cd services/detection && PYTHONPATH=../.. uvicorn main:app --reload --port 7704
+dev-control-agents:
+	cd services/control-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7701
 
-dev-analysis:
-	cd services/analysis && PYTHONPATH=../.. uvicorn main:app --reload --port 7705
+dev-detection-agents:
+	cd services/detection-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7704
 
-dev-response:
-	cd services/response && PYTHONPATH=../.. uvicorn main:app --reload --port 7706
+dev-analysis-agents:
+	cd services/analysis-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7705
 
-dev-learning:
-	cd services/learning && PYTHONPATH=../.. uvicorn main:app --reload --port 7708
+dev-response-agents:
+	cd services/response-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7706
 
-dev-supervision:
-	cd services/supervision && PYTHONPATH=../.. uvicorn main:app --reload --port 7707
+dev-learning-agents:
+	cd services/learning-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7708
+
+dev-supervision-agents:
+	cd services/supervision-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7707
+
+dev-report-agents:
+	cd services/report-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7709
 
 dev-frontend:
 	cd services/frontend && npm run dev

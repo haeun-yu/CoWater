@@ -24,20 +24,14 @@ from fastapi.responses import StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
-from ai.anomaly_ai import AnomalyAIAgent
 from ai.chat_agent import ChatAgent
-from ai.distress_agent import DistressAgent
 from ai.llm_client import make_llm_client
-from ai.report_agent import ReportAgent
 from auth import require_command_role
 from base import Agent, PlatformReport
 from config import settings
 from registry import AgentRegistry
-from rule.anomaly_rule import AnomalyRuleAgent
-from rule.cpa_agent import CPAAgent
-from rule.zone_monitor import ZoneMonitorAgent
 from shared.command_auth import CommandActor
-from shared.events import alert_created_pattern, platform_report_pattern
+from shared.events import alert_created_pattern
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -101,13 +95,13 @@ def _looks_like_command_request(text: str) -> bool:
 
 
 def _setup_agents(redis: aioredis.Redis) -> None:
+    """Control Agent (ChatAgent) 만 등록.
+
+    Rule agents는 detection 서비스에서 관리
+    AI analysis agents는 analysis 서비스에서 관리
+    Report agent는 report 서비스에서 관리
+    """
     agents: list[Agent] = [
-        CPAAgent(redis),
-        ZoneMonitorAgent(redis, settings.core_api_url),
-        AnomalyRuleAgent(redis),
-        AnomalyAIAgent(redis),
-        DistressAgent(redis),
-        ReportAgent(redis),
         ChatAgent(redis),
     ]
     for agent in agents:
@@ -168,48 +162,16 @@ def _track_task(coro, *, name: str, agent: Agent) -> asyncio.Task | None:
 
 
 async def _consume_platform_reports(redis: aioredis.Redis) -> None:
-    pubsub = redis.pubsub()
-    pattern = platform_report_pattern()
-    await pubsub.psubscribe(pattern)
-    logger.info("Agent Runtime: subscribed to %s", pattern)
-
-    async for msg in pubsub.listen():
-        if msg["type"] != "pmessage":
-            continue
-        try:
-            data = json.loads(msg["data"])
-            report = PlatformReport.from_dict(data)
-            await _dispatch_report(report)
-        except Exception:
-            logger.exception("Error dispatching platform report")
+    """DEPRECATED: agents 서비스는 더 이상 platform report를 처리하지 않습니다.
+    Detection 서비스에서 처리합니다.
+    """
+    # 이 함수는 사용되지 않음 — lifespan에서도 제거됨
+    pass
 
 
 async def _dispatch_report(report: PlatformReport) -> None:
-    """
-    Rule Agent: 순차 await (빠름, 이벤트 루프 차단 없음)
-    AI Agent:   백그라운드 태스크로 실행 (Claude API 호출이 다음 보고 처리를 블로킹하지 않음)
-    """
-    if settings.ignore_simulator_reports and report.is_simulator:
-        return
-
-    rule_agents = [a for a in _registry.enabled() if a.agent_type == "rule"]
-    ai_agents = [a for a in _registry.enabled() if a.agent_type == "ai"]
-
-    # Rule Agent — 직렬 처리 (순서 보장, 빠름)
-    for agent in rule_agents:
-        try:
-            await agent.on_platform_report(report)
-        except Exception as exc:
-            agent._record_error(str(exc))
-            logger.exception("Rule agent error: %s", agent.agent_id)
-
-    # AI Agent — 각각 독립 태스크로 실행 (블로킹 없음), 추적 집합에 등록
-    for agent in ai_agents:
-        _track_task(
-            _safe_ai_dispatch(agent, report),
-            name=f"ai-report-{agent.agent_id}",
-            agent=agent,
-        )
+    """DEPRECATED: agents 서비스는 더 이상 platform report를 처리하지 않습니다."""
+    pass
 
 
 async def _safe_ai_dispatch(agent: Agent, report: PlatformReport) -> None:
@@ -274,24 +236,13 @@ async def _safe_ai_alert(agent: Agent, alert: dict) -> None:
 
 
 async def _ais_timeout_loop() -> None:
-    """AIS 타임아웃 체크 (주기: ais_check_interval_sec)."""
-    while True:
-        await asyncio.sleep(settings.ais_check_interval_sec)
-        for agent in _registry.enabled():
-            if isinstance(agent, AnomalyRuleAgent):
-                await agent.check_ais_timeout()
+    """DEPRECATED: Detection 서비스에서 처리합니다."""
+    pass
 
 
 async def _zone_reload_loop(redis: aioredis.Redis) -> None:
-    """Zone 목록 주기적 재로드 (주기: zone_reload_interval_sec)."""
-    for agent in _registry.enabled():
-        if isinstance(agent, ZoneMonitorAgent):
-            await agent.load_zones()
-    while True:
-        await asyncio.sleep(settings.zone_reload_interval_sec)
-        for agent in _registry.enabled():
-            if isinstance(agent, ZoneMonitorAgent):
-                await agent.load_zones()
+    """DEPRECATED: Detection 서비스에서 처리합니다."""
+    pass
 
 
 async def _run_with_reconnect(
@@ -326,16 +277,17 @@ async def lifespan(app: FastAPI):
     await _restore_agent_states()
 
     tasks = [
-        asyncio.create_task(
-            _run_with_reconnect(_consume_platform_reports, "platform-consumer", _redis),
-            name="platform-consumer",
-        ),
-        asyncio.create_task(
-            _run_with_reconnect(_consume_alerts, "alert-consumer", _redis),
-            name="alert-consumer",
-        ),
-        asyncio.create_task(_ais_timeout_loop(), name="ais-timeout"),
-        asyncio.create_task(_zone_reload_loop(_redis), name="zone-reload"),
+        # Platform reports는 detection 서비스에서 처리
+        # asyncio.create_task(
+        #     _run_with_reconnect(_consume_platform_reports, "platform-consumer", _redis),
+        #     name="platform-consumer",
+        # ),
+        # Alerts는 아직 ChatAgent가 필요할 수 있으니 선택적으로 유지
+        # (ChatAgent이 alert 컨텍스트가 필요한 경우만)
+        # asyncio.create_task(
+        #     _run_with_reconnect(_consume_alerts, "alert-consumer", _redis),
+        #     name="alert-consumer",
+        # ),
     ]
     logger.info("Agent Runtime started with %d agent(s)", len(_registry.all()))
     yield
@@ -787,19 +739,8 @@ async def chat_stream(body: ChatRequest):
     )
 
 
-@app.post("/agents/report-agent/generate/{alert_id}")
-async def generate_report(
-    alert_id: str,
-    actor: CommandActor = Depends(require_command_role("operator")),
-):
-    """Alert 기반 보고서 생성 (Alert ID 필요)"""
-    agent = _registry.get("report-agent")
-    if not agent or not isinstance(agent, ReportAgent):
-        raise HTTPException(404)
-    report = await agent.generate_report(alert_id)
-    if report is None:
-        raise HTTPException(500, "Report generation failed")
-    return {"alert_id": alert_id, "report": report}
+# Report Agent는 이제 report 서비스에서 관리됩니다
+# @app.post("/agents/report-agent/generate/{alert_id}") 는 report 서비스로 이전됨
 
 
 @app.get("/health")

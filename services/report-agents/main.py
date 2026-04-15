@@ -1,11 +1,12 @@
-"""
-Supervision 서비스 진입점.
+"""Report 서비스 진입점.
 
-- 모든 Agent의 heartbeat 모니터링
-- 장애 감지 및 알림
+- Redis pub/sub 구독 (respond.*)
+- Report Agent 초기화
+- report.* 이벤트 발행 + DB 저장
 """
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from config import settings
-from supervisor import Supervisor
+from report_agent import AIReportAgent
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -28,31 +29,45 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _redis: aioredis.Redis | None = None
-_supervisor: Supervisor | None = None
+_report_agent: AIReportAgent | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Monitoring loop
+# Consumer loop
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def _health_check_loop(supervisor: Supervisor) -> None:
-    """주기적으로 모든 Agent 상태 확인"""
+async def _consume_respond_events(redis: aioredis.Redis) -> None:
+    """respond.* 이벤트 구독 및 보고서 생성"""
+    pubsub = redis.pubsub()
+    pattern = "respond.*"
+    await pubsub.psubscribe(pattern)
+    logger.info("Report service: subscribed to %s", pattern)
+
+    async for msg in pubsub.listen():
+        if msg["type"] != "pmessage":
+            continue
+
+        try:
+            data = json.loads(msg["data"])
+            # respond.* 이벤트를 Report Agent에게 전달
+            if _report_agent:
+                await _report_agent.on_respond_event(data)
+
+        except Exception as e:
+            logger.exception("Error processing respond event: %s", e)
+
+
+async def _heartbeat_loop(redis: aioredis.Redis) -> None:
+    """주기적으로 agent 상태 신호 송신"""
     while True:
-        await asyncio.sleep(settings.health_check_interval_sec)
+        await asyncio.sleep(settings.heartbeat_interval_sec)
 
-        health_status = await supervisor.check_health()
-
-        # 장애 있는 Agent 찾기
-        unhealthy = [aid for aid, status in health_status.items() if status != "healthy"]
-
-        if unhealthy:
-            logger.warning("Unhealthy agents: %s", unhealthy)
-            await supervisor.emit_system_alert(
-                alert_type="agent_health",
-                message=f"{len(unhealthy)}개 Agent가 응답하지 않음",
-                details={"unhealthy_agents": unhealthy},
-            )
+        if _report_agent:
+            try:
+                await _report_agent.send_heartbeat()
+            except Exception as e:
+                logger.error("Failed to send heartbeat: %s", e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,18 +77,19 @@ async def _health_check_loop(supervisor: Supervisor) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _redis, _supervisor
+    global _redis, _report_agent
 
     # Startup
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    _supervisor = Supervisor(_redis)
 
-    logger.info("Supervision service started")
+    _report_agent = AIReportAgent(redis=_redis)
+
+    logger.info("Report service started")
 
     # 백그라운드 타스크 시작
     tasks = [
-        asyncio.create_task(_supervisor.start_monitoring(), name="heartbeat-monitor"),
-        asyncio.create_task(_health_check_loop(_supervisor), name="health-check"),
+        asyncio.create_task(_consume_respond_events(_redis), name="respond-consumer"),
+        asyncio.create_task(_heartbeat_loop(_redis), name="heartbeat-loop"),
     ]
 
     yield
@@ -86,14 +102,14 @@ async def lifespan(app: FastAPI):
     if _redis:
         await _redis.aclose()
 
-    logger.info("Supervision service stopped")
+    logger.info("Report service stopped")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="CoWater Supervision Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="CoWater Report Service", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -119,22 +135,10 @@ async def health():
 
     return {
         "status": "ok" if redis_ok else "degraded",
+        "agents": 1,  # ai-report-agent
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
         },
-    }
-
-
-@app.get("/agents")
-async def list_agents_health():
-    """모든 Agent 상태 조회"""
-    if not _supervisor:
-        return {"error": "Supervisor not ready"}, 503
-
-    health_status = await _supervisor.check_health()
-    return {
-        "timestamp": asyncio.get_event_loop().time(),
-        "agents": health_status,
     }
 
 

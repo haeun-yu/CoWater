@@ -191,3 +191,38 @@ class LearningAgent:
 
         except Exception as e:
             logger.error("Failed to track feedback for %s: %s", agent_id, e)
+
+    async def on_respond_event(self, event: dict) -> None:
+        """respond.* 이벤트 수신 (대응 완료 이벤트)
+
+        대응이 완료된 이벤트를 분석해서 파라미터 조정 제안을 생성합니다.
+        """
+        try:
+            flow_id = event.get("flow_id") if isinstance(event, dict) else event.payload.get("flow_id")
+            alert_ids = event.get("alert_ids") if isinstance(event, dict) else event.payload.get("alert_ids", [])
+
+            logger.info("Learning: analyzing respond event for flow %s (%d alerts)", flow_id, len(alert_ids) if alert_ids else 0)
+
+            # 대응 이벤트 저장 (선택적)
+            # 실제 파라미터 조정은 사용자 피드백 후에 수행
+
+        except Exception as e:
+            logger.exception("Error processing respond event: %s", e)
+
+    async def on_user_event(self, event: dict) -> None:
+        """user.* 이벤트 수신 (사용자 명령/피드백)
+
+        사용자 명령이나 피드백을 처리해서 학습 데이터로 기록합니다.
+        """
+        try:
+            event_data = event if isinstance(event, dict) else event.payload
+            event_type = event_data.get("type")
+            user_id = event_data.get("user_id")
+
+            logger.info("Learning: processing user event %s from %s", event_type, user_id)
+
+            # 사용자 피드백 저장 (선택적)
+            # 예: 사용자가 "이 경보는 거짓 경보다"라고 표시한 경우
+
+        except Exception as e:
+            logger.exception("Error processing user event: %s", e)

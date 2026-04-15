@@ -47,3 +47,31 @@ export function getPositionWsUrl() {
 export function getAgentsApiUrl() {
   return normalizePublicUrl(process.env.NEXT_PUBLIC_AGENTS_URL, "http", 7701);
 }
+
+export function getDetectionAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_DETECTION_AGENTS_URL, "http", 7704);
+}
+
+export function getAnalysisAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_ANALYSIS_AGENTS_URL, "http", 7705);
+}
+
+export function getResponseAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_RESPONSE_AGENTS_URL, "http", 7706);
+}
+
+export function getReportAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_REPORT_AGENTS_URL, "http", 7709);
+}
+
+export function getLearningAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_LEARNING_AGENTS_URL, "http", 7708);
+}
+
+export function getSupervisionAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_SUPERVISION_AGENTS_URL, "http", 7707);
+}
+
+export function getControlAgentsApiUrl() {
+  return normalizePublicUrl(process.env.NEXT_PUBLIC_CONTROL_AGENTS_URL, "http", 7701);
+}
