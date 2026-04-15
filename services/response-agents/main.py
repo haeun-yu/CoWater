@@ -19,6 +19,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from shared.events import Event, EventType
 from config import settings
 from alert_creator import ResponseAlertCreatorAgent
+from distress_agent import ResponseDistressAgent
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 _alert_creator_agent: ResponseAlertCreatorAgent | None = None
+_distress_agent: ResponseDistressAgent | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,9 +59,31 @@ async def _consume_analyze_events(redis: aioredis.Redis) -> None:
             # 분석 이벤트를 대응 Agent에게 전달
             if _alert_creator_agent:
                 await _alert_creator_agent.on_analyze_event(event)
+            if _distress_agent:
+                await _distress_agent.on_analyze_event(event)
 
         except Exception as e:
             logger.exception("Error processing analyze event: %s", e)
+
+
+async def _consume_detect_events(redis: aioredis.Redis) -> None:
+    """detect.* 이벤트 중 response 단계가 직접 처리할 항목 구독"""
+    pubsub = redis.pubsub()
+    pattern = "detect.*"
+    await pubsub.psubscribe(pattern)
+    logger.info("Response service: subscribed to %s", pattern)
+
+    async for msg in pubsub.listen():
+        if msg["type"] != "pmessage":
+            continue
+
+        try:
+            data = json.loads(msg["data"])
+            event = Event.from_json(json.dumps(data))
+            if _distress_agent:
+                await _distress_agent.on_detect_event(event)
+        except Exception as e:
+            logger.exception("Error processing detect event: %s", e)
 
 
 async def _heartbeat_loop(redis: aioredis.Redis) -> None:
@@ -67,9 +91,11 @@ async def _heartbeat_loop(redis: aioredis.Redis) -> None:
     while True:
         await asyncio.sleep(settings.heartbeat_interval_sec)
 
-        if _alert_creator_agent:
+        for agent in (_alert_creator_agent, _distress_agent):
+            if agent is None:
+                continue
             try:
-                await _alert_creator_agent.send_heartbeat()
+                await agent.send_heartbeat()
             except Exception as e:
                 logger.error("Failed to send heartbeat: %s", e)
 
@@ -81,12 +107,16 @@ async def _heartbeat_loop(redis: aioredis.Redis) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _redis, _alert_creator_agent
+    global _redis, _alert_creator_agent, _distress_agent
 
     # Startup
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
 
     _alert_creator_agent = ResponseAlertCreatorAgent(
+        redis=_redis,
+        core_api_url=settings.core_api_url,
+    )
+    _distress_agent = ResponseDistressAgent(
         redis=_redis,
         core_api_url=settings.core_api_url,
     )
@@ -96,6 +126,7 @@ async def lifespan(app: FastAPI):
     # 백그라운드 타스크 시작
     tasks = [
         asyncio.create_task(_consume_analyze_events(_redis), name="analyze-consumer"),
+        asyncio.create_task(_consume_detect_events(_redis), name="detect-consumer"),
         asyncio.create_task(_heartbeat_loop(_redis), name="heartbeat-loop"),
     ]
 
@@ -142,7 +173,7 @@ async def health():
 
     return {
         "status": "ok" if redis_ok else "degraded",
-        "agents": 1,  # alert-creator
+        "agents": 2,
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
         },

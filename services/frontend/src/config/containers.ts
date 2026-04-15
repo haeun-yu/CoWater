@@ -35,7 +35,7 @@ export const CONTAINERS: ContainerDef[] = [
     url: getAnalysisAgentsApiUrl(),
     color: "#a78bfa",
     icon: "🧠",
-    agents: ["Anomaly AI", "Distress AI"],
+    agents: ["Anomaly AI"],
   },
   {
     id: "response",
@@ -44,7 +44,7 @@ export const CONTAINERS: ContainerDef[] = [
     url: getResponseAgentsApiUrl(),
     color: "#f87171",
     icon: "⚡",
-    agents: ["Alert Creator"],
+    agents: ["Alert Creator", "Distress Agent"],
   },
   {
     id: "report",
@@ -53,7 +53,7 @@ export const CONTAINERS: ContainerDef[] = [
     url: getReportAgentsApiUrl(),
     color: "#34d399",
     icon: "📋",
-    agents: ["AI Report Agent"],
+    agents: ["Report Agent"],
   },
   {
     id: "control",

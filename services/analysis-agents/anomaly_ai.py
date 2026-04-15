@@ -1,25 +1,34 @@
 """
 Analysis - Anomaly AI Agent
 
-Detection이 감지한 비정상 항적을 분석하고 원인을 파악.
-Claude API를 사용해서 AI 기반 분석.
+detect.anomaly 이벤트를 받아 이상 원인과 대응 권고를 생성한다.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import time
 from uuid import uuid4
 
-import httpx
 import redis.asyncio as aioredis
 
 from shared.events import Event, EventType
+from shared.llm_client import make_llm_client
+
 from config import settings
 from .base import AnalysisAgent
 
 logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = """당신은 해양 관제 전문가입니다.
+실시간 선박 데이터를 분석하여 이상 행동의 원인을 진단하고
+운항 안전을 위한 구체적인 조치를 권고합니다.
+
+응답은 반드시 다음 형식으로 작성하십시오:
+- 진단: (이상 원인 분석, 1-2문장)
+- 권고: (즉각 취해야 할 조치, 번호 목록)
+- 우선순위: (low/medium/high/critical 중 하나)"""
 
 
 class AnalysisAnomalyAIAgent(AnalysisAgent):
@@ -29,177 +38,100 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
 
     def __init__(self, redis: aioredis.Redis, core_api_url: str) -> None:
         super().__init__(redis, core_api_url)
-
-        self._client = None
+        self._llm = make_llm_client(settings)
+        self._last_analyzed_at: dict[str, float] = {}
 
     async def on_detect_event(self, event: Event) -> None:
-        """detect.anomaly.* 이벤트 수신 (빠른 반환, 분석은 백그라운드)"""
-
         if event.type != EventType.DETECT_ANOMALY:
             return
 
         payload = event.payload
-        platform_id = payload.get("platform_id")
-        anomaly_type = payload.get("anomaly_type")
-        reason = payload.get("reason", "")
-
-        logger.info(
-            "Queued anomaly analysis: platform=%s, type=%s",
-            platform_id,
-            anomaly_type,
-        )
-
-        # AI 분석을 백그라운드 태스크로 실행 (이벤트 처리를 블로킹하지 않음)
-        asyncio.create_task(
-            self._analyze_and_emit(
-                event=event,
-                platform_id=platform_id,
-                anomaly_type=anomaly_type,
-                reason=reason,
-            )
-        )
-
-    async def _analyze_and_emit(
-        self,
-        event: Event,
-        platform_id: str,
-        anomaly_type: str,
-        reason: str,
-    ) -> None:
-        """백그라운드에서 AI 분석 후 이벤트 발행"""
-
-        try:
-            # AI 분석 (시간이 걸릴 수 있음)
-            analysis_result = await self._analyze_with_ai(
-                platform_id=platform_id,
-                anomaly_type=anomaly_type,
-                reason=reason,
-            )
-        except Exception as e:
-            logger.error("AI analysis failed: %s", e)
+        if payload.get("severity") == "info":
+            return
+        if (
+            settings.ai_min_severity == "critical"
+            and payload.get("severity") != "critical"
+        ):
             return
 
-        # 분석 결과 Event 발행
-        alert_id = str(uuid4())
+        platform_id = payload.get("platform_id")
+        anomaly_type = payload.get("anomaly_type")
+        if not platform_id or not anomaly_type:
+            return
 
-        analysis_payload = {
-            "alert_id": alert_id,
-            "platform_id": platform_id,
-            "original_anomaly_type": anomaly_type,
-            "analysis_result": analysis_result.get("result", "분석 불가"),
-            "recommendation": analysis_result.get("recommendation"),
-            "confidence": analysis_result.get("confidence", 0.5),
-            "timestamp": event.timestamp.isoformat(),
-            "ai_model": settings.claude_model,
-            "execution_time_ms": analysis_result.get("execution_time_ms", 0),
-        }
+        cooldown_key = f"{anomaly_type}:{platform_id}"
+        now_ts = time.time()
+        last_ts = self._last_analyzed_at.get(cooldown_key)
+        if last_ts is not None and (now_ts - last_ts) < settings.ai_alert_cooldown_sec:
+            return
+
+        self._last_analyzed_at[cooldown_key] = now_ts
+        asyncio.create_task(self._analyze_and_emit(event))
+
+    async def _analyze_and_emit(self, event: Event) -> None:
+        payload = event.payload
+        llm_fallback = False
+        fallback_reason = None
+
+        try:
+            analysis = await self._llm.chat(
+                system=_SYSTEM_PROMPT,
+                user=_build_context(payload),
+                max_tokens=settings.anomaly_ai_max_tokens,
+            )
+        except Exception:
+            logger.exception("LLM call failed for anomaly analysis")
+            llm_fallback = True
+            fallback_reason = "llm_call_failed"
+            analysis = (
+                "[LLM 호출 실패 — rule 기반 권고]\n\n"
+                f"경보 유형: {payload.get('anomaly_type')} / 심각도: {payload.get('severity')}\n"
+                "권고사항:\n"
+                "1. 해당 선박의 현재 위치 및 상태를 즉시 확인하십시오.\n"
+                "2. VHF Ch.16을 통해 교신을 시도하십시오.\n"
+                "3. 필요 시 해양경찰청(122)에 상황을 통보하십시오."
+            )
 
         await self.emit_analysis_event(
             event_type=EventType.ANALYZE_ANOMALY,
-            payload=analysis_payload,
+            payload={
+                "alert_id": str(uuid4()),
+                "platform_id": payload.get("platform_id"),
+                "original_anomaly_type": payload.get("anomaly_type"),
+                "analysis_result": analysis,
+                "recommendation": analysis,
+                "confidence": _confidence_for_severity(payload.get("severity")),
+                "timestamp": event.timestamp.isoformat(),
+                "ai_model": self._llm.model_name,
+                "execution_time_ms": 0,
+                "source_reason": payload.get("reason"),
+                "source_severity": payload.get("severity"),
+                "llm_fallback": llm_fallback,
+                "fallback_reason": fallback_reason,
+            },
             flow_id=event.flow_id,
             causation_id=event.event_id,
         )
 
-    async def _analyze_with_ai(
-        self,
-        platform_id: str,
-        anomaly_type: str,
-        reason: str,
-    ) -> dict:
-        """Ollama를 사용해서 비정상 분석 (로컬 LLM)"""
 
-        prompt = f"""해양 선박의 비정상 항적이 감지되었습니다.
+def _build_context(payload: dict) -> str:
+    lines = [
+        f"이상 유형: {payload.get('anomaly_type')}",
+        f"심각도: {payload.get('severity')}",
+        f"사유: {payload.get('reason')}",
+        f"선박 ID: {payload.get('platform_id')}",
+        f"현재 위치: 위도 {payload.get('latitude')}, 경도 {payload.get('longitude')}",
+    ]
+    meta = payload.get("metadata") or {}
+    if meta:
+        lines.append(f"추가 메타데이터: {meta}")
+    lines.append("위 상황을 분석하고 운항 안전 조치를 권고하십시오.")
+    return "\n".join(lines)
 
-선박 ID: {platform_id}
-비정상 타입: {anomaly_type}
-상세: {reason}
 
-다음을 분석해주세요:
-1. 가능한 원인 (기술적 문제, 환경, 의도된 행동 등)
-2. 위험도 평가
-3. 권고사항
-
-JSON 형식으로 응답해주세요:
-{{"possible_causes": ["원인1", "원인2"], "risk_level": "low|medium|high", "recommendation": "권고사항", "confidence": 0.0-1.0}}"""
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{settings.ollama_url}/api/generate",
-                    json={
-                        "model": settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "temperature": 0.3,  # 더 일관된 결과
-                    },
-                    timeout=30.0,
-                )
-
-            resp.raise_for_status()
-            data = resp.json()
-
-            # Ollama 응답 파싱
-            content = data.get("response", "{}")
-
-            # JSON 추출 (응답에 마크다운 포맷팅이 있을 수 있음)
-            try:
-                # ```json ... ``` 형식이면 추출
-                if "```json" in content:
-                    content = content.split("```json")[1].split("```")[0].strip()
-                elif "```" in content:
-                    content = content.split("```")[1].split("```")[0].strip()
-
-                analysis = json.loads(content)
-            except (json.JSONDecodeError, IndexError):
-                # JSON 파싱 실패 → 규칙 기반으로 폴백
-                return self._fallback_analysis(anomaly_type)
-
-            return {
-                "result": f"원인: {', '.join(analysis.get('possible_causes', []))}",
-                "recommendation": analysis.get("recommendation", "추가 확인 필요"),
-                "confidence": analysis.get("confidence", 0.5),
-                "execution_time_ms": 0,
-            }
-
-        except Exception as e:
-            logger.error("Ollama API call failed: %s", e)
-
-            # Fallback: 규칙 기반 분석
-            return self._fallback_analysis(anomaly_type)
-
-    @staticmethod
-    def _fallback_analysis(anomaly_type: str) -> dict:
-        """AI 실패 시 규칙 기반 분석"""
-
-        rules = {
-            "rot": {
-                "result": "선회율 이상 - 선박 조종 오류 또는 흐름 영향",
-                "recommendation": "선박의 자세 확인 및 해류/바람 영향 검토",
-                "confidence": 0.6,
-            },
-            "heading_jump": {
-                "result": "방향 급변 - 의도된 항로 변경 또는 기술적 오류",
-                "recommendation": "선박 운항 계획과 실제 항로 비교",
-                "confidence": 0.5,
-            },
-            "speed_spike": {
-                "result": "속도 급변 - 엔진 출력 변화 또는 측정 오류",
-                "recommendation": "선박 운항 상태 모니터링",
-                "confidence": 0.6,
-            },
-            "position_jump": {
-                "result": "위치 점프 - GPS 신호 오류 또는 데이터 왜곡",
-                "recommendation": "GPS 신호 강도 확인",
-                "confidence": 0.5,
-            },
-        }
-
-        return rules.get(
-            anomaly_type,
-            {
-                "result": "알 수 없는 비정상",
-                "recommendation": "추가 정보 필요",
-                "confidence": 0.3,
-            },
-        )
+def _confidence_for_severity(severity: str | None) -> float:
+    if severity == "critical":
+        return 0.9
+    if severity == "warning":
+        return 0.7
+    return 0.5

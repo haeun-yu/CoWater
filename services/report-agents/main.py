@@ -11,10 +11,11 @@ import logging
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from shared.events import Event
 from config import settings
 from report_agent import AIReportAgent
 
@@ -50,9 +51,9 @@ async def _consume_respond_events(redis: aioredis.Redis) -> None:
 
         try:
             data = json.loads(msg["data"])
-            # respond.* 이벤트를 Report Agent에게 전달
+            event = Event.from_json(json.dumps(data))
             if _report_agent:
-                await _report_agent.on_respond_event(data)
+                await _report_agent.on_respond_event(event)
 
         except Exception as e:
             logger.exception("Error processing respond event: %s", e)
@@ -135,11 +136,22 @@ async def health():
 
     return {
         "status": "ok" if redis_ok else "degraded",
-        "agents": 1,  # ai-report-agent
+        "agents": 1,  # report-agent
         "dependencies": {
             "redis": "ok" if redis_ok else "error",
         },
     }
+
+
+@app.post("/agents/report-agent/generate/{alert_id}")
+async def generate_report(alert_id: str):
+    if _report_agent is None:
+        raise HTTPException(503, "Report agent unavailable")
+
+    content = await _report_agent.generate_report(alert_id)
+    if content is None:
+        raise HTTPException(404, "Alert not found or report generation failed")
+    return {"alert_id": alert_id, "report": content}
 
 
 if __name__ == "__main__":

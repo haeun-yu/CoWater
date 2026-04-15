@@ -61,6 +61,7 @@ class ResponseAlertCreatorAgent(ResponseAgent):
                 event_type=EventType.RESPOND_ALERT,
                 payload={
                     "alert_id": alert_id,
+                    "alert_ids": [alert_id],
                     "platform_id": platform_id,
                     "alert_type": alert_type,
                     "severity": severity,

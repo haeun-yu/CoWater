@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:3b"
     vllm_url: str = "http://vllm:8000"
     vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    ollama_think: bool = False
 
     # LLM Timeout
     claude_timeout_sec: int = 60
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     local_llm_max_attempts: int = 3
     claude_base_delay_sec: float = 1.0
     local_llm_base_delay_sec: float = 1.0
+    report_alert_max_tokens: int = 1024
+    report_incident_max_tokens: int = 2048
 
     # Heartbeat
     heartbeat_interval_sec: int = 60

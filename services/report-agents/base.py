@@ -1,10 +1,14 @@
 """Report Agent 기본 클래스"""
 
+from __future__ import annotations
+
+import json
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any
 
 import redis.asyncio as aioredis
+
+from shared.events import Event, EventType, get_channel_for_event
 
 
 class ReportAgent(ABC):
@@ -16,20 +20,23 @@ class ReportAgent(ABC):
         self.redis = redis
 
     @abstractmethod
-    async def on_respond_event(self, event: dict) -> None:
+    async def on_respond_event(self, event: Event) -> None:
         """respond.* 이벤트 수신"""
         pass
 
     async def send_heartbeat(self) -> None:
         """주기적 heartbeat 송신"""
-        await self.redis.publish(
-            "heartbeat",
-            {
-                "agent_id": self.agent_id,
+        event = Event(
+            flow_id="heartbeat",
+            type=EventType.SYSTEM_HEARTBEAT,
+            agent_id=self.agent_id,
+            payload={
+                "status": "healthy",
                 "timestamp": datetime.utcnow().isoformat(),
-                "status": "ok",
             },
         )
+        channel = get_channel_for_event(event)
+        await self.redis.publish(channel, event.to_json())
 
     async def emit_report_event(
         self,
@@ -39,8 +46,6 @@ class ReportAgent(ABC):
         content: str,
     ) -> None:
         """report.* 이벤트 발행"""
-        import json
-
         event = {
             "report_id": report_id,
             "flow_id": flow_id,

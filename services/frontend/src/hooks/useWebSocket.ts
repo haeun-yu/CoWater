@@ -30,8 +30,9 @@ const AGENT_NAMES: Record<string, string> = {
   "detection-zone": "Detection Zone",
   "detection-distress": "Detection Distress",
   "analysis-anomaly-ai": "Analysis Anomaly",
-  "analysis-report": "Analysis Report",
   "response-alert-creator": "Response Alert",
+  "response-distress-agent": "Response Distress",
+  "report-agent": "Report Agent",
   "supervision-supervisor": "Supervision",
   "learning-agent": "Learning",
 };

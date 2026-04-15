@@ -23,8 +23,9 @@ MONITORED_AGENTS = [
     "detection-zone",
     "detection-distress",
     "analysis-anomaly-ai",
-    "analysis-report",
     "response-alert-creator",
+    "response-distress-agent",
+    "report-agent",
 ]
 
 # Heartbeat 타임아웃 (초)
