@@ -43,6 +43,13 @@ REDIS_BIND_ADDR=127.0.0.1
 CORE_BIND_ADDR=127.0.0.1
 MOTH_BIND_ADDR=0.0.0.0
 LOG_LEVEL=info
+CONTROL_AGENTS_UPSTREAM=http://control-agents:8001
+DETECTION_AGENTS_UPSTREAM=http://detection-agents:8001
+ANALYSIS_AGENTS_UPSTREAM=http://analysis-agents:8001
+RESPONSE_AGENTS_UPSTREAM=http://response-agents:8001
+REPORT_AGENTS_UPSTREAM=http://report-agents:8001
+LEARNING_AGENTS_UPSTREAM=http://learning-agents:8001
+SUPERVISION_AGENTS_UPSTREAM=http://supervision-agents:8001
 EOF
 
     echo "✓ .env 파일 생성됨"
@@ -73,6 +80,13 @@ REDIS_BIND_ADDR=127.0.0.1
 CORE_BIND_ADDR=127.0.0.1
 MOTH_BIND_ADDR=0.0.0.0
 LOG_LEVEL=info
+CONTROL_AGENTS_UPSTREAM=http://control-agents:8001
+DETECTION_AGENTS_UPSTREAM=http://detection-agents:8001
+ANALYSIS_AGENTS_UPSTREAM=http://analysis-agents:8001
+RESPONSE_AGENTS_UPSTREAM=http://response-agents:8001
+REPORT_AGENTS_UPSTREAM=http://report-agents:8001
+LEARNING_AGENTS_UPSTREAM=http://learning-agents:8001
+SUPERVISION_AGENTS_UPSTREAM=http://supervision-agents:8001
 EOF
 
     echo "✓ .env 파일 생성됨 (강한 비밀번호 적용)"
@@ -119,6 +133,13 @@ REDIS_BIND_ADDR=0.0.0.0
 CORE_BIND_ADDR=0.0.0.0
 MOTH_BIND_ADDR=0.0.0.0
 LOG_LEVEL=info
+CONTROL_AGENTS_UPSTREAM=http://control-agents:8001
+DETECTION_AGENTS_UPSTREAM=http://detection-agents:8001
+ANALYSIS_AGENTS_UPSTREAM=http://analysis-agents:8001
+RESPONSE_AGENTS_UPSTREAM=http://response-agents:8001
+REPORT_AGENTS_UPSTREAM=http://report-agents:8001
+LEARNING_AGENTS_UPSTREAM=http://learning-agents:8001
+SUPERVISION_AGENTS_UPSTREAM=http://supervision-agents:8001
 EOF
 
     echo "✓ .env 파일 생성됨 (외부 접근 활성화)"

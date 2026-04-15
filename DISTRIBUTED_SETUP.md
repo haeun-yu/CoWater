@@ -24,6 +24,19 @@ pip install -r requirements.txt
 PYTHONPATH=../.. uvicorn main:app --host 0.0.0.0 --port 7704
 ```
 
+**권장 운영 방식 (프론트 고정 진입점):**
+```bash
+# MacBook1 .env
+DETECTION_AGENTS_UPSTREAM=http://192.168.1.101:7704
+ANALYSIS_AGENTS_UPSTREAM=http://192.168.1.101:7705
+
+# 중앙 서버 재기동
+docker compose up -d --build agent-gateway frontend
+```
+
+이후 브라우저와 프론트는 계속 `MacBook1:7704`, `MacBook1:7705` 를 사용하고,
+실제 트래픽은 중앙 서버의 `agent-gateway`가 각 워커 맥북으로 전달합니다.
+
 ---
 
 ### 시나리오 2: 다른 와이파이 (원격 + 보안)

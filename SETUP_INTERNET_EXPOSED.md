@@ -85,6 +85,21 @@ pip install -r requirements.txt
 PYTHONPATH=../.. uvicorn main:app --host 0.0.0.0 --port 7704
 ```
 
+#### 프론트/브라우저는 중앙 서버만 보게 유지 (권장)
+중앙 서버의 `agent-gateway`가 워커 agent를 프록시하도록 `.env`에 upstream을 설정합니다.
+
+```bash
+# 중앙 서버 infra/.env
+DETECTION_AGENTS_UPSTREAM=http://192.168.1.101:7704
+ANALYSIS_AGENTS_UPSTREAM=http://192.168.1.101:7705
+
+# 적용
+docker compose --env-file .env up -d --build agent-gateway frontend
+```
+
+이렇게 하면 프론트는 계속 중앙 서버의 `:7704`, `:7705`에 붙고,
+실제 worker 위치가 바뀌어도 중앙 서버의 upstream만 바꾸면 됩니다.
+
 ---
 
 ## 🔐 3가지 배포 시나리오

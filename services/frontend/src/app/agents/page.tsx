@@ -26,6 +26,84 @@ interface Agent {
   lastSeen?: string;
 }
 
+function buildFallbackAgents(container: ContainerDef): Agent[] {
+  return container.agents.map((name) => ({
+    id: name.toLowerCase().replace(" ", "-"),
+    name,
+    status: "healthy",
+  }));
+}
+
+function parseAgentsResponse(container: ContainerDef, data: unknown): Agent[] {
+  if (!data || typeof data !== "object") {
+    return buildFallbackAgents(container);
+  }
+
+  if ("agents" in data && data.agents && typeof data.agents === "object") {
+    return Object.entries(data.agents as Record<string, unknown>).map(
+      ([id, status]) => ({
+        id,
+        name:
+          container.agents.find(
+            (agentName) =>
+              agentName.toLowerCase().replace(" ", "-") === id.toLowerCase()
+          ) || id,
+        status: status === "healthy" ? "healthy" : "unhealthy",
+        lastSeen: new Date().toLocaleString(),
+      })
+    );
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          id: item.toLowerCase().replace(" ", "-"),
+          name: item,
+          status: "healthy" as const,
+          lastSeen: new Date().toLocaleString(),
+        };
+      }
+
+      if (item && typeof item === "object") {
+        const entry = item as Record<string, unknown>;
+        const id =
+          typeof entry.agent_id === "string"
+            ? entry.agent_id
+            : typeof entry.id === "string"
+              ? entry.id
+              : `${container.id}-${index}`;
+        const name =
+          typeof entry.name === "string"
+            ? entry.name
+            : container.agents.find(
+                (agentName) =>
+                  agentName.toLowerCase().replace(" ", "-") === id.toLowerCase()
+              ) || id;
+        const status =
+          entry.status === "healthy" || entry.status === "ok"
+            ? "healthy"
+            : "unhealthy";
+
+        return {
+          id,
+          name,
+          status,
+          lastSeen: new Date().toLocaleString(),
+        };
+      }
+
+      return {
+        id: `${container.id}-${index}`,
+        name: container.agents[index] || `${container.name} Agent ${index + 1}`,
+        status: "healthy" as const,
+      };
+    });
+  }
+
+  return buildFallbackAgents(container);
+}
+
 interface ContainerStatus {
   container: ContainerDef;
   health: HealthStatus | null;
@@ -376,38 +454,23 @@ export default function AgentsPage() {
     const fetchContainerStatus = async (container: ContainerDef) => {
       try {
         // Fetch health
-        const healthRes = await fetch(`${container.url}/health`, {
-          headers: { "Content-Type": "application/json" },
-        });
+        const healthRes = await fetch(`${container.url}/health`);
         const health = healthRes.ok
           ? await healthRes.json()
           : { status: "error" };
 
         // Fetch agents (if endpoint exists)
-        let agents: Agent[] = [];
-        try {
-          const agentsRes = await fetch(`${container.url}/agents`, {
-            headers: { "Content-Type": "application/json" },
-          });
-          if (agentsRes.ok) {
-            const data = await agentsRes.json();
-            // Parse agent response based on container structure
-            agents = Object.entries(data.agents || {}).map(([id, status]: [string, any]) => ({
-              id,
-              name: container.agents.find(
-                (a) => a.toLowerCase().replace(" ", "-") === id.toLowerCase()
-              ) || id,
-              status: status === "healthy" ? "healthy" : "unhealthy",
-              lastSeen: new Date().toLocaleString(),
-            }));
+        let agents: Agent[] = buildFallbackAgents(container);
+        if (container.hasAgentsEndpoint) {
+          try {
+            const agentsRes = await fetch(`${container.url}/agents`);
+            if (agentsRes.ok) {
+              const data = await agentsRes.json();
+              agents = parseAgentsResponse(container, data);
+            }
+          } catch {
+            agents = buildFallbackAgents(container);
           }
-        } catch {
-          // Some containers may not have /agents endpoint
-          agents = container.agents.map((name) => ({
-            id: name.toLowerCase().replace(" ", "-"),
-            name,
-            status: "healthy",
-          }));
         }
 
         setContainerStatuses((prev) =>

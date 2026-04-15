@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 
-from db import AsyncSessionLocal
+from db import AsyncSessionLocal, engine, Base
 from api.alerts import router as alerts_router
 from api.auth import router as auth_router
 from api.commands import router as commands_router
@@ -23,6 +23,7 @@ from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
 from services.event_consumer import consume_events
 from ws_hub import hub
+import models  # noqa: F401 - import models to register all ORM models
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -51,6 +52,13 @@ async def _wait_for_database_ready() -> None:
             logger.warning("Waiting for database readiness; retrying in %.1fs", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 5.0)
+
+
+async def _create_tables() -> None:
+    """Create all database tables from ORM models."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables created/verified")
 
 
 async def _run_with_reconnect(
@@ -83,6 +91,7 @@ async def _run_with_reconnect(
 async def lifespan(app: FastAPI):
     redis = await get_redis()
     await _wait_for_database_ready()
+    await _create_tables()
 
     tasks = [
         asyncio.create_task(
