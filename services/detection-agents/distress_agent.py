@@ -56,7 +56,7 @@ class DetectionDistressAgent(DetectionAgent):
         elif not is_distress and platform_id in self._alerted:
             # 조난 신호 해제
             self._alerted.discard(platform_id)
-            # TODO: distress cleared event
+            await self._emit_distress_cleared_event(report)
 
     def _is_distress(self, report: PlatformReport) -> bool:
         """조난 신호 여부 확인"""
@@ -92,6 +92,7 @@ class DetectionDistressAgent(DetectionAgent):
             "platform_id": report.platform_id,
             "platform_name": report.name or report.platform_id,
             "distress_type": distress_type,
+            "event_state": "active",
             "latitude": report.lat,
             "longitude": report.lon,
             "timestamp": report.timestamp.isoformat(),
@@ -100,4 +101,24 @@ class DetectionDistressAgent(DetectionAgent):
         await self.emit_event(
             event_type=EventType.DETECT_DISTRESS,
             payload=payload,
+            flow_id=f"detect-distress:{report.platform_id}",
+        )
+
+    async def _emit_distress_cleared_event(self, report: PlatformReport) -> None:
+        """조난 신호 해제 Event 발행"""
+
+        payload = {
+            "platform_id": report.platform_id,
+            "platform_name": report.name or report.platform_id,
+            "distress_type": "cleared",
+            "event_state": "cleared",
+            "latitude": report.lat,
+            "longitude": report.lon,
+            "timestamp": report.timestamp.isoformat(),
+        }
+
+        await self.emit_event(
+            event_type=EventType.DETECT_DISTRESS,
+            payload=payload,
+            flow_id=f"detect-distress:{report.platform_id}",
         )

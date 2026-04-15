@@ -69,15 +69,35 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
         asyncio.create_task(self._analyze_and_emit(event))
 
     async def _analyze_and_emit(self, event: Event) -> None:
+        import asyncio
+
         payload = event.payload
         llm_fallback = False
         fallback_reason = None
+        start_ms = time.time() * 1000
 
         try:
-            analysis = await self._llm.chat(
-                system=_SYSTEM_PROMPT,
-                user=_build_context(payload),
-                max_tokens=settings.anomaly_ai_max_tokens,
+            analysis = await asyncio.wait_for(
+                self._llm.chat(
+                    system=_SYSTEM_PROMPT,
+                    user=_build_context(payload),
+                    max_tokens=settings.anomaly_ai_max_tokens,
+                ),
+                timeout=settings.claude_timeout_sec
+                if "claude" in (settings.llm_backend or "")
+                else settings.local_llm_timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("LLM call timed out for anomaly analysis (platform=%s)", payload.get("platform_id"))
+            llm_fallback = True
+            fallback_reason = "llm_timeout"
+            analysis = (
+                "[LLM 타임아웃 — rule 기반 권고]\n\n"
+                f"경보 유형: {payload.get('anomaly_type')} / 심각도: {payload.get('severity')}\n"
+                "권고사항:\n"
+                "1. 해당 선박의 현재 위치 및 상태를 즉시 확인하십시오.\n"
+                "2. VHF Ch.16을 통해 교신을 시도하십시오.\n"
+                "3. 필요 시 해양경찰청(122)에 상황을 통보하십시오."
             )
         except Exception:
             logger.exception("LLM call failed for anomaly analysis")
@@ -92,6 +112,8 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
                 "3. 필요 시 해양경찰청(122)에 상황을 통보하십시오."
             )
 
+        execution_time_ms = int(time.time() * 1000 - start_ms)
+
         await self.emit_analysis_event(
             event_type=EventType.ANALYZE_ANOMALY,
             payload={
@@ -103,7 +125,7 @@ class AnalysisAnomalyAIAgent(AnalysisAgent):
                 "confidence": _confidence_for_severity(payload.get("severity")),
                 "timestamp": event.timestamp.isoformat(),
                 "ai_model": self._llm.model_name,
-                "execution_time_ms": 0,
+                "execution_time_ms": execution_time_ms,
                 "source_reason": payload.get("reason"),
                 "source_severity": payload.get("severity"),
                 "llm_fallback": llm_fallback,

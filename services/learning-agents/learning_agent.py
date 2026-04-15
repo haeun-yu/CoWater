@@ -56,15 +56,21 @@ class LearningAgent:
 
         logger.info("Alert feedback: %s = %s (reason: %s)", alert_id, feedback, reason)
 
-        if feedback == "false_positive":
-            # Alert 정보 조회
-            alert_info = await self._get_alert_info(alert_id)
-            if not alert_info:
-                logger.warning("Alert not found: %s", alert_id)
-                return
+        if feedback not in ("false_positive", "confirmed", "partial"):
+            logger.warning("Unknown feedback type: %s", feedback)
+            return
 
+        # Alert 정보 조회 (모든 피드백 타입에서 에이전트 특정)
+        alert_info = await self._get_alert_info(alert_id)
+        if not alert_info:
+            logger.warning("Alert not found: %s", alert_id)
+            return
+
+        agent_id = alert_info.get("generated_by")
+        await self.track_feedback(agent_id, feedback)
+
+        if feedback == "false_positive":
             # 해당 Agent의 거짓 경보율 계산
-            agent_id = alert_info.get("generated_by")
             fp_rate = await self._calculate_fp_rate(agent_id)
 
             logger.info(

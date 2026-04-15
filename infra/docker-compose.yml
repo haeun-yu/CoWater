@@ -38,7 +38,7 @@ services:
   # PostgreSQL + PostGIS + TimescaleDB
   # ─────────────────────────────────────────────────────
   postgres:
-    image: timescale/timescaledb:2.17.2-pg15
+    image: timescale/timescaledb-ha:pg15-latest
     container_name: cowater-postgres
     restart: unless-stopped
     environment:
@@ -71,13 +71,13 @@ services:
       redis-server
       --save 60 1
       --loglevel warning
-      --requirepass ${REDIS_PASSWORD:-}
+      --requirepass ${REDIS_PASSWORD:-cowater_dev}
     volumes:
       - redis_data:/data
     ports:
       - "${REDIS_BIND_ADDR:-127.0.0.1}:6379:6379" # 기본: localhost만, 원격: 0.0.0.0
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cowater_dev}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -93,7 +93,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://cowater:${POSTGRES_PASSWORD:-cowater_dev}@postgres:5432/cowater}
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       AGENTS_API_URL: ${AGENTS_API_URL:-http://agents:8001}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
     environment:
       MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RAW_PAYLOAD_MODE: ${RAW_PAYLOAD_MODE:-cache}
       RAW_PAYLOAD_PROTOCOLS: ${RAW_PAYLOAD_PROTOCOLS:-ais,ros,mavlink,nmea}
@@ -238,7 +238,7 @@ services:
     container_name: cowater-control-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       # ── LLM 백엔드 설정 ─────────────────────────────
       # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
@@ -270,7 +270,7 @@ services:
   #   container_name: cowater-detection-agents
   #   restart: unless-stopped
   #   environment:
-  #     REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+  #     REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
   #     CORE_API_URL: ${CORE_API_URL:-http://core:8000}
   #     CPA_WARNING_NM: ${CPA_WARNING_NM:-2.0}
   #     CPA_WARNING_TCPA_MIN: ${CPA_WARNING_TCPA_MIN:-20.0}
@@ -302,7 +302,7 @@ services:
   #   container_name: cowater-analysis-agents
   #   restart: unless-stopped
   #   environment:
-  #     REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+  #     REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
   #     CORE_API_URL: ${CORE_API_URL:-http://core:8000}
   #     # Mac/Windows: host.docker.internal / Linux: localhost 또는 172.17.0.1
   #     OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
@@ -326,7 +326,7 @@ services:
     container_name: cowater-response-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Port exposed via agent-gateway (7706)
@@ -348,7 +348,7 @@ services:
     container_name: cowater-report-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://cowater:${POSTGRES_PASSWORD:-cowater_dev}@postgres:5432/cowater}
       LLM_BACKEND: ${LLM_BACKEND:-ollama}
@@ -380,7 +380,7 @@ services:
     container_name: cowater-supervision-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       HEALTH_CHECK_INTERVAL_SEC: ${HEALTH_CHECK_INTERVAL_SEC:-60}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -397,7 +397,7 @@ services:
     container_name: cowater-learning-agents
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -418,7 +418,7 @@ services:
     profiles:
       - simulation
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@redis:6379}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       SCENARIO: ${SCENARIO:-demo}

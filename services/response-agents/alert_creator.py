@@ -103,10 +103,14 @@ class ResponseAlertCreatorAgent(ResponseAgent):
             )
             return
 
+        cpa_nm = payload.get("cpa_nm")
+        tcpa_min = payload.get("tcpa_minutes")
+        cpa_str = f"{cpa_nm:.2f}NM" if cpa_nm is not None else "N/A"
+        tcpa_str = f"{tcpa_min:.1f}분" if tcpa_min is not None else "N/A"
         message = (
             f"충돌 위험 {payload.get('severity', 'warning').upper()}: "
             f"{platform_ids[0]} ↔ {platform_ids[1]} "
-            f"CPA={payload.get('cpa_nm'):.2f}NM TCPA={payload.get('tcpa_minutes'):.1f}분"
+            f"CPA={cpa_str} TCPA={tcpa_str}"
         )
         alert_id = await self.create_alert(
             alert_type="cpa",

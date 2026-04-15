@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -111,14 +112,14 @@ class AIReportAgent(ReportAgent):
 
     async def _fetch_alerts(self, alert_ids: list[str]) -> list[dict]:
         alerts: list[dict] = []
-        for alert_id in alert_ids:
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for alert_id in alert_ids:
+                try:
                     response = await client.get(f"{settings.core_api_url}/alerts/{alert_id}")
-                response.raise_for_status()
-                alerts.append(response.json())
-            except Exception as exc:
-                logger.warning("Failed to fetch alert %s: %s", alert_id, exc)
+                    response.raise_for_status()
+                    alerts.append(response.json())
+                except Exception as exc:
+                    logger.warning("Failed to fetch alert %s: %s", alert_id, exc)
         return alerts
 
     async def _generate_with_ai(self, alerts: list[dict], report_type: str) -> str:
@@ -128,13 +129,24 @@ class AIReportAgent(ReportAgent):
             if report_type == "incident"
             else settings.report_alert_max_tokens
         )
+        timeout = (
+            settings.claude_timeout_sec
+            if "claude" in (settings.llm_backend or "")
+            else settings.local_llm_timeout_sec
+        )
 
         try:
-            return await self._llm.chat(
-                system=_SYSTEM_PROMPT,
-                user=context,
-                max_tokens=max_tokens,
+            return await asyncio.wait_for(
+                self._llm.chat(
+                    system=_SYSTEM_PROMPT,
+                    user=context,
+                    max_tokens=max_tokens,
+                ),
+                timeout=timeout,
             )
+        except asyncio.TimeoutError:
+            logger.warning("Report generation timed out after %ss", timeout)
+            return self._fallback_report(alerts, report_type)
         except Exception:
             logger.exception("Report generation failed, using fallback")
             return self._fallback_report(alerts, report_type)
@@ -156,7 +168,7 @@ class AIReportAgent(ReportAgent):
                     report_type=report_type,
                     content=content,
                     ai_model=self._llm.model_name,
-                    created_at=datetime.utcnow(),
+                    created_at=datetime.now(timezone.utc),
                 )
                 await session.execute(stmt)
                 await session.commit()
