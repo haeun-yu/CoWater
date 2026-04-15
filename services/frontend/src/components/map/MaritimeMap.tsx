@@ -13,6 +13,8 @@ import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useZoneStore, buildZoneGeoJSON, buildZoneLabelGeoJSON } from "@/stores/zoneStore";
+import { useMapLayerStore } from "@/stores/mapLayerStore";
+import LayerControlPanel from "@/components/map/LayerControlPanel";
 import type { Alert, PlatformState } from "@/types";
 import { getCoreApiUrl } from "@/lib/publicUrl";
 import {
@@ -621,6 +623,14 @@ function buildPlatformSources(
   platforms: Record<string, PlatformState>,
   selectedId: string | null,
   alertIds: Set<string>,
+  visiblePlatformTypes: Record<string, boolean> = {
+    vessel: true,
+    usv: true,
+    rov: true,
+    auv: true,
+    drone: true,
+    buoy: true,
+  },
 ) {
   const pointFeatures: PointFeature[] = [];
   const hullFeatures: PolygonFeature[] = [];
@@ -628,6 +638,8 @@ function buildPlatformSources(
 
   for (const platform of Object.values(platforms)) {
     if (platform.lat == null || platform.lon == null) continue;
+    const platformType = platform.platform_type ?? "vessel";
+    if (visiblePlatformTypes[platformType] === false) continue;
     const selected = platform.platform_id === selectedId;
     const alert = alertIds.has(platform.platform_id);
     const heading = platform.heading ?? platform.cog ?? 0;
@@ -792,11 +804,16 @@ function MaritimeMap() {
   const alerts = useAlertStore((s) => s.alerts);
   const streams = useSystemStore((s) => s.streams);
   const zones = useZoneStore((s) => s.zones);
+  const {
+    showSeamark: seamarkVisible,
+    showZones: zoneVisible,
+    showPlatforms: platformsVisible,
+    showNavAids: navAidVisible,
+    showTrails: trailsVisible,
+    visiblePlatformTypes,
+    toggleLayer,
+  } = useMapLayerStore();
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [seamarkVisible, setSeamarkVisible] = useState(false);
-  const [navAidVisible, setNavAidVisible] = useState(true);
-  const [fairwayVisible, setFairwayVisible] = useState(false);
-  const [zoneVisible, setZoneVisible] = useState(true);
   const [predictionVisible, setPredictionVisible] = useState(true);
   const [encounterVisible, setEncounterVisible] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
@@ -804,6 +821,7 @@ function MaritimeMap() {
   const [infoPanelsExpanded, setInfoPanelsExpanded] = useState(false);
   const [legendExpanded, setLegendExpanded] = useState(true);
   const [nauticalLayersExpanded, setNauticalLayersExpanded] = useState(true);
+  const fairwayVisible = navAidVisible;
 
   overlayVisibilityRef.current = { navAidVisible, fairwayVisible };
 
@@ -847,7 +865,9 @@ function MaritimeMap() {
     if (!map || !mapLoaded) return;
     const src = map.getSource("trails") as GeoJSONSource | undefined;
     src?.setData(
-      buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds),
+      trailsVisible
+        ? buildTrailGeoJSON(trailsRef.current, platforms, alertPlatformIds)
+        : { type: "FeatureCollection" as const, features: [] },
     );
   }
 
@@ -1615,11 +1635,13 @@ function MaritimeMap() {
       updateTrail(p);
     }
     flushTrailSource();
-    const sourceData = buildPlatformSources(platforms, selectedId, alertPlatformIds);
+    const sourceData = platformsVisible
+      ? buildPlatformSources(platforms, selectedId, alertPlatformIds, visiblePlatformTypes)
+      : { points: { type: "FeatureCollection" as const, features: [] }, hulls: { type: "FeatureCollection" as const, features: [] }, bridges: { type: "FeatureCollection" as const, features: [] } };
     (mapRef.current.getSource("platform-points") as GeoJSONSource | undefined)?.setData(sourceData.points);
     (mapRef.current.getSource("platform-hulls") as GeoJSONSource | undefined)?.setData(sourceData.hulls);
     (mapRef.current.getSource("platform-bridges") as GeoJSONSource | undefined)?.setData(sourceData.bridges);
-  }, [platforms, selectedId, alertPlatformIds, mapLoaded]);
+  }, [platforms, selectedId, alertPlatformIds, mapLoaded, visiblePlatformTypes, platformsVisible]);
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
@@ -1873,7 +1895,7 @@ function MaritimeMap() {
           {nauticalLayersExpanded && (
             <div className="panel border border-ocean-600/60 border-t-0 rounded-b px-2 py-2 space-y-1.5">
               <button
-                onClick={() => setZoneVisible((v) => !v)}
+                onClick={() => toggleLayer("zones")}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
@@ -1886,7 +1908,7 @@ function MaritimeMap() {
               </button>
 
               <button
-                onClick={() => setNavAidVisible((v) => !v)}
+                onClick={() => toggleLayer("navAids")}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: navAidVisible ? 1 : 0.5 }}>
@@ -1898,7 +1920,7 @@ function MaritimeMap() {
               </button>
 
               <button
-                onClick={() => setFairwayVisible((v) => !v)}
+                onClick={() => toggleLayer("navAids")}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: fairwayVisible ? 1 : 0.5 }}>
@@ -1910,7 +1932,7 @@ function MaritimeMap() {
               </button>
 
               <button
-                onClick={() => setSeamarkVisible((v) => !v)}
+                onClick={() => toggleLayer("seamark")}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-ocean-200 hover:bg-ocean-800/30 transition-colors"
               >
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="flex-shrink-0" style={{ opacity: seamarkVisible ? 1 : 0.5 }}>
@@ -2210,6 +2232,9 @@ function MaritimeMap() {
           </div>
         )}
       </div>
+
+      {/* 레이어 컨트롤 패널 */}
+      <LayerControlPanel />
     </div>
   );
 }

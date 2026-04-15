@@ -11,6 +11,21 @@
   --border: rgba(45, 141, 212, 0.2);
   --text-primary: #e2f0fa;
   --text-secondary: #7ab8d9;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+}
+
+/* 라이트 모드 */
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #e2e8f0;
+  --bg-panel: rgba(248, 250, 252, 0.92);
+  --border: rgba(15, 23, 42, 0.12);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  color-scheme: light;
 }
 
 * {
@@ -112,4 +127,179 @@ body {
   border-radius: 9999px;
   border: 1px solid rgba(29, 106, 184, 0.28);
   background: rgba(4, 20, 40, 0.55);
+}
+
+/* ── 실시간 업데이트 애니메이션 ── */
+@keyframes slide-in-from-top {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes count-update {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ── Sticky KPI 바 ── */
+.sticky-kpi-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  animation: slide-in-from-top 0.3s ease-out;
+}
+
+/* ── 라이브 인디케이터 (점멸) ── */
+.live-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  animation: pulse-slow 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ── 실시간 데이터 업데이트 강조 ── */
+.data-update {
+  animation: count-update 0.4s ease-out;
+}
+
+/* ── 새 항목 슬라이드 인 ── */
+.new-item-entry {
+  animation: slide-in-from-top 0.3s ease-out;
+}
+
+/* ── 사이드 패널 슬라이드 ── */
+.panel-slide-in {
+  animation: slide-in-from-right 0.3s ease-out;
+}
+
+/* ── 2칼럼 레이아웃 기본 ── */
+.two-column-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  min-height: 0;
+}
+
+@media (max-width: 1024px) {
+  .two-column-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 타임라인 구분선 ── */
+.timeline-divider {
+  position: relative;
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+.timeline-divider::before {
+  content: attr(data-label);
+  position: absolute;
+  left: 12px;
+  top: -9px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 0 8px;
+}
+
+/* ── 상태 색상 유틸리티 ── */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot-critical {
+  background: var(--accent-red);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+.status-dot-warning {
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.status-dot-success {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.status-dot-info {
+  background: var(--accent-blue);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+
+.status-dot-neutral {
+  background: #7ab8d9;
+}
+
+/* ── 컨테이너 글로우 효과 ── */
+.container-glow-ok {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: inset 0 0 12px rgba(16, 185, 129, 0.08),
+              0 0 12px rgba(16, 185, 129, 0.12);
+}
+
+.container-glow-degraded {
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow: inset 0 0 12px rgba(245, 158, 11, 0.08),
+              0 0 12px rgba(245, 158, 11, 0.12);
+}
+
+.container-glow-error {
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: inset 0 0 12px rgba(239, 68, 68, 0.08),
+              0 0 12px rgba(239, 68, 68, 0.12);
 }

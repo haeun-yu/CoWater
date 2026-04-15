@@ -10,6 +10,8 @@ import { useSystemStore } from "@/stores/systemStore";
 import { useEventStore } from "@/stores/eventStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import MetricCard from "@/components/ui/MetricCard";
+import SeverityBar from "@/components/ui/SeverityBar";
+import SparkLine from "@/components/ui/SparkLine";
 
 const MaritimeMap = dynamic(() => import("@/components/map/MaritimeMap"), {
   ssr: false,
@@ -53,6 +55,14 @@ export default function DashboardPage() {
     return { detectCount, analyzeCount, respondCount };
   }, [events]);
 
+  // 경보 심각도 분포 (활성 경보만)
+  const severityStats = useMemo(() => {
+    const critical = newAlerts.filter((a) => a.severity === "critical").length;
+    const warning = newAlerts.filter((a) => a.severity === "warning").length;
+    const info = newAlerts.filter((a) => a.severity === "info").length;
+    return { critical, warning, info };
+  }, [newAlerts]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#0b2f57_0%,#051427_42%,#020d1a_100%)]">
       {Object.values(initialData).some(
@@ -64,70 +74,90 @@ export default function DashboardPage() {
         </div>
       )}
       <section
-        className="border-b border-ocean-800/80 bg-ocean-950/60 px-4 py-3 backdrop-blur-sm"
+        className="sticky-kpi-bar border-b border-ocean-800/80 bg-ocean-950/60 px-4 py-3 backdrop-blur-sm"
         aria-label="실시간 운영 요약"
       >
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div></div>
-          <div
-            className={`rounded-full border px-3 py-1 text-[11px] font-medium ${allStreamsHealthy ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-amber-400/30 bg-amber-400/10 text-amber-200"}`}
-          >
-            {allStreamsHealthy
-              ? "실시간 스트림 정상"
-              : `스트림 주의 ${degradedStreams}건`}
+        {/* 상단 스트림 상태 + 4개 핵심 KPI */}
+        <div className="flex flex-col gap-3">
+          {/* 스트림 상태 및 요약 */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div
+              className={`rounded-full border px-3 py-1 text-[11px] font-medium ${allStreamsHealthy ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-amber-400/30 bg-amber-400/10 text-amber-200"}`}
+            >
+              {allStreamsHealthy
+                ? "실시간 스트림 정상"
+                : `스트림 주의 ${degradedStreams}건`}
+            </div>
+
+            {/* 경보 심각도 바 */}
+            {newAlerts.length > 0 && (
+              <div className="flex-1 max-w-xs">
+                <SeverityBar
+                  critical={severityStats.critical}
+                  warning={severityStats.warning}
+                  info={severityStats.info}
+                  height="h-1.5"
+                  showLabels={false}
+                />
+              </div>
+            )}
           </div>
-        </div>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="관제 대상"
-            value={`${platformValues.length}척`}
-            detail="현재 지도 및 패널 기준"
-          />
-          <MetricCard
-            label="긴급 대응"
-            value={`${criticalCount}건`}
-            detail="즉시 확인이 필요한 경보"
-            tone={criticalCount > 0 ? "critical" : "neutral"}
-          />
-          <MetricCard
-            label="활성 경보"
-            value={`${newAlerts.length}건`}
-            detail="우측 패널에서 우선순위 정렬"
-            tone={newAlerts.length > 0 ? "warning" : "neutral"}
-          />
-          <MetricCard
-            label="정상 수신"
-            value={`${freshness.live}척`}
-            detail={`지연 ${freshness.stale} · 유실 ${freshness.lost}`}
-            tone={
-              freshness.stale > 0 || freshness.lost > 0 ? "warning" : "neutral"
-            }
-          />
-        </div>
+          {/* 4개 핵심 KPI */}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              label="관제 대상"
+              value={`${platformValues.length}척`}
+              detail="현재 추적 중"
+            />
+            <MetricCard
+              label="긴급 대응"
+              value={`${criticalCount}건`}
+              detail="즉시 확인 필요"
+              tone={criticalCount > 0 ? "critical" : "neutral"}
+            />
+            <MetricCard
+              label="활성 경보"
+              value={`${newAlerts.length}건`}
+              detail={`위험${severityStats.critical} 주의${severityStats.warning}`}
+              tone={newAlerts.length > 0 ? "warning" : "neutral"}
+            />
+            <MetricCard
+              label="정상 수신"
+              value={`${freshness.live}척`}
+              detail={`지연${freshness.stale} 유실${freshness.lost}`}
+              tone={
+                freshness.stale > 0 || freshness.lost > 0 ? "warning" : "neutral"
+              }
+            />
+          </div>
 
-        <div className="mt-3 text-[11px] uppercase tracking-widest text-ocean-600 px-1">
-          이벤트 흐름 (실시간 처리)
-        </div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          <MetricCard
-            label="탐지 (Detection)"
-            value={eventStats.detectCount}
-            detail="CPA/Anomaly/Zone/Distress"
-            tone="info"
-          />
-          <MetricCard
-            label="분석 (Analysis)"
-            value={eventStats.analyzeCount}
-            detail="Claude AI 분석 중"
-            tone="info"
-          />
-          <MetricCard
-            label="응답 (Response)"
-            value={eventStats.respondCount}
-            detail="경보 자동 생성"
-            tone={eventStats.respondCount > 0 ? "success" : "neutral"}
-          />
+          {/* 이벤트 흐름 (간소화) */}
+          <div className="pt-1">
+            <div className="text-[10px] uppercase tracking-widest text-ocean-600 mb-2">
+              이벤트 흐름
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <MetricCard
+                label="탐지"
+                value={eventStats.detectCount}
+                detail="Detection"
+                tone="info"
+              />
+              <MetricCard
+                label="분석"
+                value={eventStats.analyzeCount}
+                detail="Analysis"
+                tone="info"
+              />
+              <MetricCard
+                label="응답"
+                value={eventStats.respondCount}
+                detail="Response"
+                tone={eventStats.respondCount > 0 ? "success" : "neutral"}
+              />
+            </div>
+          </div>
         </div>
       </section>
 
