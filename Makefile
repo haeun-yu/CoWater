@@ -1,5 +1,6 @@
 .PHONY: help up up-sim up-ollama down logs status \
 	dev-core dev-control-agents dev-detection-agents dev-analysis-agents dev-response-agents dev-learning-agents dev-supervision-agents dev-report-agents dev-frontend dev-simulator \
+	dev-all-tmux dev-all-manual dev-all-quick \
 	test-e2e test-unit test-all \
 	install setup clean \
 	up-host-ollama up-docker-ollama up-vllm up-host-ollama-sim up-docker-ollama-sim up-vllm-sim \
@@ -24,7 +25,7 @@ help:
 	@echo "  make logs             - 전체 로그 보기"
 	@echo "  make status           - 서비스 상태 확인"
 	@echo ""
-	@echo "로컬 개발 (PYTHONPATH=.:..로 실행):"
+	@echo "로컬 개발 (개별 실행):"
 	@echo "  make dev-core                  - Core (FastAPI + WebSocket hub)"
 	@echo "  make dev-control-agents        - Control (Chat Agent)"
 	@echo "  make dev-detection-agents      - Detection (CPA, Anomaly, Zone, Distress agents)"
@@ -35,6 +36,11 @@ help:
 	@echo "  make dev-report-agents         - Report (AI 리포트 생성)"
 	@echo "  make dev-frontend              - Frontend (Next.js 대시보드)"
 	@echo "  make dev-simulator             - Simulator (AIS 데이터 시뮬레이션)"
+	@echo ""
+	@echo "로컬 개발 (한번에 실행 - tmux 필수):"
+	@echo "  make dev-all-tmux              - 모든 서비스 tmux 윈도우에서 실행 ⚡ 추천"
+	@echo "  make dev-all-quick             - Core + Frontend만 빠르게 실행"
+	@echo "  make dev-all-manual            - 수동 실행 가이드 (터미널 9개 필요)"
 	@echo ""
 	@echo "테스트:"
 	@echo "  make test-e2e         - E2E 이벤트 흐름 테스트"
@@ -101,6 +107,63 @@ dev-frontend:
 
 dev-simulator:
 	cd services/simulator && SCENARIO=demo python main.py
+
+# ─────────────────────────────────────────────────────
+# 로컬 전체 실행 (빠른 개발 환경)
+# ─────────────────────────────────────────────────────
+dev-all-tmux:
+	@echo "🚀 시작: tmux로 모든 서비스 실행 (각각 새 윈도우)"
+	@echo "  명령어: tmux kill-session -t cowater  (종료)"
+	@command -v tmux >/dev/null 2>&1 || (echo "❌ tmux 필수: brew install tmux"; exit 1)
+	@tmux kill-session -t cowater 2>/dev/null || true
+	@tmux new-session -d -s cowater -x 200 -y 50
+	@tmux new-window -t cowater -n core "cd services/core && PYTHONPATH=../.. uvicorn main:app --reload --port 7700"
+	@tmux new-window -t cowater -n control "cd services/control-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7701"
+	@tmux new-window -t cowater -n detection "cd services/detection-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7704"
+	@tmux new-window -t cowater -n analysis "cd services/analysis-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7705"
+	@tmux new-window -t cowater -n response "cd services/response-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7706"
+	@tmux new-window -t cowater -n report "cd services/report-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7709"
+	@tmux new-window -t cowater -n learning "cd services/learning-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7708"
+	@tmux new-window -t cowater -n supervision "cd services/supervision-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7707"
+	@tmux new-window -t cowater -n frontend "cd services/frontend && npm run dev"
+	@tmux select-window -t cowater:0
+	@echo ""
+	@echo "✓ 세션 시작됨: tmux attach -t cowater"
+	@echo "  창 이동: Ctrl+B → N (다음), P (이전), 0-9 (번호)"
+	@echo ""
+	@tmux attach -t cowater
+
+dev-all-manual:
+	@echo "📋 모든 서비스 로컬 실행 (터미널 9개 필요)"
+	@echo ""
+	@echo "각 터미널에서 다음을 실행하세요:"
+	@echo ""
+	@echo "터미널 1: make dev-core"
+	@echo "터미널 2: make dev-control-agents"
+	@echo "터미널 3: make dev-detection-agents"
+	@echo "터미널 4: make dev-analysis-agents"
+	@echo "터미널 5: make dev-response-agents"
+	@echo "터미널 6: make dev-report-agents"
+	@echo "터미널 7: make dev-learning-agents"
+	@echo "터미널 8: make dev-supervision-agents"
+	@echo "터미널 9: make dev-frontend"
+	@echo ""
+	@echo "또는 tmux 사용:"
+	@echo "  make dev-all-tmux"
+
+dev-all-quick:
+	@echo "⚡ 빠른 개발: Core + Frontend만 (주요 기능)"
+	@echo ""
+	@echo "터미널 1: make dev-core"
+	@echo "터미널 2: make dev-frontend"
+	@echo ""
+	@echo "또는 tmux:"
+	@tmux kill-session -t cowater 2>/dev/null || true
+	@tmux new-session -d -s cowater -x 200 -y 50
+	@tmux new-window -t cowater -n core "cd services/core && PYTHONPATH=../.. uvicorn main:app --reload --port 7700"
+	@tmux new-window -t cowater -n frontend "cd services/frontend && npm run dev"
+	@tmux select-window -t cowater:0
+	@tmux attach -t cowater
 
 # ─────────────────────────────────────────────────────
 # 테스트
