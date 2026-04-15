@@ -4,43 +4,150 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 프로젝트 개요
+
+**CoWater**: 연안 VTS(선박 교통 서비스) 플랫폼. Moth 서버에서 수신한 선박 위치/상태 정보를 분석하여 실시간 경보를 생성하고, AI 기반 리포트를 작성하는 시스템.
+
+**핵심 특징**:
+- 마이크로서비스 아키텍처 (12개 독립 서비스)
+- Event-driven Redis pub/sub 파이프라인
+- 다중 LLM 백엔드 지원 (Claude, Ollama, vLLM)
+- Nginx Agent Gateway로 에이전트 서비스 프록시
+- TimescaleDB + PostGIS 시계열/지리공간 데이터 처리
+- 분산 배포 지원 (여러 PC에서 마이크로서비스 실행)
+
+---
+
 ## 개발 명령어
 
-### 전체 스택 실행 (Docker)
+### 1. 로컬 개발 (단일 호스트)
 
 ```bash
 cd infra
 
-# ⚠️ 사전 요구사항: 호스트 시스템에서 Ollama 실행 필요
-# Mac/Windows: ollama serve (또는 Ollama 앱 실행)
-# Linux: ollama serve
+# ⚠️ 사전 요구사항: 호스트 시스템에서 LLM 서버 실행
+# Mac/Windows: ollama serve (또는 Ollama 앱 실행) → 호스트 11434 포트
+# Linux: ollama serve → 호스트 11434 포트
 
-# 핵심 서비스 (postgres, redis, core, moth-bridge, agents, frontend)
-# Analysis Service는 호스트의 Ollama에 연결 (host.docker.internal:11434)
+# 기본 실행 (호스트 Ollama 사용, localhost만 접근 가능)
 docker compose up -d
 
-# 시뮬레이터 포함 실행
-SCENARIO=collision_risk docker compose --profile simulation up -d
+# 모든 서비스 상태 확인
+docker compose ps
 
-# Ollama를 Docker 컨테이너에서도 실행하고 싶으면 (선택)
-LLM_BACKEND=ollama docker compose --profile ollama up -d
-# 최초 실행 시 ollama-init이 모델(qwen2.5:3b)을 자동 pull (~2GB)
-
-# vLLM(고성능 로컬 LLM) 포함 실행 (선택)
-LLM_BACKEND=vllm docker compose --profile vllm up -d
-# 최초 실행 시 HuggingFace에서 모델 자동 다운로드 (~2GB)
-
-# 기본 실행 (호스트 Ollama 사용)
-docker compose up -d
+# 특정 서비스 로그 보기
+docker compose logs -f core
 
 # 서비스별 재빌드
 docker compose build core && docker compose up -d core
 ```
 
-### Python 서비스 로컬 실행
+### 2. 네트워크 접근 (원격 호스트에서 연결)
 
 ```bash
-# 공통 — 각 서비스 디렉토리에서
+cd infra
+
+# PostgreSQL/Redis를 원격에서 접근 가능하도록 바인딩
+POSTGRES_BIND_ADDR=0.0.0.0 \
+REDIS_BIND_ADDR=0.0.0.0 \
+CORE_BIND_ADDR=0.0.0.0 \
+MOTH_BIND_ADDR=0.0.0.0 \
+docker compose up -d
+
+# ⚠️ 주의: 프로덕션 환경에서는 방화벽/VPN 설정 필수!
+```
+
+### 3. 시뮬레이터 포함 실행
+
+```bash
+cd infra
+
+# 기본 시뮬레이터 (demo 시나리오, 3배속)
+SCENARIO=demo docker compose --profile simulation up -d
+
+# 충돌 위험 시나리오
+SCENARIO=collision_risk docker compose --profile simulation up -d
+
+# 실시간 시뮬레이션 로그
+docker compose logs -f simulator
+```
+
+### 4. LLM 백엔드 선택
+
+```bash
+cd infra
+
+# Claude API 사용 (권장)
+ANTHROPIC_API_KEY=sk-... \
+LLM_BACKEND=claude \
+docker compose up -d
+
+# Ollama 컨테이너 포함 (Docker-in-Docker LLM)
+LLM_BACKEND=ollama docker compose --profile ollama up -d
+
+# vLLM 고성능 서버 포함
+LLM_BACKEND=vllm docker compose --profile vllm up -d
+```
+
+### 5. 분산 배포 (여러 PC에서 마이크로서비스 실행)
+
+#### PC1 (Database, Redis, Core Backend) 실행
+
+```bash
+# .env.local 설정
+cat > infra/.env.local <<EOF
+POSTGRES_BIND_ADDR=0.0.0.0          # 모든 IP에서 접근 가능
+REDIS_BIND_ADDR=0.0.0.0
+CORE_BIND_ADDR=0.0.0.0
+POSTGRES_PASSWORD=secure_password
+REDIS_PASSWORD=secure_password
+EOF
+
+cd infra
+docker compose up -d postgres redis core moth-bridge agent-gateway
+```
+
+#### PC2 (Agent Services) 실행
+
+```bash
+# .env.local 설정 (PC1의 IP를 192.168.1.100이라고 가정)
+cat > infra/.env.local <<EOF
+DATABASE_URL=postgresql+asyncpg://cowater:secure_password@192.168.1.100:5432/cowater
+REDIS_URL=redis://:secure_password@192.168.1.100:6379
+CORE_API_URL=http://192.168.1.100:7700
+CONTROL_AGENTS_UPSTREAM=http://control-agents:8001
+DETECTION_AGENTS_UPSTREAM=http://detection-agents:8001
+ANALYSIS_AGENTS_UPSTREAM=http://analysis-agents:8001
+RESPONSE_AGENTS_UPSTREAM=http://response-agents:8001
+REPORT_AGENTS_UPSTREAM=http://report-agents:8001
+LEARNING_AGENTS_UPSTREAM=http://learning-agents:8001
+SUPERVISION_AGENTS_UPSTREAM=http://supervision-agents:8001
+EOF
+
+cd infra
+# 에이전트 서비스들 (agent-gateway의 upstream이 같은 네트워크의 컨테이너를 가리킴)
+docker compose up -d agent-gateway control-agents response-agents report-agents supervision-agents learning-agents
+```
+
+#### PC3 (Frontend) 실행
+
+```bash
+# .env.local 설정 (PC1의 IP를 192.168.1.100이라고 가정)
+cat > services/frontend/.env.local <<EOF
+NEXT_PUBLIC_API_URL=http://192.168.1.100:7700
+NEXT_PUBLIC_WS_URL=ws://192.168.1.100:7700
+NEXT_PUBLIC_AGENTS_URL=http://192.168.1.100:7701
+NEXT_PUBLIC_POSITION_WS_URL=ws://192.168.1.100:7703
+EOF
+
+cd services/frontend
+npm run dev  # http://localhost:7702
+```
+
+### 6. Python 서비스 로컬 실행 (개발 모드, 자동 리로드)
+
+```bash
+# 사전 요구사항
 pip install -r requirements.txt
 
 # core
@@ -48,12 +155,6 @@ cd services/core && PYTHONPATH=../.. uvicorn main:app --reload --port 7700
 
 # control-agents (Chat agent for user interactions)
 cd services/control-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7701
-
-# detection-agents (Rule agents: CPA, Anomaly, Zone, Distress)
-cd services/detection-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7704
-
-# analysis-agents (AI analysis agent)
-cd services/analysis-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7705
 
 # response-agents (Response agent: Alert Creator)
 cd services/response-agents && PYTHONPATH=../.. uvicorn main:app --reload --port 7706
@@ -74,6 +175,16 @@ cd services/moth-bridge && python main.py
 cd services/simulator && SCENARIO=default python main.py
 ```
 
+### 7. 인증 정보 관리
+
+```bash
+# 프로덕션 배포 시 필수 설정 (.env.prod)
+POSTGRES_PASSWORD=생성된_강력한_비밀번호
+REDIS_PASSWORD=생성된_강력한_비밀번호
+ANTHROPIC_API_KEY=sk-...
+OLLAMA_URL=http://llm-server-ip:11434  # 원격 Ollama인 경우
+```
+
 ### Frontend
 
 ```bash
@@ -89,47 +200,114 @@ npm run lint
 
 ## 아키텍처
 
-### 데이터 흐름
+### 데이터 흐름 (Event Pipeline)
 
 ```
 Moth Server (wss://cobot.center:8287)
     ↓ RSSP/WebSocket
-[moth-bridge] ParsedReport.to_redis_payload() → Redis pub/sub
-                                                 platform.report.{id}
-                                                    ↓
-                            ┌───────────────────────────────┐
-                            │  [core] DB 저장               │
-                            │  [detection] Rule 에이전트:   │
-                            │    - CPA                      │
-                            │    - Anomaly                  │
-                            │    - Zone                     │
-                            │    - Distress (rule)          │
-                            └───────────────────────────────┘
-                                      ↓ detect.{agent_id}
-                            [analysis] AI 분석 에이전트
-                            (Anomaly AI, Distress AI)
-                                      ↓ analyze.{agent_id}
-                            [response] 경보 생성 에이전트
-                                      ↓ respond.{severity}
-                    ┌──────────────────────────────────┐
-                    │ [report] AI 리포트 생성           │
-                    │ [learning] 피드백 기반 학습      │
-                    └──────────────────────────────────┘
-                                      ↓ report.{id}
-                            [core] 리포트 DB 저장
-                                  + WS 브로드캐스트
+[moth-bridge] 
+  ParsedReport.to_redis_payload() 
+    → Redis pub/sub: platform.report.{platform_id}
                                       ↓
-                            [frontend] WebSocket 수신
+          ┌─────────────────────────────────────────┐
+          │ [core] DB 저장 (platform_reports)       │
+          │ WebSocket 브로드캐스트                  │
+          └─────────────────────────────────────────┘
+                          ↓
+          ┌─────────────────────────────────────────┐
+          │ [detection-agents] 비활성               │
+          │ Rule: CPA, Anomaly, Zone, Distress     │
+          │ → detect.{agent_id} 발행 (비활성)      │
+          └─────────────────────────────────────────┘
+                          ↓ (현재 비활성)
+          ┌─────────────────────────────────────────┐
+          │ [analysis-agents] 비활성                │
+          │ AI 분석: Anomaly AI, Distress AI        │
+          │ → analyze.{agent_id} 발행 (비활성)     │
+          └─────────────────────────────────────────┘
+                          ↓ (현재 비활성)
+          [response-agents] 경보 생성
+            → respond.{severity} 발행
+                          ↓
+        ┌───────────────────────────────────┐
+        │ [report-agents] AI 리포트 생성   │
+        │ [learning-agents] 피드백 학습    │
+        └───────────────────────────────────┘
+                        ↓
+        [core] reports 테이블 저장
+            + WebSocket 브로드캐스트
+                        ↓
+        [frontend] WebSocket 수신 (dashboard)
 ```
 
+**주의**: Detection/Analysis Agents가 비활성화되어 있으므로, 현재 platform.report → response-agents로 직접 연결되는 별도의 파이프라인이 필요합니다.
+
 **Event Pipeline (Redis pub/sub)**:
-- `platform.report.{platform_id}`: moth-bridge → core, detection
-- `detect.{agent_id}`: detection → analysis
-- `analyze.{agent_id}`: analysis → response
+- `platform.report.{platform_id}`: moth-bridge → core, detection (비활성), response
+- `detect.{agent_id}`: detection (비활성) → analysis (비활성)
+- `analyze.{agent_id}`: analysis (비활성) → response
 - `respond.{severity}`: response → core, report, learning
 - `report.{report_id}`: report → core
 - `user.{event_type}`: frontend → supervision, learning
 - `system.alert_acknowledge`: frontend → learning
+
+### 분산 배포 아키텍처 (Distributed Deployment)
+
+CoWater는 마이크로서비스를 여러 PC에 분산하여 배포할 수 있습니다:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PC1 (데이터 계층 + 코어 서비스)                                         │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │ postgres (TimescaleDB + PostGIS)                         :5432    │ │
+│  │ redis (Pub/Sub 버스)                                     :6379    │ │
+│  │ core (REST API + WebSocket hub)                          :7700    │ │
+│  │ moth-bridge (RSSP 수신)                                  :7703    │ │
+│  │ agent-gateway (에이전트 프록시, upstream은 PC2 가리킴)   :7701-09 │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│  ⬇️  (네트워크: DATABASE_URL, REDIS_URL로 PC2와 연결)                   │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PC2 (에이전트 계층)                                                      │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │ control-agents      (Chat Agent, LLM)                 :7701        │ │
+│  │ response-agents     (Alert Creator)                   :7706        │ │
+│  │ report-agents       (AI 리포트, LLM)                  :7709        │ │
+│  │ supervision-agents  (Health Monitor)                  :7707        │ │
+│  │ learning-agents     (Feedback Learning)               :7708        │ │
+│  │                                                                    │ │
+│  │ 환경변수로 PC1의 서비스 연결:                                      │ │
+│  │ - DATABASE_URL=postgresql://... @PC1:5432                         │ │
+│  │ - REDIS_URL=redis://:password@PC1:6379                            │ │
+│  │ - CORE_API_URL=http://PC1:7700                                    │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│  ⬇️  (agent-gateway가 이들의 upstream 관리: localhost:8001)             │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PC3 (프론트엔드 계층)                                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │ frontend (Next.js 대시보드)                            :7702        │ │
+│  │                                                                    │ │
+│  │ 환경변수로 PC1의 서비스 연결:                                      │ │
+│  │ - NEXT_PUBLIC_API_URL=http://PC1:7700                             │ │
+│  │ - NEXT_PUBLIC_AGENTS_URL=http://PC1:7701                          │ │
+│  │ - NEXT_PUBLIC_POSITION_WS_URL=ws://PC1:7703                       │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────┘
+
+(선택) PC4 (LLM 서버, 고성능 GPU 호스트)
+  └─ ollama serve :11434 또는 vllm :8000
+     ← OLLAMA_URL=http://PC4:11434 (agent-gateway의 .env.local)
+```
+
+**분산 배포 핵심 원칙**:
+1. **Data Tier (PC1)**: Postgres, Redis는 반드시 한 곳에 집중 (SPOF 피하려면 다중화 필요)
+2. **Agent Tier (PC2)**: Agent Container들은 stateless → 여러 PC에 분산 가능
+3. **Frontend Tier (PC3)**: Frontend는 완전 분리 가능 (단순히 HTTP/WS 클라이언트)
+4. **BIND_ADDR**: 기본값 `127.0.0.1`이므로 원격 접근하려면 `.env.local`에서 `0.0.0.0`으로 변경
+5. **네트워크 보안**: 모든 포트는 방화벽/VPN으로 보호 필수 (프로덕션)
 
 **스트림**:
 - 위치 스트림: `moth-bridge`의 `/ws/positions` fast path 사용
@@ -138,19 +316,28 @@ Moth Server (wss://cobot.center:8287)
 
 ### 서비스별 역할
 
-| 서비스        | 포트 | 역할                                                                       |
-| ------------- | ---- | -------------------------------------------------------------------------- |
-| `moth-bridge` | 7703 (host) / 8002 (container) | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행 + `/ws/positions` relay |
-| `core`        | 7700 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`, `/ws/reports`) |
-| `control-agents` | 7701 | Chat 에이전트 (사용자 대화), 제어 명령 API |
-| `detection-agents` | 7704 | Rule 에이전트 (CPA, Anomaly, Zone, Distress), `platform.report.*` 구독 |
-| `analysis-agents` | 7705 | AI 분석 에이전트 (Anomaly AI, Distress AI), `detect.*` 구독 |
-| `response-agents` | 7706 | 경보 생성 에이전트 (Alert Creator), `analyze.*` 구독 |
-| `report-agents` | 7709 | AI 리포트 생성 에이전트, `respond.*` 구독 → reports 테이블 저장 |
-| `supervision-agents` | 7707 | Supervisor 에이전트, 전체 시스템 상태 모니터링 + heartbeat 추적 |
-| `learning-agents` | 7708 | Learning 에이전트, 피드백(`user.*`) 및 응답(`respond.*`) 분석 |
-| `simulator`   | —    | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시                          |
-| `frontend`    | 7702 | Next.js 15 해양 관제 대시보드 + 에이전트 제어 UI                          |
+| 서비스        | 포트 | 상태 | 역할                                                                       |
+| ------------- | ---- | ---- | -------------------------------------------------------------------------- |
+| **인프라**    |      |      |
+| `postgres`    | 5432 | ✅ 활성 | TimescaleDB + PostGIS, 시계열/지리공간 데이터 저장 |
+| `redis`       | 6379 | ✅ 활성 | Pub/Sub 이벤트 버스, 실시간 메시징 |
+| **API & 게이트웨이** |      |      |
+| `core`        | 7700 | ✅ 활성 | REST API, TimescaleDB 저장, WebSocket 허브 (`/ws/platforms`, `/ws/alerts`, `/ws/reports`) |
+| `agent-gateway` | 7701-7709 | ✅ 활성 | Nginx 리버스 프록시, 에이전트 서비스들의 upstream 관리 |
+| `moth-bridge` | 7703 | ✅ 활성 | Moth/RSSP 수신 → `PlatformReport` 정규화 → Redis 발행 + `/ws/positions` relay |
+| **에이전트 (Agent Container)** |      |      |
+| `control-agents` | 7701 (via gateway) | ✅ 활성 | Chat 에이전트 (사용자 대화), 제어 명령 API, LLM 기반 |
+| `detection-agents` | 7704 | ❌ 비활성 | Rule 에이전트 (CPA, Anomaly, Zone, Distress), `platform.report.*` 구독 |
+| `analysis-agents` | 7705 | ❌ 비활성 | AI 분석 에이전트 (Anomaly AI, Distress AI), `detect.*` 구독, LLM 기반 |
+| `response-agents` | 7706 (via gateway) | ✅ 활성 | 경보 생성 에이전트 (Alert Creator), `analyze.*` 구독 |
+| `report-agents` | 7709 (via gateway) | ✅ 활성 | AI 리포트 생성 에이전트, `respond.*` 구독 → reports 테이블 저장, LLM 기반 |
+| `supervision-agents` | 7707 (via gateway) | ✅ 활성 | Supervisor 에이전트, 전체 시스템 상태 모니터링 + heartbeat 추적 |
+| `learning-agents` | 7708 (via gateway) | ✅ 활성 | Learning 에이전트, 피드백(`user.*`) 및 응답(`respond.*`) 분석 |
+| **보조**      |      |      |
+| `simulator`   | — | ✅ 선택 | YAML 시나리오 기반 AIS 생성, Moth 서버에 퍼블리시 (profile: simulation) |
+| `frontend`    | 7702 | ✅ 활성 | Next.js 15 해양 관제 대시보드 + 에이전트 제어 UI |
+
+**주의**: Detection/Analysis Agents는 현재 docker-compose.yml에서 주석 처리되어 있습니다. 활성화하려면 해당 섹션의 주석을 제거하세요.
 
 ### 공유 타입 및 유틸 (`shared/`)
 
@@ -191,19 +378,33 @@ Moth Server (wss://cobot.center:8287)
 ### Container vs Agent 구조
 
 **Container (서비스 단위)** vs **Agent (실행 단위)**의 구분:
-- **Container**: Docker 컨테이너 = 마이크로서비스 (detection, analysis, response, report, learning, supervision, control)
-- **Agent**: Container 내에서 실행되는 개별 logic unit (예: Detection Container에는 CPA, Anomaly, Zone, Distress agents가 포함)
+- **Container**: Docker 컨테이너 = 마이크로서비스 (control, response, report, learning, supervision, detection❌, analysis❌)
+- **Agent**: Container 내에서 실행되는 개별 logic unit (예: Detection Container에는 CPA, Anomaly, Zone, Distress agents가 포함—단, 현재 비활성)
 
-**Event-driven Subscription Pattern**:
+**Event-driven Subscription Pattern (현재 상태)**:
 ```
-Detection  → platform.report.* 구독 → CPA/Anomaly/Zone/Distress 규칙 실행 → detect.{agent_id} 발행
-Analysis   → detect.* 구독 → AI 분석 에이전트 실행 → analyze.{agent_id} 발행
-Response   → analyze.* 구독 → Alert Creator 실행 → respond.{severity} 발행
-Report     → respond.* 구독 → AI 리포트 생성 → report.{report_id} 발행
-Learning   → respond.*, user.* 구독 → 피드백 학습 → learn.rule_update.* 발행
-Supervision → (heartbeat 주기 체크) → health 상태 발행
-Control    → agent.command.* 구독 → Chat Agent 실행
+Moth Server
+    ↓ RSSP/WebSocket
+moth-bridge
+    ↓ Redis: platform.report.*
+    ├─ core: DB 저장 + WebSocket 브로드캐스트
+    └─ response-agents: 직접 처리 (detection 비활성)
+        ↓ Redis: respond.{severity}
+        ├─ core: alerts 테이블 저장
+        ├─ report-agents: AI 리포트 생성
+        └─ learning-agents: 피드백 기반 학습
+            ↓ Redis: learn.rule_update.*
+            └─ (detection, response 구독했지만 모두 비활성)
+
+Control
+    ↓ user interaction
+frontend
+    ↓ Redis: user.*
+    ├─ supervision-agents: 상태 모니터링
+    └─ learning-agents: 사용자 피드백 학습
 ```
+
+**주의**: Detection/Analysis 컨테이너가 비활성화되어 있으므로, 현재 파이프라인이 단순화되어 있습니다. 활성화하려면 docker-compose.yml의 주석을 제거하세요.
 
 **Agent 실행 패턴**:
 - **Rule Agent** (Detection, Response): 동기 실행 (`await`)
@@ -265,6 +466,40 @@ CREATE TABLE learning_insights (
 ### Protocol Adapter 확장
 
 새 프로토콜 추가 시 `services/moth-bridge/adapters/` 에 `ProtocolAdapter` 서브클래스 작성 후 `config.yaml`에 채널 추가. 현재 활성: `NMEAAdapter`. 스텁: `MAVLinkAdapter`, `ROSAdapter`.
+
+### Agent Gateway (Nginx) 구성
+
+**목적**: 분산된 에이전트 서비스들을 단일 진입점(7701-7709)으로 통합
+
+**작동 원리**:
+1. `agent-gateway` 컨테이너는 Nginx 리버스 프록시
+2. 환경변수로 각 에이전트 서비스의 upstream 지정:
+   - `CONTROL_AGENTS_UPSTREAM`: control-agents 위치 (기본: http://control-agents:8001)
+   - `DETECTION_AGENTS_UPSTREAM`: detection-agents 위치 (기본: http://detection-agents:8001)
+   - `ANALYSIS_AGENTS_UPSTREAM`: analysis-agents 위치 (기본: http://analysis-agents:8001)
+   - `RESPONSE_AGENTS_UPSTREAM`: response-agents 위치 (기본: http://response-agents:8001)
+   - `REPORT_AGENTS_UPSTREAM`: report-agents 위치 (기본: http://report-agents:8001)
+   - `LEARNING_AGENTS_UPSTREAM`: learning-agents 위치 (기본: http://learning-agents:8001)
+   - `SUPERVISION_AGENTS_UPSTREAM`: supervision-agents 위치 (기본: http://supervision-agents:8001)
+
+**분산 배포 시 설정**:
+```bash
+# PC2에서 실행할 때, 모든 upstream이 localhost:8001을 가리킴
+# (같은 docker-compose 네트워크 내에서 컨테이너명으로 해석)
+docker compose up -d agent-gateway control-agents response-agents ...
+
+# 각 에이전트는 내부적으로 :8001에서 수신
+# agent-gateway가 :7701-7709로 리버스 프록시
+```
+
+**포트 매핑**:
+- 7701 → control-agents:8001 (/control)
+- 7704 → detection-agents:8001 (/detection)
+- 7705 → analysis-agents:8001 (/analysis)
+- 7706 → response-agents:8001 (/response)
+- 7707 → supervision-agents:8001 (/supervision)
+- 7708 → learning-agents:8001 (/learning)
+- 7709 → report-agents:8001 (/report)
 
 ### Frontend 상태 관리 및 API
 
