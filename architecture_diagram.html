@@ -247,6 +247,7 @@ h1 { text-align:center; font-size:1.5rem; font-weight:700; color:#7dd3fc; margin
   <div class="tab" onclick="show('bridge')">moth-bridge 상세</div>
   <div class="tab" onclick="show('core')">core 소비자 상세</div>
   <div class="tab" onclick="show('agents')">에이전트 상세</div>
+  <div class="tab" onclick="show('frontend')">Frontend UI</div>
   <div class="tab" onclick="show('db')">DB 스키마</div>
   <div class="tab" onclick="show('levels')">자율성 레벨</div>
 </div>
@@ -882,7 +883,99 @@ _clients: set[WebSocket] = set() &nbsp;<span class="cm"># 연결된 프론트엔
 </div>
 
 <!-- ═══════════════════════════════════════════════════
-     VIEW 5: DB 스키마
+     VIEW 5: Frontend UI 계층
+═══════════════════════════════════════════════════ -->
+<div id="view-frontend" class="view">
+<div style="max-width:1100px;margin:0 auto;">
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+  <!-- Layer 1: Pages -->
+  <div style="grid-column:1/3;">
+    <div style="background:#0b1120;border:1.5px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Pages (Next.js)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;background:#1e3a5f;border:1px solid #1e40af;border-radius:6px;padding:8px;text-align:center;font-size:.8rem;color:#93c5fd;">/ (Dashboard)</div>
+        <div style="flex:1;background:#1e3a5f;border:1px solid #1e40af;border-radius:6px;padding:8px;text-align:center;font-size:.8rem;color:#93c5fd;">/platforms</div>
+        <div style="flex:1;background:#1e3a5f;border:1px solid #1e40af;border-radius:6px;padding:8px;text-align:center;font-size:.8rem;color:#93c5fd;">/alerts</div>
+        <div style="flex:1;background:#1e3a5f;border:1px solid #1e40af;border-radius:6px;padding:8px;text-align:center;font-size:.8rem;color:#93c5fd;">/agents</div>
+        <div style="flex:1;background:#1e3a5f;border:1px solid #1e40af;border-radius:6px;padding:8px;text-align:center;font-size:.8rem;color:#93c5fd;">/reports</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layer 2: Layout & Components -->
+  <div>
+    <div style="background:#0b1120;border:1.5px solid #334155;border-radius:10px;padding:14px;height:100%;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:10px;">UI 컴포넌트</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:.75rem;color:#cbd5e1;">
+        <div style="padding:6px;background:#1e4d2b;border-radius:4px;color:#86efac;">• SparkLine (SVG)</div>
+        <div style="padding:6px;background:#1e4d2b;border-radius:4px;color:#86efac;">• DonutRing (SVG)</div>
+        <div style="padding:6px;background:#1e4d2b;border-radius:4px;color:#86efac;">• SeverityBar</div>
+        <div style="padding:6px;background:#1e4d2b;border-radius:4px;color:#86efac;">• TimelineList</div>
+        <div style="padding:6px;background:#1e4d2b;border-radius:4px;color:#86efac;">• LiveDot</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div style="background:#0b1120;border:1.5px solid #334155;border-radius:10px;padding:14px;height:100%;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:10px;">상태 관리 (Zustand)</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:.75rem;color:#cbd5e1;">
+        <div style="padding:6px;background:#04111a;border-radius:4px;color:#7dd3fc;">• platformStore</div>
+        <div style="padding:6px;background:#04111a;border-radius:4px;color:#7dd3fc;">• alertStore</div>
+        <div style="padding:6px;background:#04111a;border-radius:4px;color:#7dd3fc;">• zoneStore</div>
+        <div style="padding:6px;background:#04111a;border-radius:4px;color:#7dd3fc;">• mapLayerStore</div>
+        <div style="padding:6px;background:#04111a;border-radius:4px;color:#7dd3fc;">• themeStore</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layer 3: Data Flow -->
+  <div style="grid-column:1/3;">
+    <div style="background:#0b1120;border:1.5px solid #334155;border-radius:10px;padding:14px;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:10px;">실시간 연결</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:.75rem;">
+        <div style="background:#110800;border:1px solid #7c3a0e;border-radius:6px;padding:8px;text-align:center;color:#fdba74;">WebSocket<br>/ws/platforms</div>
+        <div style="background:#110505;border:1px solid #7f1d1d;border-radius:6px;padding:8px;text-align:center;color:#fca5a5;">WebSocket<br>/ws/alerts</div>
+        <div style="background:#040c06;border:1px solid #1c3a2a;border-radius:6px;padding:8px;text-align:center;color:#6ee7b7;">WebSocket<br>/ws/reports</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="background:#0e0518;border:1.5px solid #581c87;border-radius:10px;padding:16px;margin-bottom:20px;">
+  <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#c084fc;margin-bottom:12px;">🎯 주요 기능 (Phase 1-10)</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;font-size:.75rem;color:#cbd5e1;">
+    <div><span style="color:#6ee7b7;">✓</span> 다크/라이트 모드 (data-theme 속성)</div>
+    <div><span style="color:#6ee7b7;">✓</span> 5개 CSS 애니메이션</div>
+    <div><span style="color:#6ee7b7;">✓</span> 7개 시각화 컴포넌트</div>
+    <div><span style="color:#6ee7b7;">✓</span> 키보드 단축키 (⌘K, ↑↓, A, ?)</div>
+    <div><span style="color:#6ee7b7;">✓</span> 지도 레이어 컨트롤 (FAB + 패널)</div>
+    <div><span style="color:#6ee7b7;">✓</span> 플랫폼 타입 필터링</div>
+    <div><span style="color:#6ee7b7;">✓</span> 타임라인 날짜 그룹핑</div>
+    <div><span style="color:#6ee7b7;">✓</span> 실시간 데이터 표시 (LiveDot)</div>
+    <div><span style="color:#6ee7b7;">✓</span> Sticky KPI 바</div>
+    <div><span style="color:#6ee7b7;">✓</span> 테이블/카드 뷰 토글</div>
+  </div>
+</div>
+
+<div style="background:#0f172a;border:1.5px solid #1e293b;border-radius:10px;padding:16px;">
+  <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#94a3b8;margin-bottom:12px;">📋 컴포넌트 계층</div>
+  <div style="font-size:.75rem;color:#cbd5e1;line-height:1.8;font-family:monospace;">
+    <div style="margin-bottom:8px;"><span style="color:#93c5fd;">NavBar</span> ─ ThemeToggle, LiveDot, KeyboardShortcutHint</div>
+    <div style="margin-bottom:8px;"><span style="color:#93c5fd;">MaritimeMap</span> ─ LayerControlPanel + mapLayerStore</div>
+    <div style="margin-bottom:8px;"><span style="color:#93c5fd;">Dashboard</span> ─ SeverityBar, SparkLine, 3-column layout</div>
+    <div style="margin-bottom:8px;"><span style="color:#93c5fd;">AlertsPage</span> ─ DonutRing, SeverityBar, TimelineList</div>
+    <div style="margin-bottom:8px;"><span style="color:#93c5fd;">PlatformsPage</span> ─ ViewToggle (Table/Card), FilterChip</div>
+    <div><span style="color:#93c5fd;">ReportsPage</span> ─ TimelineList, FilterChip, TimeRange filter</div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     VIEW 6: DB 스키마
 ═══════════════════════════════════════════════════ -->
 <div id="view-db" class="view">
 <div class="db-grid">
@@ -1045,7 +1138,7 @@ _clients: set[WebSocket] = set() &nbsp;<span class="cm"># 연결된 프론트엔
 </div>
 
 <script>
-const views = ['flow','bridge','core','agents','db','levels'];
+const views = ['flow','bridge','core','agents','frontend','db','levels'];
 function show(name) {
   views.forEach(v => {
     document.getElementById('view-'+v).style.display = (v===name)?'block':'none';

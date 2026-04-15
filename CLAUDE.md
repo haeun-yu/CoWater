@@ -335,6 +335,131 @@ GET /reports/{report_id}        (보고서 상세 조회)
 - **실제 Moth 서버 연결**: `MOTH_SERVER_URL=wss://cobot.center:8287`. 프로덕션 채널에 충돌하지 않는 시나리오 데이터만 사용할 것.
 
 ### Frontend
-- **Container 그룹핑**: `/agents` 페이지에서 각 서비스별 Container 카드로 표시
-- **Agent 상세 보기**: Container 클릭 시 실행 agent 목록 + 발행 이벤트, config 상세 드로어 오픈
-- **Environment Variables**: 각 서비스 URL은 `NEXT_PUBLIC_*_URL` 환경변수로 설정 (Docker build time)
+
+#### 기술 스택
+- **Framework**: Next.js 15, React 19
+- **State Management**: Zustand (store per domain)
+- **Styling**: Tailwind CSS + CSS custom properties (dark/light mode)
+- **Map**: MapLibre GL (open-source, no API key required)
+- **Real-time**: WebSocket (`/ws/platforms`, `/ws/alerts`, `/ws/reports`)
+- **Type Safety**: TypeScript, strict mode
+
+#### Zustand 스토어
+| Store | 역할 |
+|-------|------|
+| `platformStore` | 플랫폼 위치 (MMSI, lat/lon, SOG, COG), 선택 상태 |
+| `alertStore` | 경보 목록 (severity, status, timestamps) |
+| `agentStore` | 에이전트 상태 및 설정 |
+| `zoneStore` | 관제 구역 지역 데이터 (PostGIS geometry) |
+| `systemStore` | 시스템 상태 (streams, notifications) |
+| `authStore` | 사용자 역할 및 권한 (viewer/operator/admin) |
+| `eventStore` | 탐지/분석/응답 이벤트 흐름 |
+| `themeStore` | 다크/라이트 모드 (localStorage 영속) |
+| `mapLayerStore` | 지도 레이어 가시성 (seamark, zones, platforms, trails, navAids) |
+
+#### UX/UI 개선사항 (Phase 1-10)
+
+**Phase 1: 디자인 시스템**
+- CSS 변수: `--bg-primary`, `--bg-secondary`, `--text-primary`, `--text-secondary` 등 16개
+- 애니메이션: `slide-in-from-top`, `fade-in`, `pulse-slow`, `count-update` (Tailwind 확장)
+- 다크/라이트 모드: HTML `data-theme` 속성으로 실시간 전환, localStorage 영속
+
+**Phase 2: 시각화 컴포넌트**
+- `LiveDot`: 실시간 상태 표시 (animated pulse)
+- `SparkLine`: SVG 미니 라인차트 (의존성 없음)
+- `DonutRing`: SVG 도넛 링 차트 (심각도 분포)
+- `SeverityBar`: 가로 스택바 (critical/warning/info 비율)
+- `TimelineList`: 날짜 그룹핑 타임라인 (오늘/어제 구분선)
+- `ThemeToggle`: 다크/라이트 모드 토글
+- `KeyboardShortcutHint`: 단축키 오버레이 (? 키 트리거)
+
+**Phase 3: NavBar 강화**
+- `ThemeToggle` (compact mode)
+- `KeyboardShortcutHint` 모달
+- `LiveDot` 실시간 연결 상태
+- 알림 뱃지 pulse 애니메이션 (`animate-pulse-slow`)
+
+**Phase 4: 대시보드 (/) 개선**
+- Sticky KPI 바: 4개 핵심 지표 + SeverityBar
+- 이벤트 흐름 SparkLine (탐지→분석→응답)
+- 3칼럼 레이아웃 (플랫폼/지도/경보) 유지
+
+**Phase 5: 경보 페이지 (/alerts) 개선**
+- DonutRing 심각도 분포 표시
+- SeverityBar 건수 비율
+- TimelineList 기반 경보 시간선 (타입별 정렬)
+
+**Phase 6: 플랫폼 페이지 (/platforms) 개선**
+- 타입별 분포 표시 (vessel/usv/rov/auv/drone/buoy)
+- 테이블/카드 뷰 토글 (FilterChip)
+- 카드뷰: grid-cols-2 md:grid-cols-3 lg:grid-cols-4
+
+**Phase 7: 에이전트 페이지 (/agents) 개선**
+- ContainerCard 헬스 상태 글로우 (emerald/amber/red)
+- LiveDot 각 파이프라인 단계에 표시
+- StatusBadge로 에이전트 상태 시각화
+
+**Phase 8: 리포트 페이지 (/reports) 개선**
+- 기간 필터 (오늘/7일/30일)
+- TimelineList 기반 리포트 타임라인
+- 리포트 타입별 컬러 코딩
+
+**Phase 9: 지도 레이어 컨트롤**
+- `mapLayerStore`: 레이어 가시성 상태 관리
+- `LayerControlPanel`: FAB 버튼 + 슬라이드 아웃 패널
+  - 기본 레이어 토글 (seamark, zones, platforms, trails, navAids)
+  - 플랫폼 타입 필터 (chip buttons)
+  - 구역 타입 필터 (color-coded toggles)
+  - 항적 길이 슬라이더 (10-200 points)
+  - 초기화 버튼
+- 플랫폼 마커 visiblePlatformTypes 기반 필터링
+- Trail 렌더링 showTrails 상태 존중
+
+**Phase 10: 상수 통합**
+- `lib/constants.ts`: 전역 상수 중복 제거
+  - ALERT_SEVERITY_LABEL, ALERT_TYPE_LABEL, ALERT_STATUS_LABEL
+  - PLATFORM_TYPE_ICON, PLATFORM_TYPE_LABEL, PLATFORM_TYPE_COLOR
+  - NAV_STATUS_LABEL, NAV_STATUS_BADGE_STYLE
+  - REPORT_TYPE_LABEL, REPORT_TYPE_COLOR, ROLE_ORDER
+
+#### 키보드 단축키 (`useKeyboard` hook)
+| 키 | 동작 |
+|----|------|
+| `?` | 단축키 오버레이 열기 |
+| `⌘K` / `Ctrl+K` | 빠른 플랫폼 검색 |
+| `↑↓` | 목록 항목 탐색 |
+| `Enter` | 항목 확인 |
+| `A` | 경보 확인 (Acknowledge) |
+| `Esc` | 패널/드로어 닫기 |
+| `1~5` | 페이지 빠른 이동 (1=Home, 2=Platforms, 3=Alerts, 4=Agents, 5=Reports) |
+
+#### 환경 변수
+```
+# Frontend development
+NEXT_PUBLIC_CORE_URL=http://localhost:7700
+NEXT_PUBLIC_DETECTION_URL=http://localhost:7704
+NEXT_PUBLIC_ANALYSIS_URL=http://localhost:7705
+NEXT_PUBLIC_RESPONSE_URL=http://localhost:7706
+NEXT_PUBLIC_REPORT_URL=http://localhost:7709
+NEXT_PUBLIC_LEARNING_URL=http://localhost:7708
+NEXT_PUBLIC_SUPERVISION_URL=http://localhost:7707
+```
+
+#### 페이지별 특징
+- `/` (대시보드): 전체 현황 + 실시간 이벤트 흐름
+- `/platforms`: 선박/드론 목록 + 위치 필터
+- `/alerts`: 경보 타임라인 + 상세 분석
+- `/agents`: 에이전트 파이프라인 상태
+- `/reports`: AI 리포트 조회 + 기간 필터
+- `/zones`: 관제 구역 지도 표시
+
+---
+
+## Frontend 의존성 추가사항 (2026-04-16)
+- maplibre-gl: ^3.0.0 (지도 렌더링)
+- zustand: ^4.0.0 (상태 관리)
+- date-fns: ^3.0.0 (날짜 포맷팅)
+- 추가 의존성 없이 구현한 컴포넌트:
+  - SparkLine, DonutRing: Pure SVG (recharts/chart.js 없음)
+  - TimelineList: Vanilla React (react-beautiful-dnd 없음)
+  - ThemeToggle: CSS custom properties 기반
