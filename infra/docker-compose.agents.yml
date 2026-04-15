@@ -35,7 +35,7 @@ services:
       - control-agents
 
   # ─────────────────────────────────────────────────────
-  # PostgreSQL + PostGIS + TimescaleDB
+  # PostgreSQL + PostGIS + TimescaleDB (report-agents 의존성)
   # ─────────────────────────────────────────────────────
   postgres:
     image: timescale/timescaledb-ha:pg15-latest
@@ -44,7 +44,7 @@ services:
     environment:
       POSTGRES_DB: cowater
       POSTGRES_USER: cowater
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cowater_dev} # 프로덕션: 환경변수로 변경 필수
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cowater_dev}
     volumes:
       - postgres_data:/home/postgres/pgdata/data
       - ./postgres/01_extensions.sql:/docker-entrypoint-initdb.d/01_extensions.sql
@@ -53,7 +53,7 @@ services:
       - ./postgres/04_migration_dedup.sql:/docker-entrypoint-initdb.d/04_migration_dedup.sql
       - ./postgres/05_learning_reports.sql:/docker-entrypoint-initdb.d/05_learning_reports.sql
     ports:
-      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:5432:5432" # 기본: localhost만, 원격: 0.0.0.0
+      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cowater -d cowater"]
       interval: 10s
@@ -61,7 +61,7 @@ services:
       retries: 5
 
   # ─────────────────────────────────────────────────────
-  # Redis
+  # Redis (모든 agents 의존성)
   # ─────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -75,7 +75,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "${REDIS_BIND_ADDR:-127.0.0.1}:6379:6379" # 기본: localhost만, 원격: 0.0.0.0
+      - "${REDIS_BIND_ADDR:-127.0.0.1}:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cowater_dev}", "ping"]
       interval: 10s
@@ -83,7 +83,7 @@ services:
       retries: 5
 
   # ─────────────────────────────────────────────────────
-  # Core Backend
+  # Core Backend (모든 agents 의존성)
   # ─────────────────────────────────────────────────────
   core:
     build:
@@ -97,33 +97,10 @@ services:
       AGENTS_API_URL: ${AGENTS_API_URL:-http://agents:8001}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "${CORE_BIND_ADDR:-127.0.0.1}:7700:8000" # 기본: localhost만, 원격: 0.0.0.0
+      - "${CORE_BIND_ADDR:-127.0.0.1}:7700:8000"
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ─────────────────────────────────────────────────────
-  # Moth Bridge
-  # ─────────────────────────────────────────────────────
-  moth-bridge:
-    build:
-      context: ..
-      dockerfile: services/moth-bridge/Dockerfile
-    container_name: cowater-moth-bridge
-    restart: unless-stopped
-    environment:
-      MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      RAW_PAYLOAD_MODE: ${RAW_PAYLOAD_MODE:-cache}
-      RAW_PAYLOAD_PROTOCOLS: ${RAW_PAYLOAD_PROTOCOLS:-ais,ros,mavlink,nmea}
-      RAW_PAYLOAD_MAX_BYTES: ${RAW_PAYLOAD_MAX_BYTES:-4096}
-      RAW_PAYLOAD_TTL_SEC: ${RAW_PAYLOAD_TTL_SEC:-86400}
-    ports:
-      - "${MOTH_BIND_ADDR:-127.0.0.1}:7703:8002" # WebSocket relay
-    depends_on:
       redis:
         condition: service_healthy
 
@@ -139,10 +116,6 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
-      # ── LLM 백엔드 설정 ─────────────────────────────
-      # Claude 사용: LLM_BACKEND=claude + ANTHROPIC_API_KEY 설정
-      # Ollama 사용: LLM_BACKEND=ollama (--profile ollama 포함 실행 필요)
-      # vLLM  사용: LLM_BACKEND=vllm   (--profile vllm  포함 실행 필요)
       LLM_BACKEND: ${LLM_BACKEND:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
@@ -160,7 +133,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Detection Service (신규 — Event 기반 Detection Agent들)
+  # Detection Service (Event 기반 Detection Agent들)
   # ─────────────────────────────────────────────────────
   detection-agents:
     build:
@@ -188,11 +161,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Analysis Service (신규 — AI 기반 분석, 호스트 Ollama 사용)
-  # ─────────────────────────────────────────────────────
-  # 참고: 호스트 시스템의 Ollama 서버가 실행 중이어야 함
-  # Mac/Windows Docker Desktop: host.docker.internal:11434 (기본)
-  # Linux: localhost:11434 또는 docker0 IP
+  # Analysis Service (AI 기반 분석)
   # ─────────────────────────────────────────────────────
   analysis-agents:
     build:
@@ -203,7 +172,6 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
-      # Mac/Windows: host.docker.internal / Linux: localhost 또는 172.17.0.1
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -216,7 +184,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Response Service (신규 — Alert 생성 및 대응)
+  # Response Service (Alert 생성 및 대응)
   # ─────────────────────────────────────────────────────
   response-agents:
     build:
@@ -228,9 +196,6 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    # Port exposed via agent-gateway (7706)
-    # ports:
-    #   - "7706:8001"
     depends_on:
       redis:
         condition: service_healthy
@@ -238,7 +203,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Report Service (신규 — AI 기반 보고서 생성)
+  # Report Service (AI 기반 보고서 생성)
   # ─────────────────────────────────────────────────────
   report-agents:
     build:
@@ -258,9 +223,6 @@ services:
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    # Port exposed via agent-gateway (7709)
-    # ports:
-    #   - "7709:8001"
     depends_on:
       redis:
         condition: service_healthy
@@ -270,24 +232,7 @@ services:
         condition: service_started
 
   # ─────────────────────────────────────────────────────
-  # Supervision Service (신규 — Agent 상태 모니터링)
-  # ─────────────────────────────────────────────────────
-  supervision-agents:
-    build:
-      context: ..
-      dockerfile: services/supervision-agents/Dockerfile
-    container_name: cowater-supervision-agents
-    restart: unless-stopped
-    environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
-      HEALTH_CHECK_INTERVAL_SEC: ${HEALTH_CHECK_INTERVAL_SEC:-60}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-
-  # ─────────────────────────────────────────────────────
-  # Learning Service (신규 — 자동 규칙 개선)
+  # Learning Service (자동 규칙 개선)
   # ─────────────────────────────────────────────────────
   learning-agents:
     build:
@@ -304,154 +249,6 @@ services:
         condition: service_healthy
       core:
         condition: service_started
-
-  # ─────────────────────────────────────────────────────
-  # Simulator (선택적 — 개발/훈련 시만 실행)
-  # ─────────────────────────────────────────────────────
-  simulator:
-    build:
-      context: ../services/simulator
-      dockerfile: Dockerfile
-    container_name: cowater-simulator
-    restart: "no"
-    profiles:
-      - simulation
-    environment:
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
-      MOTH_SERVER_URL: ${MOTH_SERVER_URL:-wss://cobot.center:8287}
-      CORE_API_URL: ${CORE_API_URL:-http://core:8000}
-      SCENARIO: ${SCENARIO:-demo}
-      TIME_SCALE: "3.0"
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-
-  # ─────────────────────────────────────────────────────
-  # Frontend
-  # ─────────────────────────────────────────────────────
-  frontend:
-    build:
-      context: ../services/frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:7700}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:7700}
-        NEXT_PUBLIC_AGENTS_URL: ${NEXT_PUBLIC_AGENTS_URL:-http://localhost:7701}
-        NEXT_PUBLIC_POSITION_WS_URL: ${NEXT_PUBLIC_POSITION_WS_URL:-ws://localhost:7703}
-        NEXT_PUBLIC_DETECTION_AGENTS_URL: ${NEXT_PUBLIC_DETECTION_AGENTS_URL:-http://localhost:7704}
-        NEXT_PUBLIC_ANALYSIS_AGENTS_URL: ${NEXT_PUBLIC_ANALYSIS_AGENTS_URL:-http://localhost:7705}
-        NEXT_PUBLIC_RESPONSE_AGENTS_URL: ${NEXT_PUBLIC_RESPONSE_AGENTS_URL:-http://localhost:7706}
-        NEXT_PUBLIC_REPORT_AGENTS_URL: ${NEXT_PUBLIC_REPORT_AGENTS_URL:-http://localhost:7709}
-        NEXT_PUBLIC_LEARNING_AGENTS_URL: ${NEXT_PUBLIC_LEARNING_AGENTS_URL:-http://localhost:7708}
-        NEXT_PUBLIC_SUPERVISION_AGENTS_URL: ${NEXT_PUBLIC_SUPERVISION_AGENTS_URL:-http://localhost:7707}
-    container_name: cowater-frontend
-    restart: unless-stopped
-    ports:
-      - "7702:7702"
-    depends_on:
-      - core
-
-  # ─────────────────────────────────────────────────────
-  # Ollama (로컬 LLM 서버) — LLM_BACKEND=ollama 시 사용
-  # ─────────────────────────────────────────────────────
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: cowater-ollama
-  #   restart: unless-stopped
-  #   profiles:
-  #     - ollama
-  #   environment:
-  #     OLLAMA_HOST: "0.0.0.0"
-  #     OLLAMA_NUM_GPU: "99"          # 모든 레이어 GPU 오프로드 (MPS/CUDA 공통)
-  #     OLLAMA_FLASH_ATTENTION: "1"   # 메모리 효율 개선 → 속도 향상
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   ports:
-  #     - "11434:11434"
-  #   # Apple Silicon: MPS (Metal) 백엔드 자동 사용
-  #   # NVIDIA GPU 사용 시 아래 주석 해제:
-  #   # deploy:
-  #   #   resources:
-  #   #     reservations:
-  #   #       devices:
-  #   #         - driver: nvidia
-  #   #           count: 1
-  #   #           capabilities: [gpu]
-  #   healthcheck:
-  #     test: ["CMD", "ollama", "list"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 10
-  #     start_period: 30s
-
-  # # 모델 자동 pull (최초 1회)
-  # ollama-init:
-  #   image: ollama/ollama:latest
-  #   container_name: cowater-ollama-init
-  #   profiles:
-  #     - ollama
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   entrypoint: >
-  #     sh -c "
-  #       ollama serve &
-  #       pid=$$! &&
-  #       sleep 5 &&
-  #       ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
-  #       ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:3b} &&
-  #       kill $$pid || true
-  #     "
-  #   environment:
-  #     OLLAMA_HOST: "0.0.0.0"
-  #   depends_on:
-  #     - ollama
-
-  # ─────────────────────────────────────────────────────
-  # vLLM (고성능 로컬 LLM 서버) — LLM_BACKEND=vllm 시 사용
-  #
-  # Apple Silicon (MPS):
-  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
-  #
-  # NVIDIA GPU:
-  #   LLM_BACKEND=vllm docker compose --profile vllm up -d
-  #   → deploy.resources 섹션 주석 해제 필요
-  # ─────────────────────────────────────────────────────
-  # vllm:
-  #   image: vllm/vllm-openai:latest
-  #   container_name: cowater-vllm
-  #   restart: unless-stopped
-  #   profiles:
-  #     - vllm
-  #   environment:
-  #     VLLM_WORKER_MULTIPROC_METHOD: spawn
-  #   command: >
-  #     --model ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
-  #     --dtype ${VLLM_DTYPE:-auto}
-  #     --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
-  #     --gpu-memory-utilization ${VLLM_GPU_MEM:-0.85}
-  #     --host 0.0.0.0
-  #     --port 8000
-  #   volumes:
-  #     - vllm_data:/root/.cache/huggingface
-  #   ports:
-  #     - "8001:8000"
-  #   # ── Apple Silicon (MPS) ──────────────────────────
-  #   # vLLM MPS 지원은 실험적. 현재 CPU fallback으로 동작할 수 있음.
-  #   # ── NVIDIA GPU ───────────────────────────────────
-  #   # deploy:
-  #   #   resources:
-  #   #     reservations:
-  #   #       devices:
-  #   #         - driver: nvidia
-  #   #           count: 1
-  #   #           capabilities: [gpu]
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 10s
-  #     retries: 10
-  #     start_period: 60s
 
 volumes:
   postgres_data:
