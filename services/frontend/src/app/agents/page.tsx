@@ -462,7 +462,6 @@ export default function AgentsPage() {
         <EmptyState
           title="권한 부족"
           description="operator 이상의 권한이 필요합니다"
-          icon="🔒"
         />
       </div>
     );
@@ -478,35 +477,34 @@ export default function AgentsPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
-          title="전체 컨테이너"
+          label="전체 컨테이너"
           value={CONTAINERS.length}
-          unit="개"
-          icon="📦"
+          detail="개"
         />
         <MetricCard
-          title="정상 상태"
+          label="정상 상태"
           value={
             containerStatuses.filter((s) => s.health?.status === "ok").length
           }
-          unit="개"
-          icon="✓"
+          detail="개"
+          tone="success"
         />
         <MetricCard
-          title="주의"
+          label="주의"
           value={
             containerStatuses.filter((s) => s.health?.status === "degraded")
               .length
           }
-          unit="개"
-          icon="⚠"
+          detail="개"
+          tone="warning"
         />
         <MetricCard
-          title="오류"
+          label="오류"
           value={
             containerStatuses.filter((s) => s.health?.status === "error").length
           }
-          unit="개"
-          icon="✗"
+          detail="개"
+          tone="critical"
         />
       </div>
 

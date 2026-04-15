@@ -307,7 +307,6 @@ export default function ReportsPage() {
         <EmptyState
           title="권한 부족"
           description="viewer 이상의 권한이 필요합니다"
-          icon="🔒"
         />
       </div>
     );
@@ -325,28 +324,25 @@ export default function ReportsPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
-          title="전체 리포트"
+          label="전체 리포트"
           value={total}
-          unit="건"
-          icon="📋"
+          detail="건"
         />
         <MetricCard
-          title="요약"
+          label="요약"
           value={reports.filter((r) => r.report_type === "summary").length}
-          unit="건"
-          icon="📄"
+          detail="건"
         />
         <MetricCard
-          title="상세"
+          label="상세"
           value={reports.filter((r) => r.report_type === "detailed").length}
-          unit="건"
-          icon="📖"
+          detail="건"
         />
         <MetricCard
-          title="사건"
+          label="사건"
           value={reports.filter((r) => r.report_type === "incident").length}
-          unit="건"
-          icon="🚨"
+          detail="건"
+          tone="warning"
         />
       </div>
 
@@ -396,13 +392,11 @@ export default function ReportsPage() {
         <EmptyState
           title="오류 발생"
           description={error}
-          icon="⚠️"
         />
       ) : reports.length === 0 ? (
         <EmptyState
           title="리포트 없음"
           description="아직 생성된 리포트가 없습니다"
-          icon="📭"
         />
       ) : (
         <>

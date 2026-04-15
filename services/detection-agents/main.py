@@ -232,7 +232,7 @@ async def list_agents():
         {
             "agent_id": agent.agent_id,
             "type": "detection",
-            "config": agent.config,
+            "config": getattr(agent, "config", {}),
         }
         for agent in _agents
     ]
@@ -248,7 +248,7 @@ async def get_agent(agent_id: str):
     return {
         "agent_id": agent.agent_id,
         "type": "detection",
-        "config": agent.config,
+        "config": getattr(agent, "config", {}),
     }
 
 
@@ -258,6 +258,9 @@ async def set_agent_config(agent_id: str, config: dict):
     agent = next((a for a in _agents if a.agent_id == agent_id), None)
     if not agent:
         return {"error": "Agent not found"}, 404
+
+    if not hasattr(agent, "config") or not isinstance(agent.config, dict):
+        return {"error": "Agent config is not mutable"}, 400
 
     agent.config.update(config)
     logger.info("Agent %s config updated: %s", agent_id, config)

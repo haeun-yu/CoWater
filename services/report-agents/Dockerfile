@@ -14,4 +14,4 @@ COPY shared/ ./shared/
 ENV PYTHONPATH=/app
 
 # Report 서비스 실행
-CMD ["python", "-m", "uvicorn", "services.report_agents.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m", "uvicorn", "main:app", "--app-dir", "/app/services/report-agents", "--host", "0.0.0.0", "--port", "8001"]

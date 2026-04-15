@@ -17,7 +17,7 @@ from shared.events import Event, EventType
 from shared.llm_client import make_llm_client
 
 from config import settings
-from .base import AnalysisAgent
+from base import AnalysisAgent
 
 logger = logging.getLogger(__name__)
 

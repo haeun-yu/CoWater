@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import ProgrammingError
 from uuid import uuid4
 
 from auth import require_command_role
@@ -175,8 +176,13 @@ async def list_alerts(
         stmt = stmt.where(
             AlertModel.metadata_["workflow_state"].astext == workflow_state
         )
-    result = await db.execute(stmt)
-    return [AlertResponse.from_model(r) for r in result.scalars().all()]
+    try:
+        result = await db.execute(stmt)
+        return [AlertResponse.from_model(r) for r in result.scalars().all()]
+    except ProgrammingError:
+        # During local bootstrap, schema init can lag behind API startup.
+        logger.warning("alerts table is not ready yet; returning empty list")
+        return []
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)

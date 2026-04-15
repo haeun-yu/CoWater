@@ -14,4 +14,4 @@ COPY shared/ ./shared/
 ENV PYTHONPATH=/app
 
 # Detection 서비스 실행
-CMD ["python", "-m", "uvicorn", "services.detection_agents.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m", "uvicorn", "main:app", "--app-dir", "/app/services/detection-agents", "--host", "0.0.0.0", "--port", "8001"]

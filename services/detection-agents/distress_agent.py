@@ -16,7 +16,7 @@ import redis.asyncio as aioredis
 
 from shared.schemas.report import PlatformReport
 from shared.events import EventType
-from .base import DetectionAgent
+from base import DetectionAgent
 
 logger = logging.getLogger(__name__)
 

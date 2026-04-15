@@ -5,6 +5,7 @@ import { getCoreWsUrl } from "@/lib/publicUrl";
 import { useEventStore } from "@/stores/eventStore";
 import { useSystemStore } from "@/stores/systemStore";
 import { useToastStore } from "@/stores/toastStore";
+import { waitForCoreReady } from "@/lib/coreReady";
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
@@ -103,69 +104,83 @@ export function useEventWebSocket() {
   const toastPush = useToastStore((s) => s.push);
 
   useEffect(() => {
-    const dispose = createManagedWs(`${getCoreWsUrl()}/ws/events`, {
-      onOpen: () => {
-        console.log("[WS] Event stream connected");
-      },
-      onDisconnect: (reconnectAttempt) => {
-        console.warn(`[WS] Event stream disconnected (attempt ${reconnectAttempt})`);
-      },
-      onError: () => {
-        console.error("[WS] Event stream error");
-      },
-      onMessage: (data) => {
-        try {
-          const msg = data as {
-            type: string;
-            channel: string;
-            event?: Record<string, unknown>;
-          };
+    const controller = new AbortController();
+    let dispose = () => {};
 
-          if (msg.type === "event" && msg.event) {
-            const event = msg.event as {
-              flow_id: string;
-              event_id: string;
+    void (async () => {
+      try {
+        await waitForCoreReady(controller.signal);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("[WS] event stream start cancelled", error);
+        }
+        return;
+      }
+
+      dispose = createManagedWs(`${getCoreWsUrl()}/ws/events`, {
+        onOpen: () => {
+          console.log("[WS] Event stream connected");
+        },
+        onDisconnect: (reconnectAttempt) => {
+          console.warn(`[WS] Event stream disconnected (attempt ${reconnectAttempt})`);
+        },
+        onError: () => {
+          console.warn("[WS] Event stream retry scheduled");
+        },
+        onMessage: (data) => {
+          try {
+            const msg = data as {
               type: string;
-              agent_id: string;
-              payload?: Record<string, unknown>;
-              causation_id?: string;
-              timestamp?: number;
+              channel: string;
+              event?: Record<string, unknown>;
             };
 
-            addEvent({
-              id: event.event_id || Math.random().toString(36),
-              channel: msg.channel || "",
-              type: event.type || "",
-              timestamp: event.timestamp || Date.now(),
-              flow_id: event.flow_id || "",
-              event_id: event.event_id || "",
-              agent_id: event.agent_id || "",
-              payload: event.payload || {},
-              causation_id: event.causation_id,
-            });
+            if (msg.type === "event" && msg.event) {
+              const event = msg.event as {
+                flow_id: string;
+                event_id: string;
+                type: string;
+                agent_id: string;
+                payload?: Record<string, unknown>;
+                causation_id?: string;
+                timestamp?: number;
+              };
 
-            // Show toast for critical events
-            if (
-              event.type?.includes("detect") &&
-              event.payload?.severity === "critical"
-            ) {
-              const platform = event.payload?.platform_name || "Unknown";
-              toastPush({
-                severity: "critical",
-                agentName: event.agent_id || "Detection",
-                alertType: event.type,
-                message: `Critical event: ${platform}`,
-                platformIds: [],
+              addEvent({
+                id: event.event_id || Math.random().toString(36),
+                channel: msg.channel || "",
+                type: event.type || "",
+                timestamp: event.timestamp || Date.now(),
+                flow_id: event.flow_id || "",
+                event_id: event.event_id || "",
+                agent_id: event.agent_id || "",
+                payload: event.payload || {},
+                causation_id: event.causation_id,
               });
+
+              if (
+                event.type?.includes("detect") &&
+                event.payload?.severity === "critical"
+              ) {
+                const platform = event.payload?.platform_name || "Unknown";
+                toastPush({
+                  severity: "critical",
+                  agentName: event.agent_id || "Detection",
+                  alertType: event.type,
+                  message: `Critical event: ${platform}`,
+                  platformIds: [],
+                });
+              }
             }
+          } catch (error) {
+            console.error("[event-ws] message handling error:", error);
           }
-        } catch (error) {
-          console.error("[event-ws] message handling error:", error);
-        }
-      },
-    });
+        },
+      });
+    })();
 
     return () => {
+      controller.abort();
       dispose();
     };
   }, [addEvent, toastPush]);

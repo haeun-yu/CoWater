@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
 import EmptyState from "@/components/ui/EmptyState";
-import { CONTAINERS } from "@/config/containers";
+import { CONTAINERS, type ContainerDef } from "@/config/containers";
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ function ContainerRow({
   expanded,
   onExpand,
 }: {
-  container: Container;
+  container: ContainerDef;
   status: "ok" | "degraded" | "error";
   expanded: boolean;
   onExpand: () => void;

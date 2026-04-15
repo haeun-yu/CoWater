@@ -19,7 +19,7 @@ from shapely.geometry import Point, shape
 from shared.events import EventType
 from shared.schemas.report import PlatformReport
 
-from .base import DetectionAgent
+from base import DetectionAgent
 
 logger = logging.getLogger(__name__)
 

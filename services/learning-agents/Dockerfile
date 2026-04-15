@@ -14,4 +14,4 @@ COPY shared/ ./shared/
 ENV PYTHONPATH=/app
 
 # Learning 서비스 실행
-CMD ["python", "-m", "uvicorn", "services.learning_agents.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m", "uvicorn", "main:app", "--app-dir", "/app/services/learning-agents", "--host", "0.0.0.0", "--port", "8001"]

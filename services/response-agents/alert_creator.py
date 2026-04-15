@@ -12,7 +12,7 @@ from uuid import uuid4
 import redis.asyncio as aioredis
 
 from shared.events import Event, EventType
-from .base import ResponseAgent
+from base import ResponseAgent
 
 logger = logging.getLogger(__name__)
 

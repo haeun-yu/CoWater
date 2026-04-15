@@ -9,6 +9,7 @@ import { useSystemStore, type StreamKey } from "@/stores/systemStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { WsMessage, PlatformType } from "@/types";
 import { parseWsMessage } from "@/lib/wsMessage";
+import { waitForCoreReady } from "@/lib/coreReady";
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
@@ -32,7 +33,6 @@ const AGENT_NAMES: Record<string, string> = {
   "analysis-anomaly-ai": "Analysis Anomaly",
   "response-alert-creator": "Response Alert",
   "response-distress-agent": "Response Distress",
-  "report-agent": "Report Agent",
   "supervision-supervisor": "Supervision",
   "learning-agent": "Learning",
 };
@@ -144,6 +144,7 @@ export function useWebSocket() {
   const alertParseShown = useRef(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     const setConnected = (stream: StreamKey) => {
       setStreamStatus(stream, "connected", { reconnectAttempt: 0, error: null });
     };
@@ -220,83 +221,97 @@ export function useWebSocket() {
       },
     });
 
-    const disposeAlerts = createManagedWs(`${getCoreWsUrl()}/ws/alerts`, {
-      onOpen: () => {
-        alertIssueShown.current = false;
-        alertParseShown.current = false;
-        setConnected("alert");
-      },
-      onDisconnect: (reconnectAttempt) => {
-        setDisconnected("alert", reconnectAttempt);
-        notifyIssue("alert", "경보 스트림 연결이 끊어졌습니다. 자동으로 재연결합니다.");
-      },
-      onError: () => {
-        setErrored("alert", "경보 스트림 연결 오류");
-        notifyIssue("alert", "경보 스트림 연결에 문제가 발생했습니다.");
-      },
-      onParseError: () => {
-        console.error("[ws] failed to parse alert payload");
-        notifyParseIssue("alert");
-      },
-      onMessage: (data) => {
-        const msg = data as WsMessage;
-        if (msg.type !== "alert_created" && msg.type !== "alert_updated") return;
-        markStreamMessage("alert");
+    let disposeAlerts = () => {};
 
-        const alertData = {
-          alert_id: msg.alert_id,
-          alert_type: msg.alert_type,
-          severity: msg.severity,
-          status: msg.status,
-          platform_ids: msg.platform_ids,
-          zone_id: msg.zone_id,
-          generated_by: msg.generated_by,
-          message: msg.message,
-          recommendation: msg.recommendation,
-          metadata: msg.metadata,
-          created_at: msg.created_at,
-          acknowledged_at: msg.acknowledged_at,
-          resolved_at: msg.resolved_at,
-        };
-
-        if (msg.type === "alert_created") {
-          addAlert(alertData);
-        } else {
-          updateAlert(alertData);
+    void (async () => {
+      try {
+        await waitForCoreReady(controller.signal);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("[ws] alert stream start cancelled", error);
         }
+        return;
+      }
 
-        const meta = (msg.metadata ?? {}) as Record<string, unknown>;
-        const logEntry: ActivityLogEntry = {
-          id: msg.alert_id,
-          timestamp: msg.created_at,
-          agent_id: msg.generated_by,
-          agent_name: AGENT_NAMES[msg.generated_by] ?? msg.generated_by,
-          agent_type: isAIAgent(msg.generated_by) ? "ai" : "rule",
-          alert_type: msg.alert_type,
-          severity: msg.severity,
-          message: msg.message,
-          recommendation: msg.recommendation ?? null,
-          platform_ids: msg.platform_ids,
-          model: (meta.ai_model as string) ?? null,
-          metadata: meta,
-        };
+      disposeAlerts = createManagedWs(`${getCoreWsUrl()}/ws/alerts`, {
+        onOpen: () => {
+          alertIssueShown.current = false;
+          alertParseShown.current = false;
+          setConnected("alert");
+        },
+        onDisconnect: (reconnectAttempt) => {
+          setDisconnected("alert", reconnectAttempt);
+          notifyIssue("alert", "경보 스트림 연결이 끊어졌습니다. 자동으로 재연결합니다.");
+        },
+        onError: () => {
+          setErrored("alert", "경보 스트림 연결 오류");
+          notifyIssue("alert", "경보 스트림 연결에 문제가 발생했습니다.");
+        },
+        onParseError: () => {
+          console.error("[ws] failed to parse alert payload");
+          notifyParseIssue("alert");
+        },
+        onMessage: (data) => {
+          const msg = data as WsMessage;
+          if (msg.type !== "alert_created" && msg.type !== "alert_updated") return;
+          markStreamMessage("alert");
 
-        if (msg.type === "alert_created") {
-          addLog(logEntry);
-          toastPush({
-            severity: msg.severity as "critical" | "warning" | "info",
-            agentName: AGENT_NAMES[msg.generated_by] ?? msg.generated_by,
-            alertType: msg.alert_type,
+          const alertData = {
+            alert_id: msg.alert_id,
+            alert_type: msg.alert_type,
+            severity: msg.severity,
+            status: msg.status,
+            platform_ids: msg.platform_ids,
+            zone_id: msg.zone_id,
+            generated_by: msg.generated_by,
             message: msg.message,
-            platformIds: msg.platform_ids,
-          });
-        } else {
-          updateLog(logEntry);
-        }
-      },
-    });
+            recommendation: msg.recommendation,
+            metadata: msg.metadata,
+            created_at: msg.created_at,
+            acknowledged_at: msg.acknowledged_at,
+            resolved_at: msg.resolved_at,
+          };
+
+          if (msg.type === "alert_created") {
+            addAlert(alertData);
+          } else {
+            updateAlert(alertData);
+          }
+
+          const meta = (msg.metadata ?? {}) as Record<string, unknown>;
+          const logEntry: ActivityLogEntry = {
+            id: msg.alert_id,
+            timestamp: msg.created_at,
+            agent_id: msg.generated_by,
+            agent_name: AGENT_NAMES[msg.generated_by] ?? msg.generated_by,
+            agent_type: isAIAgent(msg.generated_by) ? "ai" : "rule",
+            alert_type: msg.alert_type,
+            severity: msg.severity,
+            message: msg.message,
+            recommendation: msg.recommendation ?? null,
+            platform_ids: msg.platform_ids,
+            model: (meta.ai_model as string) ?? null,
+            metadata: meta,
+          };
+
+          if (msg.type === "alert_created") {
+            addLog(logEntry);
+            toastPush({
+              severity: msg.severity as "critical" | "warning" | "info",
+              agentName: AGENT_NAMES[msg.generated_by] ?? msg.generated_by,
+              alertType: msg.alert_type,
+              message: msg.message,
+              platformIds: msg.platform_ids,
+            });
+          } else {
+            updateLog(logEntry);
+          }
+        },
+      });
+    })();
 
     return () => {
+      controller.abort();
       disposePosition();
       disposeAlerts();
     };

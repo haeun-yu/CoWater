@@ -6,11 +6,14 @@ from geoalchemy2.shape import to_shape
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import ProgrammingError
+import logging
 
 from db import get_db
 from models import ZoneModel
 
 router = APIRouter(prefix="/zones", tags=["zones"])
+logger = logging.getLogger(__name__)
 
 
 class ZoneResponse(BaseModel):
@@ -57,8 +60,13 @@ async def list_zones(
     stmt = select(ZoneModel)
     if active_only:
         stmt = stmt.where(ZoneModel.active == True)
-    result = await db.execute(stmt)
-    return [ZoneResponse.from_model(r) for r in result.scalars().all()]
+    try:
+        result = await db.execute(stmt)
+        return [ZoneResponse.from_model(r) for r in result.scalars().all()]
+    except ProgrammingError:
+        # Local fallback when PostGIS/schema init is incomplete.
+        logger.warning("zones table is not ready yet; returning empty list")
+        return []
 
 
 @router.get("/{zone_id}", response_model=ZoneResponse)

@@ -15,7 +15,7 @@ from shared.events import Event, EventType
 from shared.llm_client import make_llm_client
 
 from config import settings
-from .base import ResponseAgent
+from base import ResponseAgent
 
 logger = logging.getLogger(__name__)
 
