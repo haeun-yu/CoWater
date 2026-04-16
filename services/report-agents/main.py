@@ -2,7 +2,7 @@
 
 - Redis pub/sub 구독 (respond.*)
 - Report Agent 초기화
-- report.* 이벤트 발행 + DB 저장
+- Core API로 리포트 저장 (report.* 이벤트 발행)
 """
 
 import asyncio

@@ -239,6 +239,7 @@ services:
 
   # ─────────────────────────────────────────────────────
   # Report Service (신규 — AI 기반 보고서 생성)
+  # Core API로 리포트 저장 (Core만 DB 접근)
   # ─────────────────────────────────────────────────────
   report-agents:
     build:
@@ -249,7 +250,6 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://cowater:${POSTGRES_PASSWORD:-cowater_dev}@postgres:5432/cowater}
       LLM_BACKEND: ${LLM_BACKEND:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
@@ -263,8 +263,6 @@ services:
     #   - "7709:8001"
     depends_on:
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
       core:
         condition: service_started
