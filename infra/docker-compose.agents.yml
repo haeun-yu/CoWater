@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   agent-gateway:
     image: nginx:1.27-alpine
@@ -35,77 +33,7 @@ services:
       - control-agents
 
   # ─────────────────────────────────────────────────────
-  # PostgreSQL + PostGIS + TimescaleDB (report-agents 의존성)
-  # ─────────────────────────────────────────────────────
-  postgres:
-    image: timescale/timescaledb-ha:pg15-latest
-    container_name: cowater-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: cowater
-      POSTGRES_USER: cowater
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cowater_dev}
-    volumes:
-      - postgres_data:/home/postgres/pgdata/data
-      - ./postgres/01_extensions.sql:/docker-entrypoint-initdb.d/01_extensions.sql
-      - ./postgres/02_schema.sql:/docker-entrypoint-initdb.d/02_schema.sql
-      - ./postgres/03_seed.sql:/docker-entrypoint-initdb.d/03_seed.sql
-      - ./postgres/04_migration_dedup.sql:/docker-entrypoint-initdb.d/04_migration_dedup.sql
-      - ./postgres/05_learning_reports.sql:/docker-entrypoint-initdb.d/05_learning_reports.sql
-    ports:
-      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cowater -d cowater"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ─────────────────────────────────────────────────────
-  # Redis (모든 agents 의존성)
-  # ─────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: cowater-redis
-    restart: unless-stopped
-    command: >
-      redis-server
-      --save 60 1
-      --loglevel warning
-      --requirepass ${REDIS_PASSWORD:-cowater_dev}
-    volumes:
-      - redis_data:/data
-    ports:
-      - "${REDIS_BIND_ADDR:-127.0.0.1}:6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cowater_dev}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ─────────────────────────────────────────────────────
-  # Core Backend (모든 agents 의존성)
-  # ─────────────────────────────────────────────────────
-  core:
-    build:
-      context: ..
-      dockerfile: services/core/Dockerfile
-    container_name: cowater-core
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://cowater:${POSTGRES_PASSWORD:-cowater_dev}@postgres:5432/cowater}
-      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
-      AGENTS_API_URL: ${AGENTS_API_URL:-http://agents:8001}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "${CORE_BIND_ADDR:-127.0.0.1}:7700:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ─────────────────────────────────────────────────────
-  # Agent Runtime
+  # Agent Runtime (external core/redis/database)
   # ─────────────────────────────────────────────────────
   control-agents:
     build:
@@ -126,11 +54,6 @@ services:
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
 
   # ─────────────────────────────────────────────────────
   # Detection Service (Event 기반 Detection Agent들)
@@ -152,13 +75,6 @@ services:
       ANOMALY_HEADING_THRESHOLD: ${ANOMALY_HEADING_THRESHOLD:-45.0}
       ANOMALY_SPEED_THRESHOLD: ${ANOMALY_SPEED_THRESHOLD:-5.0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "7704:8001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
 
   # ─────────────────────────────────────────────────────
   # Analysis Service (AI 기반 분석)
@@ -174,14 +90,12 @@ services:
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "7705:8001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
 
   # ─────────────────────────────────────────────────────
   # Response Service (Alert 생성 및 대응)
@@ -196,11 +110,6 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
 
   # ─────────────────────────────────────────────────────
   # Report Service (AI 기반 보고서 생성)
@@ -223,13 +132,6 @@ services:
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      core:
-        condition: service_started
 
   # ─────────────────────────────────────────────────────
   # Learning Service (자동 규칙 개선)
@@ -244,12 +146,17 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
-
-volumes:
-  postgres_data:
-  redis_data:
+  
+  # ─────────────────────────────────────────────────────
+  # Supervision Service (Agent 상태 모니터링)
+  # ─────────────────────────────────────────────────────
+  supervision-agents:
+    build:
+      context: ..
+      dockerfile: services/supervision-agents/Dockerfile
+    container_name: cowater-supervision-agents
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
+      HEALTH_CHECK_INTERVAL_SEC: ${HEALTH_CHECK_INTERVAL_SEC:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
