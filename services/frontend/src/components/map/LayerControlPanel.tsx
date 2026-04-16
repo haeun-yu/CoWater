@@ -6,7 +6,6 @@
 
 import { useState } from "react";
 import { useMapLayerStore } from "@/stores/mapLayerStore";
-import FilterChip from "@/components/ui/FilterChip";
 
 const PLATFORM_TYPES = [
   { id: "vessel", label: "선박", icon: "▲" },

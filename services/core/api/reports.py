@@ -114,8 +114,9 @@ async def create_report(
         )
 
     except Exception as exc:
+        await db.rollback()
         logger.exception("Failed to create report: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to create report: {str(exc)}")
+        raise HTTPException(status_code=500, detail="Failed to create report")
 
 
 @router.get("", response_model=ReportsListResponse)

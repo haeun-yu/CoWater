@@ -56,7 +56,11 @@ class Supervisor:
                 event = Event.from_json(json.dumps(data))
 
                 agent_id = event.agent_id
-                self._last_heartbeat[agent_id] = event.timestamp
+                last_beat = event.timestamp
+                # 하위 호환: naive datetime은 UTC로 보정
+                if last_beat.tzinfo is None:
+                    last_beat = last_beat.replace(tzinfo=timezone.utc)
+                self._last_heartbeat[agent_id] = last_beat
 
                 # logger.debug("Heartbeat received from %s", agent_id)
 

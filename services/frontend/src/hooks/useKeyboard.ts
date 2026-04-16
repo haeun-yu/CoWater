@@ -37,9 +37,9 @@ export const useKeyboard = (options: KeyboardHookOptions) => {
       if (isInputField && e.key !== "Escape") return;
 
       switch (e.key.toLowerCase()) {
-        // ? : 단축키 오버레이 열기
+        // ? : 단축키 오버레이 열기 (Shift+/ 조합으로 입력되므로 shiftKey 조건 불필요)
         case "?":
-          if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          if (!e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             onOpenShortcuts?.();
           }

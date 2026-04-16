@@ -101,6 +101,19 @@ function getSeverityColors(severity?: string) {
   }
 }
 
+function getSelectedBorderClass(severity?: string): string {
+  switch (severity) {
+    case "critical":
+      return "border-red-500/30";
+    case "warning":
+      return "border-amber-500/30";
+    case "info":
+      return "border-blue-500/30";
+    default:
+      return "border-ocean-600/30";
+  }
+}
+
 export default function TimelineList({
   items,
   groupByDate = true,
@@ -166,7 +179,7 @@ export default function TimelineList({
                     }}
                     className={`w-full text-left pl-9 pr-3 py-2.5 rounded-lg transition-colors relative ${
                       isSelected
-                        ? `${colors.line} border border-${item.severity === "critical" ? "red" : item.severity === "warning" ? "amber" : "blue"}-500/30`
+                        ? `${colors.line} border ${getSelectedBorderClass(item.severity)}`
                         : "hover:bg-ocean-900/30"
                     }`}
                   >

@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import random
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
@@ -55,6 +54,7 @@ class DetectionAnomalyAgent(DetectionAgent):
         self._last_sog: dict[str, float] = {}
         self._last_sog_time: dict[str, datetime] = {}
         self._ais_lost: set[str] = set()
+        self._report_count: int = 0
 
     async def restore_state(self) -> None:
         """서비스 재시작 시 AIS 관련 상태 복구."""
@@ -191,8 +191,9 @@ class DetectionAnomalyAgent(DetectionAgent):
                 )
 
         self._last_report[platform_id] = report
+        self._report_count += 1
         # AIS 복구 이벤트가 발생한 경우 이미 저장했으므로, 그 외에는 매 100번째 보고마다 저장
-        if len(self._last_seen) % 100 == 0:
+        if self._report_count % 100 == 0:
             await self._save_state()
 
     async def check_ais_timeout(self) -> None:

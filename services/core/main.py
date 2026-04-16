@@ -55,7 +55,11 @@ async def _wait_for_database_ready() -> None:
 
 
 async def _create_tables() -> None:
-    """Create all database tables from ORM models."""
+    """Create all database tables from ORM models (dev only; use Alembic in production)."""
+    from config import settings as _settings  # local import to avoid circular
+    if not _settings.auto_migrate:
+        logger.info("AUTO_MIGRATE=false — skipping create_all (use Alembic for migrations)")
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created/verified")
