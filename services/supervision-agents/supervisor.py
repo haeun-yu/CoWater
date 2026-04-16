@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 
@@ -56,7 +56,11 @@ class Supervisor:
                 event = Event.from_json(json.dumps(data))
 
                 agent_id = event.agent_id
-                self._last_heartbeat[agent_id] = event.timestamp
+                last_beat = event.timestamp
+                # 하위 호환: naive datetime은 UTC로 보정
+                if last_beat.tzinfo is None:
+                    last_beat = last_beat.replace(tzinfo=timezone.utc)
+                self._last_heartbeat[agent_id] = last_beat
 
                 # logger.debug("Heartbeat received from %s", agent_id)
 
@@ -64,8 +68,8 @@ class Supervisor:
                 logger.error("Error processing heartbeat: %s", e)
 
     async def check_health(self) -> dict:
-        """Agent 상태 확인"""
-        now = datetime.utcnow()
+        """Agent 상태 확인 및 비정상 에이전트 경보 발행"""
+        now = datetime.now(tz=timezone.utc)
         health_status = {}
 
         for agent_id in MONITORED_AGENTS:
@@ -74,11 +78,17 @@ class Supervisor:
             if last_beat is None:
                 health_status[agent_id] = "unknown"
             elif (now - last_beat).total_seconds() > HEARTBEAT_TIMEOUT_SEC:
+                elapsed = (now - last_beat).total_seconds()
                 health_status[agent_id] = "unhealthy"
                 logger.error(
                     "Agent %s is unhealthy (no heartbeat for %.0fs)",
                     agent_id,
-                    (now - last_beat).total_seconds(),
+                    elapsed,
+                )
+                await self.emit_system_alert(
+                    alert_type="agent_unhealthy",
+                    message=f"Agent {agent_id}가 응답하지 않습니다 ({int(elapsed)}초 경과)",
+                    details={"agent_id": agent_id, "elapsed_sec": int(elapsed)},
                 )
             else:
                 health_status[agent_id] = "healthy"
@@ -95,7 +105,7 @@ class Supervisor:
         alert = {
             "type": alert_type,
             "message": message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "details": details or {},
         }
 

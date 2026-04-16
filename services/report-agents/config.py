@@ -4,12 +4,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Report 서비스 환경 변수"""
+    """Report 서비스 환경 변수
+
+    ⚠️ DATABASE_URL 불필요 — Core API를 통해 리포트 저장 (Core만 DB 접근)
+    """
 
     # 기본
     redis_url: str = "redis://localhost:6379"
     core_api_url: str = "http://localhost:8000"
-    database_url: str = "postgresql+asyncpg://cowater:cowater_dev@localhost:5432/cowater"
     log_level: str = "info"
 
     # LLM (보고서 생성)

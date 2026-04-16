@@ -6,6 +6,8 @@ import { useAuthStore } from "@/stores/authStore";
 import PageHeader from "@/components/ui/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import EmptyState from "@/components/ui/EmptyState";
+import StatusBadge from "@/components/ui/StatusBadge";
+import LiveDot from "@/components/ui/LiveDot";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import { CONTAINERS, ContainerDef } from "@/config/containers";
@@ -24,6 +26,84 @@ interface Agent {
   name: string;
   status: "healthy" | "unhealthy";
   lastSeen?: string;
+}
+
+function buildFallbackAgents(container: ContainerDef): Agent[] {
+  return container.agents.map((name) => ({
+    id: name.toLowerCase().replace(" ", "-"),
+    name,
+    status: "healthy",
+  }));
+}
+
+function parseAgentsResponse(container: ContainerDef, data: unknown): Agent[] {
+  if (!data || typeof data !== "object") {
+    return buildFallbackAgents(container);
+  }
+
+  if ("agents" in data && data.agents && typeof data.agents === "object") {
+    return Object.entries(data.agents as Record<string, unknown>).map(
+      ([id, status]) => ({
+        id,
+        name:
+          container.agents.find(
+            (agentName) =>
+              agentName.toLowerCase().replace(" ", "-") === id.toLowerCase()
+          ) || id,
+        status: status === "healthy" ? "healthy" : "unhealthy",
+        lastSeen: new Date().toLocaleString(),
+      })
+    );
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          id: item.toLowerCase().replace(" ", "-"),
+          name: item,
+          status: "healthy" as const,
+          lastSeen: new Date().toLocaleString(),
+        };
+      }
+
+      if (item && typeof item === "object") {
+        const entry = item as Record<string, unknown>;
+        const id =
+          typeof entry.agent_id === "string"
+            ? entry.agent_id
+            : typeof entry.id === "string"
+              ? entry.id
+              : `${container.id}-${index}`;
+        const name =
+          typeof entry.name === "string"
+            ? entry.name
+            : container.agents.find(
+                (agentName) =>
+                  agentName.toLowerCase().replace(" ", "-") === id.toLowerCase()
+              ) || id;
+        const status =
+          entry.status === "healthy" || entry.status === "ok"
+            ? "healthy"
+            : "unhealthy";
+
+        return {
+          id,
+          name,
+          status,
+          lastSeen: new Date().toLocaleString(),
+        };
+      }
+
+      return {
+        id: `${container.id}-${index}`,
+        name: container.agents[index] || `${container.name} Agent ${index + 1}`,
+        status: "healthy" as const,
+      };
+    });
+  }
+
+  return buildFallbackAgents(container);
 }
 
 interface ContainerStatus {
@@ -46,10 +126,13 @@ function EventPipelineVisualization() {
   return (
     <div className="mb-8 overflow-x-auto">
       <div className="flex items-center gap-2 min-w-max p-4 bg-gradient-to-r from-ocean-950 to-ocean-900 rounded-lg border border-ocean-800/50">
-        {/* Step 1: platform.report.* */}
-        <div className="px-3 py-2 bg-ocean-800 rounded text-center">
+        {/* Step 1: moth-bridge */}
+        <div className="px-3 py-2 bg-ocean-800 rounded text-center relative">
           <div className="text-xs font-bold text-ocean-300">moth-bridge</div>
           <div className="text-[10px] text-ocean-400">platform.report.*</div>
+          <div className="absolute -top-3 -right-3">
+            <LiveDot color="ocean" size="sm" />
+          </div>
         </div>
 
         {/* Arrow */}
@@ -57,13 +140,16 @@ function EventPipelineVisualization() {
 
         {/* Step 2: Detection */}
         <div
-          className="px-3 py-2 rounded text-center border"
+          className="px-3 py-2 rounded text-center border relative"
           style={{ borderColor: "#2e8dd4", backgroundColor: "#1e3a5f" }}
         >
           <div className="text-xs font-bold" style={{ color: "#2e8dd4" }}>
             Detection
           </div>
           <div className="text-[10px] text-ocean-400">detect.*</div>
+          <div className="absolute -top-3 -right-3">
+            <LiveDot color="blue" size="sm" />
+          </div>
         </div>
 
         {/* Arrow */}
@@ -71,13 +157,16 @@ function EventPipelineVisualization() {
 
         {/* Step 3: Analysis */}
         <div
-          className="px-3 py-2 rounded text-center border"
+          className="px-3 py-2 rounded text-center border relative"
           style={{ borderColor: "#a78bfa", backgroundColor: "#2d1b4e" }}
         >
           <div className="text-xs font-bold" style={{ color: "#a78bfa" }}>
             Analysis
           </div>
           <div className="text-[10px] text-ocean-400">analyze.*</div>
+          <div className="absolute -top-3 -right-3">
+            <LiveDot color="blue" size="sm" />
+          </div>
         </div>
 
         {/* Arrow */}
@@ -85,13 +174,16 @@ function EventPipelineVisualization() {
 
         {/* Step 4: Response */}
         <div
-          className="px-3 py-2 rounded text-center border"
+          className="px-3 py-2 rounded text-center border relative"
           style={{ borderColor: "#f87171", backgroundColor: "#4d1f26" }}
         >
           <div className="text-xs font-bold" style={{ color: "#f87171" }}>
             Response
           </div>
           <div className="text-[10px] text-ocean-400">respond.*</div>
+          <div className="absolute -top-3 -right-3">
+            <LiveDot color="red" size="sm" />
+          </div>
         </div>
 
         {/* Arrow */}
@@ -100,22 +192,28 @@ function EventPipelineVisualization() {
         {/* Step 5: Report & Learning */}
         <div className="flex gap-2">
           <div
-            className="px-3 py-2 rounded text-center border"
+            className="px-3 py-2 rounded text-center border relative"
             style={{ borderColor: "#34d399", backgroundColor: "#1d3a2a" }}
           >
             <div className="text-xs font-bold" style={{ color: "#34d399" }}>
               Report
             </div>
             <div className="text-[10px] text-ocean-400">report.*</div>
+            <div className="absolute -top-3 -right-3">
+              <LiveDot color="emerald" size="sm" />
+            </div>
           </div>
           <div
-            className="px-3 py-2 rounded text-center border"
+            className="px-3 py-2 rounded text-center border relative"
             style={{ borderColor: "#fbbf24", backgroundColor: "#3a2d1a" }}
           >
             <div className="text-xs font-bold" style={{ color: "#fbbf24" }}>
               Learning
             </div>
             <div className="text-[10px] text-ocean-400">learn.*</div>
+            <div className="absolute -top-3 -right-3">
+              <LiveDot color="amber" size="sm" />
+            </div>
           </div>
         </div>
       </div>
@@ -140,9 +238,16 @@ function ContainerCard({
         ? "#f59e0b"
         : "#ef4444";
 
+  const glowClass =
+    status.health?.status === "ok"
+      ? "container-glow-ok"
+      : status.health?.status === "degraded"
+        ? "container-glow-degraded"
+        : "container-glow-error";
+
   return (
     <div
-      className="rounded-lg border p-4 bg-gradient-to-br from-ocean-900 to-ocean-950"
+      className={`rounded-lg border p-4 bg-gradient-to-br from-ocean-900 to-ocean-950 transition-all ${glowClass}`}
       style={{ borderColor: container.color + "40" }}
     >
       {/* Header */}
@@ -156,20 +261,30 @@ function ContainerCard({
             <div className="text-xs text-ocean-400">:{container.port}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: healthColor }}
-          />
-          <span className="text-xs text-ocean-300">
-            {status.loading
-              ? "로딩..."
-              : status.error
-                ? "오류"
-                : status.health?.status === "ok"
+        <div className="flex items-center gap-3">
+          {status.loading ? (
+            <span className="text-xs text-ocean-400">로딩...</span>
+          ) : status.error ? (
+            <span className="text-xs text-red-400">오류</span>
+          ) : (
+            <LiveDot
+              color={
+                status.health?.status === "ok"
+                  ? "emerald"
+                  : status.health?.status === "degraded"
+                    ? "amber"
+                    : "red"
+              }
+              size="md"
+              label={
+                status.health?.status === "ok"
                   ? "정상"
-                  : "주의"}
-          </span>
+                  : status.health?.status === "degraded"
+                    ? "주의"
+                    : "오류"
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -201,7 +316,6 @@ function ContainerCard({
                 style={{
                   backgroundColor: container.color + "15",
                   borderLeft: `3px solid ${container.color}`,
-                  color: agent.status === "healthy" ? "#e0e7ff" : "#fca5a5",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = container.color + "25";
@@ -210,15 +324,19 @@ function ContainerCard({
                   e.currentTarget.style.backgroundColor = container.color + "15";
                 }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{agent.name}</span>
-                  <span className="text-xs">
-                    {agent.status === "healthy" ? "✓" : "✗"}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-ocean-100 flex-1 truncate">
+                    {agent.name}
                   </span>
+                  <StatusBadge
+                    tone={agent.status === "healthy" ? "success" : "critical"}
+                  >
+                    {agent.status === "healthy" ? "정상" : "오류"}
+                  </StatusBadge>
                 </div>
                 {agent.lastSeen && (
-                  <div className="text-xs text-ocean-400 mt-1">
-                    {agent.lastSeen}
+                  <div className="text-xs text-ocean-400 mt-1.5">
+                    마지막: {agent.lastSeen}
                   </div>
                 )}
               </button>
@@ -376,38 +494,23 @@ export default function AgentsPage() {
     const fetchContainerStatus = async (container: ContainerDef) => {
       try {
         // Fetch health
-        const healthRes = await fetch(`${container.url}/health`, {
-          headers: { "Content-Type": "application/json" },
-        });
+        const healthRes = await fetch(`${container.url}/health`);
         const health = healthRes.ok
           ? await healthRes.json()
           : { status: "error" };
 
         // Fetch agents (if endpoint exists)
-        let agents: Agent[] = [];
-        try {
-          const agentsRes = await fetch(`${container.url}/agents`, {
-            headers: { "Content-Type": "application/json" },
-          });
-          if (agentsRes.ok) {
-            const data = await agentsRes.json();
-            // Parse agent response based on container structure
-            agents = Object.entries(data.agents || {}).map(([id, status]: [string, any]) => ({
-              id,
-              name: container.agents.find(
-                (a) => a.toLowerCase().replace(" ", "-") === id.toLowerCase()
-              ) || id,
-              status: status === "healthy" ? "healthy" : "unhealthy",
-              lastSeen: new Date().toLocaleString(),
-            }));
+        let agents: Agent[] = buildFallbackAgents(container);
+        if (container.hasAgentsEndpoint) {
+          try {
+            const agentsRes = await fetch(`${container.url}/agents`);
+            if (agentsRes.ok) {
+              const data = await agentsRes.json();
+              agents = parseAgentsResponse(container, data);
+            }
+          } catch {
+            agents = buildFallbackAgents(container);
           }
-        } catch {
-          // Some containers may not have /agents endpoint
-          agents = container.agents.map((name) => ({
-            id: name.toLowerCase().replace(" ", "-"),
-            name,
-            status: "healthy",
-          }));
         }
 
         setContainerStatuses((prev) =>

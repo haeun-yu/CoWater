@@ -1,7 +1,8 @@
 # ===== Environment =====
 .env
 .env.*
-!.env.local.example
+!.env.example
+!.env.*.example
 
 # ===== Python =====
 __pycache__/

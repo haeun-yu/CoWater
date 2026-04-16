@@ -216,7 +216,6 @@ class DetectionCPAAgent(DetectionAgent):
             "platform_id": primary.platform_id,
             "target_platform_id": counterpart.platform_id if counterpart else None,
             "cpa_nm": cpa_nm,
-            "cpa_minutes": cpa_nm,
             "tcpa_minutes": tcpa_min,
             "tcpa_min": tcpa_min,
             "latitude": primary.lat,

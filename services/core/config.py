@@ -25,5 +25,8 @@ class Settings(BaseSettings):
     # Track 조회 기본값
     track_default_limit: int = 1000
 
+    # DB 스키마 자동 생성 (개발 환경에서만 사용, 프로덕션은 Alembic 마이그레이션 권장)
+    auto_migrate: bool = True
+
 
 settings = Settings()

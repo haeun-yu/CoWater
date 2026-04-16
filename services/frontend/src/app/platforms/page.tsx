@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAlertStore } from "@/stores/alertStore";
@@ -11,6 +12,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { DataTable, DataTableEmpty } from "@/components/ui/DataTable";
+import FilterChip from "@/components/ui/FilterChip";
 
 const TYPE_ICON: Record<string, string> = {
   vessel: "▲", usv: "◆", rov: "●", auv: "◈", drone: "✦", buoy: "◉",
@@ -44,8 +46,16 @@ function formatName(p: PlatformState) {
 
 export default function PlatformsPage() {
   const router = useRouter();
+  const [viewMode, setViewMode] = useState<"table" | "card">("table");
   const platforms = Object.values(usePlatformStore((s) => s.platforms));
   const alerts = useAlertStore((s) => s.alerts);
+
+  // 타입별 분포 계산
+  const typeDistribution = platforms.reduce<Record<string, number>>((acc, p) => {
+    const type = p.platform_type ?? "vessel";
+    acc[type] = (acc[type] ?? 0) + 1;
+    return acc;
+  }, {});
 
   const alertsByPlatform = alerts
     .filter((a) => a.status === "new")
@@ -80,8 +90,56 @@ export default function PlatformsPage() {
         ]}
       />
 
+      {/* 타입별 분포 + 뷰 전환 */}
+      <div className="border-b border-ocean-800/80 bg-ocean-950/60 px-5 py-3 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {/* 타입별 분포 */}
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(typeDistribution)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([type, count]) => (
+              <div key={type} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-ocean-700 bg-ocean-900/40 text-xs">
+                <span style={{ color: TYPE_COLOR[type] ?? "#2e8dd4" }} className="text-sm">
+                  {TYPE_ICON[type] ?? "?"}
+                </span>
+                <span className="text-ocean-300">{TYPE_LABEL[type]}</span>
+                <span className="text-ocean-500 font-mono">{count}</span>
+              </div>
+            ))}
+        </div>
+
+        {/* 뷰 전환 */}
+        <div className="flex items-center gap-1 rounded-full border border-ocean-700 bg-ocean-900/40 p-1">
+          <FilterChip
+            onClick={() => setViewMode("table")}
+            active={viewMode === "table"}
+            className="text-xs"
+          >
+            📋 테이블
+          </FilterChip>
+          <FilterChip
+            onClick={() => setViewMode("card")}
+            active={viewMode === "card"}
+            className="text-xs"
+          >
+            🎴 카드
+          </FilterChip>
+        </div>
+      </div>
+
+      {/* 목록 */}
       <div className="flex-1 overflow-auto p-5">
-        <DataTable>
+        {viewMode === "table" ? (
+          <TableView />
+        ) : (
+          <CardView />
+        )}
+      </div>
+    </div>
+  );
+
+  function TableView() {
+    return (
+      <DataTable>
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 bg-ocean-950/95 z-10 backdrop-blur-sm">
             <tr className="border-b border-ocean-800 text-ocean-500 text-left">
@@ -165,7 +223,111 @@ export default function PlatformsPage() {
           </tbody>
         </table>
         </DataTable>
+    );
+  }
+
+  function CardView() {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {sorted.length === 0 ? (
+          <div className="col-span-full py-8 text-center text-ocean-500 text-sm">
+            수신된 플랫폼 없음 — 시뮬레이터를 시작하세요
+          </div>
+        ) : (
+          sorted.map((p) => {
+            const type = p.platform_type ?? "vessel";
+            const color = TYPE_COLOR[type] ?? "#2e8dd4";
+            const alertInfo = alertsByPlatform[p.platform_id];
+            const navBadge = NAV_STATUS_BADGE[p.nav_status ?? ""] ?? "text-ocean-500 bg-ocean-800/50 border-ocean-700/50";
+
+            return (
+              <div
+                key={p.platform_id}
+                onClick={() => router.push(`/platforms/${encodeURIComponent(p.platform_id)}`)}
+                className={`rounded-lg border p-3 cursor-pointer transition-all hover:bg-ocean-800/50 ${
+                  alertInfo?.maxSeverity === "critical"
+                    ? "border-red-500/50 bg-red-500/10"
+                    : alertInfo?.maxSeverity === "warning"
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-ocean-700/40 bg-ocean-900/30"
+                }`}
+              >
+                {/* 타입 아이콘 + 이름 */}
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <div className="text-2xl" style={{ color }} title={TYPE_LABEL[type]}>
+                      {TYPE_ICON[type] ?? "?"}
+                    </div>
+                    <div className="mt-1 font-semibold text-sm text-ocean-100 truncate">
+                      {formatName(p)}
+                    </div>
+                    <div className="text-xs text-ocean-500 font-mono truncate">
+                      {formatId(p)}
+                    </div>
+                  </div>
+
+                  {/* 경보 뱃지 */}
+                  {alertInfo && (
+                    <StatusBadge tone={alertInfo.maxSeverity === "critical" ? "critical" : "warning"}>
+                      {alertInfo.count}
+                    </StatusBadge>
+                  )}
+                </div>
+
+                {/* 위치 */}
+                {p.lat != null && p.lon != null && (
+                  <div className="text-[11px] text-ocean-400 font-mono mb-2">
+                    {p.lat.toFixed(2)}° / {p.lon.toFixed(2)}°
+                  </div>
+                )}
+
+                {/* 속도 + 침로 */}
+                <div className="flex gap-3 text-xs mb-2">
+                  {p.sog != null && (
+                    <div>
+                      <div className="text-ocean-600">속도</div>
+                      <div className="font-mono text-ocean-200">{p.sog.toFixed(1)} kt</div>
+                    </div>
+                  )}
+                  {p.cog != null && (
+                    <div>
+                      <div className="text-ocean-600">침로</div>
+                      <div className="font-mono text-ocean-200">{p.cog.toFixed(0)}°</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 항법 상태 */}
+                {p.nav_status && (
+                  <div className="text-[10px] mb-2">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${navBadge}`}>
+                      {NAV_STATUS_KR[p.nav_status] ?? p.nav_status}
+                    </span>
+                  </div>
+                )}
+
+                {/* 국적 + 최근 수신 */}
+                <div className="border-t border-ocean-700/30 pt-2 text-[10px] space-y-0.5">
+                  {p.flag && (
+                    <div className="flex justify-between">
+                      <span className="text-ocean-600">국적</span>
+                      <span className="text-ocean-300">{p.flag}</span>
+                    </div>
+                  )}
+                  {p.last_seen && (
+                    <div className="flex justify-between">
+                      <span className="text-ocean-600">수신</span>
+                      <span className="text-ocean-400 font-mono">
+                        {formatDistanceToNow(new Date(p.last_seen), { addSuffix: false, locale: ko })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
-    </div>
-  );
+    );
+  }
 }

@@ -6,7 +6,9 @@ import { useAuthStore } from "@/stores/authStore";
 import PageHeader from "@/components/ui/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatDistanceToNow, format } from "date-fns";
+import FilterChip from "@/components/ui/FilterChip";
+import TimelineList, { TimelineItem } from "@/components/ui/TimelineList";
+import { formatDistanceToNow, format, isAfter, subDays } from "date-fns";
 import { ko } from "date-fns/locale";
 
 const CORE_API_URL = getCoreApiUrl();
@@ -265,6 +267,7 @@ export default function ReportsPage() {
   );
   const [filterType, setFilterType] = useState<string>("");
   const [filterFlowId, setFilterFlowId] = useState<string>("");
+  const [timeRange, setTimeRange] = useState<"all" | "1d" | "7d" | "30d">("all");
 
   // Fetch reports
   useEffect(() => {
@@ -296,6 +299,14 @@ export default function ReportsPage() {
 
     fetchReports();
   }, [page, pageSize, filterType, filterFlowId]);
+
+  // 기간별 필터링
+  const now = new Date();
+  const filteredReports = reports.filter((report) => {
+    if (timeRange === "all") return true;
+    const days = timeRange === "1d" ? 1 : timeRange === "7d" ? 7 : 30;
+    return isAfter(new Date(report.created_at), subDays(now, days));
+  });
 
   if (role && ROLE_ORDER[role as keyof typeof ROLE_ORDER] < ROLE_ORDER.viewer) {
     return (
@@ -347,7 +358,25 @@ export default function ReportsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 p-4 bg-ocean-900/30 rounded-lg border border-ocean-800/30">
+      <div className="space-y-3">
+        {/* 기간 필터 */}
+        <div className="flex flex-wrap gap-2">
+          {(["all", "1d", "7d", "30d"] as const).map((range) => (
+            <FilterChip
+              key={range}
+              onClick={() => {
+                setTimeRange(range);
+                setPage(1);
+              }}
+              active={timeRange === range}
+            >
+              {range === "all" ? "전체" : range === "1d" ? "어제" : range === "7d" ? "7일" : "30일"}
+            </FilterChip>
+          ))}
+        </div>
+
+        {/* 유형 + Flow ID 필터 */}
+        <div className="flex flex-col sm:flex-row gap-3 p-4 bg-ocean-900/30 rounded-lg border border-ocean-800/30">
         <div className="flex-1">
           <label className="text-xs text-ocean-400 uppercase tracking-wider">
             리포트 유형
@@ -381,6 +410,7 @@ export default function ReportsPage() {
             className="w-full mt-1 px-3 py-2 rounded text-sm bg-ocean-950 border border-ocean-800 text-ocean-200 placeholder-ocean-600"
           />
         </div>
+        </div>
       </div>
 
       {/* Reports Grid */}
@@ -393,15 +423,15 @@ export default function ReportsPage() {
           title="오류 발생"
           description={error}
         />
-      ) : reports.length === 0 ? (
+      ) : filteredReports.length === 0 ? (
         <EmptyState
           title="리포트 없음"
-          description="아직 생성된 리포트가 없습니다"
+          description={reports.length > 0 ? "해당 기간에 리포트가 없습니다" : "아직 생성된 리포트가 없습니다"}
         />
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {reports.map((report, idx) => (
+            {filteredReports.map((report, idx) => (
               <ReportCard
                 key={report.report_id}
                 report={report}

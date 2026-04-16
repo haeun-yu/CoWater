@@ -1,14 +1,16 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
 from models import ReportModel
+from ws_hub import hub
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 logger = logging.getLogger(__name__)
@@ -42,12 +44,79 @@ class ReportResponse(BaseModel):
         )
 
 
+class CreateReportRequest(BaseModel):
+    """리포트 생성 요청 (report-agents에서 호출)"""
+    flow_id: str
+    alert_ids: list[str]
+    report_type: str
+    content: str
+    ai_model: str
+    summary: str | None = None
+    metadata: dict | None = None
+
+
+class CreateReportResponse(BaseModel):
+    """리포트 생성 응답"""
+    report_id: str
+    status: str
+
+
 class ReportsListResponse(BaseModel):
     reports: list[ReportResponse]
     total: int
     page: int
     page_size: int
     total_pages: int
+
+
+@router.post("", status_code=201, response_model=CreateReportResponse)
+async def create_report(
+    req: CreateReportRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CreateReportResponse:
+    """
+    리포트 생성 및 저장 (Core만 DB 접근)
+
+    report-agents에서 호출하여 리포트를 생성하고 저장합니다.
+    """
+    report_id = str(uuid4())
+
+    try:
+        # DB에 리포트 저장
+        stmt = insert(ReportModel).values(
+            report_id=report_id,
+            flow_id=req.flow_id,
+            alert_ids=req.alert_ids,
+            report_type=req.report_type,
+            content=req.content,
+            summary=req.summary,
+            ai_model=req.ai_model,
+            metadata_=req.metadata or {},
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        # WebSocket 브로드캐스트 (프론트엔드 실시간 업데이트)
+        await hub.broadcast("reports", {
+            "report_id": report_id,
+            "flow_id": req.flow_id,
+            "alert_ids": req.alert_ids,
+            "report_type": req.report_type,
+            "ai_model": req.ai_model,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        logger.info("Report created: %s (type=%s)", report_id, req.report_type)
+
+        return CreateReportResponse(
+            report_id=report_id,
+            status="created"
+        )
+
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Failed to create report: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to create report")
 
 
 @router.get("", response_model=ReportsListResponse)

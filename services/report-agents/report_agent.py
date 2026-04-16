@@ -5,17 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import httpx
 import redis.asyncio as aioredis
-from sqlalchemy import insert
 
 from base import ReportAgent
 from config import settings
-from db import AsyncSessionLocal
-from models import ReportModel
 from shared.events import Event
 from shared.llm_client import make_llm_client
 
@@ -73,8 +70,7 @@ class AIReportAgent(ReportAgent):
             return None
 
         content = await self._generate_with_ai(alerts, "incident")
-        await self._save_to_db(
-            report_id=str(uuid4()),
+        await self._save_to_core(
             flow_id=f"report:{alert_id}",
             alert_ids=[alert_id],
             report_type="incident",
@@ -94,31 +90,30 @@ class AIReportAgent(ReportAgent):
             return
 
         content = await self._generate_with_ai(alerts, report_type)
-        report_id = str(uuid4())
-        await self._save_to_db(
-            report_id=report_id,
+        report_id = await self._save_to_core(
             flow_id=flow_id,
             alert_ids=alert_ids,
             report_type=report_type,
             content=content,
         )
-        await self.emit_report_event(
-            report_id=report_id,
-            flow_id=flow_id,
-            report_type=report_type,
-            content=content[:500],
-        )
+        if report_id:
+            await self.emit_report_event(
+                report_id=report_id,
+                flow_id=flow_id,
+                report_type=report_type,
+                content=content[:500],
+            )
 
     async def _fetch_alerts(self, alert_ids: list[str]) -> list[dict]:
         alerts: list[dict] = []
-        for alert_id in alert_ids:
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for alert_id in alert_ids:
+                try:
                     response = await client.get(f"{settings.core_api_url}/alerts/{alert_id}")
-                response.raise_for_status()
-                alerts.append(response.json())
-            except Exception as exc:
-                logger.warning("Failed to fetch alert %s: %s", alert_id, exc)
+                    response.raise_for_status()
+                    alerts.append(response.json())
+                except Exception as exc:
+                    logger.warning("Failed to fetch alert %s: %s", alert_id, exc)
         return alerts
 
     async def _generate_with_ai(self, alerts: list[dict], report_type: str) -> str:
@@ -128,50 +123,75 @@ class AIReportAgent(ReportAgent):
             if report_type == "incident"
             else settings.report_alert_max_tokens
         )
+        timeout = (
+            settings.claude_timeout_sec
+            if "claude" in (settings.llm_backend or "")
+            else settings.local_llm_timeout_sec
+        )
 
         try:
-            return await self._llm.chat(
-                system=_SYSTEM_PROMPT,
-                user=context,
-                max_tokens=max_tokens,
+            return await asyncio.wait_for(
+                self._llm.chat(
+                    system=_SYSTEM_PROMPT,
+                    user=context,
+                    max_tokens=max_tokens,
+                ),
+                timeout=timeout,
             )
+        except asyncio.TimeoutError:
+            logger.warning("Report generation timed out after %ss", timeout)
+            return self._fallback_report(alerts, report_type)
         except Exception:
             logger.exception("Report generation failed, using fallback")
             return self._fallback_report(alerts, report_type)
 
-    async def _save_to_db(
+    async def _save_to_core(
         self,
-        report_id: str,
         flow_id: str,
         alert_ids: list[str],
         report_type: str,
         content: str,
-    ) -> None:
+    ) -> str | None:
+        """Core API를 통해 리포트를 저장합니다 (Core만 DB 접근)"""
         try:
-            async with AsyncSessionLocal() as session:
-                stmt = insert(ReportModel).values(
-                    report_id=report_id,
-                    flow_id=flow_id,
-                    alert_ids=alert_ids,
-                    report_type=report_type,
-                    content=content,
-                    ai_model=self._llm.model_name,
-                    created_at=datetime.utcnow(),
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{settings.core_api_url}/reports",
+                    json={
+                        "flow_id": flow_id,
+                        "alert_ids": alert_ids,
+                        "report_type": report_type,
+                        "content": content,
+                        "ai_model": self._llm.model_name,
+                        "summary": content[:200] if content else None,
+                        "metadata": {},
+                    }
                 )
-                await session.execute(stmt)
-                await session.commit()
+                response.raise_for_status()
+                result = response.json()
+                logger.info("Report saved via Core API: %s", result.get("report_id"))
+                return result.get("report_id")
         except Exception as exc:
-            logger.exception("Failed to save report to DB: %s", exc)
+            logger.exception("Failed to save report via Core API: %s", exc)
             try:
+                # Fallback: Redis에 임시 저장 (Core API 실패 시)
+                report_id = f"fallback-{int(time.time() * 1000)}"
                 await self.redis.hset(
                     f"report:{report_id}",
                     mapping={
                         "content": content,
+                        "flow_id": flow_id,
+                        "alert_ids": json.dumps(alert_ids),
+                        "report_type": report_type,
+                        "ai_model": self._llm.model_name,
                         "generated_at": datetime.now(timezone.utc).isoformat(),
                     },
                 )
+                logger.warning("Report saved to Redis fallback: %s", report_id)
+                return report_id
             except Exception:
-                logger.exception("Failed to save fallback report copy for %s", report_id)
+                logger.exception("Failed to save fallback report copy")
+                return None
 
     @staticmethod
     def _fallback_report(alerts: list[dict], report_type: str) -> str:

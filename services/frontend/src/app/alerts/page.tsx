@@ -17,6 +17,9 @@ import FilterChip from "@/components/ui/FilterChip";
 import SectionHeading from "@/components/ui/SectionHeading";
 import StatusBadge from "@/components/ui/StatusBadge";
 import EmptyState from "@/components/ui/EmptyState";
+import TimelineList, { TimelineItem } from "@/components/ui/TimelineList";
+import DonutRing from "@/components/ui/DonutRing";
+import SeverityBar from "@/components/ui/SeverityBar";
 
 const ROLE_ORDER: Record<CommandRole, number> = { viewer: 0, operator: 1, admin: 2 };
 
@@ -146,7 +149,18 @@ export default function AlertsPage() {
   ).length;
 
   // 활성(미확인) / 과거(확인+해결) 분리
-  const active = filtered.filter((a) => a.status === "new");
+  const activeSorted = filtered
+    .filter((a) => a.status === "new")
+    .sort((a, b) => {
+      // 심각도 우선순위: critical > warning > info
+      const severityOrder = { critical: 0, warning: 1, info: 2 };
+      if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+        return severityOrder[a.severity] - severityOrder[b.severity];
+      }
+      // 같은 심각도면 생성 시간 역순 (최신순)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  const active = activeSorted;
   const past = filtered.filter((a) => a.status !== "new");
 
   const allFilteredIds = filtered.map((a) => a.alert_id);
@@ -236,6 +250,46 @@ export default function AlertsPage() {
           <MetricCard key="new" label="전체 미확인" value={newAlerts.length} tone={newAlerts.length > 0 ? "warning" : "neutral"} valueClassName="text-xl" />,
         ]}
       />
+
+      {/* Sticky 요약 바 — 심각도 분포 시각화 */}
+      {newAlerts.length > 0 && (
+        <section className="sticky-kpi-bar border-b border-ocean-800/80 bg-ocean-950/60 px-5 py-4 backdrop-blur-sm">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* DonutRing — 심각도 분포 */}
+            <div className="flex justify-center">
+              <DonutRing
+                segments={[
+                  { value: criticalNew, color: "#ef4444", label: `위험 ${criticalNew}` },
+                  { value: warningNew, color: "#f59e0b", label: `주의 ${warningNew}` },
+                  { value: infoNew, color: "#3b82f6", label: `정보 ${infoNew}` },
+                ]}
+                size={100}
+                strokeWidth={10}
+                showLabels
+              />
+            </div>
+
+            {/* SeverityBar — 수평 스택 */}
+            <div className="flex items-center">
+              <SeverityBar
+                critical={criticalNew}
+                warning={warningNew}
+                info={infoNew}
+                height="h-2"
+                showLabels={true}
+              />
+            </div>
+
+            {/* 요약 통계 */}
+            <div className="flex items-center justify-center lg:justify-start gap-4 text-sm">
+              <div>
+                <div className="text-[11px] uppercase tracking-widest text-ocean-600">총 미확인</div>
+                <div className="text-xl font-bold text-ocean-100 mt-1">{newAlerts.length}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="flex-shrink-0 px-5 pb-4">
         <div className="flex flex-wrap gap-2 rounded-2xl border border-ocean-800/70 bg-ocean-950/35 p-3">

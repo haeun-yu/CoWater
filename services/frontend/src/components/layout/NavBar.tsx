@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAlertStore } from "@/stores/alertStore";
 import { usePlatformStore } from "@/stores/platformStore";
 import { useAILogStore } from "@/stores/aiLogStore";
@@ -9,6 +9,10 @@ import { useSystemStore } from "@/stores/systemStore";
 import { useAuthStore } from "@/stores/authStore";
 import { countPlatformsByFreshness } from "@/lib/platformStatus";
 import { useEffect, useState, useCallback } from "react";
+import { useKeyboard } from "@/hooks/useKeyboard";
+import ThemeToggle from "@/components/ui/ThemeToggle";
+import KeyboardShortcutHint from "@/components/ui/KeyboardShortcutHint";
+import LiveDot from "@/components/ui/LiveDot";
 
 const NAV = [
   { href: "/", label: "대시보드", icon: "◈" },
@@ -21,6 +25,7 @@ const NAV = [
 ];
 
 export default function NavBar() {
+  const router = useRouter();
   const pathname = usePathname();
   const alerts = useAlertStore((s) => s.alerts);
   const platforms = usePlatformStore((s) => s.platforms);
@@ -33,6 +38,9 @@ export default function NavBar() {
   const criticalCount = alerts.filter(
     (a) => a.severity === "critical" && a.status === "new",
   ).length;
+
+  // 단축키 오버레이 상태
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const [now, setNow] = useState("");
   useEffect(() => {
@@ -55,6 +63,16 @@ export default function NavBar() {
     });
   }, []);
 
+  // 단축키 시스템
+  useKeyboard({
+    onOpenShortcuts: () => setShowShortcuts(true),
+    onNavigateToPage: (pageIndex) => {
+      const pages = ["/", "/platforms", "/alerts", "/agents", "/reports"];
+      const target = pages[pageIndex - 1];
+      if (target) router.push(target);
+    },
+  });
+
   const platformValues = Object.values(platforms);
   const freshness = countPlatformsByFreshness(platformValues);
   const STREAM_DATA_TIMEOUT_MS = 60_000;
@@ -71,7 +89,8 @@ export default function NavBar() {
   ].join(" · ");
 
   return (
-    <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center gap-3 border-b border-ocean-800/80 bg-[linear-gradient(180deg,rgba(4,20,40,0.96),rgba(4,20,40,0.82))] px-3 py-2 backdrop-blur-sm lg:flex-nowrap lg:gap-6 lg:px-4">
+    <>
+      <header className="flex min-h-14 flex-shrink-0 flex-wrap items-center gap-3 border-b border-ocean-800/80 bg-[linear-gradient(180deg,rgba(4,20,40,0.96),rgba(4,20,40,0.82))] px-3 py-2 backdrop-blur-sm lg:flex-nowrap lg:gap-6 lg:px-4">
       {/* 로고 */}
       <div className="flex items-center gap-2 flex-shrink-0">
         <span className="text-ocean-400 font-bold tracking-widest text-sm">
@@ -101,17 +120,17 @@ export default function NavBar() {
               <span className="whitespace-nowrap">{label}</span>
               {href === "/alerts" && newAlerts > 0 && (
                 <span
-                  className={`ml-0.5 px-1 rounded-full text-xs font-bold ${
+                  className={`ml-0.5 px-1 rounded-full text-xs font-bold animate-pulse-slow ${
                     criticalCount > 0
-                      ? "bg-red-500 text-white"
-                      : "bg-yellow-500/80 text-black"
+                      ? "bg-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.6)]"
+                      : "bg-amber-500/90 text-black"
                   }`}
                 >
                   {newAlerts}
                 </span>
               )}
               {href === "/agents" && aiLogs.length > 0 && (
-                <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+                <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse-slow" />
               )}
             </Link>
           );
@@ -133,22 +152,34 @@ export default function NavBar() {
             <div className="hidden lg:block text-red-300">유실 {freshness.lost}</div>
           )}
           {criticalCount > 0 && (
-            <div className="flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-red-400 font-bold animate-pulse">
+            <div className="flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-red-400 font-bold animate-pulse-slow">
               <span>⚠</span>
               <span>CRITICAL {criticalCount}</span>
             </div>
           )}
           <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-ocean-800/80 bg-ocean-950/45 px-3 py-1.5" title={streamSummary} aria-label={streamSummary}>
-            <span className={`w-1.5 h-1.5 rounded-full ${allStreamsConnected ? "bg-green-400 animate-pulse" : "bg-amber-400"}`} />
+            {allStreamsConnected ? (
+              <LiveDot color="emerald" size="sm" />
+            ) : (
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            )}
             <span className="text-ocean-400">{allStreamsConnected ? "LIVE" : "DEGRADED"}</span>
           </div>
          <button
             onClick={toggleSound}
            title={soundEnabled ? "경보음 켜짐 — 클릭하여 끄기" : "경보음 꺼짐 — 클릭하여 켜기"}
            aria-pressed={soundEnabled}
-           className={`text-sm transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
+           className={`text-sm p-2 rounded-lg hover:bg-ocean-800/50 transition-colors ${soundEnabled ? "text-ocean-300 hover:text-ocean-100" : "text-ocean-600 hover:text-ocean-400"}`}
           >
             {soundEnabled ? "🔔" : "🔕"}
+          </button>
+          <ThemeToggle compact />
+          <button
+            onClick={() => setShowShortcuts(true)}
+            title="단축키 보기 (? 또는 누르기)"
+            className="text-sm p-2 rounded-lg hover:bg-ocean-800/50 transition-colors text-ocean-300 hover:text-ocean-100"
+          >
+            ⌨️
           </button>
           {actor && role && (
              <div className="hidden lg:flex items-center gap-2 rounded-full border border-ocean-800/80 bg-ocean-950/45 px-3 py-1.5 text-[11px]">
@@ -166,5 +197,12 @@ export default function NavBar() {
           <span className="text-ocean-400 font-mono hidden xl:block">{now}</span>
         </div>
       </header>
+
+      {/* 단축키 오버레이 */}
+      <KeyboardShortcutHint
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
+    </>
   );
 }

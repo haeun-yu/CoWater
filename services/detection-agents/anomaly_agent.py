@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
@@ -53,6 +54,7 @@ class DetectionAnomalyAgent(DetectionAgent):
         self._last_sog: dict[str, float] = {}
         self._last_sog_time: dict[str, datetime] = {}
         self._ais_lost: set[str] = set()
+        self._report_count: int = 0
 
     async def restore_state(self) -> None:
         """서비스 재시작 시 AIS 관련 상태 복구."""
@@ -91,8 +93,6 @@ class DetectionAnomalyAgent(DetectionAgent):
 
     async def on_platform_report(self, report: PlatformReport) -> None:
         """선박 위치 보고 수신."""
-        import random
-
         platform_id = report.platform_id
         now = report.timestamp
         prev_report = self._last_report.get(platform_id)
@@ -191,7 +191,9 @@ class DetectionAnomalyAgent(DetectionAgent):
                 )
 
         self._last_report[platform_id] = report
-        if random.random() < 0.1:
+        self._report_count += 1
+        # AIS 복구 이벤트가 발생한 경우 이미 저장했으므로, 그 외에는 매 100번째 보고마다 저장
+        if self._report_count % 100 == 0:
             await self._save_state()
 
     async def check_ais_timeout(self) -> None:
@@ -265,8 +267,6 @@ class DetectionAnomalyAgent(DetectionAgent):
         lat1: float, lon1: float, lat2: float, lon2: float
     ) -> float:
         """Haversine으로 거리 계산 (nautical miles)."""
-        import math
-
         radius_nm = 3440.065
         lat1_rad = math.radians(lat1)
         lat2_rad = math.radians(lat2)

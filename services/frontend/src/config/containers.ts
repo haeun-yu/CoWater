@@ -16,6 +16,7 @@ export interface ContainerDef {
   icon: string;
   color?: string;
   agents: string[];
+  hasAgentsEndpoint?: boolean;
 }
 
 export const CONTAINERS: ContainerDef[] = [
@@ -27,6 +28,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#2e8dd4",
     icon: "🔍",
     agents: ["CPA", "Anomaly", "Zone", "Distress"],
+    hasAgentsEndpoint: true,
   },
   {
     id: "analysis",
@@ -36,6 +38,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#a78bfa",
     icon: "🧠",
     agents: ["Anomaly AI"],
+    hasAgentsEndpoint: false,
   },
   {
     id: "response",
@@ -45,6 +48,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#f87171",
     icon: "⚡",
     agents: ["Alert Creator", "Distress Agent"],
+    hasAgentsEndpoint: false,
   },
   {
     id: "report",
@@ -54,6 +58,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#34d399",
     icon: "📋",
     agents: ["Report Agent"],
+    hasAgentsEndpoint: false,
   },
   {
     id: "control",
@@ -63,6 +68,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#38bdf8",
     icon: "💬",
     agents: ["Chat Agent"],
+    hasAgentsEndpoint: true,
   },
   {
     id: "learning",
@@ -72,6 +78,7 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#fbbf24",
     icon: "📚",
     agents: ["Learning Agent"],
+    hasAgentsEndpoint: false,
   },
   {
     id: "supervision",
@@ -81,5 +88,6 @@ export const CONTAINERS: ContainerDef[] = [
     color: "#8b5cf6",
     icon: "👁",
     agents: ["Supervisor"],
+    hasAgentsEndpoint: true,
   },
 ];

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -68,7 +68,7 @@ class Event:
     flow_id: str = field(default_factory=lambda: str(uuid4()))
     type: EventType = field(default=EventType.DETECT_ANOMALY)
     agent_id: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.utcnow())
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     payload: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
     causation_id: str | None = None
@@ -86,6 +86,8 @@ class Event:
         data = json.loads(json_str)
         data['type'] = EventType(data['type'])
         data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        if data['timestamp'].tzinfo is None:
+            data['timestamp'] = data['timestamp'].replace(tzinfo=timezone.utc)
         return cls(**data)
 
     def __repr__(self) -> str:

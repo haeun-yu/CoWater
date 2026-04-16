@@ -27,6 +27,62 @@ const config: Config = {
       fontFamily: {
         mono: ["'JetBrains Mono'", "monospace"],
       },
+      animation: {
+        "slide-in-top": "slideInTop 0.3s ease-out",
+        "slide-in-right": "slideInRight 0.3s ease-out",
+        "fade-in": "fadeIn 0.3s ease-out",
+        "pulse-slow": "pulseSlow 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        "count-update": "countUpdate 0.4s ease-out",
+      },
+      keyframes: {
+        slideInTop: {
+          from: {
+            opacity: "0",
+            transform: "translateY(-10px)",
+          },
+          to: {
+            opacity: "1",
+            transform: "translateY(0)",
+          },
+        },
+        slideInRight: {
+          from: {
+            opacity: "0",
+            transform: "translateX(20px)",
+          },
+          to: {
+            opacity: "1",
+            transform: "translateX(0)",
+          },
+        },
+        fadeIn: {
+          from: {
+            opacity: "0",
+          },
+          to: {
+            opacity: "1",
+          },
+        },
+        pulseSlow: {
+          "0%, 100%": {
+            opacity: "1",
+          },
+          "50%": {
+            opacity: "0.5",
+          },
+        },
+        countUpdate: {
+          "0%": {
+            opacity: "0.6",
+          },
+          "50%": {
+            opacity: "1",
+          },
+          "100%": {
+            opacity: "1",
+          },
+        },
+      },
     },
   },
   plugins: [],
