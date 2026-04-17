@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 해양 무인 작전 체계 시각화 PoC</title>
+    <style>
+        /* === 전역 스타일 === */
+        body { margin: 0; overflow: hidden; background-color: #000; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        
+        /* 🚀 로딩 스크린 UI */
+        #loading-screen {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #0f172a; z-index: 9999; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #60a5fa; font-family: 'Segoe UI', sans-serif;
+            transition: opacity 0.8s ease;
+        }
+        .spinner {
+            width: 60px; height: 60px; border: 6px solid #334155; border-top-color: #60a5fa; 
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 25px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #loading-text { font-size: 1.2rem; font-weight: bold; letter-spacing: 1px; }
+        #loading-subtext { font-size: 0.9rem; color: #94a3b8; margin-top: 10px; }
+
+        /* === UI 패널 공통 === */
+        .panel {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            backdrop-filter: blur(8px);
+            z-index: 10;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+        #left-panel { top: 20px; left: 20px; width: 260px; }
+        #right-panel { top: 20px; right: 20px; width: 340px; }
+
+        /* === 패널 토글(접기/펼치기) 애니메이션 요소 === */
+        .panel-header {
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+            padding-bottom: 10px; border-bottom: 1px solid #475569; margin-bottom: 10px; user-select: none;
+        }
+        .panel.collapsed .panel-header { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+        .panel-header h3 { margin: 0 !important; border: none !important; padding: 0 !important; font-size: 1.1rem; color: #fff; }
+        .toggle-icon { color: #94a3b8; font-size: 0.8rem; transition: transform 0.3s ease; }
+        .panel.collapsed .toggle-icon { transform: rotate(-90deg); }
+        
+        .panel-content {
+            max-height: 80vh; overflow-y: auto; 
+            transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s; opacity: 1;
+        }
+        .panel.collapsed .panel-content { max-height: 0; opacity: 0; margin: 0; padding: 0; overflow: hidden; }
+        
+        h3 { margin: 0 0 15px 0; font-size: 1.2rem; color: #fff; border-bottom: 1px solid #475569; padding-bottom: 8px; }
+        h4 { margin: 15px 0 5px 0; font-size: 0.9rem; color: #cbd5e1; }
+        hr { border: none; border-top: 1px solid #334155; margin: 15px 0; }
+        
+        /* === 컨트롤 요소 === */
+        select, input[type="range"] {
+            width: 100%; padding: 6px; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; outline: none; margin-bottom: 5px;
+        }
+        .control-value { font-size: 0.8rem; color: #94a3b8; text-align: right; display: block; }
+        
+        /* === 우측 탭 메뉴 === */
+        .tabs { display: flex; margin-bottom: 10px; border-bottom: 1px solid #334155; }
+        .tab-btn {
+            flex: 1; background: transparent; color: #94a3b8; border: none; padding: 8px 5px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; border-bottom: 2px solid transparent;
+        }
+        .tab-btn:hover { color: #fff; }
+        .tab-btn.active { color: #60a5fa; border-bottom: 2px solid #60a5fa; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        /* === 리스트 아이템 === */
+        .list-item {
+            background: rgba(30, 41, 59, 0.6); margin-bottom: 8px; padding: 10px; border-radius: 6px; border-left: 4px solid #475569; cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
+        }
+        .list-item:hover { background: rgba(51, 65, 85, 0.8); }
+        .list-item.selected { border-left-color: #60a5fa; background: rgba(51, 65, 85, 0.9); }
+        .list-item .title { font-weight: bold; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        
+        /* 데이터 패킷 스타일 */
+        .data-packet { font-family: monospace; font-size: 0.8rem; color: #4ade80; background: rgba(0,0,0,0.5); padding: 4px; border-radius: 3px; margin-top: 4px; }
+        .data-packet::before { content: ">> "; color: #60a5fa; }
+
+        /* 상태별 라벨 색상 */
+        .status-active { color: #4ade80; }
+        .status-warning { color: #fbbf24; }
+        .status-critical { color: #f87171; }
+        
+        /* === 경보 아이템 특수 스타일 === */
+        .alert-warning { border-left-color: #fbbf24; }
+        .alert-critical { border-left-color: #f87171; animation: pulse-bg 2s infinite; }
+        @keyframes pulse-bg { 0% { background: rgba(30, 41, 59, 0.6); } 50% { background: rgba(248, 113, 113, 0.2); } 100% { background: rgba(30, 41, 59, 0.6); } }
+
+        /* === 라벨 및 툴팁 === */
+        #labels-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 5; overflow: hidden; }
+        .object-label {
+            position: absolute; background: rgba(0, 0, 0, 0.6); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; transform: translate(-50%, -100%); border: 1px solid #475569; white-space: nowrap; text-shadow: 1px 1px 2px black;
+        }
+        #tooltip {
+            position: absolute; background: rgba(0, 0, 0, 0.9); color: white; padding: 10px; border-radius: 6px; font-size: 0.85rem; pointer-events: none; display: none; z-index: 100; border: 1px solid #60a5fa; box-shadow: 0 4px 10px rgba(0,0,0,0.5); white-space: nowrap;
+        }
+        
+        /* === 단축키 안내 === */
+        .shortcuts { font-size: 0.7rem; color: #64748b; line-height: 1.5; margin-top: 15px; }
+        .shortcuts kbd { background: #334155; padding: 2px 5px; border-radius: 3px; color: #e2e8f0; }
+
+        /* 사용자 커스텀 스크롤바 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* === 미니맵 패널 === */
+        #minimap-panel {
+            position: absolute; bottom: 20px; right: 20px; width: 260px; height: 260px; border: 3px solid #334155; border-radius: 50%; overflow: hidden; z-index: 10; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(96, 165, 250, 0.3); background: #0f172a; transform: translateZ(0); cursor: grab;
+        }
+        #minimap-panel:active { cursor: grabbing; }
+        #minimap-container { position: absolute; top: -70px; left: -70px; width: 400px; height: 400px; transform-origin: center; }
+        #minimap { width: 100%; height: 100%; background: #0f172a; }
+    </style>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+    <!-- 🚀 로딩 스크린 -->
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <div id="loading-text">지형 데이터 초기화 중... 0%</div>
+        <div id="loading-subtext">OpenDEM & GEBCO 하이브리드 수심 데이터 디코딩</div>
+    </div>
+
+    <div id="canvas-container"></div>
+    <div id="labels-container"></div>
+    <div id="tooltip"></div>
+
+    <div id="left-panel" class="panel">
+        <div class="panel-header" onclick="uiManager.togglePanel('left')">
+            <h3>해양 작전 제어판</h3>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="panel-content">
+            <div id="stats-container"></div>
+            <hr>
+            <!-- 🚀 시각화 디자인 모드 토글 추가 -->
+            <h4 style="color: #60a5fa; font-weight: bold;">✨ 시각화 디자인 모드</h4>
+            <select id="visual-mode" style="border-color: #60a5fa;">
+                <option value="real">🌍 실사 위성 뷰 (Realistic)</option>
+                <option value="tactical">🌐 전술 등고선 뷰 (Hologram)</option>
+            </select>
+            <hr>
+            
+            <h4>카메라 모드</h4>
+            <select id="camera-mode">
+                <option value="orbit">자유 회전 (Orbit)</option>
+                <option value="follow">플랫폼 추적 (Follow)</option>
+                <option value="topdown">위에서 본 뷰 (Top-down)</option>
+            </select>
+            
+            <h4>지도 스타일 (미니맵)</h4>
+            <select id="map-style">
+                <option value="satellite">위성 지도 (Satellite)</option>
+                <option value="dark">전술 다크 (지상/해면 구분)</option>
+                <option value="ocean">해양 수심도 (Ocean Base)</option>
+            </select>
+
+            <h4>표시 깊이 필터</h4>
+            <input type="range" id="depth-filter" min="-500" max="0" value="-500" step="10">
+            <span class="control-value" id="depth-value">0m ~ -500m 표시</span>
+            <h4>시뮬레이션 배속</h4>
+            <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="1">
+            <span class="control-value" id="speed-value">1.0x</span>
+            <div class="shortcuts">
+                <strong>단축키</strong><br>
+                <kbd>1</kbd>/<kbd>2</kbd> 객체/통신선 선택<br>
+                <kbd>F</kbd> 선택 타겟 포커싱<br>
+                <kbd>L</kbd> 라벨 ON/OFF &nbsp;|&nbsp; <kbd>G</kbd> 그리드 ON/OFF<br>
+            </div>
+        </div>
+    </div>
+
+    <div id="right-panel" class="panel">
+        <div class="panel-header" onclick="uiManager.togglePanel('right')">
+            <h3>정보 & 경보 현황</h3>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="panel-content">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="uiManager.switchTab('objects')">📡 정보 목록 (<span id="obj-count">0</span>)</button>
+                <button class="tab-btn" onclick="uiManager.switchTab('alerts')">⚠️ 경보 목록 (<span id="alert-count">0</span>)</button>
+            </div>
+            <div id="tab-objects" class="tab-content active">
+                <div id="selected-detail" style="margin-bottom: 15px; display: none;"></div>
+                <h4>전체 자산 및 통신 링크</h4>
+                <div id="object-list-container"></div>
+            </div>
+            <div id="tab-alerts" class="tab-content">
+                <div id="alert-list-container">
+                    <div style="text-align: center; color: #64748b; padding: 20px;">발생한 경보가 없습니다.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="minimap-panel" oncontextmenu="return false;">
+        <div id="minimap-container">
+            <div id="minimap"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        const COLORS = {
+            controlCenter: 0xff6b6b, ship: 0x4ecdc4, usv: 0xffd93d, drone: 0xffd93d,
+            rov: 0x6bcf7f, auv: 0x95a5ff, alert_warning: 0xff9800, alert_critical: 0xf44336,
+            link_rf: 0x60a5fa, link_tether: 0x94a3b8, link_acoustic: 0x2dd4bf, link_satellite: 0xc084fc,
+            commBuoy: 0xf97316, powerTower: 0xeab308, glider: 0xa855f7, submarine: 0x334155, sensorNode: 0x14b8a6
+        };
+
+        const ENV_COLORS = { sky: 0x87CEEB, waterSurface: 0x1da2d8, deepWater: 0x001e36, tacticalBg: 0x05101a };
+
+        const mapState = {
+            map: null, markers: {}, lines: {}, currentTileLayer: null,
+            baseLat: 35.15, baseLng: 129.15, scale: 0.00005, isProgrammaticMove: false
+        };
+
+        const UNIT_TO_METERS = 5.05; 
+        const HEIGHT_EXAGGERATION = 2.5; 
+        const COASTLINE_OFFSET = 15; 
+        
+        // 🚀 심해 바닥의 기본 고도를 설정합니다. 지형은 가장자리에서 이 고도에 완벽하게 안착합니다.
+        const EDGE_Y = -400;
+
+        let globalDemData = null;
+        let demCanvasSize = 0;
+        let terrainBounds = { uMin: 0, uMax: 1, vMin: 0, vMax: 1, pWidth: 0, pHeight: 0, oX: 0, oZ: 0 };
+        let terrainMeshRef = null; 
+
+        const state = {
+            time: 0, simSpeed: 1.0, cameraMode: 'orbit', depthFilter: -500,
+            visualMode: 'real', 
+            showLabels: true, showGrid: true, selectedId: null, hoveredId: null,
+            objects: [], links: [], alerts: [], tethers: []
+        };
+
+        const initialScenarios = [
+            { id: "ship-001", name: "상선 #1", type: "ship", position: {x: 250, y: 0, z: -100}, heading: 45, speed: 12.5, status: "active", battery: 100 },
+            { id: "ship-002", name: "통제 함정", type: "ship", position: {x: -50, y: 0, z: -20}, heading: 90, speed: 5, status: "active", battery: 100 },
+            { id: "drone-001", name: "정찰 드론", type: "drone", position: {x: -50, y: 60, z: 20}, heading: 0, speed: 20, status: "active", battery: 85, hoverCenter: {x:-50, z:20} },
+            { id: "usv-001", name: "통제 USV", type: "usv", position: {x: 50, y: 0, z: -150}, heading: 180, speed: 15, status: "active", battery: 90, hoverCenter: {x:50, z:-150} },
+            { id: "rov-001", name: "작업용 ROV", type: "rov", position: {x: -60, y: -180, z: -30}, heading: 0, speed: 2, status: "active", battery: 78, tetherTarget: "ship-002" },
+            { id: "auv-001", name: "정찰용 AUV", type: "auv", position: {x: 180, y: -250, z: 120}, heading: -45, speed: 6, status: "active", battery: 95 },
+            { id: "center-001", name: "육상 통제 센터", type: "controlCenter", position: {x: -350, y: 0, z: -450}, heading: 60, speed: 0, status: "active", battery: 100 },
+            { id: "buoy-001", name: "통신 릴레이 부표", type: "commBuoy", position: {x: -200, y: 0, z: -250}, heading: 0, speed: 0, status: "active", battery: 100 },
+            { id: "tower-001", name: "해양 전력 타워", type: "powerTower", position: {x: -300, y: 0, z: -200}, heading: 0, speed: 0, status: "active", battery: 100 },
+            { id: "usv-002", name: "요격용 USV", type: "usv", position: {x: 150, y: 0, z: -250}, heading: 135, speed: 18, status: "active", battery: 95, hoverCenter: {x:150, z:-250} },
+            { id: "glider-001", name: "수중 글라이더", type: "glider", position: {x: -250, y: -120, z: -100}, heading: 45, speed: 3, status: "active", battery: 98 },
+            { id: "sub-001", name: "무인 잠수정 (UUV)", type: "submarine", position: {x: 300, y: -150, z: -200}, heading: 120, speed: 8, status: "active", battery: 80 },
+            { id: "node-001", name: "해저 센서 그리드", type: "sensorNode", position: {x: -120, y: 0, z: 250}, heading: 0, speed: 0, status: "active", battery: 100 }
+        ];
+
+        const linkScenarios = [
+            { id: "link-1", source: "center-001", target: "buoy-001", type: "link_rf", name: "장거리 RF (육상-부표)", packets: ["기상 데이터 (4.2MB/s)", "암호화 작전 통제 신호"] },
+            { id: "link-2", source: "center-001", target: "ship-002", type: "link_satellite", name: "위성 통신망 (광대역)", packets: ["글로벌 AIS 추적", "지휘 통제 명령 C2"] },
+            { id: "link-3", source: "ship-002", target: "usv-001", type: "link_rf", name: "전술 RF 링크 (수상)", packets: ["USV 웨이포인트 업데이트"] },
+            { id: "link-4", source: "usv-001", target: "usv-002", type: "link_rf", name: "USV 군집 제어망", packets: ["상호 충돌 회피 알고리즘", "표적 요격 명령"] },
+            { id: "link-5", source: "ship-002", target: "drone-001", type: "link_rf", name: "지향성 RF 링크 (공중)", packets: ["드론 실시간 4K 영상 스트림", "IR(적외선) 열화상 데이터"] },
+            { id: "link-6", source: "buoy-001", target: "glider-001", type: "link_acoustic", name: "수중 음향 모뎀 (저전력)", packets: ["소나(Sonar) 핑", "해류 데이터 업로드"] },
+            { id: "link-7", source: "usv-001", target: "auv-001", type: "link_acoustic", name: "수중 음향 통신망", packets: ["정찰 목표 업데이트", "양자 센싱 표적 데이터"] },
+            { id: "link-8", source: "auv-001", target: "sub-001", type: "link_acoustic", name: "수중 전술망 (UUV-AUV)", packets: ["적 잠수함 스웜 탐지 데이터"] },
+            { id: "link-9", source: "node-001", target: "glider-001", type: "link_acoustic", name: "해저망-글라이더 중계", packets: ["해저 지진파 데이터"] },
+            { id: "link-10", source: "tower-001", target: "node-001", type: "link_tether", name: "해저 광전송 케이블", packets: ["상시 고전력 공급 (Power)", "대용량 RAW 데이터 스트림"] }
+        ];
+
+        const alertQueue = [
+            { triggerTime: 15, id: "alert-001", platformId: "ship-001", type: "collision_risk", severity: "critical", message: "상선 #1 충돌 위험 감지" },
+            { triggerTime: 30, id: "alert-002", platformId: "rov-001", type: "battery_low", severity: "warning", message: "ROV-1 배터리 부족 경고" }
+        ];
+
+        let scene, camera, renderer, controls;
+        let seaMesh, gridHelpers = [];
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Line.threshold = 5; 
+        const mouse = new THREE.Vector2();
+
+        function init3DEnvironment() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(ENV_COLORS.sky);
+            scene.fog = new THREE.FogExp2(ENV_COLORS.sky, 0.0015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 40000); 
+            camera.position.set(250, 180, 250);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.localClippingEnabled = false; 
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            dirLight.position.set(200, 300, 100); 
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 1500;
+            dirLight.shadow.camera.left = -600;
+            dirLight.shadow.camera.right = 600;
+            dirLight.shadow.camera.top = 600;
+            dirLight.shadow.camera.bottom = -600;
+            scene.add(dirLight);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI;
+
+            createEnvironment();
+            createRealWorldTerrain();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('click', onClick);
+        }
+
+        function createEnvironment() {
+            const seaGeo = new THREE.PlaneGeometry(30000, 30000, 256, 256);
+            const seaMat = new THREE.MeshPhongMaterial({ 
+                color: ENV_COLORS.waterSurface, transparent: true, opacity: 0.65, shininess: 90, side: THREE.DoubleSide
+            });
+
+            seaMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = { value: 0 };
+                seaMat.userData.shader = shader;
+                shader.vertexShader = `uniform float uTime;\n` + shader.vertexShader;
+                shader.vertexShader = shader.vertexShader.replace(
+                    `#include <begin_vertex>`,
+                    `vec3 transformed = vec3( position );
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    float wave = sin(worldPos.x * 0.5 + uTime) * cos(worldPos.z * 0.5 + uTime) * 0.6;
+                    transformed.z += wave;`
+                );
+            };
+
+            seaMesh = new THREE.Mesh(seaGeo, seaMat);
+            seaMesh.rotation.x = -Math.PI / 2;
+            seaMesh.receiveShadow = true; 
+            scene.add(seaMesh);
+
+            const bottomGeo = new THREE.PlaneGeometry(30000, 30000);
+            const bottomMesh = new THREE.Mesh(bottomGeo, new THREE.MeshLambertMaterial({ color: 0x050f1a })); // 해저 바닥 색상
+            bottomMesh.rotation.x = -Math.PI / 2;
+            bottomMesh.position.y = EDGE_Y; // 🚀 무한한 바닥 위치 동기화
+            seaMesh.userData.bottomMesh = bottomMesh;
+            scene.add(bottomMesh);
+
+            [0, -50, -100, -200, -300, -400].forEach(d => {
+                const grid = new THREE.GridHelper(10000, 1000, 0x475569, 0x1e293b);
+                grid.position.y = d;
+                grid.material.opacity = 0.15;
+                grid.material.transparent = true;
+                scene.add(grid);
+                gridHelpers.push(grid);
+            });
+        }
+
+        function getRealTerrainElevation(x, z) {
+            if (!globalDemData) return EDGE_Y; 
+
+            const { uMin, uMax, vMin, vMax, pWidth, pHeight, oX, oZ } = terrainBounds;
+            const u = (x - oX) / pWidth + 0.5;
+            const v = (z - oZ) / pHeight + 0.5;
+
+            // 범위를 벗어난 공간은 가장자리 바닥으로 일치시킴
+            if (u < 0 || u > 1 || v < 0 || v > 1) return EDGE_Y;
+
+            const px = Math.floor(u * (demCanvasSize - 1));
+            const py = Math.floor(v * (demCanvasSize - 1)); 
+            const idx = (py * demCanvasSize + px) * 4;
+
+            const r = globalDemData[idx];
+            const g = globalDemData[idx + 1];
+            const b = globalDemData[idx + 2];
+
+            let heightMeters = -10000 + ((r * 65536 + g * 256 + b) * 0.1);
+            let rawY = ((heightMeters / UNIT_TO_METERS) * HEIGHT_EXAGGERATION) + COASTLINE_OFFSET;
+
+            // 🚀 가장자리 블렌딩 (가장자리에 도달할수록 높이가 EDGE_Y와 완벽하게 일치하도록 조정)
+            const fadeMargin = demCanvasSize * 0.2; // 전체 캔버스의 약 20%를 마진으로 사용
+            const distToEdgeX = Math.min(px, demCanvasSize - 1 - px);
+            const distToEdgeY = Math.min(py, demCanvasSize - 1 - py);
+            let fadeFactor = Math.min(distToEdgeX / fadeMargin, 1.0) * Math.min(distToEdgeY / fadeMargin, 1.0);
+            fadeFactor = fadeFactor * fadeFactor * (3 - 2 * fadeFactor); // 부드러운 보간
+
+            return (rawY * fadeFactor) + (EDGE_Y * (1 - fadeFactor));
+        }
+
+        async function createRealWorldTerrain() {
+            const zoom = 13;
+            const TILE_RADIUS = 2; 
+            const TILE_SIZE = 256;
+            demCanvasSize = (TILE_RADIUS * 2 + 1) * TILE_SIZE; 
+
+            const cx = Math.floor((mapState.baseLng + 180) / 360 * Math.pow(2, zoom));
+            const cy = Math.floor((1 - Math.log(Math.tan(mapState.baseLat * Math.PI / 180) + 1 / Math.cos(mapState.baseLat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+
+            const colorCanvas = document.createElement('canvas');
+            colorCanvas.width = colorCanvas.height = demCanvasSize;
+            const colorCtx = colorCanvas.getContext('2d');
+
+            const demCanvas = document.createElement('canvas');
+            demCanvas.width = demCanvas.height = demCanvasSize;
+            const demCtx = demCanvas.getContext('2d');
+
+            const totalTiles = Math.pow(TILE_RADIUS * 2 + 1, 2) * 2;
+            let loadedTiles = 0;
+            let demFailedCount = 0;
+
+            function updateProgress() {
+                loadedTiles++;
+                const pct = Math.floor((loadedTiles / totalTiles) * 100);
+                document.getElementById('loading-text').innerText = `지형 및 수심 데이터 통합 중... ${pct}%`;
+            }
+
+            const tilePromises = [];
+            for(let x = -TILE_RADIUS; x <= TILE_RADIUS; x++) {
+                for(let y = -TILE_RADIUS; y <= TILE_RADIUS; y++) {
+                    const px = (x + TILE_RADIUS) * TILE_SIZE;
+                    const py = (y + TILE_RADIUS) * TILE_SIZE;
+
+                    const colorImg = new Image();
+                    colorImg.crossOrigin = "Anonymous";
+                    colorImg.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${cy+y}/${cx+x}`;
+                    tilePromises.push(new Promise(resolve => {
+                        colorImg.onload = () => { colorCtx.drawImage(colorImg, px, py); updateProgress(); resolve(); };
+                        colorImg.onerror = () => { updateProgress(); resolve(); }; 
+                    }));
+
+                    const demImg = new Image();
+                    demImg.crossOrigin = "Anonymous";
+                    demImg.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrain-rgb/${zoom}/${cx+x}/${cy+y}.png`;
+                    tilePromises.push(new Promise(resolve => {
+                        demImg.onload = () => { demCtx.drawImage(demImg, px, py); updateProgress(); resolve(); };
+                        demImg.onerror = () => { 
+                            demFailedCount++;
+                            updateProgress(); resolve(); 
+                        };
+                    }));
+                }
+            }
+
+            await Promise.all(tilePromises);
+            
+            if (demFailedCount > 0) {
+                document.getElementById('loading-subtext').innerText = "고도 API 접근이 제한되어 시각적 하이브리드 고도 렌더링을 진행합니다...";
+                
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = demCanvasSize; tempCanvas.height = demCanvasSize;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                const cData = colorCtx.getImageData(0, 0, demCanvasSize, demCanvasSize).data;
+                const dData = tempCtx.createImageData(demCanvasSize, demCanvasSize);
+                
+                for(let i=0; i<cData.length; i+=4) {
+                    const r = cData[i], g = cData[i+1], b = cData[i+2];
+                    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                    
+                    let height = -50; 
+                    if (!(luma < 90 && b > r - 10)) {
+                        height = Math.pow(luma / 255, 1.5) * 450; 
+                    }
+                    
+                    const val = Math.round((height + 10000) * 10);
+                    dData.data[i] = (val >> 16) & 255;
+                    dData.data[i+1] = (val >> 8) & 255;
+                    dData.data[i+2] = val & 255;
+                    dData.data[i+3] = 255;
+                }
+                tempCtx.putImageData(dData, 0, 0);
+                
+                demCtx.filter = 'blur(6px)';
+                demCtx.drawImage(tempCanvas, 0, 0);
+            }
+
+            setTimeout(() => { document.getElementById('loading-screen').style.opacity = '0'; }, 300);
+            setTimeout(() => { document.getElementById('loading-screen').style.display = 'none'; }, 1100);
+
+            globalDemData = demCtx.getImageData(0, 0, demCanvasSize, demCanvasSize).data;
+
+            const lonMin = (cx - TILE_RADIUS) / Math.pow(2, zoom) * 360 - 180;
+            const lonMax = (cx + TILE_RADIUS + 1) / Math.pow(2, zoom) * 360 - 180;
+            const nMin = Math.PI - 2 * Math.PI * (cy - TILE_RADIUS) / Math.pow(2, zoom);
+            const latMax = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMin) - Math.exp(-nMin)));
+            const nMax = Math.PI - 2 * Math.PI * (cy + TILE_RADIUS + 1) / Math.pow(2, zoom);
+            const latMin = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMax) - Math.exp(-nMax)));
+
+            terrainBounds.pWidth = (lonMax - lonMin) / mapState.scale;
+            terrainBounds.pHeight = (latMax - latMin) / mapState.scale;
+            terrainBounds.oX = ((lonMin + lonMax) / 2 - mapState.baseLng) / mapState.scale;
+            terrainBounds.oZ = (mapState.baseLat - (latMin + latMax) / 2) / mapState.scale;
+
+            const geo = new THREE.PlaneGeometry(terrainBounds.pWidth, terrainBounds.pHeight, 384, 384);
+            const pos = geo.attributes.position;
+            
+            for (let i = 0; i < pos.count; i++) {
+                const vx = pos.getX(i) + terrainBounds.oX;
+                const vz = -pos.getY(i) + terrainBounds.oZ; 
+                
+                const exactZ = getRealTerrainElevation(vx, vz);
+                pos.setZ(i, exactZ); 
+            }
+            
+            geo.computeVertexNormals(); 
+
+            // 🚀 매트리얼 세팅
+            const terrainMat = new THREE.MeshStandardMaterial({
+                map: new THREE.CanvasTexture(colorCanvas),
+                roughness: 0.9,
+                color: 0xdddddd
+            });
+
+            // 🚀 지형 가장자리의 텍스처(색상)가 주변 심해 공간으로 자연스럽게 스며드는 그라데이션 효과를 추가
+            terrainMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uVisualMode = { value: 0 }; 
+                terrainMat.userData.shader = shader; 
+
+                shader.vertexShader = `
+                    varying float vHeight;
+                    varying vec2 vBaseUv;
+                ` + shader.vertexShader;
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    `#include <begin_vertex>`,
+                    `#include <begin_vertex>
+                    vHeight = position.y;
+                    vBaseUv = uv;` // UV 좌표 가져오기
+                );
+
+                shader.fragmentShader = `
+                    uniform int uVisualMode;
+                    varying float vHeight;
+                    varying vec2 vBaseUv;
+                ` + shader.fragmentShader;
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    `#include <dithering_fragment>`,
+                    `#include <dithering_fragment>
+                    
+                    // 🚀 가장자리 페이드아웃 강도 계산 (0.0=안쪽, 1.0=가장자리 끝)
+                    float distU = abs(vBaseUv.x - 0.5) * 2.0;
+                    float distV = abs(vBaseUv.y - 0.5) * 2.0;
+                    float maxDist = max(distU, distV);
+                    // CPU의 지형 마진(20%)과 일치하도록 0.6부터 서서히 그라데이션 시작
+                    float edgeFade = smoothstep(0.6, 0.98, maxDist); 
+                    
+                    vec3 realBottomColor = vec3(5.0/255.0, 15.0/255.0, 26.0/255.0); // 실사 모드 심해 배경색 (0x050f1a)
+                    vec3 tacticalBottomColor = vec3(2.0/255.0, 11.0/255.0, 30.0/255.0); // 전술 모드 심해 배경색 (0x020b1e)
+
+                    if (uVisualMode == 1) {
+                        float interval = 15.0; 
+                        float f = fract(vHeight / interval);
+                        float d = min(f, 1.0 - f);
+                        float line = smoothstep(0.05, 0.01, d); 
+                        
+                        float mf = fract(vHeight / 75.0);
+                        float md = min(mf, 1.0 - mf);
+                        float majorLine = smoothstep(0.02, 0.005, md);
+                        
+                        float totalLine = clamp(line + majorLine * 1.5, 0.0, 1.0);
+                        
+                        float depthNorm = clamp((vHeight + 500.0) / 600.0, 0.0, 1.0);
+                        vec3 baseColor = mix(vec3(0.01, 0.04, 0.15), vec3(0.1, 0.3, 0.8), depthNorm);
+                        
+                        vec3 glowColor = vec3(0.2, 0.9, 1.0);
+                        vec3 finalTactical = mix(baseColor, glowColor, totalLine);
+                        
+                        // 🚀 전술 맵도 가장자리로 갈수록 우주 같은 딥 블루 배경으로 부드럽게 사라짐
+                        gl_FragColor = vec4(mix(finalTactical, tacticalBottomColor, edgeFade), 1.0);
+                    } else {
+                        // 🚀 실사 맵 역시 뚝 끊기는 정사각형 모양이 아니라, 심해 색깔로 자연스럽게 스며듦
+                        gl_FragColor = vec4(mix(gl_FragColor.rgb, realBottomColor, edgeFade), 1.0);
+                    }
+                    `
+                );
+            };
+            
+            const terrain = new THREE.Mesh(geo, terrainMat);
+            terrain.rotation.x = -Math.PI / 2;
+            terrain.position.set(terrainBounds.oX, 0, terrainBounds.oZ);
+            terrain.frustumCulled = false; 
+            terrain.castShadow = true;
+            terrain.receiveShadow = true;
+
+            scene.add(terrain);
+            terrainMeshRef = terrain; 
+
+            initObjects();
+        }
+
+        function applyVisualMode() {
+            const isTactical = state.visualMode === 'tactical';
+            
+            if (terrainMeshRef && terrainMeshRef.material.userData.shader) {
+                terrainMeshRef.material.userData.shader.uniforms.uVisualMode.value = isTactical ? 1 : 0;
+            }
+
+            if (isTactical) {
+                seaMesh.material.opacity = 0.15; 
+                seaMesh.material.color.setHex(0x001a4d); 
+                scene.background.setHex(0x020b1e); 
+                scene.fog.color.setHex(0x020b1e);
+                scene.fog.density = 0.002;
+                gridHelpers.forEach(g => g.material.opacity = 0.05); 
+            } else {
+                seaMesh.material.opacity = 0.65; 
+                seaMesh.material.color.setHex(ENV_COLORS.waterSurface);
+                gridHelpers.forEach(g => g.material.opacity = 0.15);
+            }
+        }
+
+        function buildDeviceModel(type, mainColorHex) {
+            const group = new THREE.Group();
+            let meshOffset = 0;
+
+            const mainMat = new THREE.MeshStandardMaterial({ color: mainColorHex, roughness: 0.6, metalness: 0.3 });
+            const darkMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+            const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x112233, roughness: 0.1, metalness: 0.8 });
+
+            if (type === 'ship') {
+                meshOffset = 2; 
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 20), mainMat); hull.position.y = 1;
+                const bowGeo = new THREE.CylinderGeometry(0, 4.24, 6, 4); bowGeo.rotateY(Math.PI/4); bowGeo.rotateX(Math.PI/2);
+                const bow = new THREE.Mesh(bowGeo, mainMat); bow.position.set(0, 1, 13);
+                const bridge = new THREE.Mesh(new THREE.BoxGeometry(5, 6, 6), whiteMat); bridge.position.set(0, 7, -3);
+                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 8), darkMat); mast.position.set(0, 14, -3);
+                group.add(hull, bow, bridge, mast);
+            }
+            else if (type === 'usv') {
+                meshOffset = 1;
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 8), mainMat);
+                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3), darkMat); mast.position.set(0, 2.5, -1);
+                group.add(hull, mast);
+            }
+            else if (type === 'drone') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 1, 8), mainMat);
+                const arm1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 8), darkMat);
+                const arm2 = new THREE.Mesh(new THREE.BoxGeometry(8, 0.4, 0.4), darkMat);
+                const rGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 16); const rMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5 });
+                const r1 = new THREE.Mesh(rGeo, rMat); r1.position.set(0, 0.3, 4); const r2 = new THREE.Mesh(rGeo, rMat); r2.position.set(0, 0.3, -4);
+                const r3 = new THREE.Mesh(rGeo, rMat); r3.position.set(4, 0.3, 0); const r4 = new THREE.Mesh(rGeo, rMat); r4.position.set(-4, 0.3, 0);
+                group.add(body, arm1, arm2, r1, r2, r3, r4);
+            }
+            else if (type === 'rov') {
+                meshOffset = 0;
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 5), mainMat);
+                const light = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.5), whiteMat); light.rotateX(Math.PI/2); light.position.set(0, 0, 2.5);
+                const t1 = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 2), darkMat); t1.rotateX(Math.PI/2); t1.position.set(-2.5, 0, -1);
+                const t2 = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 2), darkMat); t2.rotateX(Math.PI/2); t2.position.set(2.5, 0, -1);
+                group.add(frame, light, t1, t2);
+            }
+            else if (type === 'auv') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 10, 16), mainMat); body.rotateX(Math.PI/2); 
+                const nose = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), mainMat); nose.position.set(0, 0, 5);
+                const tail = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3, 16), mainMat); tail.rotateX(-Math.PI/2); tail.position.set(0, 0, -6.5);
+                const f1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4, 1.5), darkMat); f1.position.set(0, 0, -6);
+                const f2 = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 1.5), darkMat); f2.position.set(0, 0, -6);
+                group.add(body, nose, tail, f1, f2);
+            }
+            else if (type === 'glider') { 
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 8, 16), mainMat); body.rotateX(Math.PI/2);
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 2), darkMat);
+                group.add(body, wing);
+            }
+            else if (type === 'submarine') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 25, 16), darkMat); body.rotateX(Math.PI/2);
+                const sail = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 4), mainMat); sail.position.set(0, 3.5, 5);
+                group.add(body, sail);
+            }
+            else if (type === 'commBuoy') { 
+                meshOffset = 1;
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 2, 16), mainMat);
+                const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 5), darkMat); antenna.position.y = 3.5;
+                group.add(base, antenna);
+            }
+            else if (type === 'powerTower') { 
+                meshOffset = 2;
+                const platform = new THREE.Mesh(new THREE.BoxGeometry(10, 4, 10), mainMat);
+                const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 15), whiteMat); pillar.position.y = 9.5;
+                group.add(platform, pillar);
+            }
+            else if (type === 'sensorNode') { 
+                meshOffset = 1; 
+                const base = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 5), darkMat);
+                const dome = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16, 0, Math.PI * 2, 0, Math.PI/2), mainMat); dome.position.y = 0.5;
+                group.add(base, dome);
+            }
+            else if (type === 'controlCenter') {
+                meshOffset = 12.5; 
+                const b1 = new THREE.Mesh(new THREE.BoxGeometry(20, 20, 25), mainMat);
+                const b2 = new THREE.Mesh(new THREE.BoxGeometry(12, 35, 12), whiteMat); b2.position.set(-6, 7.5, -12);
+                const rd = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 16), whiteMat); rd.position.set(-6, 28, -12);
+                const w = new THREE.Mesh(new THREE.BoxGeometry(15, 6, 26), glassMat); w.position.set(-3, 4, 0); 
+                group.add(b1, b2, rd, w);
+            }
+            else { const defaultMesh = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), mainMat); group.add(defaultMesh); }
+
+            group.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
+            
+            group.scale.set(0.5, 0.5, 0.5);
+            meshOffset *= 0.5; 
+
+            return { group, meshOffset };
+        }
+
+        function initObjects() {
+            initialScenarios.forEach(data => {
+                const { group, meshOffset } = buildDeviceModel(data.type, COLORS[data.type]);
+                group.position.set(data.position.x, data.position.y + meshOffset, data.position.z);
+                group.rotation.y = THREE.MathUtils.degToRad(-data.heading);
+                group.userData = { id: data.id, isObject: true };
+                scene.add(group);
+
+                group.traverse(child => { if (child.isMesh) child.userData = { id: data.id, isObject: true }; });
+
+                const labelEl = document.createElement('div');
+                labelEl.className = 'object-label';
+                labelEl.innerText = data.name;
+                document.getElementById('labels-container').appendChild(labelEl);
+
+                state.objects.push({ ...data, mesh: group, meshOffset: meshOffset, labelEl: labelEl, hasAlert: false });
+            });
+
+            state.objects.forEach(obj => {
+                if (obj.tetherTarget) {
+                    const lineMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 8, gapSize: 6, transparent: true, opacity: 0.8 });
+                    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
+                    scene.add(line);
+                    state.tethers.push({ source: obj.id, target: obj.tetherTarget, line: line });
+                }
+            });
+
+            linkScenarios.forEach(link => {
+                const lineMat = new THREE.LineDashedMaterial({ color: COLORS[link.type], dashSize: 10, gapSize: 10, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+                const lineMesh = new THREE.Line(lineGeo, lineMat);
+                lineMesh.userData = { id: link.id, isLink: true };
+                scene.add(lineMesh);
+
+                const packetGeo = new THREE.CylinderGeometry(0.2, 0.2, 6, 8);
+                packetGeo.rotateX(Math.PI / 2);
+                
+                const particles = [];
+                const numPackets = 4;
+                for(let i=0; i<numPackets; i++) {
+                    const packetMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
+                    const pMesh = new THREE.Mesh(packetGeo, packetMat);
+                    scene.add(pMesh);
+                    particles.push({ mesh: pMesh, progress: i * (1.0 / numPackets) });
+                }
+
+                state.links.push({ ...link, mesh: lineMesh, particles: particles });
+            });
+        }
+
+        function updateSimulation(delta) {
+            if (!globalDemData) return; 
+
+            const time = state.time;
+            const simDelta = delta * state.simSpeed;
+
+            state.objects.forEach(obj => {
+                const floorY = getRealTerrainElevation(obj.position.x, obj.position.z);
+
+                if (['controlCenter', 'sensorNode'].includes(obj.type)) {
+                    obj.position.y = floorY;
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                }
+                else if (['powerTower', 'commBuoy'].includes(obj.type)) {
+                    obj.mesh.position.set(obj.position.x, 0 + obj.meshOffset, obj.position.z);
+                }
+                else if (['ship', 'auv', 'submarine', 'glider', 'rov'].includes(obj.type)) {
+                    const rad = THREE.MathUtils.degToRad(-obj.heading);
+                    const moveSpd = obj.speed * simDelta * 0.1;
+                    obj.position.x += Math.sin(rad) * moveSpd;
+                    obj.position.z += Math.cos(rad) * moveSpd;
+
+                    if (Math.abs(obj.position.x) > 600 || Math.abs(obj.position.z) > 600) {
+                        obj.heading = (obj.heading + 180) % 360;
+                        obj.mesh.rotation.y = THREE.MathUtils.degToRad(-obj.heading);
+                    }
+
+                    if (['auv', 'submarine', 'glider', 'rov'].includes(obj.type)) {
+                        const safeClearance = 5; 
+                        if (obj.position.y < floorY + safeClearance) {
+                            obj.position.y = floorY + safeClearance;
+                        }
+                    }
+
+                    let yOffset = 0;
+                    if(['submarine', 'glider'].includes(obj.type)) yOffset = Math.sin(time + obj.position.x) * 2;
+                    
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset + yOffset, obj.position.z);
+                } 
+                else if (['drone', 'usv'].includes(obj.type)) {
+                    if (obj.hoverCenter) {
+                        const radius = 50; 
+                        obj.position.x = obj.hoverCenter.x + Math.sin(time * 0.2) * radius;
+                        obj.position.z = obj.hoverCenter.z + Math.cos(time * 0.2) * radius;
+                        const dx = Math.sin(time * 0.2 + 0.1) * radius - Math.sin(time * 0.2) * radius;
+                        const dz = Math.cos(time * 0.2 + 0.1) * radius - Math.cos(time * 0.2) * radius;
+                        obj.heading = THREE.MathUtils.radToDeg(Math.atan2(-dx, -dz));
+                        obj.mesh.rotation.y = THREE.MathUtils.degToRad(-obj.heading);
+                    }
+                    if (obj.type === 'drone') obj.position.y = 40 + Math.sin(time * 3) * 2;
+                    if (obj.type === 'usv' && floorY > 0) obj.position.y = floorY;
+
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                }
+
+                if (obj.battery !== undefined && state.simSpeed > 0) obj.battery = Math.max(0, obj.battery - (0.05 * simDelta));
+
+                obj.mesh.visible = obj.position.y >= state.depthFilter;
+                obj.labelEl.style.display = (state.showLabels && obj.mesh.visible) ? 'block' : 'none';
+
+                const isSelected = obj.id === state.selectedId;
+                let targetEmissive = 0x000000;
+                let targetIntensity = 0;
+
+                if (obj.hasAlert) {
+                    targetEmissive = COLORS.alert_critical;
+                    targetIntensity = Math.sin(time * 8) * 0.5 + 0.5;
+                } else if (isSelected || obj.id === state.hoveredId) {
+                    targetEmissive = 0xffffff;
+                    targetIntensity = isSelected ? 0.5 : 0.2;
+                }
+
+                obj.mesh.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.emissive.setHex(targetEmissive);
+                        child.material.emissiveIntensity = targetIntensity;
+                    }
+                });
+            });
+
+            if (seaMesh.material.userData.shader) seaMesh.material.userData.shader.uniforms.uTime.value = time;
+            const snap = 10;
+            const camX = Math.round(camera.position.x / snap) * snap;
+            const camZ = Math.round(camera.position.z / snap) * snap;
+            seaMesh.position.x = camX; seaMesh.position.z = camZ;
+            seaMesh.userData.bottomMesh.position.x = camX; seaMesh.userData.bottomMesh.position.z = camZ;
+            gridHelpers.forEach(g => { g.position.x = camX; g.position.z = camZ; });
+
+            state.tethers.forEach(t => {
+                const s = state.objects.find(o => o.id === t.source), tgt = state.objects.find(o => o.id === t.target);
+                if (s && tgt) {
+                    const pos = t.line.geometry.attributes.position.array;
+                    pos[0]=s.mesh.position.x; pos[1]=s.mesh.position.y; pos[2]=s.mesh.position.z;
+                    pos[3]=tgt.mesh.position.x; pos[4]=tgt.mesh.position.y; pos[5]=tgt.mesh.position.z;
+                    t.line.geometry.attributes.position.needsUpdate = true;
+                    t.line.computeLineDistances();
+                    t.line.visible = s.mesh.visible && tgt.mesh.visible;
+                }
+            });
+
+            state.links.forEach(link => {
+                const sObj = state.objects.find(o => o.id === link.source);
+                const tObj = state.objects.find(o => o.id === link.target);
+                
+                if (sObj && tObj) {
+                    const isVisible = sObj.mesh.visible && tObj.mesh.visible;
+                    link.mesh.visible = isVisible;
+                    
+                    const p1 = sObj.mesh.position.clone();
+                    const p2 = tObj.mesh.position.clone();
+                    
+                    if(sObj.type==='controlCenter') p1.y += 20; if(tObj.type==='controlCenter') p2.y += 20;
+                    if(sObj.type==='ship') p1.y += 10; if(tObj.type==='ship') p2.y += 10;
+
+                    const posAttr = link.mesh.geometry.attributes.position;
+                    posAttr.array[0] = p1.x; posAttr.array[1] = p1.y; posAttr.array[2] = p1.z;
+                    posAttr.array[3] = p2.x; posAttr.array[4] = p2.y; posAttr.array[5] = p2.z;
+                    posAttr.needsUpdate = true;
+                    
+                    link.mesh.computeLineDistances();
+
+                    const isSelected = link.id === state.selectedId || link.id === state.hoveredId;
+                    link.mesh.material.opacity = isSelected ? 0.9 : 0.4;
+                    link.mesh.material.dashOffset -= simDelta * 15;
+
+                    link.particles.forEach(p => {
+                        p.mesh.visible = isVisible;
+                        p.progress += simDelta * 0.15; 
+                        if(p.progress > 1.0) p.progress = 0;
+                        
+                        p.mesh.position.lerpVectors(p1, p2, p.progress);
+                        p.mesh.lookAt(p2);
+                        
+                        p.mesh.material.color.setHex(isSelected ? 0xffffff : COLORS[link.type]);
+                        
+                        const scaleBase = isSelected ? 1.5 : 0.8;
+                        p.mesh.scale.set(scaleBase, scaleBase, scaleBase + (Math.sin(time * 10) * 0.3));
+                    });
+                }
+            });
+
+            alertQueue.forEach(a => { if (!a.triggered && time >= a.triggerTime) { a.triggered = true; triggerAlert(a); } });
+
+            if (state.showLabels) {
+                state.objects.forEach(obj => {
+                    if(!obj.mesh.visible) return;
+                    const pos = obj.mesh.position.clone();
+                    pos.y += (obj.type==='drone'? 5 : 8);
+                    pos.project(camera);
+                    if (pos.z > 1) { obj.labelEl.style.display = 'none'; return; }
+                    obj.labelEl.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
+                    obj.labelEl.style.top = `${(pos.y * -0.5 + 0.5) * window.innerHeight}px`;
+                });
+            }
+
+            if (state.visualMode === 'tactical') {
+                scene.background.setHex(ENV_COLORS.tacticalBg);
+                scene.fog.color.setHex(ENV_COLORS.tacticalBg);
+            } else {
+                if (camera.position.y < 0) {
+                    scene.background.setHex(ENV_COLORS.deepWater); scene.fog.color.setHex(ENV_COLORS.deepWater); scene.fog.density = 0.005;
+                } else {
+                    scene.background.setHex(ENV_COLORS.sky); scene.fog.color.setHex(ENV_COLORS.sky); scene.fog.density = 0.002;
+                }
+            }
+
+            if (state.cameraMode === 'follow' && state.selectedId) {
+                const target = state.objects.find(o => o.id === state.selectedId) || state.links.find(l => l.id === state.selectedId);
+                if (target) {
+                    let tPos = target.mesh ? target.mesh.position : target.position;
+                    if(target.source) {
+                        const sObj = state.objects.find(o => o.id === target.source), tObj = state.objects.find(o => o.id === target.target);
+                        if(sObj && tObj) tPos = sObj.mesh.position.clone().lerp(tObj.mesh.position, 0.5);
+                    }
+                    controls.target.lerp(tPos, 0.1);
+                }
+            } else if (state.cameraMode === 'topdown' && state.selectedId) {
+                const target = state.objects.find(o => o.id === state.selectedId);
+                if (target) {
+                    controls.target.lerp(target.mesh.position, 0.1); 
+                    camera.position.lerp(target.mesh.position.clone().add(new THREE.Vector3(0,150,0)), 0.05);
+                }
+            }
+            controls.update();
+        }
+
+        function initMap() {
+            mapState.map = L.map('minimap', { zoomControl: false, attributionControl: false, dragging: false, touchZoom: false, doubleClickZoom: false, scrollWheelZoom: false, boxZoom: false, keyboard: false }).setView([mapState.baseLat, mapState.baseLng], 14);
+            
+            mapState.currentTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18 }).addTo(mapState.map);
+
+            const createIcon = (c) => L.divIcon({ className: 'custom-div-icon', html: `<div style="background-color:#${c.toString(16).padStart(6,'0')}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.8);"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+
+            state.objects.forEach(obj => {
+                const marker = L.marker([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)], { icon: createIcon(COLORS[obj.type] || 0xffffff) }).addTo(mapState.map);
+                marker.bindTooltip(obj.name, { direction: 'top', offset: [0, -10] });
+                marker.on('click', () => {
+                    uiManager.selectObject(obj.id);
+                    const t = state.objects.find(o => o.id === obj.id);
+                    if(t) { camera.position.copy(t.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(t.mesh.position); }
+                });
+                mapState.markers[obj.id] = marker;
+            });
+
+            state.links.forEach(link => {
+                const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
+                const polyline = L.polyline([], { color: colorStr, weight: 2, dashArray: '5, 5' }).addTo(mapState.map);
+                mapState.lines[link.id] = polyline;
+            });
+        }
+
+        function updateMap() {
+            if (!mapState.map) return;
+            state.objects.forEach(obj => {
+                const marker = mapState.markers[obj.id];
+                if (marker) {
+                    marker.setLatLng([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)]);
+                    if (state.selectedId === obj.id) marker.openTooltip(); else if (!marker.isPopupOpen()) marker.closeTooltip();
+                }
+            });
+            
+            state.links.forEach(link => {
+                const polyline = mapState.lines[link.id];
+                const sObj = state.objects.find(o => o.id === link.source);
+                const tObj = state.objects.find(o => o.id === link.target);
+                if (polyline && sObj && tObj) {
+                    const sLat = mapState.baseLat - (sObj.position.z * mapState.scale);
+                    const sLng = mapState.baseLng + (sObj.position.x * mapState.scale);
+                    const tLat = mapState.baseLat - (tObj.position.z * mapState.scale);
+                    const tLng = mapState.baseLng + (tObj.position.x * mapState.scale);
+                    polyline.setLatLngs([[sLat, sLng], [tLat, tLng]]);
+                    
+                    if (link.id === state.selectedId) polyline.setStyle({ weight: 4, opacity: 1 });
+                    else polyline.setStyle({ weight: 2, opacity: 0.6 });
+                }
+            });
+
+            mapState.map.setView([mapState.baseLat - (controls.target.z * mapState.scale), mapState.baseLng + (controls.target.x * mapState.scale)], mapState.map.getZoom(), { animate: false });
+            const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
+            document.getElementById('minimap-container').style.transform = `rotate(${-Math.atan2(camDir.x, -camDir.z) * (180 / Math.PI)}deg)`;
+        }
+
+        const uiManager = {
+            init: function() {
+                document.getElementById('visual-mode').addEventListener('change', (e) => { 
+                    state.visualMode = e.target.value; 
+                    applyVisualMode(); 
+                });
+
+                document.getElementById('camera-mode').addEventListener('change', (e) => { state.cameraMode = e.target.value; if(state.cameraMode === 'orbit') controls.target.set(0,0,0); });
+                
+                document.getElementById('map-style').addEventListener('change', (e) => {
+                    if(mapState.currentTileLayer) mapState.map.removeLayer(mapState.currentTileLayer);
+                    let url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'; 
+                    if (e.target.value === 'dark') url = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'; 
+                    if (e.target.value === 'ocean') url = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}'; 
+                    mapState.currentTileLayer = L.tileLayer(url, { maxZoom: 18 }).addTo(mapState.map);
+                });
+
+                document.getElementById('depth-filter').addEventListener('input', (e) => { state.depthFilter = parseInt(e.target.value); document.getElementById('depth-value').innerText = `0m ~ ${state.depthFilter}m 표시`; });
+                document.getElementById('sim-speed').addEventListener('input', (e) => { state.simSpeed = parseFloat(e.target.value); document.getElementById('speed-value').innerText = `${state.simSpeed.toFixed(1)}x`; });
+                this.renderStats(); this.renderObjectList();
+            },
+            togglePanel: function(side) {
+                const panel = document.getElementById(`${side}-panel`);
+                if(panel) panel.classList.toggle('collapsed');
+            },
+            switchTab: function(tabName) {
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.querySelectorAll('.tab-btn')[tabName === 'objects' ? 0 : 1].classList.add('active');
+                document.getElementById(`tab-${tabName}`).classList.add('active');
+            },
+            selectObject: function(id) { state.selectedId = id; this.renderObjectList(); this.renderSelectedDetail(); this.switchTab('objects'); },
+            renderStats: function() {
+                const types = { ship: 0, rov: 0, auv: 0, drone: 0, usv: 0, land: 0 };
+                state.objects.forEach(o => { if (types[o.type] !== undefined) types[o.type]++; });
+                document.getElementById('stats-container').innerHTML = `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 객체:</span> <strong>${state.objects.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>통신 링크:</span> <strong>${state.links.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? '#f87171' : '#4ade80'}">발생 경보: ${state.alerts.length}건</div>`;
+            },
+            renderObjectList: function() {
+                let html = '';
+                state.objects.forEach(obj => {
+                    html += `<div class="list-item ${obj.id === state.selectedId ? 'selected' : ''}" onclick="uiManager.selectObject('${obj.id}')"><div class="title"><span>${obj.name}</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">●</span></div><div style="display:flex; justify-content:space-between; color:#94a3b8;"><span>Depth: ${Math.round(obj.position.y)}m</span><span>Bat: ${obj.battery ? Math.round(obj.battery) + '%' : 'N/A'}</span></div></div>`;
+                });
+                state.links.forEach(link => {
+                    html += `<div class="list-item ${link.id === state.selectedId ? 'selected' : ''}" style="border-left-color: #${COLORS[link.type].toString(16)}" onclick="uiManager.selectObject('${link.id}')"><div class="title"><span>🔗 ${link.name}</span></div><div style="font-size:0.75rem; color:#94a3b8;">Data Stream Active</div></div>`;
+                });
+                document.getElementById('object-list-container').innerHTML = html;
+                document.getElementById('obj-count').innerText = state.objects.length + state.links.length;
+            },
+            renderSelectedDetail: function() {
+                const d = document.getElementById('selected-detail');
+                const obj = state.objects.find(o => o.id === state.selectedId);
+                const link = state.links.find(l => l.id === state.selectedId);
+
+                if (!obj && !link) { d.style.display = 'none'; return; }
+                d.style.display = 'block';
+
+                if (obj) {
+                    d.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid #60a5fa;"><h4 style="margin-top:0; color:#60a5fa;">${obj.name}</h4><div style="font-size:0.85rem; display:grid; grid-template-columns: 100px 1fr; gap: 4px;"><span style="color:#94a3b8">타입:</span><span>${obj.type.toUpperCase()}</span><span style="color:#94a3b8">좌표:</span><span>(${obj.position.x.toFixed(1)}, ${obj.position.y.toFixed(1)}, ${obj.position.z.toFixed(1)})</span><span style="color:#94a3b8">속력:</span><span>${obj.speed} knots</span><span style="color:#94a3b8">헤딩:</span><span>${Math.round(obj.heading)}°</span><span style="color:#94a3b8">배터리:</span><span>${obj.battery ? obj.battery.toFixed(1) + '%' : 'N/A'}</span><span style="color:#94a3b8">상태:</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">${obj.hasAlert ? '위험 감지' : '정상 작동'}</span></div></div><hr>`;
+                } 
+                else if (link) {
+                    const sObj = state.objects.find(o => o.id === link.source);
+                    const tObj = state.objects.find(o => o.id === link.target);
+                    const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
+                    
+                    let packetHtml = link.packets.map(p => `<div class="data-packet">${p}</div>`).join('');
+                    
+                    d.innerHTML = `
+                        <div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid ${colorStr};">
+                            <h4 style="margin-top:0; color:${colorStr};">📡 ${link.name}</h4>
+                            <div style="font-size:0.85rem; margin-bottom: 10px;">
+                                <span style="color:#94a3b8">연결: </span> <strong style="color:white">${sObj ? sObj.name : 'Unknown'}</strong> ↔ <strong style="color:white">${tObj ? tObj.name : 'Unknown'}</strong>
+                            </div>
+                            <div style="color:#94a3b8; font-size: 0.8rem; margin-bottom: 5px;">실시간 전송 데이터:</div>
+                            <div style="background: #000; padding: 8px; border-radius: 4px; border: 1px solid #334155; max-height: 100px; overflow-y: auto;">
+                                ${packetHtml}
+                                <div class="data-packet" style="color:#64748b; animation: pulse-bg 1.5s infinite;">_수신 대기중...</div>
+                            </div>
+                        </div><hr>
+                    `;
+                }
+            },
+            addAlert: function(alertData) {
+                state.alerts.push(alertData); document.getElementById('alert-count').innerText = state.alerts.length;
+                const container = document.getElementById('alert-list-container');
+                if (state.alerts.length === 1) container.innerHTML = '';
+                const el = document.createElement('div');
+                el.className = `list-item ${alertData.severity === 'critical' ? 'alert-critical' : 'alert-warning'}`;
+                el.innerHTML = `<div class="title"><span>${alertData.message}</span></div><div style="font-size:0.75rem; color:#94a3b8;">Time: ${new Date().toLocaleTimeString()} | Target: ${alertData.platformId}</div>`;
+                el.onclick = () => { this.selectObject(alertData.platformId); const obj = state.objects.find(o => o.id === alertData.platformId); if(obj) { controls.target.copy(obj.mesh.position); camera.position.set(obj.mesh.position.x, obj.mesh.position.y + 40, obj.mesh.position.z + 60); } };
+                container.insertBefore(el, container.firstChild);
+                this.renderStats(); if(state.selectedId === alertData.platformId) this.renderSelectedDetail();
+            }
+        };
+
+        function triggerAlert(alertData) { const obj = state.objects.find(o => o.id === alertData.platformId); if (obj) { obj.hasAlert = true; obj.status = "warning"; uiManager.addAlert(alertData); } }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1; mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const allIntersectables = [...state.objects.map(o => o.mesh), ...state.links.map(l => l.mesh)];
+            const intersects = raycaster.intersectObjects(allIntersectables, true);
+            
+            const tooltip = document.getElementById('tooltip');
+            if (intersects.length > 0) {
+                document.body.style.cursor = 'pointer';
+                let hitObj = intersects[0].object;
+                while (hitObj && !hitObj.userData.id) hitObj = hitObj.parent;
+                
+                if (hitObj) {
+                    state.hoveredId = hitObj.userData.id;
+                    const obj = state.objects.find(o => o.id === state.hoveredId);
+                    const link = state.links.find(l => l.id === state.hoveredId);
+                    
+                    tooltip.style.display = 'block'; 
+                    tooltip.style.left = (event.clientX + 15) + 'px'; 
+                    tooltip.style.top = (event.clientY + 15) + 'px'; 
+                    
+                    if(obj) {
+                        tooltip.innerHTML = `<strong>${obj.name}</strong><br>Type: ${obj.type}<br>Depth: ${Math.round(obj.position.y)}m`; 
+                    } else if (link) {
+                        tooltip.innerHTML = `<strong>🔗 ${link.name}</strong><br>데이터 스트림 확인하기 (Click)`;
+                    }
+                }
+            } else { document.body.style.cursor = 'default'; state.hoveredId = null; tooltip.style.display = 'none'; }
+        }
+
+        function onClick() { uiManager.selectObject(state.hoveredId || null); }
+
+        window.addEventListener('keydown', (e) => {
+            if(document.activeElement.tagName === 'INPUT') return;
+            const targetList = [...state.objects, ...state.links];
+            const idx = targetList.findIndex(o => o.id === state.selectedId);
+            switch(e.key.toLowerCase()) {
+                case '1': if(targetList.length > 0) uiManager.selectObject(targetList[idx <= 0 ? targetList.length - 1 : idx - 1].id); break;
+                case '2': if(targetList.length > 0) uiManager.selectObject(targetList[(idx + 1) % targetList.length].id); break;
+                case 'f': if(state.selectedId) { 
+                    const obj = state.objects.find(o => o.id === state.selectedId); 
+                    if(obj) { camera.position.copy(obj.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(obj.mesh.position); } 
+                } break;
+                case 'l': state.showLabels = !state.showLabels; if(!state.showLabels) state.objects.forEach(o => o.labelEl.style.display = 'none'); break;
+                case 'g': state.showGrid = !state.showGrid; gridHelpers.forEach(g => g.visible = state.showGrid); break;
+                case 'z': document.getElementById('depth-filter').value = -500; document.getElementById('depth-filter').dispatchEvent(new Event('input')); break;
+                case '+': case '=': document.getElementById('sim-speed').value = Math.min(3, state.simSpeed + 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
+                case '-': case '_': document.getElementById('sim-speed').value = Math.max(0.1, state.simSpeed - 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
+            }
+        });
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            state.time += clock.getDelta() * state.simSpeed;
+            updateSimulation(clock.getDelta());
+            if (Math.floor(state.time * 10) % 10 === 0 && state.selectedId) uiManager.renderSelectedDetail();
+            updateMap();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => { init3DEnvironment(); initObjects(); uiManager.init(); initMap(); animate(); };
+    </script>
+</body>
+</html>

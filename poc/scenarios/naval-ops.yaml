@@ -1,0 +1,320 @@
+# 해양 운영 시스템 시뮬레이션 시나리오
+# 향후 Python 시뮬레이터와 연동할 데이터 포맷
+
+scenario:
+  name: "Unmanned Naval Operations"
+  description: "통제 센터 기반 무인 해양 작업 시뮬레이션"
+  version: "1.0"
+  duration_seconds: 3600  # 1시간
+  start_time: "2026-04-16T08:00:00Z"
+
+environment:
+  location:
+    latitude: 37.5
+    longitude: 126.8
+    region: "한강 외항"
+
+  weather:
+    initial_state: "clear"  # clear, cloudy, rainy, storm
+    wind_speed_knots: 5
+    wave_height_m: 0.5
+    visibility_m: 5000
+    current_direction_deg: 90
+    current_speed_knots: 0.8
+
+  water:
+    salinity_psu: 30.5  # Practical Salinity Units
+    temperature_celsius: 16.5
+    max_depth_m: 200
+
+  time_cycle:
+    sunrise: "06:30"
+    sunset: "18:45"
+    simulation_speed: 1.0  # 1x = 실시간
+
+objects:
+  control_centers:
+    - id: "center-001"
+      name: "통제 센터 A"
+      type: "control_center"
+      position:
+        x: -80
+        y: 5
+        z: -60
+      capabilities:
+        - "vessel_tracking"
+        - "rov_control"
+        - "auv_mission_planning"
+        - "communication_relay"
+      status: "operational"
+
+  surface_vessels:
+    - id: "ship-001"
+      name: "상선 #1"
+      type: "merchant_ship"
+      length_m: 180
+      beam_m: 32
+      initial_position:
+        x: 40
+        y: 0
+        z: 30
+      initial_heading_deg: 45
+      initial_speed_knots: 12
+      mission: "정기 운송"
+      ais_mmsi: 440067123
+      equipment:
+        - "gps"
+        - "radar"
+        - "vhf_radio"
+      waypoints:
+        - {x: 60, z: 50, time_seconds: 600}
+        - {x: 80, z: 30, time_seconds: 1200}
+
+    - id: "ship-002"
+      name: "쌍끌이 #2"
+      type: "fishing_vessel"
+      length_m: 38
+      beam_m: 9
+      initial_position:
+        x: -50
+        y: 0
+        z: 60
+      initial_heading_deg: 180
+      initial_speed_knots: 8
+      mission: "어업 활동"
+      ais_mmsi: 440012345
+      equipment:
+        - "gps"
+        - "fishfinder"
+      status: "active"
+
+    - id: "ship-003"
+      name: "유조선 #3"
+      type: "tanker"
+      length_m: 228
+      beam_m: 38
+      initial_position:
+        x: 20
+        y: 0
+        z: -80
+      initial_heading_deg: 270
+      initial_speed_knots: 14
+      mission: "화학물질 운송"
+      ais_mmsi: 440089999
+      cargo_type: "chemical"
+      hazard_rating: "high"
+      status: "restricted"
+
+  unmanned_surface_vehicles:
+    - id: "usv-001"
+      name: "USV-1"
+      type: "usv"
+      length_m: 8
+      initial_position:
+        x: 60
+        y: 15
+        z: -40
+      initial_speed_knots: 20
+      mission: "Water quality monitoring"
+      equipment:
+        - "gps"
+        - "ph_sensor"
+        - "temperature_sensor"
+        - "salinity_sensor"
+        - "turbidity_sensor"
+      battery_percent: 85
+      recharge_dock: "center-001"
+
+    - id: "drone-001"
+      name: "드론 #2"
+      type: "aerial_drone"
+      altitude_m: 50
+      initial_position:
+        x: -30
+        y: 50
+        z: 50
+      max_flight_time_min: 45
+      battery_percent: 92
+      mission: "Area surveillance"
+      equipment:
+        - "4k_camera"
+        - "thermal_camera"
+        - "lidar"
+
+  communication_infrastructure:
+    - id: "tower-001"
+      name: "통신 타워"
+      type: "relay_tower"
+      height_m: 30
+      position:
+        x: -90
+        y: 8
+        z: 80
+      frequency_mhz: [165.2, 166.5, 167.8]  # VHF 채널
+      range_km: 50
+      coverage_polygon: "circular"
+      status: "operational"
+
+  remotely_operated_vehicles:
+    - id: "rov-001"
+      name: "ROV-1"
+      type: "rov"
+      initial_position:
+        x: 50
+        y: -50
+        z: 20
+      tether_length_m: 80
+      tether_break_strength_kn: 500
+      depth_rating_m: 300
+      battery_percent: 78
+      cameras: 4
+      arms: 2
+      mission: "Cable inspection"
+      parent_vessel: "ship-001"
+      operating_status: "deployed"
+      equipment:
+        - "hd_camera"
+        - "manipulator_arm"
+        - "sonar"
+        - "lighting"
+      telemetry:
+        - {time: 0, depth: 50, heading: 90}
+        - {time: 600, depth: 60, heading: 95}
+
+    - id: "rov-002"
+      name: "ROV-2"
+      type: "rov"
+      initial_position:
+        x: 20
+        y: -80
+        z: -50
+      tether_length_m: 120
+      depth_rating_m: 400
+      battery_percent: 65
+      mission: "Seafloor survey"
+      parent_vessel: "ship-002"
+      operating_status: "idle"
+
+  autonomous_underwater_vehicles:
+    - id: "auv-001"
+      name: "AUV-1"
+      type: "auv"
+      length_m: 1.8
+      initial_position:
+        x: -40
+        y: -100
+        z: 30
+      endurance_hours: 8
+      battery_percent: 88
+      cruise_speed_knots: 4
+      max_depth_m: 500
+      mission: "Bathymetric mapping"
+      target_area:
+        center: {x: 0, z: 0}
+        radius_km: 5
+      navigation_type: "autonomous"
+      equipment:
+        - "multibeam_sonar"
+        - "inertial_navigation"
+        - "optical_leak_detector"
+      path_planning: "lawn_mower"  # 예정된 항로 패턴
+      telemetry:
+        - {time: 0, depth: 100, heading: 0, battery: 88}
+        - {time: 300, depth: 120, heading: 45, battery: 86}
+
+    - id: "auv-002"
+      name: "AUV-2"
+      type: "auv"
+      length_m: 2.4
+      initial_position:
+        x: 60
+        y: -120
+        z: -60
+      endurance_hours: 12
+      battery_percent: 92
+      cruise_speed_knots: 3
+      max_depth_m: 1000
+      mission: "Environmental monitoring"
+      mission_duration_hours: 6
+      equipment:
+        - "cdom_fluorometer"
+        - "dissolved_oxygen_sensor"
+        - "turbidity_sensor"
+        - "conductivity_sensor"
+
+  underwater_infrastructure:
+    - id: "cable-001"
+      name: "수중 통신 케이블"
+      type: "submarine_cable"
+      start_position: {x: 40, y: 0, z: 30}
+      end_position: {x: 50, y: -80, z: 10}
+      depth_range: [0, -80]
+      length_m: 120
+      status: "operational"
+      bandwidth_gbps: 400
+
+    - id: "platform-001"
+      name: "해양 플랫폼"
+      type: "offshore_platform"
+      position: {x: 30, y: 0, z: -50}
+      function: "power_transmission"
+      depth_foundation_m: 80
+      personnel_capacity: 120
+      status: "operational"
+
+events:
+  - time_seconds: 300
+    type: "vessel_detection"
+    description: "New vessel entered zone"
+    target_vessel: "ship-001"
+    severity: "info"
+
+  - time_seconds: 600
+    type: "anomaly"
+    description: "Unusual heading change detected"
+    target_vessel: "ship-002"
+    severity: "warning"
+    coordinates: {x: -40, z: 70}
+
+  - time_seconds: 1200
+    type: "rov_milestone"
+    description: "ROV-1 reached target depth"
+    target_rov: "rov-001"
+    depth_m: 60
+    severity: "info"
+
+  - time_seconds: 1800
+    type: "communication_loss"
+    description: "Signal lost with USV-1"
+    target_vehicle: "usv-001"
+    severity: "critical"
+    duration_seconds: 120
+
+  - time_seconds: 2400
+    type: "battery_warning"
+    description: "AUV-2 battery low"
+    target_vehicle: "auv-002"
+    battery_percent: 25
+    severity: "warning"
+
+performance_targets:
+  - name: "Detection Latency"
+    target_ms: 100
+
+  - name: "Tracking Accuracy"
+    target_m: 5
+
+  - name: "Communication Reliability"
+    target_percent: 99.5
+
+conditions:
+  - time_seconds: 1800
+    condition_type: "weather_change"
+    new_weather: "rainy"
+    wind_speed_knots: 15
+    wave_height_m: 1.2
+
+  - time_seconds: 3000
+    condition_type: "visibility_change"
+    new_visibility_m: 2000
+    reason: "fog_formation"

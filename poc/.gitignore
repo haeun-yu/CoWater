@@ -1,0 +1,30 @@
+# 파이썬
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 시뮬레이션 출력
+data/*.json
+logs/*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (향후 서버 추가 시)
+node_modules/
+dist/
+build/
