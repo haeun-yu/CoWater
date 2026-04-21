@@ -38,12 +38,21 @@ CREATE TABLE IF NOT EXISTS platform_reports (
     raw_payload     BYTEA
 );
 
-SELECT create_hypertable(
-    'platform_reports', 'time',
-    partitioning_column => 'platform_id',
-    number_partitions   => 4,
-    if_not_exists       => TRUE
-);
+-- Create hypertable if TimescaleDB is available, otherwise skip
+DO $$
+BEGIN
+    BEGIN
+        PERFORM create_hypertable(
+            'platform_reports', 'time',
+            partitioning_column => 'platform_id',
+            number_partitions   => 4,
+            if_not_exists       => TRUE
+        );
+    EXCEPTION WHEN OTHERS THEN
+        -- TimescaleDB not available, continue with regular table
+        RAISE NOTICE 'TimescaleDB extension not available, using regular table instead';
+    END;
+END $$;
 
 -- 최근 데이터 조회 최적화
 CREATE INDEX IF NOT EXISTS idx_reports_platform_time

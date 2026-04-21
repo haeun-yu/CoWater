@@ -38,7 +38,9 @@ services:
   # PostgreSQL + PostGIS + TimescaleDB
   # ─────────────────────────────────────────────────────
   postgres:
-    image: timescale/timescaledb-ha:pg15.13-ts2.17.2-all
+    build:
+      context: ..
+      dockerfile: infra/postgres/Dockerfile
     container_name: cowater-postgres
     restart: unless-stopped
     environment:
