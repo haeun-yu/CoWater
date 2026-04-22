@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import httpx
 import yaml
@@ -20,6 +21,7 @@ from core.ais_encoder import encode_position_report
 from core.vessel import NavStatus, VesselSimulator, VesselState, Waypoint
 from core.weather import WeatherGenerator
 from moth_publisher import MothPublisher
+from shared.schemas.device_stream import DeviceStreamMessage, StreamEnvelope
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +36,19 @@ class ScenarioEvent:
 
 
 class ScenarioRunner:
-    def __init__(self, scenario_path: str, publishers: list) -> None:
+    def __init__(
+        self,
+        scenario_path: str,
+        publishers: list,
+        stream_publishers: list | None = None,
+    ) -> None:
         self._publishers = publishers
+        self._stream_publishers = stream_publishers or []
         self._vessels: dict[str, VesselSimulator] = {}
         self._events: list[ScenarioEvent] = []
         self._weather = WeatherGenerator()
         self._elapsed_s: float = 0.0
+        self._last_stream_at: dict[tuple[str, str], float] = {}
         self._load(scenario_path)
 
     def _load(self, path: str) -> None:
@@ -139,6 +148,7 @@ class ScenarioRunner:
                     for publisher in self._publishers:
                         await publisher.publish(sentence)
                     sentence_count += 1
+                await self._publish_device_streams(vessel)
 
             if int(self._elapsed_s) % 30 == 0 and self._elapsed_s > 0:
                 logger.info(
@@ -148,3 +158,107 @@ class ScenarioRunner:
                     self._weather.current_state().wind_speed_knots,
                     sentence_count,
                 )
+
+    async def _publish_device_streams(self, vessel: VesselSimulator) -> None:
+        if not self._stream_publishers:
+            return
+
+        stream_defs = [
+            ("telemetry.position", 1.0, self._position_payload, "latest"),
+            ("telemetry.status", 5.0, self._status_payload, "best_effort"),
+            ("sensor.sonar", 2.0, self._sonar_payload, "sampled"),
+            ("telemetry.task", 5.0, self._task_payload, "best_effort"),
+            ("telemetry.network", 3.0, self._network_payload, "best_effort"),
+        ]
+        for stream, interval_s, payload_factory, qos in stream_defs:
+            key = (vessel.state.mmsi, stream)
+            last_at = self._last_stream_at.get(key)
+            if last_at is not None and self._elapsed_s - last_at < interval_s:
+                continue
+            self._last_stream_at[key] = self._elapsed_s
+            await self._publish_stream(vessel, stream, payload_factory(vessel), qos)
+
+    async def _publish_stream(
+        self,
+        vessel: VesselSimulator,
+        stream: str,
+        payload: dict,
+        qos: str,
+    ) -> None:
+        message = DeviceStreamMessage(
+            envelope=StreamEnvelope(
+                stream=stream,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                source="simulator",
+                device_id=vessel.state.mmsi,
+                device_type="vessel",
+                qos=qos,
+            ),
+            payload=payload,
+        )
+        for publisher in self._stream_publishers:
+            await publisher.publish_stream(message)
+
+    def _position_payload(self, vessel: VesselSimulator) -> dict:
+        state = vessel.state
+        return {
+            "lat": state.lat,
+            "lon": state.lon,
+            "sog": state.sog,
+            "cog": state.cog,
+            "heading": state.heading,
+            "rot": state.rot,
+            "nav_status": state.nav_status.name.lower(),
+            "name": state.name,
+            "source_protocol": "custom",
+        }
+
+    def _status_payload(self, vessel: VesselSimulator) -> dict:
+        state = vessel.state
+        battery_pct = max(20.0, 100.0 - (self._elapsed_s / 1800.0 * 100.0))
+        return {
+            "name": state.name,
+            "operational_state": "underway",
+            "mode": "autonomous",
+            "battery_pct": round(battery_pct, 1),
+            "health": "nominal",
+            "capabilities": ["position", "status", "network", "task", "sonar"],
+        }
+
+    def _sonar_payload(self, vessel: VesselSimulator) -> dict:
+        state = vessel.state
+        contact_strength = 0.35 + ((int(self._elapsed_s) % 10) / 100.0)
+        return {
+            "ping_id": f"{state.mmsi}-{int(self._elapsed_s)}",
+            "range_m": 120.0,
+            "bearing_deg": (state.heading + 35.0) % 360.0,
+            "contacts": [
+                {
+                    "contact_id": f"sim-contact-{state.mmsi}",
+                    "classification": "unknown_object",
+                    "confidence": round(contact_strength, 2),
+                    "range_m": 84.0,
+                    "bearing_deg": (state.heading + 18.0) % 360.0,
+                }
+            ],
+        }
+
+    def _task_payload(self, vessel: VesselSimulator) -> dict:
+        progress = min(100.0, (self._elapsed_s / 300.0) * 100.0)
+        return {
+            "task_id": f"sim-task-{vessel.state.mmsi}",
+            "task_type": "patrol",
+            "phase": "survey",
+            "progress_pct": round(progress, 1),
+        }
+
+    def _network_payload(self, vessel: VesselSimulator) -> dict:
+        latency_ms = 80 + (int(self._elapsed_s) % 5) * 20
+        packet_loss_pct = 0.0 if int(self._elapsed_s) % 10 else 10.0
+        return {
+            "link": "moth",
+            "connected": True,
+            "latency_ms": latency_ms,
+            "packet_loss_pct": packet_loss_pct,
+            "rssi_dbm": -62,
+        }

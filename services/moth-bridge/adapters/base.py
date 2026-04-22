@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -75,6 +76,40 @@ class ParsedReport:
         return base64.b64encode(data).decode("ascii"), truncated
 
 
+@dataclass
+class ParsedStreamMessage:
+    stream: str
+    device_id: str
+    device_type: str
+    timestamp: datetime
+    payload: dict[str, Any]
+    source: str = "unknown"
+    qos: str = "best_effort"
+    parent_device_id: str | None = None
+    flow_id: str | None = None
+    causation_id: str | None = None
+    message_id: str | None = None
+    schema_version: int = 1
+
+    def to_redis_payload(self) -> dict[str, Any]:
+        return {
+            "envelope": {
+                "message_id": self.message_id,
+                "schema_version": self.schema_version,
+                "stream": self.stream,
+                "timestamp": self.timestamp.isoformat(),
+                "source": self.source,
+                "device_id": self.device_id,
+                "device_type": self.device_type,
+                "parent_device_id": self.parent_device_id,
+                "flow_id": self.flow_id,
+                "causation_id": self.causation_id,
+                "qos": self.qos,
+            },
+            "payload": self.payload,
+        }
+
+
 class ProtocolAdapter(ABC):
     """모든 Protocol Adapter의 기본 클래스."""
 
@@ -87,6 +122,9 @@ class ProtocolAdapter(ABC):
         파싱 불가 또는 위치 정보 없으면 None 반환.
         """
         ...
+
+    def parse_streams(self, raw: bytes, mime: str) -> list[ParsedStreamMessage]:
+        return []
 
     def supports_mime(self, mime: str) -> bool:
         return True

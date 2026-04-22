@@ -28,8 +28,8 @@ services:
   # ─────────────────────────────────────────────────────
   simulator:
     build:
-      context: ../services/simulator
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/simulator/Dockerfile
     container_name: cowater-simulator
     restart: "no"
     environment:

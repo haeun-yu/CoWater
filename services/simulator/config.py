@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     moth_channel_type: str = "instant"
     moth_channel_name: str = "cowater-ais"
     moth_track: str = "data"
+    stream_moth_channel_type: str = "instant"
+    stream_moth_channel_name: str = "cowater-sim-device-streams"
+    stream_moth_track: str = "streams"
+    publish_device_streams: bool = True
 
     redis_url: str = "redis://localhost:6379/0"  # Redis pub/sub 연결
     core_api_url: str = "http://localhost:7700"  # 플랫폼 등록용
