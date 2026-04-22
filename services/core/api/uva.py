@@ -86,7 +86,7 @@ async def get_entities(db: AsyncSession = Depends(get_db)):
     # 각 플랫폼의 최신 리포트만 조회
     query = select(PlatformReportModel).order_by(
         PlatformReportModel.platform_id,
-        PlatformReportModel.timestamp.desc()
+        PlatformReportModel.time.desc()
     )
     result = await db.execute(query)
     reports = result.scalars().all()
@@ -101,18 +101,18 @@ async def get_entities(db: AsyncSession = Depends(get_db)):
     for report in latest_by_platform.values():
         entity = Entity(
             id=report.platform_id,
-            type=report.platform_type or "unknown",
-            label=report.platform_name or report.platform_id,
+            type=report.source_protocol or "unknown",
+            label=report.platform_id,
             position=Position(
-                latitude=report.latitude,
-                longitude=report.longitude,
-                altitude=report.depth
+                latitude=report.lat,
+                longitude=report.lon,
+                altitude=report.altitude_m
             ),
-            heading=report.true_heading,
+            heading=report.heading,
             speed=report.sog,
             state=report.nav_status,
-            metadata=report.metadata_ or {},
-            timestamp=report.timestamp
+            metadata={},
+            timestamp=report.time
         )
         entities.append(entity)
 
@@ -129,7 +129,7 @@ async def get_events(db: AsyncSession = Depends(get_db)):
     """
     query = select(AlertModel).where(
         AlertModel.status == "active"
-    ).order_by(AlertModel.timestamp.desc()).limit(100)
+    ).order_by(AlertModel.created_at.desc()).limit(100)
 
     result = await db.execute(query)
     alerts = result.scalars().all()
@@ -137,12 +137,12 @@ async def get_events(db: AsyncSession = Depends(get_db)):
     events = []
     for alert in alerts:
         event = Event(
-            id=alert.id,
-            entity_id=alert.platform_id or "unknown",
+            id=alert.alert_id,
+            entity_id=(alert.platform_ids[0] if alert.platform_ids else "unknown"),
             event_type=alert.alert_type or "generic",
             severity=alert.severity or "info",
             message=alert.message,
-            timestamp=alert.timestamp,
+            timestamp=alert.created_at,
             details=alert.metadata_ or {},
             status=alert.status
         )
