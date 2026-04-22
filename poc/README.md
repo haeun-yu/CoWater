@@ -57,13 +57,13 @@ poc/
 
 ### 1️⃣ 바로 열기 (브라우저)
 ```bash
-# 파일 직접 열기
-open /Users/teamgrit/Documents/CoWater/poc/graphics/ocean-visualization.html
-
-# 또는 로컬 서버로 실행 (권장)
-cd /Users/teamgrit/Documents/CoWater/poc/graphics
+# 저장소 루트에서 실행
+cd poc/graphics
 python -m http.server 8000
-# http://localhost:8000/ocean-visualization.html
+# 브라우저에서 http://localhost:8000/ocean-visualization.html 열기
+
+# macOS에서 파일을 직접 여는 경우 (선택 사항)
+open poc/graphics/ocean-visualization.html
 ```
 
 ### 2️⃣ 기능 확인

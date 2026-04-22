@@ -148,12 +148,29 @@ class NavalSimulator:
                     continue
 
                 if 'waypoints' in vessel and len(vessel['waypoints']) > 0:
-                    # 가장 가까운 웨이포인트 찾기
+                    # 현재 시점에 대해 단 하나의 목표 웨이포인트만 선택
                     current = self.objects[vessel_id]
-                    for i, wp in enumerate(vessel['waypoints']):
-                        if self.current_time >= wp['time_seconds']:
-                            target_pos = Position(wp['x'], current.position.y, wp['z'])
-                            self._move_towards(vessel_id, target_pos, delta_time)
+                    waypoints = vessel['waypoints']
+                    eligible_waypoints = [
+                        wp for wp in waypoints
+                        if self.current_time >= wp['time_seconds']
+                    ]
+
+                    if eligible_waypoints:
+                        target_wp = max(eligible_waypoints, key=lambda wp: wp['time_seconds'])
+                    else:
+                        upcoming_waypoints = [
+                            wp for wp in waypoints
+                            if self.current_time < wp['time_seconds']
+                        ]
+                        if upcoming_waypoints:
+                            target_wp = min(upcoming_waypoints, key=lambda wp: wp['time_seconds'])
+                        else:
+                            target_wp = None
+
+                    if target_wp is not None:
+                        target_pos = Position(target_wp['x'], current.position.y, target_wp['z'])
+                        self._move_towards(vessel_id, target_pos, delta_time)
 
         # 드론/USV 랜덤 이동
         for obj_id, obj in self.objects.items():
@@ -228,7 +245,9 @@ class NavalSimulator:
 
     def export_json(self, output_file: str):
         """현재 상태를 JSON으로 내보내기"""
-        with open(output_file, 'w') as f:
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open('w') as f:
             json.dump(self.get_state(), f, indent=2)
         print(f"💾 상태 저장: {output_file}")
 

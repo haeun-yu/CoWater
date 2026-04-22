@@ -3,4 +3,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" CASCADE;
 
 -- PostGIS + TimescaleDB extensions
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+EXCEPTION
+    WHEN undefined_file OR feature_not_supported THEN
+        NULL;
+END
+$$;
