@@ -20,6 +20,7 @@ CHANNEL_TEMPLATES = {
     EventType.DETECT_ANOMALY: "detect.anomaly.{platform_id}",
     EventType.DETECT_ZONE: "detect.zone.{platform_id}",
     EventType.DETECT_DISTRESS: "detect.distress.{platform_id}",
+    EventType.DETECT_MINE: "detect.mine.{platform_id}",
 
     # Analysis
     EventType.ANALYZE_ANOMALY: "analyze.anomaly.{alert_id}",

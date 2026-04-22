@@ -30,6 +30,7 @@ class EventType(str, Enum):
     DETECT_ANOMALY = "detect.anomaly"
     DETECT_ZONE = "detect.zone"
     DETECT_DISTRESS = "detect.distress"
+    DETECT_MINE = "detect.mine"
 
     # Analysis: 이벤트 → 상세 분석
     ANALYZE_ANOMALY = "analyze.anomaly"

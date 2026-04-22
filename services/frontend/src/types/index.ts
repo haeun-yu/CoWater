@@ -91,6 +91,7 @@ export type AlertType =
   | "anomaly"
   | "ais_off"
   | "distress"
+  | "mine_detected"
   | "compliance"
   | "traffic";
 

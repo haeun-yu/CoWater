@@ -37,3 +37,14 @@ async def ws_events(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         await hub.disconnect(ws, "events")
+
+
+@router.websocket("/ws/device-streams")
+async def ws_device_streams(ws: WebSocket):
+    """실시간 디바이스 멀티 스트림."""
+    await hub.connect(ws, "device_streams")
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        await hub.disconnect(ws, "device_streams")

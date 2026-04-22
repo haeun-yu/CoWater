@@ -17,12 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from shared.events import platform_report_pattern
+from shared.schemas.device_stream import DeviceStreamMessage
 from shared.schemas.report import PlatformReport
 from config import settings
 from cpa_agent import DetectionCPAAgent
 from anomaly_agent import DetectionAnomalyAgent
 from zone_agent import DetectionZoneAgent
 from distress_agent import DetectionDistressAgent
+from mine_agent import DetectionMineAgent
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -67,6 +69,34 @@ async def _consume_platform_reports(redis: aioredis.Redis) -> None:
 
         except Exception as e:
             logger.exception("Error processing platform report: %s", e)
+
+
+async def _consume_sonar_streams(redis: aioredis.Redis) -> None:
+    """sensor.sonar.* 스트림 구독 및 mine detection 처리."""
+    pubsub = redis.pubsub()
+    pattern = "sensor.sonar.*"
+    await pubsub.psubscribe(pattern)
+    logger.info("Detection service: subscribed to %s", pattern)
+
+    async for msg in pubsub.listen():
+        if msg["type"] != "pmessage":
+            continue
+
+        try:
+            data = json.loads(msg["data"])
+            stream_message = DeviceStreamMessage.from_dict(data)
+
+            for agent in _agents:
+                handler = getattr(agent, "on_device_stream", None)
+                if handler is None:
+                    continue
+                try:
+                    await handler(stream_message)
+                except Exception as e:
+                    logger.exception("Agent %s stream error: %s", agent.agent_id, e)
+
+        except Exception as e:
+            logger.exception("Error processing sonar stream: %s", e)
 
 
 async def _heartbeat_loop(redis: aioredis.Redis) -> None:
@@ -145,6 +175,12 @@ async def lifespan(app: FastAPI):
             redis=_redis,
             core_api_url=settings.core_api_url,
         ),
+        DetectionMineAgent(
+            redis=_redis,
+            core_api_url=settings.core_api_url,
+            confidence_threshold=settings.mine_detection_confidence_threshold,
+            emit_cooldown_sec=settings.mine_detection_emit_cooldown_sec,
+        ),
     ]
 
     for agent in _agents:
@@ -170,6 +206,7 @@ async def lifespan(app: FastAPI):
     # 백그라운드 타스크 시작
     tasks = [
         asyncio.create_task(_consume_platform_reports(_redis), name="platform-consumer"),
+        asyncio.create_task(_consume_sonar_streams(_redis), name="sonar-consumer"),
         asyncio.create_task(_heartbeat_loop(_redis), name="heartbeat-loop"),
         asyncio.create_task(_ais_timeout_loop(), name="ais-timeout-loop"),
         asyncio.create_task(_zone_reload_loop(), name="zone-reload-loop"),
