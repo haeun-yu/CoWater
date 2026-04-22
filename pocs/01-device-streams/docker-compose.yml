@@ -1,0 +1,7 @@
+services:
+  device-streams:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/01-device-streams
+    volumes:
+      - ../..:/workspace
+    command: python3 src/simulator.py --ticks 5
