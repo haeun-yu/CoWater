@@ -36,3 +36,12 @@ Excluded:
 - The same scenario can be replayed deterministically.
 - Each mission phase has observable stream/event output.
 - Manual approval is represented as an explicit event.
+
+## Run
+
+```bash
+cd pocs/07-mission-simulator
+python3 src/mission.py --scenario scenarios/mine-clearance.json
+```
+
+The output is mission event JSONL with one shared `flow_id`.

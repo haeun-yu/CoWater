@@ -32,3 +32,12 @@ command.audit.{commandId}
 - Viewer commands cannot mutate mission state.
 - Operator approval emits an explicit command event.
 - Admin can change agent or mission settings.
+
+## Run
+
+```bash
+cd pocs/08-command-control
+python3 src/command.py --role operator approve rov deploy
+python3 src/command.py --role viewer approve rov deploy
+python3 src/command.py --role admin agent mine-detector disable
+```

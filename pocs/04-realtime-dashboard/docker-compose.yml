@@ -1,0 +1,9 @@
+services:
+  realtime-dashboard:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/04-realtime-dashboard
+    volumes:
+      - ../..:/workspace
+    ports:
+      - "8744:8744"
+    command: python3 src/server.py --host 0.0.0.0 --port 8744

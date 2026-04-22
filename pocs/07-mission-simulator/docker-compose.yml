@@ -1,0 +1,7 @@
+services:
+  mission-simulator:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/07-mission-simulator
+    volumes:
+      - ../..:/workspace
+    command: python3 src/mission.py --scenario scenarios/mine-clearance.json

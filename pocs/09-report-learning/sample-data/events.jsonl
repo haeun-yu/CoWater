@@ -1,0 +1,3 @@
+{"event_type":"mission.started","envelope":{"flow_id":"flow-demo-001"},"payload":{"mission_id":"mine-clearance-alpha"}}
+{"event_type":"detect.mine","envelope":{"flow_id":"flow-demo-001"},"payload":{"device_id":"auv-01","confidence":0.44}}
+{"kind":"alert","alert_type":"mine_detected","metadata":{"flow_id":"flow-demo-001"}}

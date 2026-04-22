@@ -1,0 +1,7 @@
+services:
+  report-learning:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/09-report-learning
+    volumes:
+      - ../..:/workspace
+    command: python3 src/report.py --events sample-data/events.jsonl --feedback sample-data/feedback.json
