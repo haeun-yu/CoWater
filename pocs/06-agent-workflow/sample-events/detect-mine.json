@@ -1,0 +1,21 @@
+{
+  "envelope": {
+    "message_id": "detect-event-001",
+    "subject": "detect.mine.auv-01",
+    "source": "poc-detection-agents",
+    "device_id": "auv-01",
+    "device_type": "auv",
+    "flow_id": "flow-mine-001",
+    "qos": "durable"
+  },
+  "event_type": "detect.mine",
+  "payload": {
+    "device_id": "auv-01",
+    "contact_id": "contact-auv-01-mine-like",
+    "classification": "unknown_object",
+    "confidence": 0.78,
+    "range_m": 82,
+    "bearing_deg": 110,
+    "severity": "critical"
+  }
+}

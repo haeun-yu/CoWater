@@ -1,0 +1,7 @@
+services:
+  detection-agents:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/05-detection-agents
+    volumes:
+      - ../..:/workspace
+    command: python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4

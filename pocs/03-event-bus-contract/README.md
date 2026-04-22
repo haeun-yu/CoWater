@@ -26,3 +26,18 @@ Excluded:
 - `latest` streams can replace old values by device.
 - `durable` events can be replayed.
 - Consumers subscribe only to the subjects they need.
+
+## Run
+
+Generate stream fixtures from PoC 01 and replay them through the contract bus:
+
+```bash
+python3 ../01-device-streams/src/simulator.py --ticks 3 --output out/device-streams.jsonl
+python3 src/bus_contract.py --input out/device-streams.jsonl
+```
+
+Expected behavior:
+
+- `telemetry.position` appears in `latest_keys`
+- `telemetry.status`, `telemetry.network`, `telemetry.task`, and `sensor.sonar`
+  are counted as non-durable traffic

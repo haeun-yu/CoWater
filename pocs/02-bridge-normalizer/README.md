@@ -31,6 +31,21 @@ raw protocol payload
 DeviceStreamMessage JSON
 ```
 
+## Run
+
+Normalize ROS NavSat JSON:
+
+```bash
+cd pocs/02-bridge-normalizer
+python3 src/normalizer.py --protocol ros-navsat --input sample-data/raw-ros-navsat.json
+```
+
+Normalize decoded AIS fixture:
+
+```bash
+python3 src/normalizer.py --protocol nmea-ais --input sample-data/decoded-ais.json
+```
+
 ## Success Criteria
 
 - Every adapter returns the same shared schema shape.

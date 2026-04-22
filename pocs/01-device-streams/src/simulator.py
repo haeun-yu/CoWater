@@ -113,7 +113,7 @@ def main() -> None:
                 lines.append(json.dumps(message.to_dict(), separators=(",", ":")))
 
     if args.output:
-        output = base_dir / args.output
+        output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("\n".join(lines) + "\n")
     else:

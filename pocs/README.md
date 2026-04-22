@@ -18,6 +18,27 @@ whole historical stack.
 | `08-command-control` | Approval, authorization, command path | `respond.command.*` |
 | `09-report-learning` | Reports and feedback loop | Incident reports and suggestions |
 
+## Runnable Chain
+
+The following PoCs are currently executable:
+
+```bash
+# 01: generate multi-stream device JSONL
+python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/device-streams.jsonl
+
+# 02: normalize raw protocol fixture
+python3 pocs/02-bridge-normalizer/src/normalizer.py --protocol ros-navsat --input pocs/02-bridge-normalizer/sample-data/raw-ros-navsat.json
+
+# 03: replay stream JSONL through contract bus
+python3 pocs/03-event-bus-contract/src/bus_contract.py --input pocs/_out/device-streams.jsonl
+
+# 05: detect mine-like sonar contacts
+python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl
+
+# 06: turn detect.mine into analysis and alert candidates
+python3 pocs/06-agent-workflow/src/workflow.py --input pocs/_out/detect-events.jsonl
+```
+
 ## Rules
 
 - PoCs do not import implementation code from other PoCs.
