@@ -29,10 +29,18 @@ Excluded:
 
 ```bash
 cd pocs/06-agent-workflow
-python3 src/workflow.py --input sample-events/detect-mine.json
+python3 src/workflow.py --input sample-events/detect-mine.json --format timeline
 ```
 
-The output is JSONL containing:
+The output is a readable timeline containing:
 
 - an `analyze.mine` agent event
 - a `mine_detected` alert candidate
+
+Use `--format jsonl` when downstream PoCs need machine-readable events.
+
+Run with Docker:
+
+```bash
+docker compose up
+```

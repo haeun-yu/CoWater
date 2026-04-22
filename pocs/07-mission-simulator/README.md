@@ -41,7 +41,14 @@ Excluded:
 
 ```bash
 cd pocs/07-mission-simulator
-python3 src/mission.py --scenario scenarios/mine-clearance.json
+python3 src/mission.py --scenario scenarios/mine-clearance.json --format timeline
 ```
 
-The output is mission event JSONL with one shared `flow_id`.
+The output is a readable mission timeline with one shared `flow_id`.
+Use `--format jsonl` when downstream PoCs need machine-readable events.
+
+Run with Docker:
+
+```bash
+docker compose up
+```

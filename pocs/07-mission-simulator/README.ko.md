@@ -41,7 +41,8 @@
 
 ```bash
 cd pocs/07-mission-simulator
-python3 src/mission.py --scenario scenarios/mine-clearance.json
+python3 src/mission.py --scenario scenarios/mine-clearance.json --format timeline
 ```
 
 출력은 하나의 `flow_id`를 공유하는 mission event JSONL입니다.
+JSONL이 필요하면 `--format jsonl`을 사용합니다.

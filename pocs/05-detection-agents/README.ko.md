@@ -44,7 +44,8 @@ detect.anomaly.{deviceId}
 
 ```bash
 cd pocs/05-detection-agents
-python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4
+python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4 --format table
 ```
 
 출력은 `detect.mine.{deviceId}` 도메인 이벤트입니다.
+JSONL이 필요하면 `--format jsonl`을 사용합니다.

@@ -101,16 +101,23 @@ def main() -> None:
     parser.add_argument("--devices", default="devices.json")
     parser.add_argument("--ticks", type=int, default=5)
     parser.add_argument("--output")
+    parser.add_argument("--format", choices=["jsonl", "table"], default="jsonl")
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parents[1]
     devices = load_devices(base_dir / args.devices)
 
-    lines: list[str] = []
+    messages: list[DeviceStreamMessage] = []
     for tick in range(args.ticks):
         for device in devices:
             for message in build_messages(device, tick):
-                lines.append(json.dumps(message.to_dict(), separators=(",", ":")))
+                messages.append(message)
+
+    lines = (
+        render_table(messages)
+        if args.format == "table"
+        else [json.dumps(message.to_dict(), separators=(",", ":")) for message in messages]
+    )
 
     if args.output:
         output = Path(args.output)
@@ -118,6 +125,33 @@ def main() -> None:
         output.write_text("\n".join(lines) + "\n")
     else:
         print("\n".join(lines))
+
+
+def render_table(messages: list[DeviceStreamMessage]) -> list[str]:
+    rows = [
+        "DEVICE STREAMS",
+        f"{'device':<18} {'stream':<20} {'qos':<12} summary",
+        "-" * 76,
+    ]
+    for message in messages:
+        payload = message.payload
+        summary = ""
+        if message.stream == "telemetry.position":
+            summary = f"lat={payload['lat']} lon={payload['lon']} heading={payload['heading']}"
+        elif message.stream == "telemetry.status":
+            summary = f"state={payload['state']} battery={payload['battery_pct']}%"
+        elif message.stream == "telemetry.network":
+            summary = f"latency={payload['latency_ms']}ms loss={payload['packet_loss_pct']}%"
+        elif message.stream == "telemetry.task":
+            summary = f"phase={payload['phase']} progress={payload['progress_pct']}%"
+        elif message.stream == "sensor.sonar":
+            summary = f"contacts={len(payload.get('contacts', []))}"
+        elif message.stream == "device.event":
+            summary = str(payload.get("event_type"))
+        rows.append(
+            f"{message.envelope.device_id:<18} {message.stream:<20} {message.envelope.qos:<12} {summary}"
+        )
+    return rows
 
 
 if __name__ == "__main__":

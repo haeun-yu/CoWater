@@ -4,4 +4,4 @@ services:
     working_dir: /workspace/pocs/01-device-streams
     volumes:
       - ../..:/workspace
-    command: python3 src/simulator.py --ticks 5
+    command: python3 src/simulator.py --ticks 5 --format table

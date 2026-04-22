@@ -4,4 +4,4 @@ services:
     working_dir: /workspace/pocs/07-mission-simulator
     volumes:
       - ../..:/workspace
-    command: python3 src/mission.py --scenario scenarios/mine-clearance.json
+    command: python3 src/mission.py --scenario scenarios/mine-clearance.json --format timeline

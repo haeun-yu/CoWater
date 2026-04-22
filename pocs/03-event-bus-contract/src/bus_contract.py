@@ -58,6 +58,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policies", default="stream-policies.json")
     parser.add_argument("--input", required=True)
+    parser.add_argument("--format", choices=["json", "table"], default="json")
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parents[1]
@@ -66,7 +67,34 @@ def main() -> None:
     bus = ContractBus(policies)
     for message in messages:
         bus.publish(message)
-    print(json.dumps(bus.summary(), indent=2, sort_keys=True))
+    if args.format == "table":
+        print("\n".join(render_table(bus.summary(), policies)))
+    else:
+        print(json.dumps(bus.summary(), indent=2, sort_keys=True))
+
+
+def render_table(summary: dict[str, Any], policies: dict[str, Any]) -> list[str]:
+    rows = [
+        "EVENT BUS CONTRACT",
+        f"{'stream':<22} {'qos':<12} {'result'}",
+        "-" * 62,
+    ]
+    latest_by_stream: dict[str, int] = defaultdict(int)
+    for key in summary["latest_keys"]:
+        stream, _device_id = key.split(":", 1)
+        latest_by_stream[stream] += 1
+    for stream, policy in sorted(policies.items()):
+        qos = policy.get("qos", "best_effort")
+        if qos == "latest":
+            result = f"{latest_by_stream.get(stream, 0)} latest device keys"
+        elif qos == "durable":
+            result = f"{summary['durable_counts'].get(stream, 0)} durable events"
+        else:
+            result = "best-effort traffic"
+        rows.append(f"{stream:<22} {qos:<12} {result}")
+    rows.append("")
+    rows.append(f"best_effort_count={summary['best_effort_count']}")
+    return rows
 
 
 if __name__ == "__main__":

@@ -119,11 +119,16 @@ def main() -> None:
     parser.add_argument("--protocol", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output")
+    parser.add_argument("--format", choices=["jsonl", "summary"], default="jsonl")
     args = parser.parse_args()
 
     raw = json.loads(Path(args.input).read_text())
     messages = normalize(args.protocol, raw)
-    lines = [json.dumps(message.to_dict(), separators=(",", ":")) for message in messages]
+    lines = (
+        render_summary(args.protocol, raw, messages)
+        if args.format == "summary"
+        else [json.dumps(message.to_dict(), separators=(",", ":")) for message in messages]
+    )
 
     if args.output:
         output = Path(args.output)
@@ -131,6 +136,27 @@ def main() -> None:
         output.write_text("\n".join(lines) + "\n")
     else:
         print("\n".join(lines))
+
+
+def render_summary(
+    protocol: str,
+    raw: dict[str, Any],
+    messages: list[DeviceStreamMessage],
+) -> list[str]:
+    rows = [
+        "BRIDGE NORMALIZER",
+        f"protocol: {protocol}",
+        f"input keys: {', '.join(sorted(raw.keys()))}",
+        "",
+        f"{'subject':<34} {'stream':<20} {'qos':<10} payload",
+        "-" * 90,
+    ]
+    for message in messages:
+        rows.append(
+            f"{message.envelope.subject:<34} {message.stream:<20} {message.envelope.qos:<10} "
+            f"{', '.join(sorted(message.payload.keys()))}"
+        )
+    return rows
 
 
 if __name__ == "__main__":

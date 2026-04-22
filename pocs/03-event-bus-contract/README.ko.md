@@ -32,10 +32,12 @@ PoC 01에서 stream fixture를 생성하고 contract bus로 재생합니다.
 
 ```bash
 python3 ../01-device-streams/src/simulator.py --ticks 3 --output out/device-streams.jsonl
-python3 src/bus_contract.py --input out/device-streams.jsonl
+python3 src/bus_contract.py --input out/device-streams.jsonl --format table
 ```
 
 예상 동작:
 
 - `telemetry.position`은 `latest_keys`에 나타납니다.
 - `telemetry.status`, `telemetry.network`, `telemetry.task`, `sensor.sonar`는 non-durable traffic으로 집계됩니다.
+
+Docker로 실행하면 stream policy table이 logs에 출력됩니다.

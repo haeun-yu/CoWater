@@ -27,14 +27,24 @@ Excluded:
 
 ```bash
 cd pocs/01-device-streams
-python3 src/simulator.py --ticks 5
+python3 src/simulator.py --ticks 5 --format table
 ```
+
+Use `--format jsonl` when downstream PoCs need machine-readable events.
 
 Write a fixture:
 
 ```bash
 python3 src/simulator.py --ticks 10 --output out/device-streams.jsonl
 ```
+
+Run with Docker:
+
+```bash
+docker compose up
+```
+
+Docker prints the stream table to logs by default.
 
 ## Success Criteria
 

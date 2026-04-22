@@ -76,15 +76,48 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--threshold", type=float, default=0.4)
+    parser.add_argument("--format", choices=["jsonl", "table"], default="jsonl")
     args = parser.parse_args()
 
-    output: list[str] = []
+    events: list[DomainEvent] = []
+    rows: list[tuple[str, str, float, str]] = []
     for message in load_messages(Path(args.input)):
-        output.extend(
-            json.dumps(event.to_dict(), separators=(",", ":"))
-            for event in detect_mines(message, args.threshold)
-        )
-    print("\n".join(output))
+        detected = detect_mines(message, args.threshold)
+        events.extend(detected)
+        if message.get("stream") == "sensor.sonar":
+            envelope = message.get("envelope") or {}
+            for contact in (message.get("payload") or {}).get("contacts") or []:
+                confidence = float(contact.get("confidence") or 0.0)
+                rows.append(
+                    (
+                        str(envelope.get("device_id")),
+                        str(contact.get("contact_id")),
+                        confidence,
+                        "DETECTED" if confidence >= args.threshold else "SKIPPED",
+                    )
+                )
+    if args.format == "table":
+        print("\n".join(render_table(rows, args.threshold, events)))
+    else:
+        print("\n".join(json.dumps(event.to_dict(), separators=(",", ":")) for event in events))
+
+
+def render_table(
+    rows: list[tuple[str, str, float, str]],
+    threshold: float,
+    events: list[DomainEvent],
+) -> list[str]:
+    output = [
+        "DETECTION AGENTS",
+        f"mine threshold={threshold:.2f}",
+        f"{'device':<12} {'contact':<34} {'confidence':<11} decision",
+        "-" * 75,
+    ]
+    for device_id, contact_id, confidence, decision in rows:
+        output.append(f"{device_id:<12} {contact_id:<34} {confidence:<11.2f} {decision}")
+    output.append("")
+    output.append(f"detect.mine events={len(events)}")
+    return output
 
 
 if __name__ == "__main__":

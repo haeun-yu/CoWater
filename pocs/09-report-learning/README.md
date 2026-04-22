@@ -29,7 +29,14 @@ Excluded:
 
 ```bash
 cd pocs/09-report-learning
-python3 src/report.py --events sample-data/events.jsonl --feedback sample-data/feedback.json
+python3 src/report.py --events sample-data/events.jsonl --feedback sample-data/feedback.json --format markdown
 ```
 
 The output contains a mission summary and a pending learning suggestion.
+Use `--format json` when another process needs the raw report payload.
+
+Run with Docker:
+
+```bash
+docker compose up
+```

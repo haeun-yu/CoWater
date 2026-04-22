@@ -25,13 +25,19 @@
 
 ```bash
 cd pocs/01-device-streams
-python3 src/simulator.py --ticks 5
+python3 src/simulator.py --ticks 5 --format table
 ```
 
 fixture 파일 생성:
 
 ```bash
 python3 src/simulator.py --ticks 10 --output out/device-streams.jsonl
+```
+
+Docker로 실행하면 기본적으로 table 형식이 logs에 출력됩니다.
+
+```bash
+docker compose up
 ```
 
 ## 성공 기준

@@ -48,10 +48,19 @@ def execute(role: str, command: str) -> CommandResult:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", choices=sorted(ROLE_RANK), default="viewer")
+    parser.add_argument("--format", choices=["json", "pretty"], default="json")
     parser.add_argument("command", nargs="+")
     args = parser.parse_args()
     result = execute(args.role, " ".join(args.command))
-    print(json.dumps(asdict(result), indent=2, sort_keys=True))
+    if args.format == "pretty":
+        status = "ALLOWED" if result.allowed else "DENIED"
+        print("COMMAND CONTROL")
+        print(f"role={result.role} required={result.required_role} decision={status}")
+        print(f"command={result.command}")
+        print(f"event_type={result.event_type}")
+        print(f"payload={json.dumps(result.payload, sort_keys=True)}")
+    else:
+        print(json.dumps(asdict(result), indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

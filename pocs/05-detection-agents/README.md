@@ -44,7 +44,14 @@ detect.anomaly.{deviceId}
 
 ```bash
 cd pocs/05-detection-agents
-python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4
+python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4 --format table
 ```
 
-The output is a `detect.mine.{deviceId}` domain event.
+The output shows a readable detection table. Use `--format jsonl` when
+downstream PoCs need the `detect.mine.{deviceId}` domain event.
+
+Run with Docker:
+
+```bash
+docker compose up
+```

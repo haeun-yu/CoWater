@@ -29,7 +29,7 @@
 
 ```bash
 cd pocs/09-report-learning
-python3 src/report.py --events sample-data/events.jsonl --feedback sample-data/feedback.json
+python3 src/report.py --events sample-data/events.jsonl --feedback sample-data/feedback.json --format markdown
 ```
 
 출력에는 mission summary와 pending learning suggestion이 포함됩니다.

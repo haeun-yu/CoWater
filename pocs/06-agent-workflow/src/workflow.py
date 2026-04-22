@@ -86,12 +86,33 @@ def handle_detect_mine(event: dict[str, Any]) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
+    parser.add_argument("--format", choices=["jsonl", "timeline"], default="jsonl")
     args = parser.parse_args()
 
-    rows: list[str] = []
+    items: list[dict[str, Any]] = []
     for event in load_events(Path(args.input)):
-        rows.extend(json.dumps(item, separators=(",", ":")) for item in handle_detect_mine(event))
-    print("\n".join(rows))
+        items.extend(handle_detect_mine(event))
+    if args.format == "timeline":
+        print("\n".join(render_timeline(items)))
+    else:
+        print("\n".join(json.dumps(item, separators=(",", ":")) for item in items))
+
+
+def render_timeline(items: list[dict[str, Any]]) -> list[str]:
+    rows = ["AGENT WORKFLOW", "detect.mine -> analyze.mine -> alert", "-" * 64]
+    for item in items:
+        if item.get("kind") == "agent_event":
+            payload = item.get("payload") or {}
+            rows.append(
+                f"[{item.get('event_type')}] device={payload.get('device_id')} "
+                f"risk={payload.get('risk')} recommendation={payload.get('recommendation')}"
+            )
+        elif item.get("kind") == "alert":
+            rows.append(
+                f"[alert] {item.get('alert_type')} severity={item.get('severity')} "
+                f"devices={','.join(item.get('device_ids') or [])}"
+            )
+    return rows
 
 
 if __name__ == "__main__":

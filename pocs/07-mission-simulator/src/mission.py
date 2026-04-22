@@ -49,15 +49,30 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default="scenarios/mine-clearance.json")
     parser.add_argument("--output")
+    parser.add_argument("--format", choices=["jsonl", "timeline"], default="jsonl")
     args = parser.parse_args()
 
-    rows = [json.dumps(event.to_dict(), separators=(",", ":")) for event in run_scenario(Path(args.scenario))]
+    events = run_scenario(Path(args.scenario))
+    rows = (
+        render_timeline(events)
+        if args.format == "timeline"
+        else [json.dumps(event.to_dict(), separators=(",", ":")) for event in events]
+    )
     if args.output:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("\n".join(rows) + "\n")
     else:
         print("\n".join(rows))
+
+
+def render_timeline(events: list[DomainEvent]) -> list[str]:
+    rows = ["MISSION TIMELINE", f"flow_id={events[0].envelope.flow_id if events else '-'}", "-" * 72]
+    for event in events:
+        rows.append(
+            f"{event.payload['at_s']:>4}s  {event.event_type:<32} {event.payload.get('device_id') or '-'}"
+        )
+    return rows
 
 
 if __name__ == "__main__":

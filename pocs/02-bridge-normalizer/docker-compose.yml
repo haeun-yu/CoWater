@@ -4,4 +4,4 @@ services:
     working_dir: /workspace/pocs/02-bridge-normalizer
     volumes:
       - ../..:/workspace
-    command: python3 src/normalizer.py --protocol ros-navsat --input sample-data/raw-ros-navsat.json
+    command: python3 src/normalizer.py --protocol ros-navsat --input sample-data/raw-ros-navsat.json --format summary

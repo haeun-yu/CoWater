@@ -37,7 +37,15 @@ command.audit.{commandId}
 
 ```bash
 cd pocs/08-command-control
-python3 src/command.py --role operator approve rov deploy
-python3 src/command.py --role viewer approve rov deploy
-python3 src/command.py --role admin agent mine-detector disable
+python3 src/command.py --role operator --format pretty approve rov deploy
+python3 src/command.py --role viewer --format pretty approve rov deploy
+python3 src/command.py --role admin --format pretty agent mine-detector disable
+```
+
+Use `--format json` when another process needs the raw command decision.
+
+Run with Docker:
+
+```bash
+docker compose up
 ```

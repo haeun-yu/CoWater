@@ -4,4 +4,4 @@ services:
     working_dir: /workspace/pocs/05-detection-agents
     volumes:
       - ../..:/workspace
-    command: python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4
+    command: python3 src/detect.py --input sample-events/sonar-contact.json --threshold 0.4 --format table

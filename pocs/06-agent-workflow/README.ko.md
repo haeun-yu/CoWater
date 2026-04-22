@@ -29,10 +29,12 @@ Detection에서 Analysis, Response로 이어지는 이벤트 체인을 검증합
 
 ```bash
 cd pocs/06-agent-workflow
-python3 src/workflow.py --input sample-events/detect-mine.json
+python3 src/workflow.py --input sample-events/detect-mine.json --format timeline
 ```
 
 출력 JSONL:
 
 - `analyze.mine` agent event
 - `mine_detected` alert candidate
+
+JSONL이 필요하면 `--format jsonl`을 사용합니다.

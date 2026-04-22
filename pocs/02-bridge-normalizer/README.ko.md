@@ -37,13 +37,19 @@ ROS NavSat JSON 정규화:
 
 ```bash
 cd pocs/02-bridge-normalizer
-python3 src/normalizer.py --protocol ros-navsat --input sample-data/raw-ros-navsat.json
+python3 src/normalizer.py --protocol ros-navsat --input sample-data/raw-ros-navsat.json --format summary
 ```
 
 decoded AIS fixture 정규화:
 
 ```bash
 python3 src/normalizer.py --protocol nmea-ais --input sample-data/decoded-ais.json
+```
+
+Docker로 실행하면 변환 요약이 logs에 출력됩니다.
+
+```bash
+docker compose up
 ```
 
 ## 성공 기준

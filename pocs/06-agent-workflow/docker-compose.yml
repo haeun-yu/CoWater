@@ -4,4 +4,4 @@ services:
     working_dir: /workspace/pocs/06-agent-workflow
     volumes:
       - ../..:/workspace
-    command: python3 src/workflow.py --input sample-events/detect-mine.json
+    command: python3 src/workflow.py --input sample-events/detect-mine.json --format timeline

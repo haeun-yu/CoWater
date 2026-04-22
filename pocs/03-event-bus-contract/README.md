@@ -33,8 +33,18 @@ Generate stream fixtures from PoC 01 and replay them through the contract bus:
 
 ```bash
 python3 ../01-device-streams/src/simulator.py --ticks 3 --output out/device-streams.jsonl
-python3 src/bus_contract.py --input out/device-streams.jsonl
+python3 src/bus_contract.py --input out/device-streams.jsonl --format table
 ```
+
+Use `--format json` when another process needs the raw contract summary.
+
+Run with Docker:
+
+```bash
+docker compose up
+```
+
+Docker prints the stream policy table to logs by default.
 
 Expected behavior:
 
