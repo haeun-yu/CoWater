@@ -143,8 +143,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-gemma4:e2b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}

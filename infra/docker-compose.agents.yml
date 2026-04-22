@@ -48,8 +48,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-gemma4:e2b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
@@ -89,7 +89,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LLM_BACKEND: ${LLM_BACKEND:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
@@ -109,6 +109,14 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-cowater_dev}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
   # ─────────────────────────────────────────────────────
@@ -128,7 +136,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
