@@ -18,6 +18,7 @@ from api.platforms import router as platforms_router
 from api.reports import router as reports_router
 from api.ws import router as ws_router
 from api.zones import router as zones_router
+from api.uva import router as uva_router
 from redis_client import close_redis, get_redis
 from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
@@ -142,6 +143,7 @@ app.include_router(auth_router)
 app.include_router(commands_router)
 app.include_router(zones_router)
 app.include_router(ws_router)
+app.include_router(uva_router)
 
 Instrumentator().instrument(app).expose(app)
 
