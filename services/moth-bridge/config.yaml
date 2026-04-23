@@ -13,7 +13,7 @@ channels:
   - name: "device-streams"
     moth_channel_type: instant
     moth_channel_name: "cowater-sim-device-streams"
-    moth_track: "streams"
+    moth_track: "data"
     moth_source: "base"
     adapter: DeviceStreamAdapter
     platform_type: device

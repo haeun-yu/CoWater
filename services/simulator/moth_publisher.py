@@ -1,10 +1,16 @@
 """
 Moth RSSP WebSocket 퍼블리셔.
 
-SKILL.md 가이드라인 준수:
-- 연결 후 MIME text를 먼저 전송한 뒤 binary payload 전송
-- MIME은 ~1초 주기로 재전송 (late-join subscriber 지원)
+Moth 프로토콜 규칙 (pub):
+- Pub URL: /pang/ws/pub?channel=<type>&name=<name>&source=base&track=<track>&mode=single
+- 연결 후 MIME text frame을 먼저 전송한 뒤 binary payload 전송
+- mode=single: 30초 이내 binary 데이터 전송 없으면 서버가 연결 종료
+- 빈 binary frame(b'')을 25초마다 keepalive로 전송
+- WebSocket-level ping 미지원 → ping_interval=None 필수
 - 연결 드롭 시 자동 재연결
+- track 값: "data" 사용 (track=streams는 ~1s 후 서버 종료)
+- MIME 전송 후 즉시 binary 전송 (async yield 없이)
+- pub 연결에서는 recv() 금지
 """
 
 from __future__ import annotations
@@ -67,29 +73,30 @@ class MothPublisher:
         url = self._build_url()
         logger.info("Moth publisher connecting → %s", url)
 
-        async with websockets.connect(url) as ws:
+        # ping_interval=None: Moth 서버는 WebSocket ping에 응답하지 않음
+        async with websockets.connect(url, ping_interval=None) as ws:
             self._connected = True
             logger.info("Moth publisher connected")
 
             # 초기 MIME 전송 (한 번만)
             await ws.send(_MIME)
-            last_ping_at = asyncio.get_running_loop().time()
+            last_sent_at = asyncio.get_running_loop().time()
             sent_count = 0
 
             while True:
                 now = asyncio.get_running_loop().time()
 
-                # 바이너리 ping 전송 (30초 idle 타임아웃 방지)
-                if now - last_ping_at >= _PING_INTERVAL:
-                    await ws.ping()
-                    last_ping_at = now
-                    logger.debug("Moth publisher sent ping")
+                # 빈 binary frame으로 keepalive (30s 서버 타임아웃 방지)
+                if now - last_sent_at >= _PING_INTERVAL:
+                    await ws.send(b'')
+                    last_sent_at = now
+                    logger.debug("Moth publisher sent keepalive")
 
                 # 큐에서 메시지 꺼내기 (최대 100ms 대기)
                 try:
                     sentence = await asyncio.wait_for(self._queue.get(), timeout=0.1)
                     await ws.send(sentence.encode("ascii"))
-                    last_ping_at = now  # reset ping timer on data
+                    last_sent_at = now
                     sent_count += 1
                     if sent_count % 15 == 0:
                         logger.debug("Moth publisher sent %d sentences", sent_count)

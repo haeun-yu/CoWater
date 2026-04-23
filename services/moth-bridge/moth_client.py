@@ -1,10 +1,14 @@
 """
 Moth RSSP WebSocket 클라이언트.
 
-SKILL.md 가이드라인 준수:
-- MIME text 메시지를 먼저 수신한 후 binary payload를 처리
+Moth 프로토콜 규칙 (sub):
+- Sub URL: /pang/ws/sub?channel=<type>&name=<name>&source=base&track=<track>&mode=single
+- 연결 후 text frame(MIME)을 먼저 수신한 뒤 binary payload 처리
+- mode=single: 30초 이내 데이터 수신 없으면 서버가 연결 종료
+- WebSocket-level ping 미지원 → ping_interval=None 필수
 - 연결 드롭 시 자동 재연결
 - transport-level 에러는 예외로 전파 (silent fallback 없음)
+- track 값: pub/sub 모두 "data" 사용 (track=streams는 ~1s 후 서버 종료)
 """
 
 from __future__ import annotations
@@ -85,7 +89,8 @@ class MothChannelClient:
         url = self._build_url()
         logger.info("Connecting to Moth channel '%s' → %s", self._config.name, url)
 
-        async with websockets.connect(url) as ws:
+        # ping_interval=None: Moth 서버는 WebSocket ping에 응답하지 않음
+        async with websockets.connect(url, ping_interval=None) as ws:
             logger.info("Connected: channel='%s'", self._config.name)
             current_mime: str | None = None
 

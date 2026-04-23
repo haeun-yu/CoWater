@@ -1,9 +1,0 @@
-services:
-  event-bus-contract:
-    image: python:3.12-slim
-    working_dir: /workspace/pocs/03-event-bus-contract
-    volumes:
-      - ../..:/workspace
-    command: >
-      /bin/sh -c "python3 ../01-device-streams/src/simulator.py --ticks 3 --output out/device-streams.jsonl &&
-      python3 src/bus_contract.py --input out/device-streams.jsonl --format table"

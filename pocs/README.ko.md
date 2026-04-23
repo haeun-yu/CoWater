@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `01-device-streams` | 디바이스 멀티 스트림 생성 | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
 | `02-bridge-normalizer` | 원시 프로토콜을 정규화된 스트림으로 변환 | `DeviceStreamMessage` |
-| `03-event-bus-contract` | Subject, QoS, latest/durable 동작 검증 | 스트림 정책 검증 결과 |
+| `03-device-registration-server` | 디바이스 등록과 주소 생성 | 디바이스 메타데이터 검증 |
 | `04-realtime-dashboard` | 실시간 관제 UI | 지도/상태/경보 UI 프로토타입 |
 | `05-detection-agents` | 스트림을 도메인 탐지 이벤트로 변환 | `detect.*` |
 | `06-agent-workflow` | `detect -> analyze -> respond` 흐름 검증 | 분석 이벤트와 경보 후보 |
@@ -29,8 +29,8 @@ python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/dev
 # 02: 원시 프로토콜 fixture 정규화
 python3 pocs/02-bridge-normalizer/src/normalizer.py --protocol ros-navsat --input pocs/02-bridge-normalizer/sample-data/raw-ros-navsat.json
 
-# 03: 스트림 JSONL을 contract bus로 재생
-python3 pocs/03-event-bus-contract/src/bus_contract.py --input pocs/_out/device-streams.jsonl
+# 03: 디바이스 등록 및 메타데이터 조회
+python3 pocs/03-device-registration-server/src/device_registration_server.py
 
 # 05: sonar contact에서 기뢰 의심 이벤트 탐지
 python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl

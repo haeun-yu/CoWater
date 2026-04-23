@@ -10,7 +10,7 @@ whole historical stack.
 | --- | --- | --- |
 | `01-device-streams` | Multi-stream device generation | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
 | `02-bridge-normalizer` | Raw protocol to normalized stream conversion | `DeviceStreamMessage` |
-| `03-event-bus-contract` | Subject, QoS, latest/durable behavior | Stream policy validation |
+| `03-device-registration-server` | Device registration and address generation | Device metadata validation |
 | `04-realtime-dashboard` | Real-time operator UI | Map/status/alert UI prototype |
 | `05-detection-agents` | Stream to domain detection events | `detect.*` |
 | `06-agent-workflow` | `detect -> analyze -> respond` chain | Alerts and commands |
@@ -29,8 +29,8 @@ python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/dev
 # 02: normalize raw protocol fixture
 python3 pocs/02-bridge-normalizer/src/normalizer.py --protocol ros-navsat --input pocs/02-bridge-normalizer/sample-data/raw-ros-navsat.json
 
-# 03: replay stream JSONL through contract bus
-python3 pocs/03-event-bus-contract/src/bus_contract.py --input pocs/_out/device-streams.jsonl
+# 03: register and inspect device metadata
+python3 pocs/03-device-registration-server/src/device_registration_server.py
 
 # 05: detect mine-like sonar contacts
 python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl

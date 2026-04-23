@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     moth_track: str = "data"
     stream_moth_channel_type: str = "instant"
     stream_moth_channel_name: str = "cowater-sim-device-streams"
-    stream_moth_track: str = "streams"
+    stream_moth_track: str = "data"
     publish_device_streams: bool = True
 
     redis_url: str = "redis://localhost:6379/0"  # Redis pub/sub 연결
