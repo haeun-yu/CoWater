@@ -1,0 +1,16 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9011
+  },
+  "agent": {
+    "id": "control_ship-01",
+    "role": "control_ship",
+    "parent_id": "control_center-01",
+    "parent_endpoint": "http://127.0.0.1:9012",
+    "direct_route_allowed": true
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>06 Control Center System Agent</title>
+  <style>
+    body { margin:0; font-family: Inter, system-ui, sans-serif; background: radial-gradient(circle at top left, #0f172a, #030712 55%); color:#e5eefb; }
+    .shell { display:grid; grid-template-columns: 320px 1fr; min-height:100vh; }
+    .panel { padding:20px; border-right:1px solid #223047; background:rgba(2,8,23,.72); }
+    .main { padding:20px; display:grid; gap:16px; }
+    .card { background:rgba(15,23,42,.9); border:1px solid #223047; border-radius:16px; padding:16px; box-shadow:0 20px 50px rgba(0,0,0,.22); }
+    .row { display:grid; gap:8px; margin-top:10px; }
+    input, select, textarea, button { font:inherit; }
+    input, select, textarea { width:100%; background:#0f172a; color:#e5eefb; border:1px solid #334155; border-radius:10px; padding:10px; }
+    button { background:#1e293b; color:#e5eefb; border:1px solid #334155; border-radius:10px; padding:10px 12px; cursor:pointer; }
+    button.primary { background:#60a5fa; color:#07111f; font-weight:700; }
+    .badge { display:inline-block; background:#1e293b; border:1px solid #334155; border-radius:999px; padding:4px 8px; margin:2px 4px 2px 0; font-size:.78rem; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#020617; border:1px solid #334155; border-radius:12px; padding:12px; max-height:220px; overflow:auto; }
+    .muted { color:#94a3b8; }
+    .list { display:grid; gap:8px; max-height:280px; overflow:auto; }
+    .item { border:1px solid #334155; border-radius:12px; padding:10px; background:rgba(30,41,59,.7); }
+    @media (max-width: 980px) { .shell { grid-template-columns:1fr; } .panel { border-right:none; border-bottom:1px solid #223047; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel">
+      <h1>06 Control Center</h1>
+      <p class="muted">상위 미션 오너와 A2A 라우팅 허브</p>
+      <div class="row">
+        <label>API Base</label>
+        <input id="api-base" value="http://127.0.0.1:9012">
+      </div>
+      <div class="row" style="grid-template-columns:1fr 1fr;">
+        <button class="primary" id="refresh">Refresh</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="row">
+        <div class="muted">Status</div>
+        <div id="status">-</div>
+      </div>
+      <div class="row">
+        <div class="muted">Agent</div>
+        <div id="agent-meta">-</div>
+      </div>
+    </aside>
+    <main class="main">
+      <section class="card">
+        <h2>Children</h2>
+        <div id="children" class="list"></div>
+      </section>
+      <section class="card">
+        <h2>Missions</h2>
+        <div id="missions" class="list"></div>
+      </section>
+      <section class="card">
+        <h2>Create Mission</h2>
+        <div class="row">
+          <label>Mission ID</label>
+          <input id="mission-id" placeholder="mission-001">
+        </div>
+        <div class="row">
+          <label>Title</label>
+          <input id="mission-title" placeholder="Harbor survey">
+        </div>
+        <div class="row">
+          <label>Objective</label>
+          <textarea id="mission-objective" rows="3" placeholder="Coordinate child agents to survey the north sector"></textarea>
+        </div>
+        <div class="row" style="grid-template-columns:1fr 1fr;">
+          <input id="mission-scope" placeholder="north-sector">
+          <select id="mission-priority">
+            <option value="low">low</option>
+            <option value="normal" selected>normal</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Assigned Targets JSON</label>
+          <textarea id="mission-targets" rows="5">[{"agent_id":"control_ship-01","role":"control_ship","endpoint":"http://127.0.0.1:9011"}]</textarea>
+        </div>
+        <div class="row" style="grid-template-columns:1fr 1fr;">
+          <label style="display:block;">
+            <span class="muted">Auto Dispatch</span>
+            <select id="mission-auto">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label style="display:block;">
+            <span class="muted">Task ID</span>
+            <input id="mission-task-id" placeholder="task-001">
+          </label>
+        </div>
+        <div class="row">
+          <button class="primary" id="create-mission">Create Mission</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Dispatch A2A</h2>
+        <div class="row" style="grid-template-columns:1fr 1fr;">
+          <input id="target-agent" placeholder="control_ship-01">
+          <input id="target-endpoint" placeholder="http://127.0.0.1:9011">
+        </div>
+        <div class="row">
+          <label>Message Type</label>
+          <select id="message-type">
+            <option>task.assign</option>
+            <option>status.report</option>
+            <option>task.escalate</option>
+            <option>task.complete</option>
+            <option>task.fail</option>
+          </select>
+        </div>
+        <div class="row" style="grid-template-columns:1fr 1fr 1fr;">
+          <input id="from-agent" placeholder="control_center-01">
+          <input id="to-agent" placeholder="control_ship-01">
+          <input id="task-id" placeholder="mission-001">
+        </div>
+        <div class="row">
+          <label>Payload JSON</label>
+          <textarea id="payload" rows="6">{}</textarea>
+        </div>
+        <div class="row">
+          <button class="primary" id="send">Send A2A</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Inbox / Outbox</h2>
+        <div class="row">
+          <div class="muted">Inbox</div>
+          <div id="inbox" class="list"></div>
+        </div>
+        <div class="row">
+          <div class="muted">Outbox</div>
+          <div id="outbox" class="list"></div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Raw State</h2>
+        <pre id="state">-</pre>
+      </section>
+    </main>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiBase = () => $("api-base").value.trim();
+    const api = (path) => new URL(path, apiBase()).toString();
+    const j = async (path, opts={}) => {
+      const res = await fetch(api(path), { headers: {"Content-Type":"application/json", ...(opts.headers||{})}, ...opts});
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+      return body;
+    };
+    const pretty = (v) => JSON.stringify(v, null, 2);
+    const render = (items, id) => {
+      $(id).innerHTML = items.length ? items.map(i => `<div class="item"><div><strong>${i.title || i.message_type || i.kind || 'item'}</strong> <span class="muted">${i.mission_id || i.task_id || ''}</span></div><div class="muted">${i.role || i.from_agent_id || ''} → ${i.to_agent_id || ''}</div><pre>${pretty(i)}</pre></div>`).join('') : '<div class="muted">empty</div>';
+    };
+    async function refresh() {
+      const [meta, state] = await Promise.all([j('/meta'), j('/state')]);
+      $("status").textContent = state.connected ? 'connected' : 'disconnected';
+      $("agent-meta").innerHTML = `<span class="badge">${meta.agent.role}</span><span class="badge">${meta.agent.id}</span><span class="badge">${meta.agent.mission_prefix}</span>`;
+      $("state").textContent = pretty(state);
+      render(state.children || [], 'children');
+      render(state.missions || [], 'missions');
+      render(state.inbox || [], 'inbox');
+      render(state.outbox || [], 'outbox');
+    }
+    $("create-mission").onclick = async () => {
+      let targets = [];
+      try { targets = JSON.parse($("mission-targets").value.trim() || '[]'); } catch (e) { alert('Assigned Targets JSON error'); return; }
+      const result = await j('/missions', {
+        method:'POST',
+        body: JSON.stringify({
+          mission_id: $("mission-id").value.trim() || null,
+          title: $("mission-title").value.trim() || 'Mission',
+          objective: $("mission-objective").value.trim() || 'Coordinate child agents',
+          scope: $("mission-scope").value.trim() || null,
+          priority: $("mission-priority").value,
+          task_id: $("mission-task-id").value.trim() || null,
+          assigned_targets: targets,
+          auto_dispatch: $("mission-auto").value === 'true',
+        })
+      });
+      console.log(result);
+      await refresh();
+    };
+    $("send").onclick = async () => {
+      const payloadText = $("payload").value.trim() || '{}';
+      let payload = {};
+      try { payload = JSON.parse(payloadText); } catch (e) { alert('payload JSON error'); return; }
+      await j('/dispatch', { method:'POST', body: JSON.stringify({
+        target_agent_id: $("target-agent").value.trim(),
+        target_endpoint: $("target-endpoint").value.trim() || null,
+        message: {
+          message_type: $("message-type").value,
+          from_agent_id: $("from-agent").value.trim() || 'control_center-01',
+          to_agent_id: $("to-agent").value.trim(),
+          task_id: $("task-id").value.trim() || null,
+          payload,
+        }
+      })});
+      await refresh();
+    };
+    $("reset").onclick = async () => { await j('/reset', { method:'POST' }); await refresh(); };
+    $("refresh").onclick = refresh;
+    refresh().catch(e => $("status").textContent = e.message);
+  </script>
+</body>
+</html>

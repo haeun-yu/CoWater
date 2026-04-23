@@ -12,9 +12,8 @@ whole historical stack.
 | `02-device-agent-contract` | Per-device Agent hub for `usv`, `auv`, `rov` | `ws://.../agents/{token}` |
 | `03-device-registration-server` | Device registration and address generation | Device metadata validation |
 | `04-realtime-dashboard` | Real-time operator UI | Map/status/alert UI prototype |
-| `05-device-agent-per-device` | One Agent per device using simulator config | Per-device agent state and commands |
-| `05-detection-agents` | Stream to domain detection events | `detect.*` |
-| `06-agent-workflow` | `detect -> analyze -> respond` chain | Alerts and commands |
+| `05-control-ship-agent` | Mid-tier `control_ship` A2A hub | Child dispatch and upstream status reports |
+| `06-control-center-system-agent` | Top-tier `control_center` A2A hub | Mission planning and direct routing |
 | `07-mission-simulator` | End-to-end mission scenario demo | Scenario replay |
 | `08-command-control` | Approval, authorization, command path | `respond.command.*` |
 | `09-report-learning` | Reports and feedback loop | Incident reports and suggestions |
@@ -33,15 +32,17 @@ python3 pocs/02-device-agent-contract/device_agent_server.py
 # 03: register and inspect device metadata
 python3 pocs/03-device-registration-server/src/device_registration_server.py
 
-# 05: detect mine-like sonar contacts
-python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl
+# 05: run the control ship A2A hub
+python3 pocs/05-control-ship-agent/device_agent_server.py
 
-# 05b: run one-agent-per-device fleet dashboard
-python3 pocs/05-device-agent-per-device/device_agent_server.py
-
-# 06: turn detect.mine into analysis and alert candidates
-python3 pocs/06-agent-workflow/src/workflow.py --input pocs/_out/detect-events.jsonl
+# 06: run the control center A2A hub
+python3 pocs/06-control-center-system-agent/device_agent_server.py
 ```
+
+## Hierarchy Note
+
+The active A2A hierarchy demo is `06-control-center-system-agent -> 05-control-ship-agent -> 02-device-agent-contract`.
+Standalone workflow PoCs may still exist in the tree, but they are not the primary control-path demo anymore.
 
 ## Rules
 

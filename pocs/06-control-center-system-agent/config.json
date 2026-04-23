@@ -1,0 +1,17 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9012
+  },
+  "agent": {
+    "id": "control_center-01",
+    "role": "control_center",
+    "parent_id": "",
+    "parent_endpoint": "",
+    "direct_route_allowed": true,
+    "mission_prefix": "mission"
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}
