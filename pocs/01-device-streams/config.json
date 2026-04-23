@@ -1,0 +1,161 @@
+{
+  "static_devices": [
+    {
+      "device_id": "control-center-01",
+      "device_type": "control_center",
+      "name": "Control Center 01",
+      "position": {
+        "latitude": 37.2650,
+        "longitude": 127.0084,
+        "altitude": 10.0
+      },
+      "transmission_interval": 3600
+    },
+    {
+      "device_id": "control-ship-01",
+      "device_type": "control_ship",
+      "name": "Control Ship 01",
+      "position": {
+        "latitude": 37.2700,
+        "longitude": 127.0150,
+        "altitude": 5.0
+      },
+      "transmission_interval": 60,
+      "position_drift": {
+        "lat_change_per_interval": 0.0001,
+        "lon_change_per_interval": 0.0002
+      }
+    },
+    {
+      "device_id": "ocean-power-tower-01",
+      "device_type": "ocean_power_tower",
+      "name": "Ocean Power Tower 01",
+      "position": {
+        "latitude": 37.2550,
+        "longitude": 127.0200,
+        "altitude": 45.0
+      },
+      "transmission_interval": 3600
+    }
+  ],
+  "dynamic_devices": [
+    {
+      "device_id": "usv-01",
+      "device_type": "usv",
+      "name": "USV 01",
+      "parent_device_id": "control-ship-01",
+      "transmission_interval": 2,
+      "start_position": {
+        "latitude": 37.2680,
+        "longitude": 127.0120,
+        "altitude": 0.5
+      },
+      "movement": {
+        "speed_range": [0.5, 3.0],
+        "heading_change_max": 15,
+        "depth_range": [0.5, 50.0]
+      },
+      "sensors": [
+        {
+          "sensor_id": "usv-gps-01",
+          "sensor_type": "gps",
+          "accuracy": 2.0
+        },
+        {
+          "sensor_id": "usv-imu-01",
+          "sensor_type": "imu",
+          "sample_rate": 10
+        },
+        {
+          "sensor_id": "usv-sonar-01",
+          "sensor_type": "sonar",
+          "frequency": 200000
+        }
+      ]
+    },
+    {
+      "device_id": "auv-01",
+      "device_type": "auv",
+      "name": "AUV 01",
+      "parent_device_id": "control-ship-01",
+      "transmission_interval": 3,
+      "start_position": {
+        "latitude": 37.2650,
+        "longitude": 127.0100,
+        "altitude": -30.0
+      },
+      "movement": {
+        "speed_range": [0.3, 2.0],
+        "heading_change_max": 10,
+        "depth_range": [5.0, 100.0]
+      },
+      "sensors": [
+        {
+          "sensor_id": "auv-gps-01",
+          "sensor_type": "gps",
+          "accuracy": 1.0
+        },
+        {
+          "sensor_id": "auv-pressure-01",
+          "sensor_type": "pressure"
+        },
+        {
+          "sensor_id": "auv-sonar-01",
+          "sensor_type": "side_scan_sonar",
+          "frequency": 300000
+        },
+        {
+          "sensor_id": "auv-mag-01",
+          "sensor_type": "magnetometer"
+        }
+      ]
+    },
+    {
+      "device_id": "rov-01",
+      "device_type": "rov",
+      "name": "ROV 01",
+      "parent_device_id": "control-ship-01",
+      "transmission_interval": 1,
+      "start_position": {
+        "latitude": 37.2670,
+        "longitude": 127.0110,
+        "altitude": -50.0
+      },
+      "movement": {
+        "speed_range": [0.1, 1.5],
+        "heading_change_max": 25,
+        "depth_range": [10.0, 300.0]
+      },
+      "sensors": [
+        {
+          "sensor_id": "rov-camera-01",
+          "sensor_type": "hd_camera",
+          "resolution": "1080p"
+        },
+        {
+          "sensor_id": "rov-light-01",
+          "sensor_type": "led_light",
+          "lumens": 5000
+        },
+        {
+          "sensor_id": "rov-pressure-01",
+          "sensor_type": "pressure"
+        },
+        {
+          "sensor_id": "rov-temperature-01",
+          "sensor_type": "temperature"
+        },
+        {
+          "sensor_id": "rov-sonar-01",
+          "sensor_type": "profiling_sonar",
+          "frequency": 500000
+        }
+      ]
+    }
+  ],
+  "moth_server": {
+    "url": "wss://cobot.center:8287",
+    "channel": "instant",
+    "timeout": 30
+  }
+}
