@@ -43,6 +43,12 @@ DEFAULT_SERVER_HOST = "192.168.1.100"
 DEFAULT_SERVER_PORT = 9001
 DEFAULT_PING_ENDPOINT = "/pang/ping"
 DEFAULT_SECRET_KEY = "server-secret"
+DEFAULT_AGENT_SCHEME = "ws"
+DEFAULT_AGENT_HOST = "127.0.0.1"
+DEFAULT_AGENT_PORT = 9010
+DEFAULT_AGENT_PATH_PREFIX = "/agents"
+DEFAULT_AGENT_COMMAND_SCHEME = "http"
+DEFAULT_AGENT_COMMAND_PATH_PREFIX = "/agents"
 DEFAULT_CORS_ORIGINS = ["*"]
 CONFIG_PATH = Path(os.getenv("COWATER_DEVICE_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
 
@@ -62,6 +68,16 @@ def build_track_endpoint(token: str, track_name: str, track_type: str) -> str:
     )
 
 
+def build_agent_endpoint(scheme: str, host: str, port: int, path_prefix: str, token: str) -> str:
+    prefix = path_prefix.rstrip("/")
+    return f"{scheme}://{host}:{port}{prefix}/{token}"
+
+
+def build_agent_command_endpoint(scheme: str, host: str, port: int, path_prefix: str, token: str) -> str:
+    prefix = path_prefix.rstrip("/")
+    return f"{scheme}://{host}:{port}{prefix}/{token}/command"
+
+
 def resolve_default_main_video_track_name(tracks: List["TrackRecord"]) -> Optional[str]:
     for track in tracks:
         if track.type == "VIDEO":
@@ -78,6 +94,7 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 def load_runtime_config(config_path: Path) -> dict[str, Any]:
     raw = _load_json_file(config_path)
     server_cfg = raw.get("server") or {}
+    agent_cfg = raw.get("agent") or {}
     device_cfg = raw.get("device") or {}
     cors_cfg = raw.get("cors") or {}
 
@@ -96,6 +113,48 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
             "COWATER_DEVICE_PING_ENDPOINT",
             server_cfg.get("ping_endpoint"),
             DEFAULT_PING_ENDPOINT,
+        )
+    )
+    agent_scheme = str(
+        pick(
+            "COWATER_DEVICE_AGENT_SCHEME",
+            agent_cfg.get("scheme"),
+            DEFAULT_AGENT_SCHEME,
+        )
+    )
+    agent_host = str(
+        pick(
+            "COWATER_DEVICE_AGENT_HOST",
+            agent_cfg.get("host"),
+            DEFAULT_AGENT_HOST,
+        )
+    )
+    agent_port = int(
+        pick(
+            "COWATER_DEVICE_AGENT_PORT",
+            agent_cfg.get("port"),
+            DEFAULT_AGENT_PORT,
+        )
+    )
+    agent_path_prefix = str(
+        pick(
+            "COWATER_DEVICE_AGENT_PATH_PREFIX",
+            agent_cfg.get("path_prefix"),
+            DEFAULT_AGENT_PATH_PREFIX,
+        )
+    )
+    agent_command_scheme = str(
+        pick(
+            "COWATER_DEVICE_AGENT_COMMAND_SCHEME",
+            agent_cfg.get("command_scheme"),
+            "http" if agent_scheme == "ws" else "https",
+        )
+    )
+    agent_command_path_prefix = str(
+        pick(
+            "COWATER_DEVICE_AGENT_COMMAND_PATH_PREFIX",
+            agent_cfg.get("command_path_prefix"),
+            DEFAULT_AGENT_COMMAND_PATH_PREFIX,
         )
     )
     secret_key = str(
@@ -122,6 +181,14 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
             "host": host,
             "port": port,
             "ping_endpoint": ping_endpoint,
+        },
+        "agent": {
+            "scheme": agent_scheme,
+            "host": agent_host,
+            "port": agent_port,
+            "path_prefix": agent_path_prefix,
+            "command_scheme": agent_command_scheme,
+            "command_path_prefix": agent_command_path_prefix,
         },
         "cors": {
             "allow_origins": cors_origins,
@@ -159,6 +226,32 @@ class DeviceServerInformationRecord:
 
 
 @dataclass
+class DeviceAgentInformationRecord:
+    scheme: str
+    host: str
+    port: int
+    path_prefix: str
+    endpoint: str
+    command_endpoint: str
+    connected: bool = False
+    mode: Optional[str] = None
+    connected_at: Optional[str] = None
+    last_seen_at: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class DeviceAgentRegistrationRequest(BaseModel):
+    secretKey: str
+    endpoint: Optional[str] = None
+    commandEndpoint: Optional[str] = None
+    mode: Optional[str] = None
+    connected: bool = True
+    last_seen_at: Optional[str] = None
+
+
+@dataclass
 class DeviceRecord:
     id: int
     token: str
@@ -167,6 +260,7 @@ class DeviceRecord:
     created_at: str
     updated_at: str
     server: DeviceServerInformationRecord
+    agent: DeviceAgentInformationRecord
     tracks: List[TrackRecord]
     actions: DeviceActionsRecord
     main_video_track_name: Optional[str] = None
@@ -188,6 +282,7 @@ class DeviceRecord:
             "updated_at": self.updated_at,
             "main_video_track_name": self.resolved_main_video_track_name(),
             "server": self.server.to_dict(),
+            "agent": self.agent.to_dict(),
             "tracks": [track.to_dict() for track in self.tracks],
             "actions": self.actions.to_dict(),
         }
@@ -220,13 +315,34 @@ class MainVideoTrackRequest(BaseModel):
 
 
 class DeviceRegistry:
-    def __init__(self, *, secret_key: str, host: str, port: int, ping_endpoint: str) -> None:
+    def __init__(
+        self,
+        *,
+        secret_key: str,
+        host: str,
+        port: int,
+        ping_endpoint: str,
+        agent_scheme: str,
+        agent_host: str,
+        agent_port: int,
+        agent_path_prefix: str,
+        agent_command_scheme: str,
+        agent_command_path_prefix: str,
+    ) -> None:
         self._secret_key = secret_key
         self._server = DeviceServerInformationRecord(
             host=host,
             port=port,
             ping_endpoint=ping_endpoint,
         )
+        self._agent = {
+            "scheme": agent_scheme,
+            "host": agent_host,
+            "port": agent_port,
+            "path_prefix": agent_path_prefix,
+            "command_scheme": agent_command_scheme,
+            "command_path_prefix": agent_command_path_prefix,
+        }
         self._devices: Dict[int, DeviceRecord] = {}
         self._next_id = 1
 
@@ -264,6 +380,20 @@ class DeviceRegistry:
         request: DeviceRegistrationRequest,
     ) -> DeviceRecord:
         token = str(uuid4())
+        agent_endpoint = build_agent_endpoint(
+            self._agent["scheme"],
+            self._agent["host"],
+            self._agent["port"],
+            self._agent["path_prefix"],
+            token,
+        )
+        agent_command_endpoint = build_agent_command_endpoint(
+            self._agent["command_scheme"],
+            self._agent["host"],
+            self._agent["port"],
+            self._agent["command_path_prefix"],
+            token,
+        )
         seen_track_names = set()
         tracks = []
         for raw_track in request.tracks:
@@ -291,6 +421,14 @@ class DeviceRegistry:
             created_at=created_at,
             updated_at=now,
             server=self._server,
+            agent=DeviceAgentInformationRecord(
+                scheme=self._agent["scheme"],
+                host=self._agent["host"],
+                port=self._agent["port"],
+                path_prefix=self._agent["path_prefix"],
+                endpoint=agent_endpoint,
+                command_endpoint=agent_command_endpoint,
+            ),
             tracks=tracks,
             actions=DeviceActionsRecord(
                 core=list(request.actions.core),
@@ -359,6 +497,34 @@ class DeviceRegistry:
             raise KeyError(device_id)
         del self._devices[device_id]
 
+    def attach_agent(self, device_id: int, request: DeviceAgentRegistrationRequest) -> DeviceRecord:
+        self._validate_secret_key(request.secretKey)
+        device = self.get_device(device_id)
+        now = utc_now_iso()
+        if request.endpoint:
+            device.agent.endpoint = request.endpoint
+        if request.commandEndpoint:
+            device.agent.command_endpoint = request.commandEndpoint
+        if request.mode:
+            device.agent.mode = request.mode
+        device.agent.connected = bool(request.connected)
+        if device.agent.connected and device.agent.connected_at is None:
+            device.agent.connected_at = now
+        if not device.agent.connected:
+            device.agent.connected_at = device.agent.connected_at or now
+        device.agent.last_seen_at = request.last_seen_at or now
+        device.updated_at = now
+        return device
+
+    def detach_agent(self, device_id: int, secret_key: str) -> DeviceRecord:
+        self._validate_secret_key(secret_key)
+        device = self.get_device(device_id)
+        now = utc_now_iso()
+        device.agent.connected = False
+        device.agent.last_seen_at = now
+        device.updated_at = now
+        return device
+
 
 APP_SETTINGS = load_runtime_config(CONFIG_PATH)
 
@@ -367,6 +533,12 @@ registry = DeviceRegistry(
     host=APP_SETTINGS["server"]["host"],
     port=APP_SETTINGS["server"]["port"],
     ping_endpoint=APP_SETTINGS["server"]["ping_endpoint"],
+    agent_scheme=APP_SETTINGS["agent"]["scheme"],
+    agent_host=APP_SETTINGS["agent"]["host"],
+    agent_port=APP_SETTINGS["agent"]["port"],
+    agent_path_prefix=APP_SETTINGS["agent"]["path_prefix"],
+    agent_command_scheme=APP_SETTINGS["agent"]["command_scheme"],
+    agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
 )
 
 app = FastAPI(title="CoWater Device Registration Server", version="1.0.0")
@@ -387,6 +559,7 @@ def health() -> dict[str, str]:
 def meta() -> dict[str, Any]:
     return {
         "server": registry._server.to_dict(),
+        "agent": registry._agent,
         "track_types": list(TRACK_TYPES.__args__),
         "core_actions": list(CORE_ACTIONS.__args__),
         "config_path": APP_SETTINGS["config_path"],
@@ -447,6 +620,30 @@ def delete_device(device_id: int) -> Response:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="device not found") from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.put("/devices/{device_id}/agent")
+def upsert_device_agent(device_id: int, request: DeviceAgentRegistrationRequest) -> dict[str, Any]:
+    try:
+        device = registry.attach_agent(device_id, request)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return device.to_dict()
+
+
+@app.delete("/devices/{device_id}/agent")
+def detach_device_agent(device_id: int, secretKey: str) -> dict[str, Any]:
+    try:
+        device = registry.detach_agent(device_id, secretKey)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+    return device.to_dict()
 
 
 def main() -> None:

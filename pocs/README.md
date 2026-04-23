@@ -9,9 +9,10 @@ whole historical stack.
 | PoC | Purpose | Primary Output |
 | --- | --- | --- |
 | `01-device-streams` | Multi-stream device generation | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
-| `02-bridge-normalizer` | Raw protocol to normalized stream conversion | `DeviceStreamMessage` |
+| `02-device-agent-contract` | Per-device Agent hub for `usv`, `auv`, `rov` | `ws://.../agents/{token}` |
 | `03-device-registration-server` | Device registration and address generation | Device metadata validation |
 | `04-realtime-dashboard` | Real-time operator UI | Map/status/alert UI prototype |
+| `05-device-agent-per-device` | One Agent per device using simulator config | Per-device agent state and commands |
 | `05-detection-agents` | Stream to domain detection events | `detect.*` |
 | `06-agent-workflow` | `detect -> analyze -> respond` chain | Alerts and commands |
 | `07-mission-simulator` | End-to-end mission scenario demo | Scenario replay |
@@ -26,14 +27,17 @@ The following PoCs are currently executable:
 # 01: generate multi-stream device JSONL
 python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/device-streams.jsonl
 
-# 02: normalize raw protocol fixture
-python3 pocs/02-bridge-normalizer/src/normalizer.py --protocol ros-navsat --input pocs/02-bridge-normalizer/sample-data/raw-ros-navsat.json
+# 02: run per-device agent hub
+python3 pocs/02-device-agent-contract/device_agent_server.py
 
 # 03: register and inspect device metadata
 python3 pocs/03-device-registration-server/src/device_registration_server.py
 
 # 05: detect mine-like sonar contacts
 python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl
+
+# 05b: run one-agent-per-device fleet dashboard
+python3 pocs/05-device-agent-per-device/device_agent_server.py
 
 # 06: turn detect.mine into analysis and alert candidates
 python3 pocs/06-agent-workflow/src/workflow.py --input pocs/_out/detect-events.jsonl

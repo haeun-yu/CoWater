@@ -102,7 +102,25 @@ function statusBadge(connected) {
 }
 
 function renderEndpointList(device) {
-  return device.tracks
+  const agentBlock = device.agent?.endpoint
+    ? `
+        <div class="device-card" style="margin-bottom: 12px;">
+          <div class="device-head">
+            <div>
+              <h3 class="device-title">Agent</h3>
+              <div class="device-meta">
+                <span class="badge">${escapeHtml(device.agent.endpoint)}</span>
+                <span class="badge">${escapeHtml(device.agent.command_endpoint || "-")}</span>
+                <span class="badge">${escapeHtml(device.agent.mode || "-")}</span>
+                <span class="badge ${device.agent.connected ? "ok" : "warn"}">${device.agent.connected ? "connected" : "disconnected"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `
+    : "";
+
+  return agentBlock + device.tracks
     .map(
       (track) => `
         <div class="device-card">
@@ -165,6 +183,7 @@ function renderDashboardDevices(devices) {
                 ${statusBadge(device.connected)}
                 <span class="badge">id ${device.id}</span>
                 <span class="badge">${escapeHtml(device.main_video_track_name || "-")}</span>
+                <span class="badge">${escapeHtml(device.agent?.endpoint || "no agent")}</span>
               </div>
             </div>
             <a class="button" href="device.html?id=${device.id}">Open</a>
@@ -209,7 +228,7 @@ function renderDevicesTable(devices, filterText = "") {
   });
   if (!rows.length) {
     body.innerHTML = `
-      <tr><td colspan="7" class="muted">No matching devices.</td></tr>
+      <tr><td colspan="9" class="muted">No matching devices.</td></tr>
     `;
     return;
   }
@@ -226,6 +245,13 @@ function renderDevicesTable(devices, filterText = "") {
           <td>${escapeHtml(device.main_video_track_name || "-")}</td>
           <td>${device.tracks.length}</td>
           <td>${escapeHtml(device.server.host)}:${device.server.port}</td>
+          <td>
+            <div>${escapeHtml(device.agent?.endpoint || "-")}</div>
+            <div class="muted" style="margin-top:4px;">${escapeHtml(device.agent?.command_endpoint || "-")}</div>
+          </td>
+          <td>
+            <span class="badge ${device.agent?.connected ? "ok" : "warn"}">${device.agent?.connected ? "agent connected" : "agent disconnected"}</span>
+          </td>
           <td>
             <a class="button" href="device.html?id=${device.id}">Manage</a>
             <button class="button danger" data-delete-device="${device.id}">Delete</button>
@@ -373,6 +399,13 @@ async function initDevicePage() {
     setHtml("device-json", `<div class="code">${escapeHtml(prettyJson(device))}</div>`);
     setHtml("device-tracks", renderEndpointList(device));
     setHtml("device-server", `<div class="code">${escapeHtml(prettyJson(device.server))}</div>`);
+    setText("device-agent", device.agent?.endpoint || "-");
+    setText("device-agent-connection", device.agent?.connected ? "connected" : "disconnected");
+    setText("device-agent-command", device.agent?.command_endpoint || "-");
+    setText(
+      "device-agent-state",
+      `${device.agent?.mode || "-"} · last seen ${formatTimestamp(device.agent?.last_seen_at)}`,
+    );
 
     if (form) {
       form.querySelector("[name='name']").value = device.name;

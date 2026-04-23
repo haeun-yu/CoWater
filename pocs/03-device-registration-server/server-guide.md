@@ -28,6 +28,14 @@ pocs/03-device-registration-server/config.json
     "port": 9001,
     "ping_endpoint": "/pang/ping"
   },
+  "agent": {
+    "scheme": "ws",
+    "host": "127.0.0.1",
+    "port": 9010,
+    "path_prefix": "/agents",
+    "command_scheme": "http",
+    "command_path_prefix": "/agents"
+  },
   "cors": {
     "allow_origins": ["*"]
   }
@@ -41,6 +49,12 @@ pocs/03-device-registration-server/config.json
 - `COWATER_DEVICE_SERVER_HOST`
 - `COWATER_DEVICE_SERVER_PORT`
 - `COWATER_DEVICE_PING_ENDPOINT`
+- `COWATER_DEVICE_AGENT_SCHEME`
+- `COWATER_DEVICE_AGENT_HOST`
+- `COWATER_DEVICE_AGENT_PORT`
+- `COWATER_DEVICE_AGENT_PATH_PREFIX`
+- `COWATER_DEVICE_AGENT_COMMAND_SCHEME`
+- `COWATER_DEVICE_AGENT_COMMAND_PATH_PREFIX`
 - `COWATER_DEVICE_CORS_ORIGINS`
 
 ### 0.3 우선순위
@@ -99,18 +113,61 @@ POST /devices
 #### 응답 (201 Created)
 ```json
 {
-  "id": 1,
-  "name": "robot-1",
-  "token": "generated-token-string",
-  "connected": false
+  "id": 1,
+  "name": "robot-1",
+  "token": "generated-token-string",
+  "agent": {
+    "scheme": "ws",
+    "host": "127.0.0.1",
+    "port": 9010,
+    "path_prefix": "/agents",
+    "command_scheme": "http",
+    "command_path_prefix": "/agents",
+    "endpoint": "ws://127.0.0.1:9010/agents/generated-token-string",
+    "command_endpoint": "http://127.0.0.1:9010/agents/generated-token-string/command",
+    "connected": false
+  },
+  "connected": false
 }
 ```
 
 #### 생성되는 것
 - 디바이스 고유 ID (Long)
 - 고유 토큰 (UUID 기반): 디바이스 인증 및 통신용
+- Agent 주소: 디바이스별 Agent 연결용 WebSocket 주소
+- Agent 명령 주소: 원격 제어용 HTTP 엔드포인트
 - 기본 메인 비디오 트랙: VIDEO 타입 트랙 중 첫 번째가 자동 설정
 - 연결 상태: 기본값 false (미연결)
+
+### 1.2 Agent 등록/연결 정보
+
+디바이스가 등록된 뒤, 각 디바이스별 Agent는 `PUT /devices/{deviceId}/agent`로 자기 연결 정보를 다시 서버에 등록합니다.
+
+#### 엔드포인트
+```http
+PUT /devices/{deviceId}/agent
+```
+
+#### 요청 본문
+```json
+{
+  "secretKey": "server-secret",
+  "endpoint": "ws://127.0.0.1:9010/agents/generated-token-string",
+  "commandEndpoint": "http://127.0.0.1:9010/agents/generated-token-string/command",
+  "mode": "dynamic",
+  "connected": true,
+  "last_seen_at": "2026-04-23T12:00:00+09:00"
+}
+```
+
+#### 의미
+- `endpoint`: Agent가 디바이스 스트림과 연결되는 WebSocket 주소
+- `commandEndpoint`: 원격 사용자가 Agent에 명령을 보낼 때 쓰는 HTTP 주소
+- `mode`: `static` 또는 `dynamic`
+- `connected`: 현재 연결 여부
+- `last_seen_at`: 마지막으로 확인된 시간
+
+Agent가 연결이 끊기면 `DELETE /devices/{deviceId}/agent?secretKey=...`로 연결 해제 상태를 저장합니다.
 
 ---
 

@@ -7,9 +7,10 @@
 | PoC | 목적 | 주요 출력 |
 | --- | --- | --- |
 | `01-device-streams` | 디바이스 멀티 스트림 생성 | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
-| `02-bridge-normalizer` | 원시 프로토콜을 정규화된 스트림으로 변환 | `DeviceStreamMessage` |
+| `02-device-agent-contract` | `usv`, `auv`, `rov`용 디바이스별 Agent 허브 | `ws://.../agents/{token}` |
 | `03-device-registration-server` | 디바이스 등록과 주소 생성 | 디바이스 메타데이터 검증 |
 | `04-realtime-dashboard` | 실시간 관제 UI | 지도/상태/경보 UI 프로토타입 |
+| `05-device-agent-per-device` | 시뮬레이터 config 기준 디바이스 1:1 Agent | 디바이스별 Agent 상태와 명령 |
 | `05-detection-agents` | 스트림을 도메인 탐지 이벤트로 변환 | `detect.*` |
 | `06-agent-workflow` | `detect -> analyze -> respond` 흐름 검증 | 분석 이벤트와 경보 후보 |
 | `07-mission-simulator` | 임무 시나리오 재생 | 시나리오 이벤트 JSONL |
@@ -26,14 +27,17 @@
 # 01: 멀티 스트림 디바이스 JSONL 생성
 python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/device-streams.jsonl
 
-# 02: 원시 프로토콜 fixture 정규화
-python3 pocs/02-bridge-normalizer/src/normalizer.py --protocol ros-navsat --input pocs/02-bridge-normalizer/sample-data/raw-ros-navsat.json
+# 02: 디바이스별 Agent 허브 실행
+python3 pocs/02-device-agent-contract/device_agent_server.py
 
 # 03: 디바이스 등록 및 메타데이터 조회
 python3 pocs/03-device-registration-server/src/device_registration_server.py
 
 # 05: sonar contact에서 기뢰 의심 이벤트 탐지
 python3 pocs/05-detection-agents/src/detect.py --input pocs/_out/device-streams.jsonl --threshold 0.4 > pocs/_out/detect-events.jsonl
+
+# 05b: 디바이스 1:1 Agent fleet 대시보드 실행
+python3 pocs/05-device-agent-per-device/device_agent_server.py
 
 # 06: detect.mine을 분석 이벤트와 경보 후보로 변환
 python3 pocs/06-agent-workflow/src/workflow.py --input pocs/_out/detect-events.jsonl

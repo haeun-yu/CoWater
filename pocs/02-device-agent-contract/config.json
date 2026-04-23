@@ -1,0 +1,30 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9010
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  },
+  "registry": {
+    "url": "http://localhost:8003",
+    "secret_key": "server-secret"
+  },
+  "profiles": {
+    "usv": {
+      "max_speed_mps": 2.5,
+      "low_speed_mps": 0.2,
+      "sensor_types": ["gps", "imu", "sonar", "magnetometer"]
+    },
+    "auv": {
+      "surface_altitude_m": -2.0,
+      "deep_depth_m": 40.0,
+      "sensor_types": ["gps", "pressure", "side_scan_sonar", "temperature", "magnetometer"]
+    },
+    "rov": {
+      "low_light_lux": 250.0,
+      "slow_speed_mps": 1.0,
+      "sensor_types": ["hd_camera", "led_light", "pressure", "temperature", "profiling_sonar", "magnetometer"]
+    }
+  }
+}

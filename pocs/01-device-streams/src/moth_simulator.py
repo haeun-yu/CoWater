@@ -12,7 +12,7 @@ Moth protocol rules:
 - Registered mode: connect to the track endpoint returned by PoC 03
 - Fallback mode: /pang/ws/pub?channel=<type>&name=<fallback>&source=base&track=<device_id>&mode=single
 - Connect → send MIME text frame first → send binary payload frames
-- Send binary keepalive (b'') every 25 s when idle
+- Send binary keepalive (b"ping") every 25 s when idle
 - ping_interval=None (Moth does not respond to WebSocket pings)
 - Never recv() on a pub connection
 """
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _MIME = "application/vnd.cowater.device-stream+json"
 _KEEPALIVE_INTERVAL = 25.0
+_KEEPALIVE_PAYLOAD = b"ping"
 
 # Maps sensor_type (from config) → registration server track type
 SENSOR_TO_TRACK_TYPE: Dict[str, str] = {
@@ -119,7 +120,7 @@ class DevicePublisher:
                     while running_ref[0]:
                         now = asyncio.get_running_loop().time()
                         if now - last_sent_at >= _KEEPALIVE_INTERVAL:
-                            await ws.send(b"")
+                            await ws.send(_KEEPALIVE_PAYLOAD)
                             last_sent_at = now
                             logger.debug("[%s] keepalive sent", self.label)
 
@@ -140,6 +141,102 @@ class DevicePublisher:
                 await asyncio.sleep(5)
 
         logger.info("[%s] Stopped", self.label)
+
+
+class AgentSessionPublisher:
+    """
+    JSON WebSocket session for one device Agent.
+
+    The Agent server receives identity first, then the same envelope/payload
+    stream used by the simulator.
+    """
+
+    def __init__(self, label: str, ws_url: str, hello: dict, on_command=None) -> None:
+        self.label = label
+        self._ws_url = ws_url
+        self._hello = hello
+        self._on_command = on_command
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+
+    async def publish(self, envelope: dict, payload: dict) -> None:
+        message = {"kind": "stream", "envelope": envelope, "payload": payload}
+        try:
+            self._queue.put_nowait(message)
+        except asyncio.QueueFull:
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(message)
+            except asyncio.QueueEmpty:
+                pass
+
+    async def run(self, running_ref: list) -> None:
+        logger.info("[%s] Connecting Agent → %s", self.label, self._ws_url)
+
+        while running_ref[0]:
+            while not self._queue.empty():
+                try:
+                    self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+            try:
+                async with websockets.connect(self._ws_url, ping_interval=None) as ws:
+                    logger.info("[%s] Agent connected", self.label)
+                    await ws.send(json.dumps(self._hello, separators=(",", ":")))
+                    recv_task = None
+
+                    async def recv_loop() -> None:
+                        try:
+                            while running_ref[0]:
+                                raw = await ws.recv()
+                                if raw is None:
+                                    continue
+                                if isinstance(raw, bytes):
+                                    try:
+                                        raw = raw.decode("utf-8")
+                                    except Exception:
+                                        continue
+                                try:
+                                    message = json.loads(raw)
+                                except Exception:
+                                    logger.debug("[%s] Agent message ignored: %s", self.label, raw)
+                                    continue
+                                if isinstance(message, dict) and message.get("kind") == "command":
+                                    if self._on_command:
+                                        await self._on_command(message)
+                        except ConnectionClosedError:
+                            return
+                        except asyncio.CancelledError:
+                            return
+                        except Exception:
+                            logger.exception("[%s] Agent receive loop error", self.label)
+
+                    recv_task = asyncio.create_task(recv_loop())
+
+                    try:
+                        while running_ref[0]:
+                            if not self._queue.empty():
+                                msg = self._queue.get_nowait()
+                                await ws.send(json.dumps(msg, separators=(",", ":")))
+                            else:
+                                await asyncio.sleep(0.05)
+                    finally:
+                        if recv_task:
+                            recv_task.cancel()
+                            try:
+                                await recv_task
+                            except BaseException:
+                                pass
+
+            except ConnectionClosedError as e:
+                logger.warning("[%s] Agent closed (%s) — reconnecting in 5 s", self.label, e)
+            except Exception:
+                logger.exception("[%s] Agent error — reconnecting in 5 s", self.label)
+
+            if running_ref[0]:
+                await asyncio.sleep(5)
+
+        logger.info("[%s] Agent stopped", self.label)
 
 
 # ── HTTP helper ──────────────────────────────────────────────────────────────
@@ -201,8 +298,12 @@ class MothSimulator:
 
         # {device_id: {track_name: DevicePublisher}}
         self._publishers: Dict[str, Dict[str, DevicePublisher]] = {}
+        # {device_id: AgentSessionPublisher}
+        self._agent_publishers: Dict[str, AgentSessionPublisher] = {}
         # Device IDs that were successfully registered (use per-sensor tracks)
         self._registered: Set[str] = set()
+        # Registration responses keyed by device id
+        self._registrations: Dict[str, dict] = {}
         self._running = [True]
 
     def _load_config(self) -> dict:
@@ -217,9 +318,125 @@ class MothSimulator:
                 "position": device["start_position"].copy(),
                 "heading": random.uniform(0, 360),
                 "speed": random.uniform(*device["movement"]["speed_range"]),
+                "command": {
+                    "mode": "idle",
+                    "route": [],
+                    "route_index": 0,
+                    "target_position": None,
+                    "home_position": device["start_position"].copy(),
+                    "light_on": False,
+                    "camera_mode": "default",
+                    "scan_mode": "normal",
+                    "hold_depth": None,
+                    "last_command": None,
+                },
             }
             for dev_id, device in self.dynamic_devices.items()
         }
+
+    def _get_position_for_device(self, device_id: str) -> Optional[dict]:
+        if device_id in self.static_devices:
+            device = self.static_devices[device_id]
+            return device["position"].copy()
+        if device_id in self.device_state:
+            return self.device_state[device_id]["position"].copy()
+        return None
+
+    @staticmethod
+    def _distance_m(a: dict, b: dict) -> float:
+        lat = (a["latitude"] - b["latitude"]) * 111000
+        lon = (a["longitude"] - b["longitude"]) * 111000
+        alt = a.get("altitude", 0.0) - b.get("altitude", 0.0)
+        return math.sqrt(lat * lat + lon * lon + alt * alt)
+
+    @staticmethod
+    def _step_toward(current: dict, target: dict, meters: float) -> dict:
+        delta_lat = target["latitude"] - current["latitude"]
+        delta_lon = target["longitude"] - current["longitude"]
+        delta_alt = target.get("altitude", 0.0) - current.get("altitude", 0.0)
+        distance = math.sqrt((delta_lat * 111000) ** 2 + (delta_lon * 111000) ** 2 + delta_alt ** 2)
+        if distance <= 0 or meters <= 0:
+            return current.copy()
+        ratio = min(1.0, meters / distance)
+        return {
+            "latitude": current["latitude"] + delta_lat * ratio,
+            "longitude": current["longitude"] + delta_lon * ratio,
+            "altitude": current.get("altitude", 0.0) + delta_alt * ratio,
+        }
+
+    def _set_device_command(self, dev_id: str, command: dict) -> None:
+        state = self.device_state.get(dev_id)
+        if state is None:
+            return
+        command_state = state["command"]
+        action = str(command.get("action") or "").strip()
+        params = command.get("params") or {}
+        command_state["mode"] = action or "idle"
+        command_state["last_command"] = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "command": command,
+        }
+
+        if action in {"patrol_route", "route_move"}:
+            command_state["hold_depth"] = None
+            route = params.get("route") or []
+            normalized_route = []
+            for waypoint in route:
+                if isinstance(waypoint, dict) and "latitude" in waypoint and "longitude" in waypoint:
+                    normalized_route.append({
+                        "latitude": float(waypoint["latitude"]),
+                        "longitude": float(waypoint["longitude"]),
+                        "altitude": float(waypoint.get("altitude", state["position"].get("altitude", 0.0))),
+                    })
+            command_state["route"] = normalized_route
+            command_state["route_index"] = 0
+            command_state["target_position"] = normalized_route[0] if normalized_route else state["position"].copy()
+        elif action in {"move_to_device", "follow_target"}:
+            command_state["hold_depth"] = None
+            target_device_id = params.get("device_id") or params.get("target_device_id")
+            target_position = params.get("target_position")
+            if isinstance(target_position, dict) and "latitude" in target_position and "longitude" in target_position:
+                command_state["target_position"] = {
+                    "latitude": float(target_position["latitude"]),
+                    "longitude": float(target_position["longitude"]),
+                    "altitude": float(target_position.get("altitude", state["position"].get("altitude", 0.0))),
+                }
+            elif target_device_id:
+                command_state["target_position"] = self._get_position_for_device(str(target_device_id)) or state["position"].copy()
+            else:
+                command_state["target_position"] = state["position"].copy()
+        elif action == "return_to_base":
+            command_state["hold_depth"] = None
+            command_state["target_position"] = command_state.get("home_position") or state["position"].copy()
+        elif action == "charge_at_tower":
+            command_state["hold_depth"] = None
+            target = self._get_position_for_device("ocean-power-tower-01")
+            command_state["target_position"] = target or state["position"].copy()
+        elif action == "hold_position":
+            command_state["hold_depth"] = None
+            command_state["target_position"] = state["position"].copy()
+        elif action == "hold_depth":
+            command_state["hold_depth"] = float(params.get("depth", state["position"].get("altitude", 0.0)))
+        elif action == "surface":
+            command_state["hold_depth"] = None
+            command_state["target_position"] = {
+                "latitude": state["position"]["latitude"],
+                "longitude": state["position"]["longitude"],
+                "altitude": 0.0,
+            }
+        elif action == "light_on":
+            command_state["light_on"] = True
+        elif action == "light_off":
+            command_state["light_on"] = False
+        elif action == "camera_mode_switch":
+            command_state["camera_mode"] = str(params.get("mode") or params.get("camera_mode") or "default")
+        elif action == "sonar_scan_plan":
+            command_state["scan_mode"] = str(params.get("mode") or "scan")
+
+        logger.info("[%s] Agent command applied: %s", dev_id, action or "unknown")
+
+    async def _apply_agent_command(self, dev_id: str, command: dict) -> None:
+        self._set_device_command(dev_id, command)
 
     # ── Registration ─────────────────────────────────────────────────────────
 
@@ -260,11 +477,13 @@ class MothSimulator:
         if not token:
             logger.error("[%s] Registration response missing token", device_id)
             return None
+        agent_endpoint = (result.get("agent") or {}).get("endpoint", "")
         logger.info(
-            "[%s] Registered → token=%s…  tracks=%d",
+            "[%s] Registered → token=%s…  tracks=%d  agent=%s",
             device_id,
             token[:8],
             track_count,
+            agent_endpoint or "-",
         )
         return result
 
@@ -298,6 +517,23 @@ class MothSimulator:
             tracks = self._tracks_for_static()
             result = self._register_device(dev_id, device["name"], tracks)
             if result:
+                self._registrations[dev_id] = result
+                agent_endpoint = (result.get("agent") or {}).get("endpoint", "")
+                if agent_endpoint:
+                    self._agent_publishers[dev_id] = AgentSessionPublisher(
+                        label=f"{dev_id}/agent",
+                        ws_url=agent_endpoint,
+                        hello={
+                            "kind": "hello",
+                            "token": result.get("token"),
+                            "device_id": result.get("id") or dev_id,
+                            "device_name": device["name"],
+                            "device_type": device["device_type"],
+                            "registry_id": result.get("id"),
+                            "agent_mode": "static",
+                        },
+                        on_command=lambda message, device_id=dev_id: self._apply_agent_command(device_id, message),
+                    )
                 track_map = {t["name"]: t for t in (result.get("tracks") or [])}
                 self._publishers[dev_id] = {
                     t["name"]: self._make_publisher(
@@ -311,16 +547,37 @@ class MothSimulator:
                 self._registered.add(dev_id)
             elif self._reg_fallback_on_failure:
                 logger.warning("[%s] Using fallback track", dev_id)
+                self._registrations.pop(dev_id, None)
+                self._agent_publishers.pop(dev_id, None)
                 self._publishers[dev_id] = {
                     dev_id: self._make_publisher_fallback(dev_id)
                 }
             else:
                 logger.warning("[%s] Registration failed; skipping publish", dev_id)
+                self._registrations.pop(dev_id, None)
+                self._agent_publishers.pop(dev_id, None)
 
         for dev_id, device in self.dynamic_devices.items():
             tracks = self._tracks_for_dynamic(device)
             result = self._register_device(dev_id, device["name"], tracks)
             if result:
+                self._registrations[dev_id] = result
+                agent_endpoint = (result.get("agent") or {}).get("endpoint", "")
+                if agent_endpoint:
+                    self._agent_publishers[dev_id] = AgentSessionPublisher(
+                        label=f"{dev_id}/agent",
+                        ws_url=agent_endpoint,
+                        hello={
+                            "kind": "hello",
+                            "token": result.get("token"),
+                            "device_id": result.get("id") or dev_id,
+                            "device_name": device["name"],
+                            "device_type": device["device_type"],
+                            "registry_id": result.get("id"),
+                            "agent_mode": "dynamic",
+                        },
+                        on_command=lambda message, device_id=dev_id: self._apply_agent_command(device_id, message),
+                    )
                 track_map = {t["name"]: t for t in (result.get("tracks") or [])}
                 self._publishers[dev_id] = {
                     t["name"]: self._make_publisher(
@@ -334,11 +591,15 @@ class MothSimulator:
                 self._registered.add(dev_id)
             elif self._reg_fallback_on_failure:
                 logger.warning("[%s] Using fallback track", dev_id)
+                self._registrations.pop(dev_id, None)
+                self._agent_publishers.pop(dev_id, None)
                 self._publishers[dev_id] = {
                     dev_id: self._make_publisher_fallback(dev_id)
                 }
             else:
                 logger.warning("[%s] Registration failed; skipping publish", dev_id)
+                self._registrations.pop(dev_id, None)
+                self._agent_publishers.pop(dev_id, None)
 
     def _init_publishers_fallback(self) -> None:
         for dev_id in list(self.static_devices) + list(self.dynamic_devices):
@@ -356,6 +617,8 @@ class MothSimulator:
         sensor_id: Optional[str] = None,
         parent_device_id: Optional[str] = None,
     ) -> dict:
+        registration = self._registrations.get(device_id, {})
+        agent_endpoint = (registration.get("agent") or {}).get("endpoint")
         return {
             "stream": stream,
             "device_id": device_id,
@@ -365,6 +628,7 @@ class MothSimulator:
             "source": self._source,
             "qos": "best_effort",
             "parent_device_id": parent_device_id,
+            "agent_endpoint": agent_endpoint,
             "flow_id": str(uuid.uuid4()),
             "message_id": str(uuid.uuid4()),
             "schema_version": 1,
@@ -388,6 +652,9 @@ class MothSimulator:
             pub = pubs.get(_POSITION_TRACK_NAME) or pubs.get(dev_id)
             if pub:
                 await pub.publish(envelope, payload)
+                agent_pub = self._agent_publishers.get(dev_id)
+                if agent_pub:
+                    await agent_pub.publish(envelope, payload)
                 logger.info(
                     "📍 Static: %s  lat=%.4f  lon=%.4f",
                     device["name"],
@@ -400,36 +667,74 @@ class MothSimulator:
     def _update_position(self, dev_id: str) -> None:
         device = self.dynamic_devices[dev_id]
         state = self.device_state[dev_id]
+        command_state = state.get("command", {})
 
-        state["heading"] = (
-            state["heading"]
-            + random.uniform(
-                -device["movement"]["heading_change_max"],
-                device["movement"]["heading_change_max"],
-            )
-        ) % 360
+        target_position = command_state.get("target_position")
+        hold_depth = command_state.get("hold_depth")
+        mode = command_state.get("mode", "idle")
 
         lo, hi = device["movement"]["speed_range"]
         state["speed"] = max(lo, min(hi, state["speed"] + random.uniform(-0.2, 0.2)))
 
-        state["position"]["latitude"] += (
-            state["speed"] / 111000
-        ) * math.cos(math.radians(state["heading"]))
-        state["position"]["longitude"] += (
-            state["speed"] / 111000
-        ) * math.sin(math.radians(state["heading"]))
+        if target_position:
+            if mode in {"hold_position"}:
+                state["speed"] = 0.0
+            else:
+                step_m = max(0.5, state["speed"] * 1.5)
+                next_position = self._step_toward(state["position"], target_position, step_m)
+                delta_lat = next_position["latitude"] - state["position"]["latitude"]
+                delta_lon = next_position["longitude"] - state["position"]["longitude"]
+                if delta_lat or delta_lon:
+                    state["heading"] = (math.degrees(math.atan2(delta_lon, delta_lat)) + 360) % 360
+                state["position"] = next_position
+
+            if self._distance_m(state["position"], target_position) < 8.0:
+                if mode in {"patrol_route", "route_move"}:
+                    route = command_state.get("route") or []
+                    index = int(command_state.get("route_index") or 0)
+                    if route:
+                        index = (index + 1) % len(route)
+                        command_state["route_index"] = index
+                        command_state["target_position"] = route[index]
+                elif mode == "move_to_device":
+                    command_state["target_position"] = None
+                elif mode == "follow_target":
+                    target_device_id = (command_state.get("last_command") or {}).get("command", {}).get("params", {}).get("device_id")
+                    if target_device_id:
+                        command_state["target_position"] = self._get_position_for_device(str(target_device_id)) or target_position
+                elif mode == "charge_at_tower":
+                    command_state["target_position"] = target_position
+        else:
+            state["heading"] = (
+                state["heading"]
+                + random.uniform(
+                    -device["movement"]["heading_change_max"],
+                    device["movement"]["heading_change_max"],
+                )
+            ) % 360
+
+            state["position"]["latitude"] += (
+                state["speed"] / 111000
+            ) * math.cos(math.radians(state["heading"]))
+            state["position"]["longitude"] += (
+                state["speed"] / 111000
+            ) * math.sin(math.radians(state["heading"]))
 
         dlo, dhi = device["movement"]["depth_range"]
-        state["position"]["altitude"] = max(
-            dlo,
-            min(dhi, state["position"]["altitude"] + random.uniform(-2, 2)),
-        )
+        if hold_depth is not None:
+            state["position"]["altitude"] = max(dlo, min(dhi, float(hold_depth)))
+        else:
+            state["position"]["altitude"] = max(
+                dlo,
+                min(dhi, state["position"]["altitude"] + random.uniform(-2, 2)),
+            )
 
     def _sensor_payload(self, sensor: dict, state: dict) -> dict:
         """Build the data payload for a single sensor reading."""
         st = sensor["sensor_type"]
         sid = sensor["sensor_id"]
         depth = abs(state["position"]["altitude"])
+        command_state = state.get("command", {})
 
         if st == "gps":
             return {
@@ -469,6 +774,7 @@ class MothSimulator:
                 "range_m": random.uniform(10, 300),
                 "target_detected": random.random() > 0.7,
                 "signal_strength_db": random.uniform(-120, -60),
+                "scan_mode": command_state.get("scan_mode", "normal"),
             }
         if st == "hd_camera":
             return {
@@ -478,13 +784,14 @@ class MothSimulator:
                 "light_level_lux": (
                     random.uniform(0, 100) if depth > 50 else random.uniform(100, 10000)
                 ),
+                "camera_mode": command_state.get("camera_mode", "default"),
             }
         if st == "led_light":
             return {
                 "sensor_id": sid, "type": "led_light",
                 "lumens": sensor["lumens"],
                 "power_w": random.uniform(100, 150),
-                "status": "on" if random.random() > 0.1 else "dimmed",
+                "status": "on" if command_state.get("light_on") else "off",
             }
         if st == "magnetometer":
             return {
@@ -493,6 +800,15 @@ class MothSimulator:
                 "field_y_ut": random.uniform(-50000, 50000),
                 "field_z_ut": random.uniform(-50000, 50000),
                 "heading": state["heading"],
+            }
+        if st in ("sonar", "side_scan_sonar", "profiling_sonar"):
+            return {
+                "sensor_id": sid, "type": st,
+                "frequency_hz": sensor.get("frequency", 200000),
+                "range_m": random.uniform(10, 300),
+                "target_detected": random.random() > 0.5,
+                "signal_strength_db": random.uniform(-120, -60),
+                "scan_mode": command_state.get("scan_mode", "normal"),
             }
         return {"sensor_id": sid, "type": st}
 
@@ -524,24 +840,37 @@ class MothSimulator:
                         sensor_id=sensor["sensor_id"],
                         parent_device_id=parent,
                     )
-                    await pub.publish(envelope, sensor_payloads[sensor["sensor_id"]])
+                    payload = sensor_payloads[sensor["sensor_id"]]
+                    await pub.publish(envelope, payload)
+                    agent_pub = self._agent_publishers.get(dev_id)
+                    if agent_pub:
+                        await agent_pub.publish(envelope, payload)
 
                 # Aggregated telemetry → telemetry TOPIC track
                 tel_pub = pubs.get(_TELEMETRY_TRACK_NAME)
                 if tel_pub:
+                    command_snapshot = {
+                        key: state["command"].get(key)
+                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position")
+                    }
                     envelope = self._make_envelope(
                         dev_id, device["device_type"], "telemetry",
                         parent_device_id=parent,
                     )
-                    await tel_pub.publish(envelope, {
+                    payload = {
                         "name": device["name"],
                         "position": state["position"],
                         "motion": {
                             "heading": round(state["heading"], 2),
                             "speed": round(state["speed"], 2),
                         },
+                        "command": command_snapshot,
                         "sensors": sensor_payloads,
-                    })
+                    }
+                    await tel_pub.publish(envelope, payload)
+                    agent_pub = self._agent_publishers.get(dev_id)
+                    if agent_pub:
+                        await agent_pub.publish(envelope, payload)
             else:
                 # ── Fallback mode: single combined payload ──────────────────
                 pub = pubs.get(dev_id)
@@ -551,15 +880,23 @@ class MothSimulator:
                     dev_id, device["device_type"], "telemetry",
                     parent_device_id=parent,
                 )
-                await pub.publish(envelope, {
+                payload = {
                     "name": device["name"],
                     "position": state["position"],
                     "motion": {
                         "heading": round(state["heading"], 2),
                         "speed": round(state["speed"], 2),
                     },
+                    "command": {
+                        key: state["command"].get(key)
+                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position")
+                    },
                     "sensors": sensor_payloads,
-                })
+                }
+                await pub.publish(envelope, payload)
+                agent_pub = self._agent_publishers.get(dev_id)
+                if agent_pub:
+                    await agent_pub.publish(envelope, payload)
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -595,6 +932,8 @@ class MothSimulator:
         for track_pubs in self._publishers.values():
             for pub in track_pubs.values():
                 tasks.append(asyncio.ensure_future(pub.run(self._running)))
+        for agent_pub in self._agent_publishers.values():
+            tasks.append(asyncio.ensure_future(agent_pub.run(self._running)))
 
         try:
             await asyncio.gather(*tasks)

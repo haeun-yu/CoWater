@@ -2,6 +2,12 @@
 
 이 문서는 02 POC에서 `Agent`를 붙이기 전에, 각 디바이스가 **직접 처리하는 기능**과 `Agent`가 **판단/계획/전달하는 기능**을 나눈 정리표입니다.
 
+02번 Agent는 `static`과 `dynamic` 두 형태를 모두 가질 수 있습니다.
+- `static` Agent는 규칙 기반으로만 동작할 수 있습니다.
+- `dynamic` Agent는 컨텍스트를 반영해 더 유연하게 판단할 수 있습니다.
+- LLM은 선택사항이며, 반드시 사용하지 않아도 됩니다.
+- Agent 구현은 `USVAgent`, `AUVAgent`, `ROVAgent`처럼 타입별로 분리합니다.
+
 대상 디바이스는 `usv`, `auv`, `rov`만 포함합니다.
 
 - `control_center`, `control_ship`, `ocean_power_tower`는 이번 Agent 대상에서 제외합니다.

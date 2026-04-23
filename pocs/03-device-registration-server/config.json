@@ -7,6 +7,14 @@
     "port": 8286,
     "ping_endpoint": "/pang/ping"
   },
+  "agent": {
+    "scheme": "ws",
+    "host": "127.0.0.1",
+    "port": 9010,
+    "path_prefix": "/agents",
+    "command_scheme": "http",
+    "command_path_prefix": "/agents"
+  },
   "cors": {
     "allow_origins": ["*"]
   }
