@@ -21,9 +21,11 @@ python3 device_agent_server.py
 ## 주요 엔드포인트
 
 - `GET /.well-known/agent-card.json`
+- `GET /manifest`
 - `GET /meta`
 - `GET /state`
 - `GET /children`
+- `POST /agents/register`
 - `POST /children/register`
 - `POST /message:send`
 - `GET /tasks`

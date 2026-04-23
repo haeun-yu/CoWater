@@ -142,6 +142,7 @@ class ControlCenterState:
     connected: bool = True
     connected_at: str = field(default_factory=utc_now_iso)
     last_seen_at: str = field(default_factory=utc_now_iso)
+    agent_manifest: Dict[str, Any] = field(default_factory=dict)
     children: List[ChildAgentRecord] = field(default_factory=list)
     missions: List[MissionRecord] = field(default_factory=list)
     inbox: List[MessageRecord] = field(default_factory=list)
@@ -166,6 +167,7 @@ class ControlCenterState:
             "connected": self.connected,
             "connected_at": self.connected_at,
             "last_seen_at": self.last_seen_at,
+            "agent_manifest": self.agent_manifest,
             "children": [item.to_dict() for item in self.children],
             "missions": [item.to_dict() for item in self.missions[-50:]],
             "inbox": [item.to_dict() for item in self.inbox[-50:]],
@@ -181,7 +183,33 @@ class ChildAgentInput(BaseModel):
     agent_id: str
     role: str
     endpoint: Optional[str] = None
+    command_endpoint: Optional[str] = None
+    mode: str = "dynamic"
+    skills: List[str] = Field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    constraints: List[str] = Field(default_factory=list)
+    available_actions: List[str] = Field(default_factory=list)
+    supported_inputs: List[str] = Field(default_factory=list)
+    supported_outputs: List[str] = Field(default_factory=list)
     capabilities: List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
+class AgentManifestInput(BaseModel):
+    agent_id: str
+    role: str
+    endpoint: Optional[str] = None
+    command_endpoint: Optional[str] = None
+    mode: str = "dynamic"
+    skills: List[str] = Field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    constraints: List[str] = Field(default_factory=list)
+    available_actions: List[str] = Field(default_factory=list)
+    supported_inputs: List[str] = Field(default_factory=list)
+    supported_outputs: List[str] = Field(default_factory=list)
+    capabilities: List[str] = Field(default_factory=list)
+    parent_id: Optional[str] = None
+    parent_endpoint: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -314,21 +342,46 @@ class ControlCenterHub:
         self._child_index: Dict[str, ChildAgentRecord] = {}
         self._mission_index: Dict[str, MissionRecord] = {}
         self._task_index: Dict[str, TaskRecord] = {}
+        self.state.agent_manifest = self._build_agent_manifest()
 
     def register_child(self, payload: ChildAgentInput) -> ChildAgentRecord:
         child = ChildAgentRecord(
             agent_id=payload.agent_id,
             role=payload.role,
             endpoint=payload.endpoint,
-            capabilities=list(payload.capabilities),
+            capabilities=list(payload.capabilities or payload.available_actions),
             status="registered",
             last_seen_at=utc_now_iso(),
             notes=payload.notes,
         )
         self._child_index[child.agent_id] = child
         self.state.children = list(self._child_index.values())
+        self.state.agent_manifest.setdefault("children", {})
+        self.state.agent_manifest["children"][child.agent_id] = self._child_manifest(payload)
         self.state.remember({"kind": "child.registered", "at": utc_now_iso(), "child": child.to_dict()})
         return child
+
+    def _child_manifest(self, payload: ChildAgentInput | AgentManifestInput) -> dict[str, Any]:
+        available_actions = list(payload.available_actions or payload.capabilities)
+        skills = list(payload.skills or available_actions)
+        return {
+            "agent_id": payload.agent_id,
+            "role": payload.role,
+            "mode": payload.mode,
+            "endpoint": payload.endpoint,
+            "command_endpoint": payload.command_endpoint,
+            "skills": skills,
+            "tools": list(payload.tools),
+            "constraints": list(payload.constraints),
+            "available_actions": available_actions,
+            "supported_inputs": list(payload.supported_inputs),
+            "supported_outputs": list(payload.supported_outputs),
+            "capabilities": list(payload.capabilities),
+            "parent_id": getattr(payload, "parent_id", None) or self.state.agent_id,
+            "parent_endpoint": getattr(payload, "parent_endpoint", None) or self.state.parent_endpoint,
+            "notes": payload.notes,
+            "last_seen_at": utc_now_iso(),
+        }
 
     def heartbeat_child(self, agent_id: str) -> ChildAgentRecord:
         child = self._child_index.get(agent_id)
@@ -337,6 +390,9 @@ class ControlCenterHub:
         child.status = "online"
         child.last_seen_at = utc_now_iso()
         self.state.children = list(self._child_index.values())
+        if agent_id in self.state.agent_manifest.get("children", {}):
+            self.state.agent_manifest["children"][agent_id]["status"] = "online"
+            self.state.agent_manifest["children"][agent_id]["last_seen_at"] = child.last_seen_at
         self.state.remember({"kind": "child.heartbeat", "at": utc_now_iso(), "agent_id": agent_id})
         return child
 
@@ -358,6 +414,49 @@ class ControlCenterHub:
             routed_via=routed_via,
             status=status_text,
         )
+
+    def _build_agent_manifest(self) -> dict[str, Any]:
+        base_url = f"http://{self.settings['server']['host']}:{self.settings['server']['port']}"
+        return {
+            "agent_id": self.state.agent_id,
+            "role": self.state.role,
+            "mode": "dynamic",
+            "endpoint": base_url,
+            "command_endpoint": f"{base_url}/message:send",
+            "skills": [
+                "plan_mission",
+                "assign_control_ship",
+                "direct_route_override",
+            ],
+            "tools": [
+                "mission_store",
+                "child_registry",
+                "route_planner",
+            ],
+            "constraints": [
+                "prefer_mid_tier_routing",
+                "direct_route_requires_authority",
+            ],
+            "available_actions": [
+                "task.assign",
+                "task.accept",
+                "task.complete",
+                "task.fail",
+                "status.report",
+                "task.escalate",
+            ],
+            "supported_inputs": ["application/json", "text/plain"],
+            "supported_outputs": ["application/json", "text/plain"],
+            "capabilities": {
+                "streaming": False,
+                "push_notifications": False,
+                "direct_route_allowed": self.state.direct_route_allowed,
+            },
+            "parent_id": self.state.parent_id,
+            "parent_endpoint": self.state.parent_endpoint,
+            "children": {},
+            "updated_at": utc_now_iso(),
+        }
 
     def _build_agent_card(self) -> dict[str, Any]:
         base_url = f"http://{self.settings['server']['host']}:{self.settings['server']['port']}"
@@ -779,6 +878,11 @@ def state() -> dict[str, Any]:
     return hub.state.to_dict()
 
 
+@app.get("/manifest")
+def manifest() -> dict[str, Any]:
+    return hub.state.agent_manifest
+
+
 @app.post("/message:send")
 def message_send(request: SendMessageRequest) -> dict[str, Any]:
     return hub.send_message(request)
@@ -812,6 +916,11 @@ def list_children() -> list[dict[str, Any]]:
 
 @app.post("/children/register", status_code=status.HTTP_201_CREATED)
 def register_child(request: ChildAgentInput) -> dict[str, Any]:
+    return hub.register_child(request).to_dict()
+
+
+@app.post("/agents/register", status_code=status.HTTP_201_CREATED)
+def register_agent(request: AgentManifestInput) -> dict[str, Any]:
     return hub.register_child(request).to_dict()
 
 
