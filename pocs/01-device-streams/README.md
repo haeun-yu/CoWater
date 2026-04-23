@@ -91,6 +91,12 @@ Edit `config.json`:
   "moth_server": {
     "url": "wss://cobot.center:8287",
     "channel": "instant"
+  },
+  "registration_server": {
+    "enabled": true,
+    "url": "http://localhost:8003",
+    "secret_key": "server-secret",
+    "fallback_on_failure": false
   }
 }
 ```
@@ -137,11 +143,13 @@ python3 -m http.server 8000
 
 ## Success Criteria
 
-- All 6 devices connect to Moth server successfully
+- All 6 devices register successfully when `registration_server.enabled = true`
 - Static devices transmit only on position change or timeout
 - Dynamic devices stream continuously with realistic sensor data
 - HTML dashboard receives and displays data in real-time (last 10 per device)
 - Configuration-driven: easy to add/modify devices and sensors
+
+If registration fails and `fallback_on_failure` is `false`, the simulator skips publishing for that device instead of silently falling back to the shared track.
 
 ## Payload Examples
 

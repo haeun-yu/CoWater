@@ -1,0 +1,13 @@
+{
+  "device": {
+    "secret_key": "server-secret"
+  },
+  "server": {
+    "host": "cobot.center",
+    "port": 8286,
+    "ping_endpoint": "/pang/ping"
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}

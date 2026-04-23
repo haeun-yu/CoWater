@@ -91,6 +91,12 @@ MothSimulator (Python)
   "moth_server": {
     "url": "wss://cobot.center:8287",
     "channel": "instant"
+  },
+  "registration_server": {
+    "enabled": true,
+    "url": "http://localhost:8003",
+    "secret_key": "server-secret",
+    "fallback_on_failure": false
   }
 }
 ```
@@ -137,11 +143,13 @@ python3 -m http.server 8000
 
 ## 성공 기준
 
-- 6개 모든 디바이스가 Moth 서버에 성공적으로 연결
+- `registration_server.enabled = true`일 때 6개 모든 디바이스가 등록 성공
 - 정적 디바이스는 위치 변경 또는 타임아웃 시에만 전송
 - 동적 디바이스는 현실적인 센서 데이터로 지속 스트리밍
 - HTML 대시보드가 실시간으로 데이터 수신 및 표시 (디바이스당 최신 10개)
 - 설정 기반: 디바이스 및 센서 추가/수정이 용이
+
+등록 실패 시 `fallback_on_failure = false`이면, 시뮬레이터는 해당 디바이스 전송을 중단하고 공유 트랙으로 몰래 fallback 하지 않습니다.
 
 ## 페이로드 예제
 

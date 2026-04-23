@@ -321,10 +321,18 @@
     </div>
 
     <script>
-        const MOTH_URL = "wss://cobot.center:8287";
-        const CHANNEL = "instant";
+        // Moth sub: one WebSocket per device track (device_id = track)
+        const MOTH_BASE = "wss://cobot.center:8287";
+        const MOTH_CHANNEL = "instant";
+        const MOTH_NAME   = "cowater-sim-device-streams";
+        const MOTH_SOURCE = "base";
+        const MOTH_MODE   = "single";
 
-        let ws = null;
+        function mothSubUrl(track) {
+            return `${MOTH_BASE}/pang/ws/sub?channel=${MOTH_CHANNEL}&name=${MOTH_NAME}&source=${MOTH_SOURCE}&track=${encodeURIComponent(track)}&mode=${MOTH_MODE}`;
+        }
+
+        const deviceSockets = {};   // device_id → WebSocket
         let deviceData = {};
         let selectedDeviceId = null;
         let deviceConfigs = {};
@@ -351,60 +359,59 @@
             });
         }
 
-        function connectToMoth() {
-            console.log('Connecting to Moth server:', MOTH_URL);
+        function connectDeviceTrack(deviceId) {
+            // Moth sub protocol per device track:
+            // 1st frame = text (MIME), subsequent frames = binary {envelope, payload}
+            const url = mothSubUrl(deviceId);
+            console.log(`[${deviceId}] Connecting → ${url}`);
 
-            ws = new WebSocket(MOTH_URL);
+            const ws = new WebSocket(url);
+            deviceSockets[deviceId] = ws;
 
             ws.onopen = () => {
-                console.log('Connected to Moth server');
+                console.log(`[${deviceId}] Connected`);
                 updateConnectionStatus(true);
             };
 
             ws.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
+                if (typeof event.data === 'string') return; // MIME frame — ignore
 
-                    if (message.channel === CHANNEL && message.data) {
-                        const deviceId = message.data.device_id;
-                        const timestamp = new Date(message.data.timestamp).toLocaleTimeString();
+                event.data.arrayBuffer().then(buf => {
+                    try {
+                        const message = JSON.parse(new TextDecoder().decode(buf));
+                        const envelope = message.envelope || {};
+                        const payload  = message.payload  || {};
+                        const devId    = envelope.device_id || deviceId;
+                        const timestamp = new Date(envelope.timestamp).toLocaleTimeString();
 
-                        // Add to device data (keep last 10 entries)
-                        if (!deviceData[deviceId]) {
-                            deviceData[deviceId] = [];
-                        }
+                        if (!deviceData[devId]) deviceData[devId] = [];
+                        deviceData[devId].unshift({ timestamp, envelope, payload });
+                        if (deviceData[devId].length > 10) deviceData[devId].pop();
 
-                        deviceData[deviceId].unshift({
-                            timestamp,
-                            data: message.data
-                        });
-
-                        // Keep only last 10 entries
-                        if (deviceData[deviceId].length > 10) {
-                            deviceData[deviceId].pop();
-                        }
-
-                        // Update display if this device is selected
-                        if (selectedDeviceId === deviceId) {
-                            updateDataPanel(deviceId);
-                        }
+                        if (selectedDeviceId === devId) updateDataPanel(devId);
+                    } catch (e) {
+                        console.error(`[${deviceId}] parse error:`, e);
                     }
-                } catch (error) {
-                    console.error('Error parsing message:', error);
-                }
+                });
             };
 
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                updateConnectionStatus(false);
-            };
+            ws.onerror = () => updateConnectionStatus(false);
 
             ws.onclose = () => {
-                console.log('Disconnected from Moth server');
-                updateConnectionStatus(false);
-                // Try to reconnect in 5 seconds
-                setTimeout(connectToMoth, 5000);
+                console.log(`[${deviceId}] Disconnected — reconnecting in 5s`);
+                delete deviceSockets[deviceId];
+                updateConnectionStatus(Object.keys(deviceSockets).length > 0);
+                setTimeout(() => connectDeviceTrack(deviceId), 5000);
             };
+        }
+
+        function connectToMoth() {
+            // Open one sub connection per device (each device uses its own track)
+            const allDevices = [
+                ...deviceConfigs.static_devices,
+                ...deviceConfigs.dynamic_devices,
+            ];
+            allDevices.forEach(device => connectDeviceTrack(device.device_id));
         }
 
         function updateConnectionStatus(connected) {
@@ -541,7 +548,7 @@
             stream.innerHTML = data.map((item, index) => `
                 <div class="data-item">
                     <div class="timestamp">#${index + 1} • ${item.timestamp} <span class="update-indicator"></span></div>
-                    <div class="data-value">${JSON.stringify(item.data, null, 2)}</div>
+                    <div class="data-value">${JSON.stringify({envelope: item.envelope, payload: item.payload}, null, 2)}</div>
                 </div>
             `).join('');
 
