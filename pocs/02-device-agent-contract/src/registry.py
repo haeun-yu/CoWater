@@ -159,6 +159,7 @@ class AgentHub:
         if isinstance(envelope, dict) and isinstance(payload, dict):
             session.last_stream = envelope.get("stream")
             session.last_payload = payload
+            session.context["last_envelope"] = envelope
             if not session.device_type:
                 session.device_type = str(envelope.get("device_type") or "usv").lower()
             agent = self.ensure_agent(token, session.device_type)

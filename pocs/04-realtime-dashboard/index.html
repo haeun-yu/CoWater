@@ -323,7 +323,19 @@ function buildModel(type, colorHex) {
         const lt = M(new THREE.CylinderGeometry(0.5,0.5,0.5), white); lt.rotateX(Math.PI/2); lt.position.set(0,0,2.5);
         const t1 = M(new THREE.CylinderGeometry(0.6,0.6,2), dark);   t1.rotateX(Math.PI/2); t1.position.set(-2.5,0,-1);
         const t2 = M(new THREE.CylinderGeometry(0.6,0.6,2), dark);   t2.rotateX(Math.PI/2); t2.position.set(2.5,0,-1);
-        g.add(frame, lt, t1, t2);
+        const lamp = new THREE.PointLight(0xfff3b0, 0, 70, 2);
+        lamp.position.set(0, 0, 3);
+        lamp.castShadow = true;
+        const lampBall = M(new THREE.SphereGeometry(0.35, 12, 12), new THREE.MeshStandardMaterial({
+            color: 0xfff3b0,
+            emissive: 0xfff3b0,
+            emissiveIntensity: 0,
+            roughness: 0.2,
+            metalness: 0.1,
+        }));
+        lampBall.position.set(0, 0, 3);
+        lampBall.userData = { role: 'rov-light' };
+        g.add(frame, lt, t1, t2, lamp, lampBall);
     } else if (type === 'auv') {
         offset = 0;
         const body = M(new THREE.CylinderGeometry(1.2,1.2,10,16), main); body.rotateX(Math.PI/2);
@@ -479,6 +491,7 @@ function initObjects() {
             id:cfg.id, config:cfg, mesh:group, offset, labelEl,
             scenePos:{...sp}, heading:0, speed:0,
             connStatus:'connecting', lastPayload:null, lastEnvelope:null, hasAlert:false,
+            lightOn:false,
         });
         connState[cfg.id] = 'connecting';
     });
@@ -567,6 +580,19 @@ function connectTrack(deviceId, trackName, endpoint) {
                     dev.scenePos = toScene(p.latitude, p.longitude, p.altitude);
                 }
                 if (pay.motion) { dev.heading = pay.motion.heading||0; dev.speed = pay.motion.speed||0; }
+                const commandLight = pay.command && typeof pay.command === 'object' ? pay.command.light_on : undefined;
+                const ledLightSensor = (() => {
+                    const sensors = pay.sensors || {};
+                    for (const sensor of Object.values(sensors)) {
+                        if (sensor && sensor.type === 'led_light') return sensor.status;
+                    }
+                    return undefined;
+                })();
+                if (typeof commandLight === 'boolean') {
+                    dev.lightOn = commandLight;
+                } else if (typeof ledLightSensor === 'string') {
+                    dev.lightOn = ledLightSensor === 'on';
+                }
                 if (appState.selectedId === devId) uiManager.renderSelectedDetail();
             } catch(e) {}
         });
@@ -615,8 +641,20 @@ function updateScene(delta) {
         const isHov = dev.id === appState.hoveredId;
         const emissive = dev.hasAlert ? COLORS.alert_critical : (isSel ? 0xffffff : (isHov ? 0x334155 : 0x000000));
         const intensity = dev.hasAlert ? (Math.sin(time*8)*0.5+0.5) : (isSel ? 0.5 : (isHov ? 0.2 : 0));
+        const lightBoost = dev.lightOn ? 0xfff3b0 : 0x000000;
+        const lightIntensity = dev.lightOn ? 2.8 : 0;
         dev.mesh.traverse(c => {
             if (c.isMesh && c.material) { c.material.emissive = new THREE.Color(emissive); c.material.emissiveIntensity = intensity; }
+            if (c.userData && c.userData.role === 'rov-light' && c.material) {
+                c.material.color.setHex(dev.lightOn ? 0xfff3b0 : 0x7c7c7c);
+                c.material.emissive = new THREE.Color(lightBoost);
+                c.material.emissiveIntensity = dev.lightOn ? 2.8 : 0;
+            }
+            if (c.isPointLight) {
+                c.intensity = lightIntensity;
+                c.visible = dev.lightOn;
+                c.color.setHex(0xfff3b0);
+            }
         });
     });
 
@@ -899,6 +937,7 @@ const uiManager = {
                     <span style="color:#94a3b8">03 ID:</span><span>${reg?.id ?? '—'}</span>
                     <span style="color:#94a3b8">03 토큰:</span><span>${reg?.token ? `${reg.token.slice(0, 8)}…` : '—'}</span>
                     <span style="color:#94a3b8">Agent:</span><span>${streamAgent || '—'}</span>
+                    <span style="color:#94a3b8">Light:</span><span>${dev.lightOn ? 'ON' : 'OFF'}</span>
                 </div>${sensorHtml}
                 ${trackHtml}
                 ${agentHtml}

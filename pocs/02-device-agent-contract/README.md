@@ -14,6 +14,7 @@ LLM usage is optional, not required.
 - After `hello`, re-registers Agent connection info back to the 03 registry server
 - Produces simple recommendations for each device type
 - Exposes per-device agent state through REST
+- Stores the device's allowed actions in session state and renders button-only commands in the dashboard
 - Supports both static and dynamic agent modes
 - Works without an LLM by using rule-based planning only
 

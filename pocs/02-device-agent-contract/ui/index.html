@@ -307,43 +307,25 @@
             <div style="margin-top:14px;">
               <h3 style="margin-bottom:10px;">명령 전송</h3>
               <div id="command-presets" class="button-row" style="margin-bottom:12px;"></div>
-              <form id="command-form" class="stack tight">
+              <div class="input-row" style="margin-top:0;">
+                <label for="command-reason">Reason</label>
+                <input id="command-reason" name="reason" placeholder="why this command is being sent">
+              </div>
+              <div class="input-row" style="margin-top:0;">
+                <label for="command-priority">Priority</label>
+                <select id="command-priority" name="priority">
+                  <option value="low">low</option>
+                  <option value="normal" selected>normal</option>
+                  <option value="high">high</option>
+                </select>
+              </div>
+              <div class="muted" id="command-context" style="margin-top:8px; font-size:.8rem;">작업 버튼을 선택하면 필요한 값이 자동으로 채워집니다.</div>
+              <form id="command-form" class="stack tight" style="margin-top:10px;">
                 <div class="input-row" style="margin-top:0;">
-                  <label for="command-action">Action</label>
-                  <select id="command-action" name="action">
-                    <option value="patrol_route">patrol_route</option>
-                    <option value="route_move">route_move</option>
-                    <option value="move_to_device">move_to_device</option>
-                    <option value="follow_target">follow_target</option>
-                    <option value="return_to_base">return_to_base</option>
-                    <option value="charge_at_tower">charge_at_tower</option>
-                    <option value="hold_position">hold_position</option>
-                    <option value="hold_depth">hold_depth</option>
-                    <option value="surface">surface</option>
-                    <option value="light_on">light_on</option>
-                    <option value="light_off">light_off</option>
-                    <option value="camera_mode_switch">camera_mode_switch</option>
-                    <option value="sonar_scan_plan">sonar_scan_plan</option>
-                  </select>
-                </div>
-                <div class="input-row" style="margin-top:0;">
-                  <label for="command-reason">Reason</label>
-                  <input id="command-reason" name="reason" placeholder="why this command is being sent">
-                </div>
-                <div class="input-row" style="margin-top:0;">
-                  <label for="command-priority">Priority</label>
-                  <select id="command-priority" name="priority">
-                    <option value="low">low</option>
-                    <option value="normal" selected>normal</option>
-                    <option value="high">high</option>
-                  </select>
-                </div>
-                <div class="input-row" style="margin-top:0;">
-                  <label for="command-params">Params JSON</label>
-                  <textarea id="command-params" name="params" rows="6" style="width:100%; border-radius:12px; border:1px solid rgba(148,163,184,.2); background:rgba(15,23,42,.95); color:var(--text); padding:10px 12px; outline:none; resize:vertical;">{}</textarea>
+                  <div id="command-action-note" class="muted" style="font-size:.8rem;">선택된 버튼으로 명령을 보낼 수 있습니다.</div>
                 </div>
                 <div class="button-row">
-                  <button type="submit" class="button primary">Send Command</button>
+                  <button type="submit" class="button primary" id="command-submit">Send Selected Action</button>
                   <button type="button" class="button" id="command-reset">Reset</button>
                 </div>
               </form>
@@ -377,6 +359,7 @@
       meta: null,
       agents: [],
       selectedToken: null,
+      selectedAction: null,
       autoRefresh: true,
       timer: null,
     };
@@ -528,6 +511,9 @@
           ${badge(`constraints ${Array.isArray(agent.constraints) ? agent.constraints.join(", ") : "-"}`)}
         </div>
         <div class="badges">
+          ${badge(`actions ${Array.isArray(agent.available_actions) ? agent.available_actions.join(", ") : "-"}`)}
+        </div>
+        <div class="badges">
           ${badge(`connected ${agent.connected ? "yes" : "no"}`, agent.connected ? "ok" : "off")}
           ${badge(`connected_at ${formatTime(agent.connected_at)}`)}
           ${badge(`last_seen ${formatTime(agent.last_seen_at)}`)}
@@ -570,11 +556,17 @@
       }
     }
 
-    function setCommandFields({ action, reason, priority = "normal", params = {} }) {
-      document.getElementById("command-action").value = action;
-      document.getElementById("command-reason").value = reason || "";
-      document.getElementById("command-priority").value = priority;
-      document.getElementById("command-params").value = pretty(params);
+    function setCommandContext(text) {
+      const note = document.getElementById("command-action-note");
+      if (note) note.textContent = text;
+      const context = document.getElementById("command-context");
+      if (context) context.textContent = text;
+    }
+
+    function humanizeAction(action) {
+      return String(action || "-")
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
     }
 
     function buildRouteFromAgent(agent, step = 0.001) {
@@ -594,20 +586,72 @@
       ];
     }
 
-    async function sendCommand(command) {
+    async function sendCommand(command, reason = "", priority = "normal") {
       const token = state.selectedToken;
       if (!token) {
         setCommandResult("선택된 Agent가 없습니다.");
         return;
       }
+      if (!command || !command.action) {
+        setCommandResult("선택된 작업이 없습니다.");
+        return;
+      }
       try {
         const result = await requestJson(`/agents/${encodeURIComponent(token)}/command`, {
           method: "POST",
-          body: JSON.stringify(command),
+          body: JSON.stringify({
+            action: command.action,
+            reason: reason || command.reason || null,
+            priority,
+            params: command.params || {},
+          }),
         });
         setCommandResult(result);
       } catch (error) {
         setCommandResult(`전송 실패: ${error.message}`);
+      }
+    }
+
+    function currentCommandMeta(agent, action) {
+      const payload = agent?.last_payload || {};
+      const position = payload.position || {};
+      const parentDeviceId = payload.parent_device_id || agent?.context?.last_envelope?.parent_device_id || null;
+      const currentDepth = Number.isFinite(Number(position.altitude)) ? Number(position.altitude) : -10;
+      const route = buildRouteFromAgent(agent);
+
+      switch (action) {
+        case "patrol_route":
+        case "route_move":
+          return {
+            command: { action, params: { route } },
+            note: `${humanizeAction(action)}: 현재 위치 기반 순찰 경로`,
+          };
+        case "move_to_device":
+        case "follow_target":
+          return {
+            command: { action, params: parentDeviceId ? { device_id: parentDeviceId } : {} },
+            note: `${humanizeAction(action)}: 상위 디바이스로 이동`,
+          };
+        case "hold_depth":
+          return {
+            command: { action, params: { depth: currentDepth } },
+            note: "Hold Depth: 현재 수심 유지",
+          };
+        case "camera_mode_switch":
+          return {
+            command: { action, params: { mode: "inspection" } },
+            note: "Camera Mode: inspection",
+          };
+        case "sonar_scan_plan":
+          return {
+            command: { action, params: { mode: "scan" } },
+            note: "Sonar Scan Plan: scan",
+          };
+        default:
+          return {
+            command: { action, params: {} },
+            note: humanizeAction(action),
+          };
       }
     }
 
@@ -616,98 +660,27 @@
       if (!host) return;
       if (!agent) {
         host.innerHTML = `<span class="muted">Agent를 선택하면 프리셋이 표시됩니다.</span>`;
+        setCommandControlsEnabled(false);
+        setCommandContext("Agent를 선택하면 가능한 작업 버튼이 표시됩니다.");
         return;
       }
+      const allowed = Array.isArray(agent.available_actions) && agent.available_actions.length
+        ? agent.available_actions
+        : (agent.context?.profile?.agent_side || []);
+      const presets = allowed.map((action) => {
+        const meta = currentCommandMeta(agent, action);
+        return {
+          action,
+          label: humanizeAction(action),
+          command: meta.command,
+          note: meta.note,
+        };
+      });
 
-      const common = [
-        {
-          label: "Hold Position",
-          action: "hold_position",
-          reason: "현재 위치를 유지합니다.",
-          params: {},
-        },
-      ];
+      if (!state.selectedAction || !presets.some((preset) => preset.action === state.selectedAction)) {
+        state.selectedAction = presets[0]?.action || null;
+      }
 
-      const byType = {
-        usv: [
-          {
-            label: "Patrol Route",
-            action: "patrol_route",
-            reason: "USV 순찰 경로를 실행합니다.",
-            params: { route: buildRouteFromAgent(agent) },
-          },
-          {
-            label: "Return Home",
-            action: "return_to_base",
-            reason: "출발 지점으로 복귀합니다.",
-            params: {},
-          },
-          {
-            label: "Charge Tower",
-            action: "charge_at_tower",
-            reason: "충전 타워로 이동합니다.",
-            params: {},
-          },
-        ],
-        auv: [
-          {
-            label: "Hold Depth",
-            action: "hold_depth",
-            reason: "현재 수심을 유지합니다.",
-            params: {
-              depth: Number.isFinite(Number(agent?.last_payload?.position?.altitude))
-                ? Number(agent.last_payload.position.altitude)
-                : -10,
-            },
-          },
-          {
-            label: "Surface",
-            action: "surface",
-            reason: "수면으로 상승합니다.",
-            params: {},
-          },
-          {
-            label: "Return Home",
-            action: "return_to_base",
-            reason: "출발 지점으로 복귀합니다.",
-            params: {},
-          },
-        ],
-        rov: [
-          {
-            label: "Light On",
-            action: "light_on",
-            reason: "ROV 조명을 켭니다.",
-            params: {},
-          },
-          {
-            label: "Light Off",
-            action: "light_off",
-            reason: "ROV 조명을 끕니다.",
-            params: {},
-          },
-          {
-            label: "Camera Mode",
-            action: "camera_mode_switch",
-            reason: "카메라 모드를 전환합니다.",
-            params: { mode: "inspection" },
-          },
-          {
-            label: "Scan Plan",
-            action: "sonar_scan_plan",
-            reason: "소나 스캔 계획을 실행합니다.",
-            params: { mode: "scan" },
-          },
-          {
-            label: "Return Home",
-            action: "return_to_base",
-            reason: "출발 지점으로 복귀합니다.",
-            params: {},
-          },
-        ],
-      };
-
-      const presets = [...common, ...(byType[agent.device_type] || [])];
       host.innerHTML = presets
         .map((preset) => `
           <button type="button" class="button" data-preset-action="${escapeHtml(preset.action)}">
@@ -716,6 +689,7 @@
         `)
         .join("");
       setCommandControlsEnabled(Boolean(agent.connected));
+      setCommandContext(agent.connected ? "버튼을 누르면 명령이 즉시 전송됩니다." : "Agent가 disconnected 상태입니다.");
 
       host.querySelectorAll("[data-preset-action]").forEach((button) => {
         const action = button.getAttribute("data-preset-action");
@@ -726,13 +700,13 @@
             setCommandResult("Agent가 disconnected 상태라 명령을 보낼 수 없습니다.");
             return;
           }
-          setCommandFields(preset);
-          await sendCommand({
-            action: preset.action,
-            reason: preset.reason,
-            priority: "normal",
-            params: preset.params || {},
-          });
+          state.selectedAction = preset.action;
+          setCommandContext(preset.note);
+          await sendCommand(
+            preset.command,
+            document.getElementById("command-reason").value.trim(),
+            document.getElementById("command-priority").value,
+          );
         });
       });
     }
@@ -798,7 +772,6 @@
       const commandReset = document.getElementById("command-reset");
       if (commandReset) {
         commandReset.addEventListener("click", () => {
-          document.getElementById("command-params").value = "{}";
           document.getElementById("command-reason").value = "";
           document.getElementById("command-priority").value = "normal";
           setCommandResult("-");
@@ -817,22 +790,13 @@
             setCommandResult("Agent가 disconnected 상태라 명령을 보낼 수 없습니다.");
             return;
           }
-          let params = {};
-          const paramsText = document.getElementById("command-params").value.trim();
-          if (paramsText) {
-            try {
-              params = JSON.parse(paramsText);
-            } catch (error) {
-              setCommandResult(`Params JSON 오류: ${error.message}`);
-              return;
-            }
-          }
-          await sendCommand({
-            action: document.getElementById("command-action").value,
-            reason: document.getElementById("command-reason").value.trim() || null,
-            priority: document.getElementById("command-priority").value,
-            params,
-          });
+          const action = state.selectedAction || (selected.available_actions || [])[0];
+          const meta = currentCommandMeta(selected, action);
+          await sendCommand(
+            meta.command,
+            document.getElementById("command-reason").value.trim(),
+            document.getElementById("command-priority").value,
+          );
         });
       }
     }

@@ -25,6 +25,7 @@ class DeviceAgentBase(ABC):
             session.agent_mode if session.agent_mode in session.supported_modes else profile.get("preferred_mode", "dynamic")
         )
         session.llm_optional = bool(profile.get("llm_optional", True))
+        session.available_actions = list(profile.get("agent_side", []))
         session.skills = list(profile.get("skills", []))
         session.tools = list(profile.get("tools", []))
         session.constraints = list(profile.get("constraints", []))

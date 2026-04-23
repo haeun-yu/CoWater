@@ -35,6 +35,7 @@ class DeviceAgentStateRecord:
     agent_mode: str = "dynamic"
     llm_optional: bool = True
     supported_modes: List[str] = field(default_factory=list)
+    available_actions: List[str] = field(default_factory=list)
     skills: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list)
     constraints: List[str] = field(default_factory=list)
@@ -67,6 +68,7 @@ class DeviceAgentStateRecord:
             "agent_mode": self.agent_mode,
             "llm_optional": self.llm_optional,
             "supported_modes": list(self.supported_modes),
+            "available_actions": list(self.available_actions),
             "skills": list(self.skills),
             "tools": list(self.tools),
             "constraints": list(self.constraints),
