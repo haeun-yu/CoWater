@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
@@ -25,6 +26,7 @@ DEFAULT_AGENT_ROLE = "control_ship"
 DEFAULT_PARENT_ID = "control_center-01"
 DEFAULT_PARENT_ENDPOINT = "http://127.0.0.1:9012"
 DEFAULT_CORS_ORIGINS = ["*"]
+DEFAULT_A2A_BINDING = "HTTP+JSON"
 
 
 def utc_now_iso() -> str:
@@ -115,6 +117,7 @@ class ControlShipState:
     inbox: List[MessageRecord] = field(default_factory=list)
     outbox: List[MessageRecord] = field(default_factory=list)
     dispatches: List[dict[str, Any]] = field(default_factory=list)
+    tasks: List[TaskRecord] = field(default_factory=list)
     memory: List[dict[str, Any]] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
 
@@ -136,6 +139,7 @@ class ControlShipState:
             "inbox": [item.to_dict() for item in self.inbox[-50:]],
             "outbox": [item.to_dict() for item in self.outbox[-50:]],
             "dispatches": list(self.dispatches[-50:]),
+            "tasks": [item.to_dict() for item in self.tasks[-50:]],
             "memory": list(self.memory[-25:]),
             "context": self.context,
         }
@@ -170,6 +174,84 @@ class DispatchInput(BaseModel):
     message: A2AMessageInput
 
 
+class A2APartInput(BaseModel):
+    type: str
+    text: Optional[str] = None
+    data: Optional[dict[str, Any]] = None
+    mime_type: Optional[str] = Field(default=None, alias="mimeType")
+
+
+class A2AMessageEnvelopeInput(BaseModel):
+    role: str
+    parts: List[A2APartInput]
+
+
+class SendMessageRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    message: A2AMessageEnvelopeInput
+    task_id: Optional[str] = Field(default=None, alias="taskId")
+    context_id: Optional[str] = Field(default=None, alias="contextId")
+
+
+class GetTaskRequest(BaseModel):
+    task_id: str = Field(alias="id")
+
+
+class ListTasksRequest(BaseModel):
+    status: Optional[str] = None
+
+
+class CancelTaskRequest(BaseModel):
+    task_id: str = Field(alias="id")
+
+
+@dataclass
+class TaskArtifactRecord:
+    name: str
+    parts: List[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "parts": list(self.parts)}
+
+
+@dataclass
+class TaskRecord:
+    id: str
+    state: str = "submitted"
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    artifacts: List[TaskArtifactRecord] = field(default_factory=list)
+    history: List[dict[str, Any]] = field(default_factory=list)
+    message: Optional[dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
+
+    def touch(self, state: Optional[str] = None) -> None:
+        self.updated_at = utc_now_iso()
+        if state:
+            self.state = state
+
+    def add_artifact(self, name: str, payload: dict[str, Any]) -> None:
+        self.artifacts.append(TaskArtifactRecord(name=name, parts=[{"type": "data", "data": payload}]))
+        self.updated_at = utc_now_iso()
+
+    def to_dict(self, include_artifacts: bool = True) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "id": self.id,
+            "status": {"state": self.state},
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+            "history": list(self.history),
+        }
+        if self.message is not None:
+            data["message"] = self.message
+        if self.result is not None:
+            data["result"] = self.result
+        if include_artifacts:
+            data["artifacts"] = [artifact.to_dict() for artifact in self.artifacts]
+        return data
+
+
 class ControlShipHub:
     def __init__(self, settings: dict[str, Any]) -> None:
         agent = settings["agent"]
@@ -182,6 +264,7 @@ class ControlShipHub:
             direct_route_allowed=agent["direct_route_allowed"],
         )
         self._child_index: Dict[str, ChildAgentRecord] = {}
+        self._task_index: Dict[str, TaskRecord] = {}
 
     def register_child(self, payload: ChildAgentInput) -> ChildAgentRecord:
         child = ChildAgentRecord(
@@ -227,6 +310,113 @@ class ControlShipHub:
             status=status_text,
         )
         return record
+
+    def _build_agent_card(self) -> dict[str, Any]:
+        base_url = f"http://{self.settings['server']['host']}:{self.settings['server']['port']}"
+        return {
+            "name": self.state.agent_id,
+            "displayName": "CoWater Control Ship Agent",
+            "description": "Mid-tier control_ship A2A agent for dispatching child agents and relaying status upstream.",
+            "url": base_url,
+            "version": "1.0.0",
+            "protocolVersion": "1.0.0",
+            "supportedInterfaces": [
+                {
+                    "url": base_url,
+                    "protocolBinding": DEFAULT_A2A_BINDING,
+                    "protocolVersion": "1.0.0",
+                }
+            ],
+            "capabilities": {
+                "streaming": False,
+                "pushNotifications": False,
+                "extendedAgentCard": False,
+            },
+            "defaultInputModes": ["application/json", "text/plain"],
+            "defaultOutputModes": ["application/json", "text/plain"],
+            "skills": [
+                {
+                    "id": "dispatch_task",
+                    "name": "Dispatch Task",
+                    "description": "Assign tasks to child agents based on scope and capability.",
+                },
+                {
+                    "id": "relay_status_upstream",
+                    "name": "Relay Status Upstream",
+                    "description": "Report child and mission status back to the control center.",
+                },
+                {
+                    "id": "register_child_agent",
+                    "name": "Register Child Agent",
+                    "description": "Track child agent capability, endpoint, and online status.",
+                },
+            ],
+        }
+
+    def _new_task(self, state: str = "submitted") -> TaskRecord:
+        task = TaskRecord(id=f"task-{uuid4()}", state=state)
+        self._task_index[task.id] = task
+        self.state.tasks = list(self._task_index.values())
+        return task
+
+    def _get_task(self, task_id: str) -> TaskRecord:
+        task = self._task_index.get(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        return task
+
+    def _attach_task_artifacts(self, task: TaskRecord, result: dict[str, Any]) -> None:
+        task.result = result
+        task.add_artifact("a2a_result", result)
+        if result.get("outbox"):
+            task.add_artifact("dispatches", {"dispatches": result["outbox"]})
+        task.touch("completed" if result.get("status") != "failed" else "failed")
+
+    def _extract_message_data(self, parts: List[A2APartInput]) -> dict[str, Any]:
+        for part in parts:
+            if part.type == "data" and isinstance(part.data, dict):
+                return part.data
+        for part in parts:
+            if part.type == "text" and part.text:
+                return {"text": part.text}
+        return {}
+
+    def send_message(self, request: SendMessageRequest) -> dict[str, Any]:
+        task = self._new_task("working")
+        task.message = request.message.model_dump(by_alias=True)
+        data = self._extract_message_data(request.message.parts)
+        payload = A2AMessageInput(
+            message_type=str(data.get("message_type") or data.get("type") or "task.assign"),
+            message_id=str(data.get("message_id") or task.id),
+            conversation_id=str(data.get("conversation_id") or request.context_id or task.id),
+            task_id=str(data.get("task_id") or request.task_id or task.id),
+            from_agent_id=str(data.get("from_agent_id") or data.get("sender_id") or request.message.role or "a2a-client"),
+            to_agent_id=self.state.agent_id,
+            role=request.message.role,
+            scope=data.get("scope"),
+            priority=str(data.get("priority") or "normal"),
+            ttl=int(data.get("ttl") or 60),
+            payload=data,
+            route_hint=data.get("route_hint") if isinstance(data.get("route_hint"), dict) else None,
+        )
+        result = self.ingest_message(payload, routed_via="a2a/message:send")
+        self._attach_task_artifacts(task, result)
+        return {"task": task.to_dict()}
+
+    def get_task(self, task_id: str) -> dict[str, Any]:
+        return {"task": self._get_task(task_id).to_dict()}
+
+    def list_tasks(self, status_filter: Optional[str] = None) -> dict[str, Any]:
+        tasks = list(self._task_index.values())
+        if status_filter:
+            tasks = [task for task in tasks if task.state == status_filter]
+        return {"tasks": [task.to_dict(include_artifacts=False) for task in tasks], "nextPageToken": ""}
+
+    def cancel_task(self, task_id: str) -> dict[str, Any]:
+        task = self._get_task(task_id)
+        task.touch("canceled")
+        task.add_artifact("task_canceled", {"task_id": task.id, "state": task.state})
+        return {"task": task.to_dict()}
 
     def ingest_message(self, payload: A2AMessageInput, routed_via: Optional[str] = None) -> dict[str, Any]:
         record = self._record_message(payload, routed_via=routed_via)
@@ -316,7 +506,7 @@ class ControlShipHub:
             "route_hint": {"preferred_route": "upstream"},
         }
         try:
-            _post_json(f"{self.state.parent_endpoint.rstrip('/')}/a2a/inbox", report)
+            _send_a2a_message(self.state.parent_endpoint, report)
             self.state.remember({"kind": "a2a.report", "at": utc_now_iso(), "target": self.state.parent_endpoint, "payload": report})
         except Exception as exc:
             self.state.remember({"kind": "a2a.report_failed", "at": utc_now_iso(), "error": str(exc)})
@@ -326,7 +516,7 @@ class ControlShipHub:
         self.state.dispatches.append(record.to_dict())
         target = payload.target_endpoint or self._child_index.get(payload.target_agent_id, ChildAgentRecord(payload.target_agent_id, "unknown")).endpoint
         if target:
-            _post_json(f"{target.rstrip('/')}/a2a/inbox", payload.message.model_dump())
+            _send_a2a_message(target, payload.message.model_dump())
             record.status = "sent"
         else:
             record.status = "queued"
@@ -339,9 +529,11 @@ class ControlShipHub:
         self.state.inbox = []
         self.state.outbox = []
         self.state.dispatches = []
+        self.state.tasks = []
         self.state.memory = []
         self.state.context = {}
         self._child_index = {}
+        self._task_index = {}
 
 
 def _post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
@@ -364,6 +556,16 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[
         raise RuntimeError(str(exc)) from exc
 
 
+def _send_a2a_message(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+    body = {
+        "message": {
+            "role": "agent",
+            "parts": [{"type": "data", "data": payload}],
+        }
+    }
+    return _post_json(f"{url.rstrip('/')}/message:send", body, timeout=timeout)
+
+
 APP_SETTINGS = load_runtime_config(CONFIG_PATH)
 hub = ControlShipHub(APP_SETTINGS)
 
@@ -381,6 +583,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/.well-known/agent-card.json")
+def agent_card() -> dict[str, Any]:
+    return hub._build_agent_card()
+
+
+@app.get("/.well-known/agent.json")
+def agent_card_legacy() -> dict[str, Any]:
+    return hub._build_agent_card()
+
+
 @app.get("/meta")
 def meta() -> dict[str, Any]:
     return {
@@ -388,6 +600,11 @@ def meta() -> dict[str, Any]:
         "agent": APP_SETTINGS["agent"],
         "config_path": APP_SETTINGS["config_path"],
         "cors": APP_SETTINGS["cors"],
+        "a2a": {
+            "agent_card": "/.well-known/agent-card.json",
+            "send_message": "/message:send",
+            "tasks": "/tasks",
+        },
         "message_types": [
             "task.assign",
             "task.accept",
@@ -403,6 +620,32 @@ def meta() -> dict[str, Any]:
 @app.get("/state")
 def state() -> dict[str, Any]:
     return hub.state.to_dict()
+
+
+@app.post("/message:send")
+def message_send(request: SendMessageRequest) -> dict[str, Any]:
+    return hub.send_message(request)
+
+
+@app.get("/tasks")
+def list_tasks(status: Optional[str] = None) -> dict[str, Any]:
+    return hub.list_tasks(status_filter=status)
+
+
+@app.get("/tasks/{task_id}")
+def get_task(task_id: str) -> dict[str, Any]:
+    try:
+        return hub.get_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="task not found") from exc
+
+
+@app.post("/tasks/{task_id}:cancel")
+def cancel_task(task_id: str) -> dict[str, Any]:
+    try:
+        return hub.cancel_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="task not found") from exc
 
 
 @app.get("/children")
