@@ -14,7 +14,10 @@ class RegistryAgentRegistration:
     secret_key: str
     endpoint: str
     command_endpoint: str
+    role: str
     mode: str
+    skills: list[str]
+    available_actions: list[str]
     connected: bool = True
     last_seen_at: Optional[str] = None
     device_name: Optional[str] = None
@@ -25,7 +28,10 @@ class RegistryAgentRegistration:
             "secretKey": self.secret_key,
             "endpoint": self.endpoint,
             "commandEndpoint": self.command_endpoint,
+            "role": self.role,
             "mode": self.mode,
+            "skills": list(self.skills),
+            "available_actions": list(self.available_actions),
             "connected": self.connected,
             "last_seen_at": self.last_seen_at,
             "device_name": self.device_name,

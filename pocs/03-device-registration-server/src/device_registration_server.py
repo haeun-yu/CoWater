@@ -233,6 +233,9 @@ class DeviceAgentInformationRecord:
     path_prefix: str
     endpoint: str
     command_endpoint: str
+    role: Optional[str] = None
+    skills: List[str] = field(default_factory=list)
+    available_actions: List[str] = field(default_factory=list)
     connected: bool = False
     mode: Optional[str] = None
     connected_at: Optional[str] = None
@@ -246,7 +249,10 @@ class DeviceAgentRegistrationRequest(BaseModel):
     secretKey: str
     endpoint: Optional[str] = None
     commandEndpoint: Optional[str] = None
+    role: Optional[str] = None
     mode: Optional[str] = None
+    skills: List[str] = Field(default_factory=list)
+    available_actions: List[str] = Field(default_factory=list)
     connected: bool = True
     last_seen_at: Optional[str] = None
 
@@ -505,8 +511,14 @@ class DeviceRegistry:
             device.agent.endpoint = request.endpoint
         if request.commandEndpoint:
             device.agent.command_endpoint = request.commandEndpoint
+        if request.role:
+            device.agent.role = request.role
         if request.mode:
             device.agent.mode = request.mode
+        if request.skills:
+            device.agent.skills = list(request.skills)
+        if request.available_actions:
+            device.agent.available_actions = list(request.available_actions)
         device.agent.connected = bool(request.connected)
         if device.agent.connected and device.agent.connected_at is None:
             device.agent.connected_at = now

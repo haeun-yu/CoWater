@@ -164,8 +164,14 @@ PUT /devices/{deviceId}/agent
 - `endpoint`: Agent가 디바이스 스트림과 연결되는 WebSocket 주소
 - `commandEndpoint`: 원격 사용자가 Agent에 명령을 보낼 때 쓰는 HTTP 주소
 - `mode`: `static` 또는 `dynamic`
+- `role`: Agent 역할 식별자. 예: `usv`, `auv`, `rov`, `control_ship`
+- `skills`: 이 Agent가 수행할 수 있는 작업 이름 목록
+- `available_actions`: 실제 명령으로 허용할 액션 이름 목록
 - `connected`: 현재 연결 여부
 - `last_seen_at`: 마지막으로 확인된 시간
+
+이 서버는 판단용으로 필요한 최소 정보만 저장합니다.  
+상세 제약이나 장황한 설명은 Agent 쪽 `AGENT.md`와 `manifest`에서 관리하고, 03 서버는 라우팅과 연결 판단에 필요한 값만 유지합니다.
 
 Agent가 연결이 끊기면 `DELETE /devices/{deviceId}/agent?secretKey=...`로 연결 해제 상태를 저장합니다.
 
