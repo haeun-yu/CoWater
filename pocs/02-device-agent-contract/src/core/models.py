@@ -26,6 +26,7 @@ class AgentRecommendationRecord:
 
 @dataclass
 class DeviceAgentStateRecord:
+    # 식별/연결 정보
     token: str
     device_id: Optional[str] = None
     device_name: Optional[str] = None
@@ -34,19 +35,29 @@ class DeviceAgentStateRecord:
     registry_token: Optional[str] = None
     registry_endpoint: Optional[str] = None
     registry_command_endpoint: Optional[str] = None
-    agent_mode: str = "dynamic"
-    llm_optional: bool = True
-    supported_modes: List[str] = field(default_factory=list)
+    llm_enabled: bool = False
+
+    # 기능/역할 정보
     available_actions: List[str] = field(default_factory=list)
     skills: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list)
     constraints: List[str] = field(default_factory=list)
+
+    # 연결/텔레메트리 상태
     connected: bool = False
     connected_at: Optional[str] = None
     last_seen_at: Optional[str] = None
     last_stream: Optional[str] = None
     last_payload: Optional[dict[str, Any]] = None
     home_position: Optional[dict[str, Any]] = None
+
+    # planner / decision / execution / feedback 레이어의 최근 결과
+    last_plan: Optional[dict[str, Any]] = None
+    last_decision: Optional[dict[str, Any]] = None
+    last_execution: Optional[dict[str, Any]] = None
+    last_feedback: Optional[dict[str, Any]] = None
+
+    # 런타임 컨텍스트/이력
     context: Dict[str, Any] = field(default_factory=dict)
     memory: List[dict[str, Any]] = field(default_factory=list)
     recommendations: List[AgentRecommendationRecord] = field(default_factory=list)
@@ -58,6 +69,7 @@ class DeviceAgentStateRecord:
         self.memory = self.memory[-50:]
 
     def to_dict(self) -> dict[str, Any]:
+        # UI와 03 등록 서버가 읽는 상태 스냅샷
         return {
             "token": self.token,
             "device_id": self.device_id,
@@ -67,9 +79,7 @@ class DeviceAgentStateRecord:
             "registry_token": self.registry_token,
             "registry_endpoint": self.registry_endpoint,
             "registry_command_endpoint": self.registry_command_endpoint,
-            "agent_mode": self.agent_mode,
-            "llm_optional": self.llm_optional,
-            "supported_modes": list(self.supported_modes),
+            "llm_enabled": self.llm_enabled,
             "available_actions": list(self.available_actions),
             "skills": list(self.skills),
             "tools": list(self.tools),
@@ -80,6 +90,10 @@ class DeviceAgentStateRecord:
             "last_stream": self.last_stream,
             "last_payload": self.last_payload,
             "home_position": self.home_position,
+            "last_plan": self.last_plan,
+            "last_decision": self.last_decision,
+            "last_execution": self.last_execution,
+            "last_feedback": self.last_feedback,
             "context": self.context,
             "memory": list(self.memory[-10:]),
             "recommendations": [item.to_dict() for item in self.recommendations[-20:]],
@@ -87,6 +101,7 @@ class DeviceAgentStateRecord:
         }
 
 
+# 명령 요청 스키마
 class DeviceCommandRequest(BaseModel):
     action: str
     reason: Optional[str] = None

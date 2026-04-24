@@ -17,9 +17,10 @@ CONFIG_PATH = Path(os.getenv("COWATER_AGENT_CONFIG_PATH", str(DEFAULT_CONFIG_PAT
 
 DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
     "usv": {
-        "supported_modes": ["static", "dynamic"],
-        "preferred_mode": "dynamic",
-        "llm_optional": True,
+        "llm": {
+            "provider": "ollama",
+            "model": "gemma4",
+        },
         "device_side": [
             "surface_navigation",
             "position_update",
@@ -60,9 +61,6 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "auv": {
-        "supported_modes": ["static", "dynamic"],
-        "preferred_mode": "dynamic",
-        "llm_optional": True,
         "device_side": [
             "subsurface_navigation",
             "depth_update",
@@ -101,9 +99,10 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "rov": {
-        "supported_modes": ["static", "dynamic"],
-        "preferred_mode": "dynamic",
-        "llm_optional": True,
+        "llm": {
+            "provider": "ollama",
+            "model": "gemma4",
+        },
         "device_side": [
             "deep_navigation",
             "depth_update",

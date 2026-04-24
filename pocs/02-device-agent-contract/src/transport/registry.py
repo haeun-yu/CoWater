@@ -7,8 +7,12 @@ from urllib.parse import quote
 
 from fastapi import WebSocket
 
-from .agents import DeviceAgentBase, create_agent
-from .models import DeviceAgentStateRecord, utc_now_iso
+from ..agents import DeviceAgentBase, create_agent
+from ..core.decision import DecisionLayer
+from ..core.execution import ExecutionLayer
+from ..core.feedback import FeedbackLayer
+from ..core.models import DeviceAgentStateRecord, utc_now_iso
+from ..core.planner import PlannerLayer
 from .registry_client import RegistryAgentRegistration, RegistryClient
 
 
@@ -24,6 +28,10 @@ class AgentHub:
         self._profiles = profiles
         self._sessions: Dict[str, DeviceAgentStateRecord] = {}
         self._agents: Dict[str, DeviceAgentBase] = {}
+        self._planner = PlannerLayer()
+        self._decision_layer = DecisionLayer()
+        self._execution_layer = ExecutionLayer()
+        self._feedback_layer = FeedbackLayer()
         self._registry_client = registry_client
         self._public_host = public_host
         self._public_port = public_port
@@ -67,7 +75,6 @@ class AgentHub:
         device_name: Optional[str] = None,
         device_type: Optional[str] = None,
         registry_id: Optional[int] = None,
-        agent_mode: Optional[str] = None,
     ) -> DeviceAgentStateRecord:
         session = self.ensure_session(token)
         if device_id:
@@ -80,12 +87,9 @@ class AgentHub:
             session.registry_id = registry_id
         agent = self.ensure_agent(token, session.device_type)
         agent.apply_profile(session)
-        if agent_mode and agent_mode in session.supported_modes:
-            session.agent_mode = agent_mode
         session.context["agent"] = {
             "type": session.device_type,
-            "mode": session.agent_mode,
-            "llm_optional": session.llm_optional,
+            "llm_enabled": session.llm_enabled,
         }
         return session
 
@@ -123,7 +127,7 @@ class AgentHub:
             endpoint=self._agent_ws_endpoint(token),
             command_endpoint=self._agent_command_endpoint(token),
             role=session.device_type or "device",
-            mode=session.agent_mode,
+            llm_enabled=session.llm_enabled,
             skills=list(session.skills),
             available_actions=list(session.available_actions),
             connected=session.connected,
@@ -170,6 +174,14 @@ class AgentHub:
             agent = self.ensure_agent(token, session.device_type)
             agent.apply_profile(session)
             recommendations = agent.recommend(session, envelope, payload)
+            plan = self._planner.plan(session, envelope, payload, recommendations)
+            decision = self._decision_layer.decide(session, plan)
+            self._feedback_layer.record(
+                session,
+                source="telemetry",
+                plan=plan.to_dict(),
+                decision=decision.to_dict() if decision else None,
+            )
             session.recommendations.extend(recommendations)
             session.remember({"kind": "recommendation", "at": utc_now_iso(), "count": len(recommendations)})
             await self.sync_registry(token)
@@ -183,7 +195,6 @@ class AgentHub:
                 device_name=message.get("device_name"),
                 device_type=message.get("device_type"),
                 registry_id=message.get("registry_id"),
-                agent_mode=message.get("agent_mode"),
             )
             await self.sync_registry(token)
         elif kind == "command":
@@ -192,8 +203,16 @@ class AgentHub:
 
     async def send_command(self, token: str, command: dict[str, Any]) -> bool:
         session = self._sessions.get(token)
-        if session is None or session.websocket is None:
+        if session is None:
             return False
-        await session.websocket.send_json({"kind": "command", **command})
-        session.pending_commands.append(command)
+        execution = await self._execution_layer.execute(session, command, source="external")
+        self._feedback_layer.record(
+            session,
+            source="command",
+            decision=dict(command),
+            execution=execution.to_dict(),
+            note="manual command request",
+        )
+        if not execution.delivered:
+            return False
         return True

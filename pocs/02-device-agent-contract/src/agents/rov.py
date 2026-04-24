@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List
 
-from ..models import AgentRecommendationRecord, DeviceAgentStateRecord
+from ..core.models import AgentRecommendationRecord, DeviceAgentStateRecord
 from .base import DeviceAgentBase
 
 

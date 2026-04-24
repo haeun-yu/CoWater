@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import argparse
 from typing import Any, Optional
-from datetime import datetime, timezone
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .models import DeviceCommandRequest
+from .core.models import DeviceCommandRequest
 from .profiles import CONFIG_PATH, load_runtime_config
-from .registry import AgentHub
-from .registry_client import RegistryClient
+from .transport.registry import AgentHub
+from .transport.registry_client import RegistryClient
 
 
 APP_SETTINGS = load_runtime_config(CONFIG_PATH)
@@ -54,9 +53,7 @@ def meta() -> dict[str, Any]:
         "cors": APP_SETTINGS["cors"],
         "registry": APP_SETTINGS["registry"],
         "agent_types": ["usv", "auv", "rov"],
-        "agent_modes": ["static", "dynamic"],
-        "llm_optional": True,
-        "runtime_note": "Each device type has its own Agent class; Agents can be static rule-based or dynamic reasoning-based; LLM is optional, not required.",
+        "runtime_note": "Each device type has its own Agent class; a profile with LLM configuration uses hybrid decision logic, otherwise it falls back to rule-based planning.",
     }
 
 
@@ -65,7 +62,7 @@ def _build_agent_card() -> dict[str, Any]:
     return {
         "name": "cowater-device-agent-hub",
         "displayName": "CoWater Device Agent Hub",
-        "description": "Per-device Agent hub for USV, AUV, and ROV telemetry sessions. Accepts WebSocket streams and issues rule-based recommendations.",
+        "description": "Per-device Agent hub for USV, AUV, and ROV telemetry sessions. Accepts WebSocket streams and issues rule-based or hybrid recommendations depending on profile LLM configuration.",
         "url": base_url,
         "version": "2.0.0",
         "protocolVersion": "1.0.0",
@@ -137,8 +134,6 @@ async def device_agent_socket(token: str, websocket: WebSocket) -> None:
             "kind": "hello",
             "agent": "cowater-device-agent-hub",
             "token": token,
-            "agent_modes": ["static", "dynamic"],
-            "llm_optional": True,
             "profiles": list(APP_SETTINGS["profiles"].keys()),
         }
     )
@@ -159,16 +154,7 @@ async def device_agent_socket(token: str, websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
-            recommendations = await hub.ingest_message(token, message)
-            if recommendations:
-                await websocket.send_json(
-                    {
-                        "kind": "recommendation",
-                        "token": token,
-                        "recommendations": recommendations,
-                        "generated_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
+            await hub.ingest_message(token, message)
     except WebSocketDisconnect:
         pass
     finally:

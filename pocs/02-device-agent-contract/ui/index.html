@@ -195,12 +195,38 @@
     }
     .timeline-item .k { color: var(--muted); font-size: .76rem; margin-bottom: 4px; }
     .timeline-item .v { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .82rem; white-space: pre-wrap; }
+    .layer-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .layer-panel {
+      background: rgba(15,23,42,.82);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 14px;
+      padding: 12px;
+      min-height: 180px;
+      display: grid;
+      gap: 8px;
+    }
+    .layer-panel .layer-name {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+    }
+    .layer-panel .layer-meta {
+      color: var(--muted);
+      font-size: .78rem;
+    }
     .muted { color: var(--muted); }
     .error { color: #fca5a5; }
     @media (max-width: 1080px) {
       .shell { grid-template-columns: 1fr; }
       .sidebar { border-right: none; border-bottom: 1px solid rgba(148,163,184,.12); }
       .agent-detail-grid { grid-template-columns: 1fr; }
+      .layer-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -238,14 +264,14 @@
           <div class="title-row">
             <div>
               <h3>요약</h3>
-              <small>세션과 모드 상태</small>
+              <small>세션과 LLM 사용 상태</small>
             </div>
           </div>
           <div class="metric-grid">
             <div class="metric"><div class="label">Agents</div><div class="value" id="metric-agents">0</div></div>
             <div class="metric"><div class="label">Connected</div><div class="value" id="metric-connected">0</div></div>
-            <div class="metric"><div class="label">Static</div><div class="value" id="metric-static">0</div></div>
-            <div class="metric"><div class="label">Dynamic</div><div class="value" id="metric-dynamic">0</div></div>
+            <div class="metric"><div class="label">LLM On</div><div class="value" id="metric-llm-on">0</div></div>
+            <div class="metric"><div class="label">LLM Off</div><div class="value" id="metric-llm-off">0</div></div>
           </div>
         </div>
 
@@ -253,7 +279,7 @@
           <div class="title-row">
             <div>
               <h3>필터</h3>
-              <small>타입 / 모드</small>
+              <small>타입</small>
             </div>
           </div>
           <div class="input-row">
@@ -263,14 +289,6 @@
               <option value="usv">USV</option>
               <option value="auv">AUV</option>
               <option value="rov">ROV</option>
-            </select>
-          </div>
-          <div class="input-row">
-            <label for="filter-mode">Agent Mode</label>
-            <select id="filter-mode">
-              <option value="">All</option>
-              <option value="static">static</option>
-              <option value="dynamic">dynamic</option>
             </select>
           </div>
         </div>
@@ -303,6 +321,31 @@
             <div style="margin-top:14px;">
               <h3 style="margin-bottom:10px;">마지막 수신 데이터</h3>
               <div id="last-payload" class="json-box">-</div>
+            </div>
+            <div style="margin-top:14px;">
+              <h3 style="margin-bottom:10px;">Planner / Decision / Execution / Feedback</h3>
+              <div class="layer-grid">
+                <div class="layer-panel">
+                  <div class="layer-name">Planner <span class="badge">telemetry</span></div>
+                  <div class="layer-meta" id="plan-meta">-</div>
+                  <div id="plan-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Decision <span class="badge">rule / hybrid</span></div>
+                  <div class="layer-meta" id="decision-meta">-</div>
+                  <div id="decision-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Execution <span class="badge">command</span></div>
+                  <div class="layer-meta" id="execution-meta">-</div>
+                  <div id="execution-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Feedback <span class="badge">memory</span></div>
+                  <div class="layer-meta" id="feedback-meta">-</div>
+                  <div id="feedback-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+              </div>
             </div>
             <div style="margin-top:14px;">
               <h3 style="margin-bottom:10px;">명령 전송</h3>
@@ -415,31 +458,25 @@
 
     function updateGlobalBadges(meta) {
       const host = document.getElementById("global-badges");
-      const modes = (meta?.agent_modes || ["static", "dynamic"])
-        .map((mode) => badge(mode, mode))
-        .join("");
       host.innerHTML = [
-        badge(`LLM optional: ${meta?.llm_optional ? "yes" : "no"}`, meta?.llm_optional ? "ok" : "warn"),
         badge(`Types: ${(meta?.agent_types || ["usv", "auv", "rov"]).join(", ")}`),
-        modes,
+        badge("Decision: rule or hybrid", "ok"),
       ].join("");
     }
 
     function renderMetrics(agents) {
       const connected = agents.filter((a) => a.connected).length;
-      const statics = agents.filter((a) => a.agent_mode === "static").length;
-      const dynamics = agents.filter((a) => a.agent_mode !== "static").length;
+      const llmOn = agents.filter((a) => a.llm_enabled).length;
+      const llmOff = agents.length - llmOn;
       document.getElementById("metric-agents").textContent = String(agents.length);
       document.getElementById("metric-connected").textContent = String(connected);
-      document.getElementById("metric-static").textContent = String(statics);
-      document.getElementById("metric-dynamic").textContent = String(dynamics);
+      document.getElementById("metric-llm-on").textContent = String(llmOn);
+      document.getElementById("metric-llm-off").textContent = String(llmOff);
     }
 
     function matchesFilter(agent) {
       const type = document.getElementById("filter-type").value;
-      const mode = document.getElementById("filter-mode").value;
       if (type && agent.device_type !== type) return false;
-      if (mode && agent.agent_mode !== mode) return false;
       return true;
     }
 
@@ -449,7 +486,6 @@
       document.getElementById("empty-state").style.display = filtered.length ? "none" : "block";
       host.innerHTML = filtered.map((agent) => {
         const active = agent.token === state.selectedToken ? "active" : "";
-        const modeCls = agent.agent_mode || "dynamic";
         const connectedCls = agent.connected ? "ok" : "off";
         return `
           <div class="agent-card ${active}" data-token="${escapeHtml(agent.token)}">
@@ -458,7 +494,7 @@
                 <div class="agent-name">${escapeHtml(agent.device_name || agent.device_id || agent.token)}</div>
                 <div class="agent-meta">
                   ${badge(agent.device_type || "-", "")}
-                  ${badge(agent.agent_mode || "-", modeCls)}
+                  ${badge(agent.llm_enabled ? "LLM enabled" : "LLM disabled", agent.llm_enabled ? "ok" : "warn")}
                   ${badge(agent.connected ? "connected" : "disconnected", connectedCls)}
                   ${badge(`token ${agent.token.slice(0, 8)}`)}
                 </div>
@@ -482,6 +518,14 @@
       const summary = document.getElementById("selected-summary");
       const subtitle = document.getElementById("selected-subtitle");
       const lastPayload = document.getElementById("last-payload");
+      const planJson = document.getElementById("plan-json");
+      const decisionJson = document.getElementById("decision-json");
+      const executionJson = document.getElementById("execution-json");
+      const feedbackJson = document.getElementById("feedback-json");
+      const planMeta = document.getElementById("plan-meta");
+      const decisionMeta = document.getElementById("decision-meta");
+      const executionMeta = document.getElementById("execution-meta");
+      const feedbackMeta = document.getElementById("feedback-meta");
       const memoryHost = document.getElementById("memory-list");
       const recHost = document.getElementById("recommendation-list");
 
@@ -489,6 +533,14 @@
         subtitle.textContent = "세션을 선택해주세요.";
         summary.innerHTML = "";
         lastPayload.textContent = "-";
+        planJson.textContent = "-";
+        decisionJson.textContent = "-";
+        executionJson.textContent = "-";
+        feedbackJson.textContent = "-";
+        planMeta.textContent = "-";
+        decisionMeta.textContent = "-";
+        executionMeta.textContent = "-";
+        feedbackMeta.textContent = "-";
         memoryHost.innerHTML = `<div class="muted">표시할 메모리가 없습니다.</div>`;
         recHost.innerHTML = `<div class="muted">추천 결과가 없습니다.</div>`;
         setCommandControlsEnabled(false);
@@ -496,19 +548,23 @@
       }
 
       setCommandControlsEnabled(Boolean(agent.connected));
-      subtitle.textContent = `${agent.device_name || agent.device_id || agent.token} · ${agent.device_type || "-"} · ${agent.agent_mode || "-"}`;
+      subtitle.textContent = `${agent.device_name || agent.device_id || agent.token} · ${agent.device_type || "-"} · ${agent.llm_enabled ? "LLM enabled" : "LLM disabled"}`;
       summary.innerHTML = `
         <div class="badges">
           ${badge(`token ${agent.token}`)}
           ${badge(`device_id ${agent.device_id || "-"}`)}
           ${badge(`registry ${agent.registry_id ?? "-"}`)}
-          ${badge(`mode ${agent.agent_mode || "-"}`, agent.agent_mode || "")}
-          ${badge(`llm ${agent.llm_optional ? "optional" : "required"}`, agent.llm_optional ? "ok" : "warn")}
+          ${badge(`LLM ${agent.llm_enabled ? "enabled" : "disabled"}`, agent.llm_enabled ? "ok" : "warn")}
+          ${badge(`Decision ${agent.context?.decision_strategy || (agent.llm_enabled ? "hybrid" : "rule")}`, agent.context?.decision_strategy || (agent.llm_enabled ? "hybrid" : "rule"))}
         </div>
         <div class="badges">
           ${badge(`skills ${Array.isArray(agent.skills) ? agent.skills.join(", ") : "-"}`)}
           ${badge(`tools ${Array.isArray(agent.tools) ? agent.tools.join(", ") : "-"}`)}
           ${badge(`constraints ${Array.isArray(agent.constraints) ? agent.constraints.join(", ") : "-"}`)}
+        </div>
+        <div class="badges">
+          ${agent.context?.decision?.selected_action ? badge(`selected ${agent.context.decision.selected_action}`, "ok") : badge("selected -", "warn")}
+          ${agent.context?.decision?.selected_priority ? badge(`priority ${agent.context.decision.selected_priority}`) : ""}
         </div>
         <div class="badges">
           ${badge(`actions ${Array.isArray(agent.available_actions) ? agent.available_actions.join(", ") : "-"}`)}
@@ -520,6 +576,22 @@
         </div>
       `;
       lastPayload.textContent = agent.last_payload ? pretty(agent.last_payload) : "-";
+      planJson.textContent = agent.last_plan ? pretty(agent.last_plan) : "-";
+      decisionJson.textContent = agent.last_decision ? pretty(agent.last_decision) : "-";
+      executionJson.textContent = agent.last_execution ? pretty(agent.last_execution) : "-";
+      feedbackJson.textContent = agent.last_feedback ? pretty(agent.last_feedback) : "-";
+      planMeta.textContent = agent.last_plan
+        ? `${formatTime(agent.last_plan.at)} · ${agent.last_plan.stream || "telemetry"} · candidates ${Array.isArray(agent.last_plan.candidates) ? agent.last_plan.candidates.length : 0}`
+        : "-";
+      decisionMeta.textContent = agent.last_decision
+        ? `${agent.last_decision.strategy || (agent.llm_enabled ? "hybrid" : "rule")} · ${agent.last_decision.selected_action || "-"}`
+        : "-";
+      executionMeta.textContent = agent.last_execution
+        ? `${agent.last_execution.delivered ? "delivered" : "failed"} · ${agent.last_execution.source || "external"}`
+        : "-";
+      feedbackMeta.textContent = agent.last_feedback
+        ? `${agent.last_feedback.status || "-"} · ${agent.last_feedback.source || "-"}`
+        : "-";
       memoryHost.innerHTML = (agent.memory || []).slice().reverse().map((item) => `
         <div class="timeline-item">
           <div class="k">${escapeHtml(formatTime(item.at || item.timestamp || ""))} · ${escapeHtml(item.kind || "event")}</div>
@@ -766,7 +838,6 @@
       });
 
       document.getElementById("filter-type").addEventListener("change", () => renderAgentList(state.agents));
-      document.getElementById("filter-mode").addEventListener("change", () => renderAgentList(state.agents));
 
       const commandForm = document.getElementById("command-form");
       const commandReset = document.getElementById("command-reset");

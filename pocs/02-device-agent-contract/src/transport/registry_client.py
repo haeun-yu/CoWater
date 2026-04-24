@@ -17,7 +17,7 @@ class RegistryAgentRegistration:
     endpoint: str
     command_endpoint: str
     role: str
-    mode: str
+    llm_enabled: bool
     skills: list[str]
     available_actions: list[str]
     connected: bool = True
@@ -31,7 +31,7 @@ class RegistryAgentRegistration:
             "endpoint": self.endpoint,
             "commandEndpoint": self.command_endpoint,
             "role": self.role,
-            "mode": self.mode,
+            "llm_enabled": self.llm_enabled,
             "skills": list(self.skills),
             "available_actions": list(self.available_actions),
             "connected": self.connected,

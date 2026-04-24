@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
-from ..models import AgentRecommendationRecord, DeviceAgentStateRecord
+from ..core.models import AgentRecommendationRecord, DeviceAgentStateRecord
 
 
 class DeviceAgentBase(ABC):
@@ -22,11 +22,7 @@ class DeviceAgentBase(ABC):
     def apply_profile(self, session: DeviceAgentStateRecord) -> None:
         profile = self.profile()
         session.device_type = self.device_type
-        session.supported_modes = list(profile.get("supported_modes", []))
-        session.agent_mode = (
-            session.agent_mode if session.agent_mode in session.supported_modes else profile.get("preferred_mode", "dynamic")
-        )
-        session.llm_optional = bool(profile.get("llm_optional", True))
+        session.llm_enabled = bool(profile.get("llm"))
         session.available_actions = list(profile.get("agent_side", []))
         session.skills = list(profile.get("skills", []))
         session.tools = list(profile.get("tools", []))
@@ -34,12 +30,12 @@ class DeviceAgentBase(ABC):
         session.context["profile"] = {
             "device_side": profile.get("device_side", []),
             "agent_side": profile.get("agent_side", []),
+            "llm": profile.get("llm"),
             "rules": profile.get("rules", {}),
         }
         session.context["agent"] = {
             "type": self.device_type,
-            "mode": session.agent_mode,
-            "llm_optional": session.llm_optional,
+            "llm_enabled": session.llm_enabled,
         }
 
     def prepare_session(self, session: DeviceAgentStateRecord, envelope: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -48,9 +44,8 @@ class DeviceAgentBase(ABC):
         session.context["last_stream"] = envelope.get("stream")
 
     def finalize(self, session: DeviceAgentStateRecord, recommendations: List[AgentRecommendationRecord]) -> List[AgentRecommendationRecord]:
-        if session.agent_mode == "static":
-            return recommendations[:1]
-        return recommendations[:3]
+        # 후보 추천을 그대로 반환하고, 최종 판단은 planner/decision/execution 계층에서 수행한다.
+        return recommendations
 
     @abstractmethod
     def recommend(
