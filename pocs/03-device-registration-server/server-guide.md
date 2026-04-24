@@ -154,7 +154,7 @@ PUT /devices/{deviceId}/agent
   "secretKey": "server-secret",
   "endpoint": "ws://127.0.0.1:9010/agents/generated-token-string",
   "commandEndpoint": "http://127.0.0.1:9010/agents/generated-token-string/command",
-  "mode": "dynamic",
+  "llm_enabled": true,
   "connected": true,
   "last_seen_at": "2026-04-23T12:00:00+09:00"
 }
@@ -163,7 +163,7 @@ PUT /devices/{deviceId}/agent
 #### 의미
 - `endpoint`: Agent가 디바이스 스트림과 연결되는 WebSocket 주소
 - `commandEndpoint`: 원격 사용자가 Agent에 명령을 보낼 때 쓰는 HTTP 주소
-- `mode`: `static` 또는 `dynamic`
+- `llm_enabled`: 이 Agent가 LLM 기반 hybrid 판단을 사용하는지 여부
 - `role`: Agent 역할 식별자. 예: `usv`, `auv`, `rov`, `control_ship`
 - `skills`: 이 Agent가 수행할 수 있는 작업 이름 목록
 - `available_actions`: 실제 명령으로 허용할 액션 이름 목록

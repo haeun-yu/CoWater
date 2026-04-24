@@ -234,10 +234,10 @@ class DeviceAgentInformationRecord:
     endpoint: str
     command_endpoint: str
     role: Optional[str] = None
+    llm_enabled: bool = False
     skills: List[str] = field(default_factory=list)
     available_actions: List[str] = field(default_factory=list)
     connected: bool = False
-    mode: Optional[str] = None
     connected_at: Optional[str] = None
     last_seen_at: Optional[str] = None
 
@@ -250,7 +250,7 @@ class DeviceAgentRegistrationRequest(BaseModel):
     endpoint: Optional[str] = None
     commandEndpoint: Optional[str] = None
     role: Optional[str] = None
-    mode: Optional[str] = None
+    llm_enabled: bool = False
     skills: List[str] = Field(default_factory=list)
     available_actions: List[str] = Field(default_factory=list)
     connected: bool = True
@@ -513,8 +513,7 @@ class DeviceRegistry:
             device.agent.command_endpoint = request.commandEndpoint
         if request.role:
             device.agent.role = request.role
-        if request.mode:
-            device.agent.mode = request.mode
+        device.agent.llm_enabled = bool(request.llm_enabled)
         if request.skills:
             device.agent.skills = list(request.skills)
         if request.available_actions:

@@ -530,7 +530,6 @@ class MothSimulator:
                             "device_name": device["name"],
                             "device_type": device["device_type"],
                             "registry_id": result.get("id"),
-                            "agent_mode": "static",
                         },
                         on_command=lambda message, device_id=dev_id: self._apply_agent_command(device_id, message),
                     )
@@ -574,7 +573,6 @@ class MothSimulator:
                             "device_name": device["name"],
                             "device_type": device["device_type"],
                             "registry_id": result.get("id"),
-                            "agent_mode": "dynamic",
                         },
                         on_command=lambda message, device_id=dev_id: self._apply_agent_command(device_id, message),
                     )

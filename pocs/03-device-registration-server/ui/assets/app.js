@@ -111,7 +111,7 @@ function renderEndpointList(device) {
               <div class="device-meta">
                 <span class="badge">${escapeHtml(device.agent.endpoint)}</span>
                 <span class="badge">${escapeHtml(device.agent.command_endpoint || "-")}</span>
-                <span class="badge">${escapeHtml(device.agent.mode || "-")}</span>
+                <span class="badge ${device.agent.llm_enabled ? "ok" : "warn"}">LLM ${device.agent.llm_enabled ? "enabled" : "disabled"}</span>
                 <span class="badge ${device.agent.connected ? "ok" : "warn"}">${device.agent.connected ? "connected" : "disconnected"}</span>
               </div>
             </div>
@@ -250,7 +250,8 @@ function renderDevicesTable(devices, filterText = "") {
             <div class="muted" style="margin-top:4px;">${escapeHtml(device.agent?.command_endpoint || "-")}</div>
           </td>
           <td>
-            <span class="badge ${device.agent?.connected ? "ok" : "warn"}">${device.agent?.connected ? "agent connected" : "agent disconnected"}</span>
+            <span class="badge ${device.agent?.llm_enabled ? "ok" : "warn"}">LLM ${device.agent?.llm_enabled ? "enabled" : "disabled"}</span>
+            <span class="badge ${device.agent?.connected ? "ok" : "warn"}" style="margin-top:4px; display:inline-block;">${device.agent?.connected ? "agent connected" : "agent disconnected"}</span>
           </td>
           <td>
             <a class="button" href="device.html?id=${device.id}">Manage</a>
@@ -404,7 +405,7 @@ async function initDevicePage() {
     setText("device-agent-command", device.agent?.command_endpoint || "-");
     setText(
       "device-agent-state",
-      `${device.agent?.mode || "-"} · last seen ${formatTimestamp(device.agent?.last_seen_at)}`,
+      `${device.agent?.llm_enabled ? "LLM enabled" : "LLM disabled"} · last seen ${formatTimestamp(device.agent?.last_seen_at)}`,
     );
 
     if (form) {
