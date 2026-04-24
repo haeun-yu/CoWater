@@ -58,6 +58,12 @@ class ExecutionLayer:
             await websocket.send_json({"kind": "command", **command})
             record.delivered = True
             session.pending_commands.append(dict(command))
+            session.context["mission_active"] = True
+            session.context["mission"] = {
+                "at": record.at,
+                "source": source,
+                "command": dict(command),
+            }
         except Exception as exc:  # pragma: no cover - 네트워크 전송 오류 기록
             record.error = str(exc)
 

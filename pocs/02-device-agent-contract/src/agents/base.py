@@ -102,3 +102,59 @@ class DeviceAgentBase(ABC):
             except (TypeError, ValueError):
                 continue
         return False
+
+    @staticmethod
+    def battery_percent(payload: dict[str, Any]) -> Optional[float]:
+        power = payload.get("power")
+        if isinstance(power, dict):
+            value = power.get("battery_percent")
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @staticmethod
+    def light_status(payload: dict[str, Any]) -> Optional[str]:
+        sensors = payload.get("sensors")
+        if not isinstance(sensors, dict):
+            return None
+        for sensor in sensors.values():
+            if not isinstance(sensor, dict):
+                continue
+            if sensor.get("type") != "led_light":
+                continue
+            status = sensor.get("status")
+            if status is None:
+                return None
+            return str(status)
+        return None
+
+    @staticmethod
+    def command_mode(payload: dict[str, Any]) -> str:
+        command = payload.get("command")
+        if isinstance(command, dict):
+            return str(command.get("mode") or "idle")
+        return "idle"
+
+    @staticmethod
+    def has_active_mission(session: DeviceAgentStateRecord, payload: dict[str, Any]) -> bool:
+        if DeviceAgentBase.command_mode(payload) != "idle":
+            return True
+        if session.context.get("mission_active"):
+            return True
+        return False
+
+    @staticmethod
+    def home_deviation_deg(session: DeviceAgentStateRecord, payload: dict[str, Any]) -> Optional[float]:
+        home = session.home_position
+        current = payload.get("position") or {}
+        if not home or not isinstance(current, dict):
+            return None
+        try:
+            lat_delta = abs(float(current.get("latitude", 0.0)) - float(home.get("latitude", 0.0)))
+            lon_delta = abs(float(current.get("longitude", 0.0)) - float(home.get("longitude", 0.0)))
+        except (TypeError, ValueError):
+            return None
+        return lat_delta + lon_delta

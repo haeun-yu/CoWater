@@ -709,6 +709,16 @@
             command: { action, params: { depth: currentDepth } },
             note: "Hold Depth: 현재 수심 유지",
           };
+        case "slow_down":
+          return {
+            command: { action, params: { target_speed_mps: Math.max(0.1, Number(payload.motion?.speed || 0) * 0.5) } },
+            note: "Slow Down: 현재 속도를 낮춤",
+          };
+        case "charge_at_tower":
+          return {
+            command: { action, params: { target_device_id: "ocean-power-tower-01" } },
+            note: "Charge At Tower: 전력 타워로 이동",
+          };
         case "camera_mode_switch":
           return {
             command: { action, params: { mode: "inspection" } },

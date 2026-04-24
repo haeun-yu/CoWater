@@ -10,6 +10,7 @@ from .models import AgentRecommendationRecord, DeviceAgentStateRecord, utc_now_i
 
 @dataclass
 class PlanRecord:
+    # Planner가 telemetry를 어떤 판단 재료로 묶었는지 저장하는 스냅샷이다.
     at: str
     token: str
     device_type: str | None
@@ -20,6 +21,7 @@ class PlanRecord:
     context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        # UI와 다음 레이어가 그대로 읽을 수 있도록 직렬화한다.
         return {
             "at": self.at,
             "token": self.token,
@@ -40,6 +42,7 @@ class PlannerLayer:
         payload: dict[str, Any],
         recommendations: list[AgentRecommendationRecord],
     ) -> PlanRecord:
+        # 1) telemetry와 envelope에서 판단에 필요한 최소 정보를 추린다.
         telemetry = {
             "device_id": envelope.get("device_id") or session.device_id,
             "device_name": envelope.get("device_name") or session.device_name,
@@ -47,8 +50,12 @@ class PlannerLayer:
             "stream": envelope.get("stream"),
             "position": payload.get("position"),
             "motion": payload.get("motion"),
+            "power": payload.get("power"),
             "sensor_keys": sorted(payload.get("sensors", {}).keys()) if isinstance(payload.get("sensors"), dict) else [],
+            "command_mode": payload.get("command", {}).get("mode") if isinstance(payload.get("command"), dict) else None,
         }
+
+        # 2) 현재 세션 상태와 추천 후보를 묶어서 "plan" 객체로 만든다.
         plan = PlanRecord(
             at=utc_now_iso(),
             token=session.token,
@@ -63,6 +70,8 @@ class PlannerLayer:
                 "connected": session.connected,
             },
         )
+
+        # 3) 최신 plan은 세션의 현재 상태로 저장하고, context와 memory에도 남긴다.
         session.last_plan = plan.to_dict()
         session.context["planner"] = {
             "at": plan.at,
@@ -70,6 +79,8 @@ class PlannerLayer:
             "candidate_count": len(plan.candidates),
         }
         session.context["plan"] = plan.to_dict()
+
+        # 4) 이 기록은 나중에 decision/execution/feedback 흐름을 추적하는 기준이 된다.
         session.remember(
             {
                 "kind": "plan",

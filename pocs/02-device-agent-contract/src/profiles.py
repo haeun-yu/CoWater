@@ -39,6 +39,7 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
             "charge_at_tower",
             "hold_position",
             "route_move",
+            "slow_down",
         ],
         "skills": [
             "route_planning",
@@ -58,6 +59,8 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
             "max_speed_mps": 2.5,
             "low_speed_mps": 0.2,
             "home_radius_deg": 0.01,
+            "battery_warn_percent": 30.0,
+            "battery_critical_percent": 10.0,
         },
     },
     "auv": {
@@ -78,6 +81,7 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
             "charge_at_tower",
             "hold_depth",
             "surface",
+            "slow_down",
         ],
         "skills": [
             "subsurface_navigation",
@@ -96,6 +100,9 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
         "rules": {
             "surface_altitude_m": -2.0,
             "deep_depth_m": 40.0,
+            "max_speed_mps": 2.0,
+            "battery_warn_percent": 30.0,
+            "battery_critical_percent": 10.0,
         },
     },
     "rov": {
@@ -123,6 +130,7 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
             "light_off",
             "camera_mode_switch",
             "sonar_scan_plan",
+            "slow_down",
         ],
         "skills": [
             "inspection",
@@ -141,6 +149,9 @@ DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
         "rules": {
             "low_light_lux": 250.0,
             "slow_speed_mps": 1.0,
+            "max_speed_mps": 1.0,
+            "battery_warn_percent": 30.0,
+            "battery_critical_percent": 10.0,
         },
     },
 }

@@ -318,11 +318,13 @@ class MothSimulator:
                 "position": device["start_position"].copy(),
                 "heading": random.uniform(0, 360),
                 "speed": random.uniform(*device["movement"]["speed_range"]),
+                "battery_percent": random.uniform(60, 100),
                 "command": {
                     "mode": "idle",
                     "route": [],
                     "route_index": 0,
                     "target_position": None,
+                    "target_speed": None,
                     "home_position": device["start_position"].copy(),
                     "light_on": False,
                     "camera_mode": "default",
@@ -415,6 +417,7 @@ class MothSimulator:
         elif action == "hold_position":
             command_state["hold_depth"] = None
             command_state["target_position"] = state["position"].copy()
+            command_state["target_speed"] = 0.0
         elif action == "hold_depth":
             command_state["hold_depth"] = float(params.get("depth", state["position"].get("altitude", 0.0)))
         elif action == "surface":
@@ -428,6 +431,11 @@ class MothSimulator:
             command_state["light_on"] = True
         elif action == "light_off":
             command_state["light_on"] = False
+        elif action == "slow_down":
+            target_speed = params.get("target_speed_mps")
+            if target_speed is None:
+                target_speed = max(0.1, state["speed"] * 0.5)
+            command_state["target_speed"] = float(target_speed)
         elif action == "camera_mode_switch":
             command_state["camera_mode"] = str(params.get("mode") or params.get("camera_mode") or "default")
         elif action == "sonar_scan_plan":
@@ -674,6 +682,15 @@ class MothSimulator:
         lo, hi = device["movement"]["speed_range"]
         state["speed"] = max(lo, min(hi, state["speed"] + random.uniform(-0.2, 0.2)))
 
+        target_speed = command_state.get("target_speed")
+        if target_speed is not None:
+            target_speed = float(target_speed)
+            if abs(state["speed"] - target_speed) < 0.05:
+                command_state["target_speed"] = None
+            else:
+                state["speed"] += max(-0.25, min(0.25, target_speed - state["speed"]))
+                state["speed"] = max(lo, min(hi, state["speed"]))
+
         if target_position:
             if mode in {"hold_position"}:
                 state["speed"] = 0.0
@@ -726,6 +743,30 @@ class MothSimulator:
                 dlo,
                 min(dhi, state["position"]["altitude"] + random.uniform(-2, 2)),
             )
+
+    def _update_battery(self, dev_id: str) -> None:
+        device = self.dynamic_devices[dev_id]
+        state = self.device_state[dev_id]
+        command_state = state.get("command", {})
+        battery = float(state.get("battery_percent", 100.0))
+
+        if command_state.get("mode") == "charge_at_tower":
+            tower_position = self._get_position_for_device("ocean-power-tower-01")
+            if tower_position and self._distance_m(state["position"], tower_position) < 20.0:
+                battery += random.uniform(2.0, 5.0)
+            else:
+                battery -= random.uniform(0.1, 0.3)
+        else:
+            drain = 0.12 + (float(state.get("speed", 0.0)) * 0.04)
+            if command_state.get("light_on"):
+                drain += 0.03
+            if command_state.get("camera_mode") not in {None, "default"}:
+                drain += 0.02
+            if command_state.get("scan_mode") not in {None, "normal"}:
+                drain += 0.03
+            battery -= drain
+
+        state["battery_percent"] = max(0.0, min(100.0, battery))
 
     def _sensor_payload(self, sensor: dict, state: dict) -> dict:
         """Build the data payload for a single sensor reading."""
@@ -813,6 +854,7 @@ class MothSimulator:
     async def _tick_dynamic_devices(self) -> None:
         for dev_id, device in self.dynamic_devices.items():
             self._update_position(dev_id)
+            self._update_battery(dev_id)
             state = self.device_state[dev_id]
             pubs = self._publishers.get(dev_id, {})
             parent = device.get("parent_device_id")
@@ -849,7 +891,7 @@ class MothSimulator:
                 if tel_pub:
                     command_snapshot = {
                         key: state["command"].get(key)
-                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position")
+                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position", "target_speed")
                     }
                     envelope = self._make_envelope(
                         dev_id, device["device_type"], "telemetry",
@@ -863,6 +905,10 @@ class MothSimulator:
                             "speed": round(state["speed"], 2),
                         },
                         "command": command_snapshot,
+                        "power": {
+                            "battery_percent": round(float(state.get("battery_percent", 0.0)), 1),
+                            "charging": state["command"].get("mode") == "charge_at_tower",
+                        },
                         "sensors": sensor_payloads,
                     }
                     await tel_pub.publish(envelope, payload)
@@ -887,7 +933,11 @@ class MothSimulator:
                     },
                     "command": {
                         key: state["command"].get(key)
-                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position")
+                        for key in ("mode", "light_on", "camera_mode", "scan_mode", "route_index", "target_position", "target_speed")
+                    },
+                    "power": {
+                        "battery_percent": round(float(state.get("battery_percent", 0.0)), 1),
+                        "charging": state["command"].get("mode") == "charge_at_tower",
                     },
                     "sensors": sensor_payloads,
                 }
