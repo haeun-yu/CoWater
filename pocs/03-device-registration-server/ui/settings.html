@@ -26,15 +26,16 @@
           <span>Health</span>
           <span id="health-status">checking...</span>
         </div>
+        <div class="header-menu">
+          <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+          <a href="devices.html" data-nav-link="devices">Devices</a>
+          <a href="register.html" data-nav-link="register">Register</a>
+          <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="settings.html" data-nav-link="settings">Settings</a>
+        </div>
       </div>
     </header>
-
-    <nav class="nav">
-      <a href="index.html" data-nav-link="dashboard">Dashboard</a>
-      <a href="devices.html" data-nav-link="devices">Devices</a>
-      <a href="register.html" data-nav-link="register">Register</a>
-      <a href="settings.html" data-nav-link="settings">Settings</a>
-    </nav>
 
     <div class="grid-2">
       <section class="panel">
@@ -82,6 +83,13 @@
             <tr><td>PATCH</td><td>/devices/{deviceId}</td><td>Rename device</td></tr>
             <tr><td>PATCH</td><td>/devices/{deviceId}/main-video-track</td><td>Change main VIDEO track</td></tr>
             <tr><td>DELETE</td><td>/devices/{deviceId}</td><td>Remove device</td></tr>
+            <tr><td>POST</td><td>/alerts/ingest</td><td>Store canonical alert</td></tr>
+            <tr><td>GET</td><td>/alerts</td><td>List alerts</td></tr>
+            <tr><td>GET</td><td>/alerts/{alertId}</td><td>Read one alert</td></tr>
+            <tr><td>POST</td><td>/alerts/{alertId}/ack</td><td>Acknowledge alert</td></tr>
+            <tr><td>POST</td><td>/responses/ingest</td><td>Store canonical response</td></tr>
+            <tr><td>GET</td><td>/responses</td><td>List responses</td></tr>
+            <tr><td>GET</td><td>/responses/{responseId}</td><td>Read one response</td></tr>
           </tbody>
         </table>
       </div>

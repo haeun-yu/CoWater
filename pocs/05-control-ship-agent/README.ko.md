@@ -1,6 +1,6 @@
-# 05 Control Ship Agent
+# 05 Regional Orchestrator Agent
 
-이 POC는 A2A 위계에서 `control_ship` 계층을 모델링합니다.
+이 POC는 A2A 위계에서 `regional_orchestrator` 계층을 모델링합니다.
 
 ## 하는 일
 
@@ -36,6 +36,6 @@ python3 device_agent_server.py
 
 ## A2A 흐름
 
-- `control_center -> control_ship`: `task.assign`
-- `control_ship -> control_center`: `task.accept` / `status.report`
-- `control_ship -> device agents`: 하위 디스패치 기록
+- `system_center -> regional_orchestrator`: `task.assign`
+- `regional_orchestrator -> system_center`: `task.accept` / `status.report`
+- `regional_orchestrator -> device agents`: 하위 디스패치 기록

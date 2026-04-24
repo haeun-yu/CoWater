@@ -166,6 +166,7 @@
     <div id="header-right">
         <span id="header-clock">--:--:--</span>
         <span id="header-registry-badge" onclick="promptRegistryUrl()">03 서버: 확인 중</span>
+        <button id="header-alerts-page" onclick="location.href='alerts.html'" style="font-size:0.72rem;padding:3px 10px;border-radius:20px;border:1px solid #334155;color:#f8fafc;background:rgba(30,41,59,0.72);cursor:pointer;">경보 관리</button>
     </div>
 </header>
 
@@ -319,7 +320,7 @@ const mapState = { map:null, markers:{}, lines:{}, currentTileLayer:null };
 const appState = {
     time:0, cameraMode:'orbit', depthFilter:-300,
     showLabels:true, showGrid:true, selectedId:null, hoveredId:null,
-    objects:[], links:[], alerts:[],
+    objects:[], links:[], alerts:[], registryAlerts:[],
     registryDevices:[],
     registryStatus:'unknown',
 };
@@ -342,6 +343,113 @@ function hideLoading() { document.getElementById('loading-overlay').classList.ad
 
 function registryBaseUrl() {
     return localStorage.getItem('cowater.dashboard.registryUrl') || DEVICE_REGISTRY_URL;
+}
+
+function normalizeRegistryAlert(alert) {
+    const createdAt = alert.created_at || alert.updated_at || null;
+    return {
+        source: '03',
+        alert_id: alert.alert_id,
+        message: alert.message,
+        summary: alert.message,
+        severity: alert.severity || 'info',
+        status: alert.status || 'waiting',
+        source_system: alert.source_system || 'system_center',
+        source_role: alert.source_role || null,
+        source_agent_id: alert.source_agent_id || null,
+        target_role: alert.target_role || null,
+        target_agent_id: alert.target_agent_id || null,
+        route_mode: alert.route_mode || 'direct',
+        recommended_action: alert.recommended_action || null,
+        requires_user_approval: !!alert.requires_user_approval,
+        auto_remediated: !!alert.auto_remediated,
+        created_at: createdAt,
+        updated_at: alert.updated_at || createdAt,
+        metadata: alert.metadata || {},
+        deviceId: alert.target_agent_id || alert.source_agent_id || alert.metadata?.device_id || null,
+    };
+}
+
+function renderAlertCard(alert, opts = {}) {
+    const source = opts.source || alert.source || 'local';
+    const kindClass = alert.severity === 'critical' ? 'alert-critical' : 'alert-warning';
+    const title = alert.message || alert.summary || alert.recommended_action || '알림';
+    const target = alert.target_agent_id || alert.deviceId || alert.source_agent_id || '-';
+    const status = alert.status || 'waiting';
+    const created = alert.created_at ? new Date(alert.created_at).toLocaleTimeString() : new Date().toLocaleTimeString();
+    const sourceLabel = source === '03' ? '03 원장' : '실시간';
+    const statusTone = status === 'approved' || status === 'done' ? 'status-active' : status === 'rejected' ? 'status-critical' : 'status-waiting';
+    const clickableTarget = alert.deviceId || target;
+    return `
+        <div class="list-item ${kindClass}" data-alert-source="${source}" data-alert-id="${alert.alert_id || ''}">
+            <div class="title">
+                <span>${title}</span>
+                <span class="${statusTone}">${alert.severity || 'info'}</span>
+            </div>
+            <div style="font-size:0.75rem;color:#94a3b8;">
+                ${sourceLabel} | ${created} | ${status}
+            </div>
+            <div style="font-size:0.74rem;color:#cbd5e1;margin-top:6px;">
+                출처: ${alert.source_role || alert.source_system || '-'} · 대상: ${clickableTarget || '-'}
+            </div>
+            ${alert.recommended_action ? `<div class="data-packet" style="margin-top:6px;">${alert.recommended_action}</div>` : ''}
+            ${alert.metadata ? `<pre style="margin-top:8px;max-height:140px;">${JSON.stringify(alert.metadata, null, 2)}</pre>` : ''}
+        </div>
+    `;
+}
+
+function renderAlertList() {
+    const cont = document.getElementById('alert-list-container');
+    const localAlerts = (appState.alerts || []).map(a => ({ ...a, source: 'local' }));
+    const registryAlerts = (appState.registryAlerts || []).map(a => normalizeRegistryAlert(a));
+    const alerts = [...registryAlerts, ...localAlerts].sort((a, b) => {
+        const ta = new Date(a.created_at || 0).getTime();
+        const tb = new Date(b.created_at || 0).getTime();
+        return tb - ta;
+    });
+    document.getElementById('alert-count').innerText = alerts.length;
+    document.getElementById('hdr-alerts').textContent = alerts.length;
+    document.getElementById('hdr-alerts').style.color = alerts.length > 0 ? '#f87171' : '#4ade80';
+    if (!cont) return;
+    if (!alerts.length) {
+        cont.innerHTML = '<div style="text-align:center; color:#64748b; padding:20px;">발생한 경보가 없습니다.</div>';
+        return;
+    }
+    cont.innerHTML = alerts.map(alert => renderAlertCard(alert)).join('');
+    cont.querySelectorAll('[data-alert-source]').forEach(el => {
+        el.onclick = () => {
+            const source = el.getAttribute('data-alert-source');
+            const alertId = el.getAttribute('data-alert-id');
+            const local = appState.alerts.find(a => a.alert_id === alertId || a.deviceId === alertId);
+            const registry = appState.registryAlerts.find(a => a.alert_id === alertId);
+            const alert = source === '03' ? registry : local;
+            const deviceId = alert?.deviceId || alert?.target_agent_id || alert?.source_agent_id;
+            if (deviceId) {
+                uiManager.selectObject(deviceId);
+                const o = appState.objects.find(x => x.id === deviceId);
+                if (o) {
+                    controls.target.copy(o.mesh.position);
+                    camera.position.set(o.mesh.position.x, o.mesh.position.y + 40, o.mesh.position.z + 60);
+                }
+            }
+        };
+    });
+}
+
+async function syncRegistryAlerts() {
+    const url = registryBaseUrl();
+    try {
+        const resp = await fetch(`${url}/alerts`);
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+        const alerts = await resp.json();
+        appState.registryAlerts = Array.isArray(alerts) ? alerts : [];
+    } catch (error) {
+        appState.registryAlerts = [];
+        console.warn(`Registry alerts unavailable: ${error.message}`);
+    }
+    renderAlertList();
 }
 
 async function syncDeviceRegistry() {
@@ -381,6 +489,7 @@ async function syncDeviceRegistry() {
         LINK_CONFIG = [];
         console.warn(`Device registry unavailable: ${error.message}`);
     }
+    await syncRegistryAlerts();
 }
 
 // ─── 3D 모델 ─────────────────────────────────────────────────
@@ -977,7 +1086,7 @@ const uiManager = {
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>03 서버 등록:</span><strong style="color:${registered>0?'#4ade80':'#f87171'}">${registered} / ${appState.objects.length}</strong></div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>Moth 연결:</span><strong style="color:${conn>0?'#4ade80':'#f87171'}">${conn} / ${appState.objects.length}</strong></div>
             <div style="display:flex;justify-content:space-between;font-size:0.85rem;"><span>통신 링크:</span><strong>${appState.links.length}개</strong></div>
-            <div style="margin-top:8px;color:${appState.alerts.length>0?'#f87171':'#4ade80'};font-size:0.85rem;">발생 경보: ${appState.alerts.length}건</div>`;
+            <div style="margin-top:8px;color:${(appState.alerts.length + appState.registryAlerts.length)>0?'#f87171':'#4ade80'};font-size:0.85rem;">발생 경보: ${appState.alerts.length + appState.registryAlerts.length}건</div>`;
     },
     renderLinkList() {
         let html = '';
@@ -1083,17 +1192,16 @@ const uiManager = {
         }
     },
     addAlert(data) {
-        appState.alerts.push(data);
-        document.getElementById('alert-count').innerText = appState.alerts.length;
-        const cont = document.getElementById('alert-list-container');
-        if (appState.alerts.length===1) cont.innerHTML='';
-        const el = document.createElement('div');
-        el.className = `list-item ${data.severity==='critical'?'alert-critical':'alert-warning'}`;
-        el.innerHTML = `<div class="title"><span>${data.message}</span></div><div style="font-size:0.75rem;color:#94a3b8;">${new Date().toLocaleTimeString()} | ${data.deviceId}</div>`;
-        el.onclick = () => { this.selectObject(data.deviceId); const o=appState.objects.find(x=>x.id===data.deviceId); if(o){controls.target.copy(o.mesh.position);camera.position.set(o.mesh.position.x,o.mesh.position.y+40,o.mesh.position.z+60);} };
-        cont.insertBefore(el, cont.firstChild);
+        appState.alerts.push({
+            ...data,
+            source: 'local',
+            alert_id: data.alert_id || `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            created_at: data.created_at || new Date().toISOString(),
+            updated_at: data.updated_at || data.created_at || new Date().toISOString(),
+        });
         const dev = appState.objects.find(o=>o.id===data.deviceId);
         if (dev) dev.hasAlert = true;
+        renderAlertList();
         this.renderObjectList();
     },
     init() {
@@ -1265,9 +1373,10 @@ function updateHeader() {
     document.getElementById('hdr-links').textContent     = appState.links.length;
     const conn = DEVICE_CONFIG.filter(c => connState[c.id] === 'connected').length;
     document.getElementById('hdr-connected').textContent = conn;
+    const totalAlerts = appState.alerts.length + appState.registryAlerts.length;
     const alertEl = document.getElementById('hdr-alerts');
-    alertEl.textContent = appState.alerts.length;
-    alertEl.style.color = appState.alerts.length > 0 ? '#f87171' : '#4ade80';
+    alertEl.textContent = totalAlerts;
+    alertEl.style.color = totalAlerts > 0 ? '#f87171' : '#4ade80';
 
     const badge = document.getElementById('header-registry-badge');
     if (appState.registryStatus === 'ok') {
@@ -1290,6 +1399,8 @@ function promptRegistryUrl() {
         location.reload();
     }
 }
+
+setInterval(syncRegistryAlerts, 15000);
 
 window.onload = () => {
     initScene();

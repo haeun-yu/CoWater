@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8003";
+let selectedAlertId = null;
 
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEYS.apiBase) || DEFAULT_API_BASE;
@@ -84,6 +85,26 @@ function activeNav() {
   });
 }
 
+function headerMenuHtml() {
+  return `
+    <div class="header-menu">
+      <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+      <a href="devices.html" data-nav-link="devices">Devices</a>
+      <a href="register.html" data-nav-link="register">Register</a>
+      <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+      <a href="responses.html" data-nav-link="responses">Responses</a>
+      <a href="settings.html" data-nav-link="settings">Settings</a>
+    </div>
+  `;
+}
+
+function injectHeaderMenu() {
+  document.querySelectorAll(".topbar-actions").forEach((node) => {
+    if (node.querySelector(".header-menu")) return;
+    node.insertAdjacentHTML("afterbegin", headerMenuHtml());
+  });
+}
+
 function bindConfigInputs() {
   document.querySelectorAll("[data-bind='apiBase']").forEach((input) => {
     input.value = getApiBase();
@@ -147,6 +168,14 @@ async function loadDevices() {
   return requestJson("/devices");
 }
 
+async function loadAlerts() {
+  return requestJson("/alerts");
+}
+
+async function loadResponses() {
+  return requestJson("/responses");
+}
+
 function countTracks(devices, kind) {
   return devices.reduce(
     (total, device) =>
@@ -197,7 +226,12 @@ function renderDashboardDevices(devices) {
 async function initDashboardPage() {
   bindConfigInputs();
   try {
-    const [meta, devices] = await Promise.all([loadMeta(), loadDevices()]);
+    const [meta, devices, alerts, responses] = await Promise.all([
+      loadMeta(),
+      loadDevices(),
+      loadAlerts(),
+      loadResponses(),
+    ]);
     setText("meta-host", meta.server.host);
     setText("meta-port", String(meta.server.port));
     setText("meta-ping", meta.server.ping_endpoint);
@@ -205,6 +239,9 @@ async function initDashboardPage() {
     setText("count-connected", String(devices.filter((d) => d.connected).length));
     setText("count-video", String(countTracks(devices, "VIDEO")));
     setText("count-actions", String(coreActionsCount(devices)));
+    setText("count-alerts", String(alerts.length));
+    setText("count-responses", String(responses.length));
+    setText("count-open-alerts", String(alerts.filter((alert) => alert.status === "waiting").length));
     setHtml("server-summary", `
       <div class="code">${escapeHtml(prettyJson(meta))}</div>
     `);
@@ -287,6 +324,256 @@ async function initDevicesPage() {
     }
   } catch (error) {
     setHtml("devices-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+  }
+}
+
+function renderAlertBadge(alert) {
+  const severityClass =
+    alert.severity === "critical" || alert.severity === "high"
+      ? "danger"
+      : alert.severity === "warning"
+        ? "warn"
+        : "ok";
+  return `<span class="badge ${severityClass}">${escapeHtml(alert.severity)}</span>`;
+}
+
+function renderAlertDetail(alert) {
+  const host = document.getElementById("alert-detail");
+  if (!host) return;
+  if (!alert) {
+    host.innerHTML = `<div class="panel"><p class="lead">Select an alert to inspect the canonical record.</p></div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Alert ID</div>
+      <strong>${escapeHtml(alert.alert_id)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Status</div>
+      <strong>${escapeHtml(alert.status)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Message</div>
+      <strong>${escapeHtml(alert.message)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Recommended Action</div>
+      <strong>${escapeHtml(alert.recommended_action || "-")}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Target / Route</div>
+      <strong>${escapeHtml(alert.target_agent_id || "-")} · ${escapeHtml(alert.route_mode || "-")}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Created / Updated</div>
+      <strong>${escapeHtml(formatTimestamp(alert.created_at))} / ${escapeHtml(formatTimestamp(alert.updated_at))}</strong>
+    </div>
+    <div class="code">${escapeHtml(prettyJson(alert))}</div>
+  `;
+}
+
+function renderAlertsTable(alerts, filterText = "") {
+  const body = document.getElementById("alerts-body");
+  if (!body) return;
+  const q = filterText.trim().toLowerCase();
+  const rows = alerts.filter((alert) => {
+    if (!q) return true;
+    return (
+      alert.alert_id.toLowerCase().includes(q) ||
+      (alert.source_system || "").toLowerCase().includes(q) ||
+      (alert.alert_type || "").toLowerCase().includes(q) ||
+      (alert.message || "").toLowerCase().includes(q) ||
+      (alert.status || "").toLowerCase().includes(q)
+    );
+  });
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="8" class="muted">No matching alerts.</td></tr>`;
+    renderAlertDetail(null);
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (alert) => `
+        <tr class="${alert.alert_id === selectedAlertId ? "selected" : ""}" data-alert-row="${escapeHtml(alert.alert_id)}">
+          <td><strong>${escapeHtml(alert.alert_id)}</strong></td>
+          <td>${escapeHtml(alert.status)}</td>
+          <td>${renderAlertBadge(alert)}</td>
+          <td>${escapeHtml(alert.source_system)}</td>
+          <td>${escapeHtml(alert.alert_type)}</td>
+          <td>${escapeHtml(alert.target_agent_id || "-")}</td>
+          <td>${escapeHtml(formatTimestamp(alert.created_at))}</td>
+          <td>
+            <button class="button" data-alert-open="${escapeHtml(alert.alert_id)}">Open</button>
+            <button class="button primary" data-alert-ack-yes="${escapeHtml(alert.alert_id)}">Approve</button>
+            <button class="button danger" data-alert-ack-no="${escapeHtml(alert.alert_id)}">Reject</button>
+          </td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  body.querySelectorAll("[data-alert-row]").forEach((row) => {
+    row.addEventListener("click", () => {
+      selectedAlertId = row.getAttribute("data-alert-row");
+      const active = alerts.find((alert) => alert.alert_id === selectedAlertId);
+      renderAlertsTable(alerts, q);
+      renderAlertDetail(active || null);
+    });
+  });
+
+  body.querySelectorAll("[data-alert-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectedAlertId = button.getAttribute("data-alert-open");
+      const active = alerts.find((alert) => alert.alert_id === selectedAlertId);
+      renderAlertDetail(active || null);
+    });
+  });
+
+  body.querySelectorAll("[data-alert-ack-yes]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const alertId = button.getAttribute("data-alert-ack-yes");
+      await requestJson(`/alerts/${alertId}/ack`, {
+        method: "POST",
+        body: JSON.stringify({ approved: true, notes: "Approved from registry UI" }),
+      });
+      selectedAlertId = alertId;
+      await initAlertsPage();
+    });
+  });
+
+  body.querySelectorAll("[data-alert-ack-no]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const alertId = button.getAttribute("data-alert-ack-no");
+      await requestJson(`/alerts/${alertId}/ack`, {
+        method: "POST",
+        body: JSON.stringify({ approved: false, notes: "Rejected from registry UI" }),
+      });
+      selectedAlertId = alertId;
+      await initAlertsPage();
+    });
+  });
+
+  const active = alerts.find((alert) => alert.alert_id === selectedAlertId) || alerts[0];
+  if (!selectedAlertId && active) {
+    selectedAlertId = active.alert_id;
+  }
+  renderAlertDetail(active || null);
+}
+
+function renderResponseDetail(response) {
+  const host = document.getElementById("response-detail");
+  if (!host) return;
+  if (!response) {
+    host.innerHTML = `<div class="panel"><p class="lead">Select a response to inspect the canonical record.</p></div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Response ID</div>
+      <strong>${escapeHtml(response.response_id)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Alert ID</div>
+      <strong>${escapeHtml(response.alert_id)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Action / Status</div>
+      <strong>${escapeHtml(response.action)} · ${escapeHtml(response.status)}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Target / Route</div>
+      <strong>${escapeHtml(response.target_agent_id || "-")} · ${escapeHtml(response.route_mode || "-")}</strong>
+    </div>
+    <div class="device-card" style="margin-bottom: 12px;">
+      <div class="muted">Created / Updated</div>
+      <strong>${escapeHtml(formatTimestamp(response.created_at))} / ${escapeHtml(formatTimestamp(response.updated_at))}</strong>
+    </div>
+    <div class="code">${escapeHtml(prettyJson(response))}</div>
+  `;
+}
+
+function renderResponsesTable(responses, filterText = "") {
+  const body = document.getElementById("responses-body");
+  if (!body) return;
+  const q = filterText.trim().toLowerCase();
+  const rows = responses.filter((response) => {
+    if (!q) return true;
+    return (
+      response.response_id.toLowerCase().includes(q) ||
+      response.alert_id.toLowerCase().includes(q) ||
+      (response.action || "").toLowerCase().includes(q) ||
+      (response.status || "").toLowerCase().includes(q) ||
+      (response.target_agent_id || "").toLowerCase().includes(q)
+    );
+  });
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">No matching responses.</td></tr>`;
+    renderResponseDetail(null);
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (response) => `
+        <tr data-response-row="${escapeHtml(response.response_id)}">
+          <td><strong>${escapeHtml(response.response_id)}</strong></td>
+          <td>${escapeHtml(response.alert_id)}</td>
+          <td>${escapeHtml(response.action)}</td>
+          <td>${escapeHtml(response.status)}</td>
+          <td>${escapeHtml(response.target_agent_id || "-")}</td>
+          <td>${escapeHtml(response.route_mode || "-")}</td>
+          <td>${escapeHtml(formatTimestamp(response.created_at))}</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  body.querySelectorAll("[data-response-row]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const response = responses.find((item) => item.response_id === row.getAttribute("data-response-row"));
+      renderResponseDetail(response || null);
+    });
+  });
+
+  renderResponseDetail(rows[0] || null);
+}
+
+async function initAlertsPage() {
+  bindConfigInputs();
+  const search = document.getElementById("alert-search");
+  try {
+    const alerts = await loadAlerts();
+    renderAlertsTable(alerts, search ? search.value : "");
+    if (search) {
+      search.oninput = () => renderAlertsTable(alerts, search.value);
+    }
+    const refresh = document.getElementById("refresh-alerts");
+    if (refresh) {
+      refresh.onclick = async () => initAlertsPage();
+    }
+  } catch (error) {
+    setHtml("alerts-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+  }
+}
+
+async function initResponsesPage() {
+  bindConfigInputs();
+  const search = document.getElementById("response-search");
+  try {
+    const responses = await loadResponses();
+    renderResponsesTable(responses, search ? search.value : "");
+    if (search) {
+      search.oninput = () => renderResponsesTable(responses, search.value);
+    }
+    const refresh = document.getElementById("refresh-responses");
+    if (refresh) {
+      refresh.onclick = async () => initResponsesPage();
+    }
+  } catch (error) {
+    setHtml("responses-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
   }
 }
 
@@ -469,12 +756,15 @@ async function initSettingsPage() {
 }
 
 function initPage() {
+  injectHeaderMenu();
   activeNav();
   const page = document.body.dataset.page;
   const map = {
     dashboard: initDashboardPage,
     devices: initDevicesPage,
     register: initRegisterPage,
+    alerts: initAlertsPage,
+    responses: initResponsesPage,
     device: initDevicePage,
     settings: initSettingsPage,
   };

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>06 Events</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body data-page="events">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>System Events</h1>
+        <p class="muted">이벤트 수집, 알림 생성, 처리 결과 확인</p>
+      </div>
+      <div class="header-menu">
+        <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+        <a href="events.html" data-nav-link="events">Events</a>
+        <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+        <a href="responses.html" data-nav-link="responses">Responses</a>
+      </div>
+      <div class="topbar-actions">
+        <input id="api-base" value="http://127.0.0.1:9012" aria-label="API base URL">
+        <button class="primary" id="refresh" type="button">Refresh</button>
+        <button id="sync" type="button">Sync Registry</button>
+        <button id="reset" type="button">Reset</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <h2 class="title">Create Event</h2>
+        <div class="grid">
+          <div class="row">
+            <label>Event Type</label>
+            <input id="event-type" value="event.report" placeholder="event.report">
+          </div>
+          <div class="row">
+            <label>Source ID</label>
+            <input id="event-source-id" value="system_center-01" placeholder="system_center-01">
+          </div>
+        </div>
+        <div class="grid">
+          <div class="row">
+            <label>Source Role</label>
+            <input id="event-source-role" value="system_center" placeholder="system_center">
+          </div>
+          <div class="row">
+            <label>Severity</label>
+            <select id="event-severity">
+              <option value="info">info</option>
+              <option value="warning">warning</option>
+              <option value="critical">critical</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <label>Summary</label>
+          <input id="event-summary" placeholder="Battery 8% on rov-01">
+        </div>
+        <div class="grid">
+          <div class="row">
+            <label>Target Role</label>
+            <input id="event-target-role" placeholder="device_agent">
+          </div>
+          <div class="row">
+            <label>Target Agent ID</label>
+            <input id="event-target-agent" placeholder="rov-01">
+          </div>
+        </div>
+        <div class="grid">
+          <div class="row">
+            <label>Auto Response</label>
+            <select id="event-auto-response">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Requires Approval</label>
+            <select id="event-requires-approval">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <label>Payload JSON</label>
+          <textarea id="event-payload" rows="7">{"power":{"battery_percent":8}}</textarea>
+        </div>
+        <div class="row">
+          <button class="good" id="ingest-event" type="button">Ingest Event</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2 class="title">Events</h2>
+          <div id="events" class="list"></div>
+        </div>
+        <div class="card">
+          <h2 class="title">Inbox / Outbox</h2>
+          <div class="row">
+            <div class="muted tiny">Inbox</div>
+            <div id="inbox" class="list"></div>
+          </div>
+          <div class="row">
+            <div class="muted tiny">Outbox</div>
+            <div id="outbox" class="list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

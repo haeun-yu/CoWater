@@ -3,6 +3,7 @@ from __future__ import annotations
 # ────────────────────────────────────────────────────────────────────────────
 # 표준 라이브러리 및 서드파티 의존성
 # ────────────────────────────────────────────────────────────────────────────
+import asyncio
 import argparse
 import json
 import os
@@ -18,6 +19,26 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
+from .core.analysis import analyze_event as core_analyze_event
+from .core.analysis import build_event_record as core_build_event_record
+from .core.analysis import llm_analyze_event as core_llm_analyze_event
+from .core.analysis import llm_enabled as core_llm_enabled
+from .core.analysis import rule_analyze_event as core_rule_analyze_event
+from .core.alerts import acknowledge_alert as core_acknowledge_alert
+from .core.alerts import get_alert as core_get_alert
+from .core.alerts import record_alert as core_record_alert
+from .core.alerts import record_event as core_record_event
+from .core.responses import record_response as core_record_response
+from .core.routing import build_message_record as core_build_message_record
+from .events.ingest import ingest_system_event as core_ingest_system_event
+from .registry.child_registry import child_manifest as core_child_manifest
+from .registry.child_registry import heartbeat_child as core_heartbeat_child
+from .registry.child_registry import register_child as core_register_child
+from .registry.child_registry import sync_children_from_registry as core_sync_children_from_registry
+from .registry.manifest import build_agent_card as core_build_agent_card
+from .registry.manifest import build_agent_manifest as core_build_agent_manifest
+from .transport.http import acknowledge_alert as remote_acknowledge_alert
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # 설정 기본값
@@ -27,13 +48,26 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
 CONFIG_PATH = Path(os.getenv("COWATER_CONTROL_CENTER_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 9012
-DEFAULT_AGENT_ID = "control_center-01"
-DEFAULT_AGENT_ROLE = "control_center"
+DEFAULT_AGENT_ID = "system_center-01"
+DEFAULT_AGENT_ROLE = "system_center"
 DEFAULT_PARENT_ID = ""              # 최상위 에이전트이므로 부모가 없다
 DEFAULT_PARENT_ENDPOINT = ""
 DEFAULT_CORS_ORIGINS = ["*"]
 DEFAULT_MISSION_PREFIX = "mission"  # 미션 ID 자동 생성 시 사용할 접두어
 DEFAULT_A2A_BINDING = "HTTP+JSON"   # A2A 프로토콜 바인딩 방식
+DEFAULT_DEVICE_REGISTRY_URL = "http://127.0.0.1:8003"
+DEFAULT_CONTROL_SHIP_ROLE = "regional_orchestrator"
+DEFAULT_DIRECT_DEVICE_ROLES = ["usv", "auv", "rov"]
+DEFAULT_AUTO_SYNC_ON_START = True
+DEFAULT_SYNC_INTERVAL_SECONDS = 30
+DEFAULT_AUTO_RESPONSE = True
+DEFAULT_APPROVAL_REQUIRED_ACTIONS = ["mission.abort", "system.shutdown", "task.cancel"]
+DEFAULT_LLM_PROVIDER = "ollama"
+DEFAULT_LLM_MODEL = "gemma4"
+DEFAULT_LLM_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_LLM_TEMPERATURE = 0.2
+DEFAULT_ALWAYS_ALERT = True
+DEFAULT_NOTIFICATION_RETAIN = 100
 
 
 def utc_now_iso() -> str:
@@ -60,6 +94,10 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
     raw = _load_json_file(config_path)
     server_cfg = raw.get("server") or {}
     agent_cfg = raw.get("agent") or {}
+    registry_cfg = raw.get("registry") or {}
+    analysis_cfg = raw.get("analysis") or {}
+    llm_cfg = analysis_cfg.get("llm") or {}
+    notifications_cfg = raw.get("notifications") or {}
     cors_cfg = raw.get("cors") or {}
 
     host = str(server_cfg.get("host") or DEFAULT_SERVER_HOST)
@@ -82,6 +120,29 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
             "direct_route_allowed": bool(agent_cfg.get("direct_route_allowed", True)),
             "mission_prefix": str(agent_cfg.get("mission_prefix") or DEFAULT_MISSION_PREFIX),
         },
+        "registry": {
+            "device_registry_url": str(registry_cfg.get("device_registry_url") or DEFAULT_DEVICE_REGISTRY_URL).rstrip("/"),
+            "control_ship_role": str(registry_cfg.get("control_ship_role") or DEFAULT_CONTROL_SHIP_ROLE),
+            "direct_device_roles": list(registry_cfg.get("direct_device_roles") or DEFAULT_DIRECT_DEVICE_ROLES),
+            "auto_sync_on_start": bool(registry_cfg.get("auto_sync_on_start", DEFAULT_AUTO_SYNC_ON_START)),
+            "sync_interval_seconds": int(registry_cfg.get("sync_interval_seconds") or DEFAULT_SYNC_INTERVAL_SECONDS),
+        },
+        "analysis": {
+            "auto_response": bool(analysis_cfg.get("auto_response", DEFAULT_AUTO_RESPONSE)),
+            "approval_required_actions": list(
+                analysis_cfg.get("approval_required_actions") or DEFAULT_APPROVAL_REQUIRED_ACTIONS
+            ),
+            "llm": {
+                "provider": str(llm_cfg.get("provider") or DEFAULT_LLM_PROVIDER).strip(),
+                "model": str(llm_cfg.get("model") or DEFAULT_LLM_MODEL).strip(),
+                "base_url": str(llm_cfg.get("base_url") or DEFAULT_LLM_BASE_URL).rstrip("/"),
+                "temperature": float(llm_cfg.get("temperature") or DEFAULT_LLM_TEMPERATURE),
+            },
+        },
+        "notifications": {
+            "retain": int(notifications_cfg.get("retain") or DEFAULT_NOTIFICATION_RETAIN),
+            "always_alert": bool(notifications_cfg.get("always_alert", DEFAULT_ALWAYS_ALERT)),
+        },
     }
 
 
@@ -93,13 +154,15 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
 @dataclass
 class ChildAgentRecord:
     """
-    하위 에이전트(control_ship 등) 한 개의 등록 정보.
-    control_center가 미션을 위임할 수 있는 대상 목록을 구성한다.
+    하위 에이전트(regional_orchestrator 등) 한 개의 등록 정보.
+    system_center가 미션을 위임할 수 있는 대상 목록을 구성한다.
     """
     agent_id: str
     role: str
     endpoint: Optional[str] = None           # 하위 에이전트의 HTTP 엔드포인트
+    command_endpoint: Optional[str] = None    # 디바이스 명령용 HTTP 엔드포인트
     capabilities: List[str] = field(default_factory=list)  # 수행 가능한 액션 목록
+    transport: str = "a2a"                   # a2a / command
     status: str = "unknown"                  # 연결 상태: unknown / registered / online
     last_seen_at: Optional[str] = None
     notes: Optional[str] = None
@@ -112,7 +175,7 @@ class ChildAgentRecord:
 class MissionRecord:
     """
     최상위 미션(임무) 한 건의 기록.
-    control_center가 생성하고, control_ship 또는 하위 에이전트에게 할당한다.
+    system_center가 생성하고, regional_orchestrator 또는 하위 에이전트에게 할당한다.
     """
     mission_id: str
     title: str
@@ -225,9 +288,104 @@ class TaskRecord:
 
 
 @dataclass
+class SystemEventRecord:
+    """
+    시스템 단에서 수집한 실시간 이벤트 한 건.
+    03/04/05/02 및 사용자 입력을 모두 같은 형태로 정규화한다.
+    """
+    event_id: str
+    event_type: str
+    source_id: str
+    source_role: str
+    severity: str = "info"
+    summary: str = ""
+    payload: Dict[str, Any] = field(default_factory=dict)
+    flow_id: Optional[str] = None
+    causation_id: Optional[str] = None
+    decision_strategy: str = "rule"
+    recommended_action: Optional[str] = None
+    target_agent_id: Optional[str] = None
+    route_mode: Optional[str] = None
+    user_approval_required: bool = False
+    status: str = "new"
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    notes: Optional[str] = None
+
+    def touch(self, status: Optional[str] = None) -> None:
+        """updated_at을 갱신하고, 필요하면 상태를 함께 바꾼다."""
+        self.updated_at = utc_now_iso()
+        if status:
+            self.status = status
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SystemAlertRecord:
+    """
+    이벤트 분석 결과로 생성되는 알림 한 건.
+    사람 승인 필요 여부와 자동 대응 가능 여부를 함께 기록한다.
+    """
+    alert_id: str
+    event_id: str
+    alert_type: str
+    severity: str
+    message: str
+    status: str = "waiting"
+    recommended_action: Optional[str] = None
+    target_agent_id: Optional[str] = None
+    requires_user_approval: bool = False
+    auto_remediated: bool = False
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def touch(self, status: Optional[str] = None) -> None:
+        """updated_at을 갱신하고, 필요하면 상태를 함께 바꾼다."""
+        self.updated_at = utc_now_iso()
+        if status:
+            self.status = status
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SystemResponseRecord:
+    """
+    알림에 대한 대응 기록.
+    자동 대응, 사용자 승인 대기, 디스패치 결과를 모두 담는다.
+    """
+    response_id: str
+    alert_id: str
+    action: str
+    target_agent_id: Optional[str] = None
+    target_endpoint: Optional[str] = None
+    route_mode: str = "direct"
+    status: str = "planned"
+    reason: str = ""
+    task_id: Optional[str] = None
+    dispatch_result: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    notes: Optional[str] = None
+
+    def touch(self, status: Optional[str] = None) -> None:
+        """updated_at을 갱신하고, 필요하면 상태를 함께 바꾼다."""
+        self.updated_at = utc_now_iso()
+        if status:
+            self.status = status
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class ControlCenterState:
     """
-    control_center 에이전트의 전체 런타임 상태.
+    system_center/system agent의 전체 런타임 상태.
     ControlCenterHub 내부에서 단일 인스턴스로 관리된다.
     """
     agent_id: str
@@ -246,6 +404,10 @@ class ControlCenterState:
     outbox: List[MessageRecord] = field(default_factory=list)
     dispatches: List[dict[str, Any]] = field(default_factory=list)
     tasks: List[TaskRecord] = field(default_factory=list)
+    events: List[SystemEventRecord] = field(default_factory=list)
+    alerts: List[SystemAlertRecord] = field(default_factory=list)
+    responses: List[SystemResponseRecord] = field(default_factory=list)
+    registry_snapshot: Dict[str, Any] = field(default_factory=dict)
     memory: List[dict[str, Any]] = field(default_factory=list)    # 최근 100건 이벤트 로그
     context: Dict[str, Any] = field(default_factory=dict)
 
@@ -273,6 +435,10 @@ class ControlCenterState:
             "outbox": [item.to_dict() for item in self.outbox[-50:]],
             "dispatches": list(self.dispatches[-50:]),
             "tasks": [item.to_dict() for item in self.tasks[-50:]],
+            "events": [item.to_dict() for item in self.events[-100:]],
+            "alerts": [item.to_dict() for item in self.alerts[-100:]],
+            "responses": [item.to_dict() for item in self.responses[-100:]],
+            "registry_snapshot": self.registry_snapshot,
             "memory": list(self.memory[-25:]),
             "context": self.context,
         }
@@ -360,6 +526,7 @@ class DispatchInput(BaseModel):
     """수동 dispatch 요청 바디. /dispatch 에서 사용한다."""
     target_agent_id: str
     target_endpoint: Optional[str] = None  # 미지정 시 하위 에이전트 레지스트리에서 조회
+    transport: str = "a2a"
     message: A2AMessageInput
 
 
@@ -390,17 +557,42 @@ class SendMessageRequest(BaseModel):
     context_id: Optional[str] = Field(default=None, alias="contextId")
 
 
+class SystemEventInput(BaseModel):
+    """
+    03/04/05/02 또는 사용자 입력에서 들어오는 시스템 이벤트 바디.
+    event.report / system.event / user.command 형태 모두 이 모델로 수렴시킨다.
+    """
+    event_type: str
+    source_id: str
+    source_role: str = "unknown"
+    severity: str = "info"
+    summary: Optional[str] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    flow_id: Optional[str] = None
+    causation_id: Optional[str] = None
+    target_agent_id: Optional[str] = None
+    target_role: Optional[str] = None
+    requires_user_approval: bool = False
+    auto_response: Optional[bool] = None
+
+
+class ResponseApprovalInput(BaseModel):
+    """사용자 승인 후 알림 대응을 진행할 때 사용하는 바디."""
+    approved: bool = True
+    notes: Optional[str] = None
+
+
 # ────────────────────────────────────────────────────────────────────────────
-# ControlCenterHub — control_center 에이전트의 핵심 비즈니스 로직
+# SystemCenterHub — system_center 에이전트의 핵심 비즈니스 로직
 # ────────────────────────────────────────────────────────────────────────────
 
 class ControlCenterHub:
     """
-    control_center 에이전트의 중앙 허브. 플릿 전체의 최상위 조율자.
+    system_center 에이전트의 중앙 허브. 플릿 전체의 최상위 조율자.
 
     역할:
-    - 미션(Mission) 생성 및 하위 에이전트(control_ship 등)에게 할당
-    - direct_route_allowed가 True이면 control_ship을 거치지 않고 디바이스 에이전트에 직접 dispatch
+    - 미션(Mission) 생성 및 하위 에이전트(regional_orchestrator 등)에게 할당
+    - direct_route_allowed가 True이면 regional_orchestrator를 거치지 않고 디바이스 에이전트에 직접 dispatch
     - 하위 에이전트로부터 수신한 status.report를 미션 레코드에 반영
     - 하위 에이전트 등록·heartbeat 관리
     - A2A Task 생명주기(submitted→working→completed/failed) 추적
@@ -409,6 +601,9 @@ class ControlCenterHub:
     def __init__(self, settings: dict[str, Any]) -> None:
         agent = settings["agent"]
         self.settings = settings
+        self.registry_settings = settings.get("registry") or {}
+        self.analysis_settings = settings.get("analysis") or {}
+        self.notification_settings = settings.get("notifications") or {}
         self.state = ControlCenterState(
             agent_id=agent["id"],
             role=agent["role"],
@@ -418,10 +613,19 @@ class ControlCenterHub:
             mission_prefix=agent["mission_prefix"],
         )
         self._child_index: Dict[str, ChildAgentRecord] = {}     # agent_id → 레코드
+        self._manual_child_ids: set[str] = set()
+        self._registry_child_ids: set[str] = set()
         self._mission_index: Dict[str, MissionRecord] = {}       # mission_id → 레코드
         self._task_index: Dict[str, TaskRecord] = {}              # task_id → 레코드
         # 자신의 능력 명세를 초기화한다
         self.state.agent_manifest = self._build_agent_manifest()
+        self.state.registry_snapshot = {
+            "device_registry_url": self.registry_settings.get("device_registry_url"),
+            "control_ship_role": self.registry_settings.get("control_ship_role"),
+            "direct_device_roles": list(self.registry_settings.get("direct_device_roles") or []),
+            "auto_sync_on_start": bool(self.registry_settings.get("auto_sync_on_start", True)),
+            "sync_interval_seconds": int(self.registry_settings.get("sync_interval_seconds") or 30),
+        }
 
     # ── 하위 에이전트 등록·heartbeat ───────────────────────────────────────
 
@@ -430,61 +634,18 @@ class ControlCenterHub:
         하위 에이전트를 레지스트리에 등록(또는 갱신)한다.
         agent_manifest의 children 섹션도 함께 업데이트한다.
         """
-        child = ChildAgentRecord(
-            agent_id=payload.agent_id,
-            role=payload.role,
-            endpoint=payload.endpoint,
-            capabilities=list(payload.capabilities or payload.available_actions),
-            status="registered",
-            last_seen_at=utc_now_iso(),
-            notes=payload.notes,
-        )
-        self._child_index[child.agent_id] = child
-        self.state.children = list(self._child_index.values())
-        self.state.agent_manifest.setdefault("children", {})
-        self.state.agent_manifest["children"][child.agent_id] = self._child_manifest(payload)
-        self.state.remember({"kind": "child.registered", "at": utc_now_iso(), "child": child.to_dict()})
-        return child
+        return core_register_child(self, payload)
 
     def _child_manifest(self, payload: ChildAgentInput | AgentManifestInput) -> dict[str, Any]:
         """
         등록 요청 바디로부터 하위 에이전트의 능력 명세(manifest) dict를 생성한다.
         미션 할당 시 대상 에이전트의 능력 확인에 사용한다.
         """
-        available_actions = list(payload.available_actions or payload.capabilities)
-        skills = list(payload.skills or available_actions)
-        return {
-            "agent_id": payload.agent_id,
-            "role": payload.role,
-            "mode": payload.mode,
-            "endpoint": payload.endpoint,
-            "command_endpoint": payload.command_endpoint,
-            "skills": skills,
-            "tools": list(payload.tools),
-            "constraints": list(payload.constraints),
-            "available_actions": available_actions,
-            "supported_inputs": list(payload.supported_inputs),
-            "supported_outputs": list(payload.supported_outputs),
-            "capabilities": list(payload.capabilities),
-            "parent_id": getattr(payload, "parent_id", None) or self.state.agent_id,
-            "parent_endpoint": getattr(payload, "parent_endpoint", None) or self.state.parent_endpoint,
-            "notes": payload.notes,
-            "last_seen_at": utc_now_iso(),
-        }
+        return core_child_manifest(self, payload)
 
     def heartbeat_child(self, agent_id: str) -> ChildAgentRecord:
         """하위 에이전트의 생존 신호를 갱신하고 상태를 'online'으로 표시한다."""
-        child = self._child_index.get(agent_id)
-        if child is None:
-            raise KeyError(agent_id)
-        child.status = "online"
-        child.last_seen_at = utc_now_iso()
-        self.state.children = list(self._child_index.values())
-        if agent_id in self.state.agent_manifest.get("children", {}):
-            self.state.agent_manifest["children"][agent_id]["status"] = "online"
-            self.state.agent_manifest["children"][agent_id]["last_seen_at"] = child.last_seen_at
-        self.state.remember({"kind": "child.heartbeat", "at": utc_now_iso(), "agent_id": agent_id})
-        return child
+        return core_heartbeat_child(self, agent_id)
 
     # ── 메시지 기록 헬퍼 ───────────────────────────────────────────────────
 
@@ -493,23 +654,7 @@ class ControlCenterHub:
         A2AMessageInput을 MessageRecord로 변환한다.
         message_id가 없으면 uuid4를 자동 생성한다.
         """
-        return MessageRecord(
-            message_id=payload.message_id or str(uuid4()),
-            message_type=payload.message_type,
-            from_agent_id=payload.from_agent_id,
-            to_agent_id=payload.to_agent_id,
-            task_id=payload.task_id,
-            conversation_id=payload.conversation_id,
-            role=payload.role,
-            scope=payload.scope,
-            priority=payload.priority,
-            ttl=payload.ttl,
-            payload=payload.payload,
-            route_hint=payload.route_hint,
-            received_at=utc_now_iso(),
-            routed_via=routed_via,
-            status=status_text,
-        )
+        return core_build_message_record(self, payload, routed_via=routed_via, status_text=status_text)
 
     # ── Agent Card / Manifest 빌더 ─────────────────────────────────────────
 
@@ -520,47 +665,7 @@ class ControlCenterHub:
 
         capabilities 키는 A2A Agent Card와 동일하게 camelCase를 사용한다.
         """
-        base_url = f"http://{self.settings['server']['host']}:{self.settings['server']['port']}"
-        return {
-            "agent_id": self.state.agent_id,
-            "role": self.state.role,
-            "mode": "dynamic",
-            "endpoint": base_url,
-            "command_endpoint": f"{base_url}/message:send",
-            "skills": [
-                "plan_mission",            # 미션 생성 및 목표 분해
-                "assign_control_ship",     # control_ship에 미션 위임
-                "direct_route_override",   # 권한 있을 때 하위 에이전트 직접 제어
-            ],
-            "tools": [
-                "mission_store",    # 미션 레코드 관리
-                "child_registry",   # 하위 에이전트 레지스트리
-                "route_planner",    # 라우팅 경로 결정
-            ],
-            "constraints": [
-                "prefer_mid_tier_routing",           # 기본적으로 control_ship 경유 우선
-                "direct_route_requires_authority",   # 직접 라우팅은 권한 필요
-            ],
-            "available_actions": [
-                "task.assign",
-                "task.accept",
-                "task.complete",
-                "task.fail",
-                "status.report",
-                "task.escalate",
-            ],
-            "supported_inputs": ["application/json", "text/plain"],
-            "supported_outputs": ["application/json", "text/plain"],
-            "capabilities": {
-                "streaming": False,
-                "pushNotifications": False,
-                "direct_route_allowed": self.state.direct_route_allowed,
-            },
-            "parent_id": self.state.parent_id,
-            "parent_endpoint": self.state.parent_endpoint,
-            "children": {},
-            "updated_at": utc_now_iso(),
-        }
+        return core_build_agent_manifest(self)
 
     def _build_agent_card(self) -> dict[str, Any]:
         """
@@ -568,46 +673,7 @@ class ControlCenterHub:
         /.well-known/agent-card.json 에서 반환한다.
         외부 에이전트가 이 에이전트의 능력을 discovery할 때 사용한다.
         """
-        base_url = f"http://{self.settings['server']['host']}:{self.settings['server']['port']}"
-        return {
-            "name": self.state.agent_id,
-            "displayName": "CoWater Control Center System Agent",
-            "description": "Top-tier control_center A2A agent for mission planning, routing, and direct child coordination.",
-            "url": base_url,
-            "version": "1.0.0",
-            "protocolVersion": "1.0.0",
-            "supportedInterfaces": [
-                {
-                    "url": base_url,
-                    "protocolBinding": DEFAULT_A2A_BINDING,
-                    "protocolVersion": "1.0.0",
-                }
-            ],
-            "capabilities": {
-                "streaming": False,
-                "pushNotifications": False,
-                "extendedAgentCard": False,
-            },
-            "defaultInputModes": ["application/json", "text/plain"],
-            "defaultOutputModes": ["application/json", "text/plain"],
-            "skills": [
-                {
-                    "id": "plan_mission",
-                    "name": "Plan Mission",
-                    "description": "Create and manage mission records for downstream agents.",
-                },
-                {
-                    "id": "assign_control_ship",
-                    "name": "Assign Control Ship",
-                    "description": "Delegate mission scope to a control_ship layer or direct child agent.",
-                },
-                {
-                    "id": "direct_route_override",
-                    "name": "Direct Route Override",
-                    "description": "Bypass the mid-tier when scope and authority allow direct control.",
-                },
-            ],
-        }
+        return core_build_agent_card(self)
 
     # ── Task 생명주기 관리 ─────────────────────────────────────────────────
 
@@ -674,6 +740,82 @@ class ControlCenterHub:
         if isinstance(assigned, list):
             return [target for target in assigned if isinstance(target, dict)]
         return []
+
+    def _llm_enabled(self) -> bool:
+        """LLM 설정이 실제로 채워져 있는지 확인한다."""
+        return core_llm_enabled(self)
+
+    def _find_child_by_role(self, role: str) -> Optional[ChildAgentRecord]:
+        """등록된 하위 에이전트 중 role이 일치하는 첫 번째 항목을 찾는다."""
+        for child in self._child_index.values():
+            if child.role == role:
+                return child
+        return None
+
+    def _find_child_by_agent_id(self, agent_id: str) -> Optional[ChildAgentRecord]:
+        """등록된 하위 에이전트 중 agent_id가 일치하는 항목을 찾는다."""
+        return self._child_index.get(agent_id)
+
+    def _event_summary(self, payload: SystemEventInput) -> str:
+        """이벤트의 사람이 읽을 수 있는 요약 문장을 만든다."""
+        if payload.summary:
+            return payload.summary.strip()
+        return f"{payload.event_type} from {payload.source_id}"
+
+    def _build_event_record(self, payload: SystemEventInput) -> SystemEventRecord:
+        """입력 이벤트를 내부 정규화 레코드로 변환한다."""
+        return core_build_event_record(self, payload)
+
+    def _rule_analyze_event(self, event: SystemEventRecord) -> dict[str, Any]:
+        """
+        규칙 기반 분석을 수행한다.
+        애매하지 않은 사건은 이 단계에서 바로 알림과 대응 권고를 생성한다.
+        """
+        return core_rule_analyze_event(self, event)
+
+    async def _llm_analyze_event(self, event: SystemEventRecord) -> Optional[dict[str, Any]]:
+        """
+        Ollama 계열 LLM이 설정되어 있으면 보조 판단을 요청한다.
+        실패하면 None을 반환하고 규칙 기반 판단으로 폴백한다.
+        """
+        return await core_llm_analyze_event(self, event)
+
+    async def _analyze_event(self, event: SystemEventRecord) -> dict[str, Any]:
+        """
+        이벤트를 분석해 알림 및 대응 권고를 만든다.
+        규칙이 먼저 적용되고, 애매한 경우 LLM 보조를 사용한다.
+        """
+        return await core_analyze_event(self, event)
+
+    def _record_event(self, event: SystemEventRecord) -> SystemEventRecord:
+        """이벤트를 상태에 저장하고 최신 흔적을 남긴다."""
+        return core_record_event(self, event)
+
+    def _record_alert(self, alert: SystemAlertRecord) -> SystemAlertRecord:
+        """알림을 상태에 저장한다."""
+        return core_record_alert(self, alert)
+
+    def _record_response(self, response: SystemResponseRecord) -> SystemResponseRecord:
+        """대응 결과를 상태에 저장한다."""
+        return core_record_response(self, response)
+
+    def _get_alert(self, alert_id: str) -> SystemAlertRecord:
+        """alert_id로 알림을 찾는다. 없으면 KeyError."""
+        return core_get_alert(self, alert_id)
+
+    def acknowledge_alert(self, alert_id: str, approved: bool = True, notes: Optional[str] = None) -> SystemAlertRecord:
+        """
+        사용자 승인을 기록한다.
+        승인된 알림은 status를 approved 또는 rejected로 전환한다.
+        """
+        return core_acknowledge_alert(self, alert_id, approved=approved, notes=notes)
+
+    async def sync_children_from_registry(self) -> dict[str, Any]:
+        """
+        03 디바이스 등록 서버에서 현재 Agent 목록을 가져와 하위 에이전트 레지스트리를 갱신한다.
+        regional_orchestrator가 없으면 direct route가 가능하도록 빈 목록도 허용한다.
+        """
+        return await core_sync_children_from_registry(self)
 
     # ── A2A 표준 메시지 처리 ──────────────────────────────────────────────
 
@@ -767,6 +909,8 @@ class ControlCenterHub:
             target_id = str(target.get("agent_id") or target.get("id") or "")
             if not target_id:
                 continue
+            target_transport = str(target.get("transport") or ("command" if target.get("command_endpoint") else "a2a"))
+            target_endpoint = target.get("command_endpoint") if target_transport == "command" else target.get("endpoint")
             message = A2AMessageInput(
                 message_type="task.assign",
                 message_id=str(uuid4()),
@@ -784,7 +928,12 @@ class ControlCenterHub:
                 },
                 route_hint={"preferred_route": "direct" if self.state.direct_route_allowed else "parent"},
             )
-            dispatch = await self._dispatch_message(message, target_id=target_id, target_endpoint=target.get("endpoint"))
+            dispatch = await self._dispatch_message(
+                message,
+                target_id=target_id,
+                target_endpoint=target_endpoint,
+                transport=target_transport,
+            )
             dispatches.append(dispatch)
         return dispatches
 
@@ -801,6 +950,24 @@ class ControlCenterHub:
 
         처리 후 _report_upstream()으로 상위 에이전트(있으면)에 결과를 보고한다.
         """
+        if payload.message_type in {"event.report", "system.event", "alert.report"}:
+            event_payload = payload.payload if isinstance(payload.payload, dict) else {}
+            event = SystemEventInput(
+                event_type=str(event_payload.get("event_type") or payload.message_type),
+                source_id=str(event_payload.get("source_id") or payload.from_agent_id),
+                source_role=str(event_payload.get("source_role") or payload.role or "unknown"),
+                severity=str(event_payload.get("severity") or "info"),
+                summary=event_payload.get("summary"),
+                payload=event_payload,
+                flow_id=payload.conversation_id,
+                causation_id=payload.message_id,
+                target_agent_id=event_payload.get("target_agent_id"),
+                target_role=event_payload.get("target_role"),
+                requires_user_approval=bool(event_payload.get("requires_user_approval", False)),
+                auto_response=event_payload.get("auto_response"),
+            )
+            return await self.ingest_system_event(event, routed_via=routed_via)
+
         record = self._record_message(payload, routed_via=routed_via)
         self.state.inbox.append(record)
         self.state.last_seen_at = utc_now_iso()
@@ -906,7 +1073,7 @@ class ControlCenterHub:
     async def _report_upstream(self, record: MessageRecord, out_messages: List[MessageRecord]) -> None:
         """
         상위 에이전트에 status.report 메시지를 발송한다.
-        control_center는 최상위이므로 parent_endpoint가 보통 비어 있다.
+        system_center는 최상위이므로 parent_endpoint가 보통 비어 있다.
         parent_endpoint가 설정된 경우에만 발송하며, 실패해도 예외를 전파하지 않는다.
         """
         if not self.state.parent_endpoint:
@@ -936,7 +1103,29 @@ class ControlCenterHub:
         except Exception as exc:
             self.state.remember({"kind": "a2a.report_failed", "at": utc_now_iso(), "error": str(exc)})
 
-    async def _dispatch_message(self, payload: A2AMessageInput, target_id: str, target_endpoint: Optional[str] = None) -> dict[str, Any]:
+    async def _dispatch_command(self, payload: A2AMessageInput, target_id: str, command_endpoint: str) -> dict[str, Any]:
+        """
+        디바이스 agent의 command endpoint로 명령을 발송한다.
+        command API는 A2A가 아니라 action/reason/priority/params 형태를 사용한다.
+        """
+        command = payload.payload.get("command") if isinstance(payload.payload, dict) else {}
+        if not isinstance(command, dict):
+            command = {}
+        body = {
+            "action": command.get("action") or payload.message_type,
+            "reason": command.get("reason") or payload.payload.get("reason") or "system remediation",
+            "priority": payload.priority,
+            "params": command.get("params") or {
+                "event": payload.payload.get("event"),
+                "alert": payload.payload.get("alert"),
+                "response": payload.payload.get("response"),
+            },
+        }
+        await _post_json(command_endpoint, body)
+        self.state.remember({"kind": "command.dispatch", "at": utc_now_iso(), "target": target_id, "status": "sent"})
+        return {"status": "sent", "target_agent_id": target_id, "target_endpoint": command_endpoint, "body": body}
+
+    async def _dispatch_message(self, payload: A2AMessageInput, target_id: str, target_endpoint: Optional[str] = None, transport: Optional[str] = None) -> dict[str, Any]:
         """
         단일 에이전트에게 A2A 메시지를 발송하는 내부 메서드.
         target_endpoint가 없으면 _child_index에서 조회한다.
@@ -944,22 +1133,25 @@ class ControlCenterHub:
         """
         record = self._record_message(payload, routed_via=self.state.agent_id, status_text="dispatching")
         self.state.dispatches.append(record.to_dict())
-        target = target_endpoint or self._child_index.get(
-            target_id,
-            ChildAgentRecord(target_id, "unknown"),
-        ).endpoint
-        if target:
-            await _send_a2a_message(target, payload.model_dump())
+        child = self._child_index.get(target_id)
+        transport_mode = transport or (child.transport if child else "a2a")
+        if transport_mode == "command" and child and child.command_endpoint:
+            await self._dispatch_command(payload, target_id, child.command_endpoint)
             record.status = "sent"
         else:
-            record.status = "queued"
+            target = target_endpoint or (child.endpoint if child else None)
+            if target:
+                await _send_a2a_message(target, payload.model_dump())
+                record.status = "sent"
+            else:
+                record.status = "queued"
         self.state.outbox.append(record)
         self.state.remember({"kind": "dispatch", "at": utc_now_iso(), "target": target_id, "status": record.status})
         return record.to_dict()
 
     async def dispatch(self, payload: DispatchInput) -> dict[str, Any]:
         """수동 dispatch 요청을 처리한다. _dispatch_message()의 공개 래퍼."""
-        return await self._dispatch_message(payload.message, payload.target_agent_id, payload.target_endpoint)
+        return await self._dispatch_message(payload.message, payload.target_agent_id, payload.target_endpoint, transport=payload.transport)
 
     async def assign_mission(self, mission_id: str, targets: list[dict[str, Any]], auto_dispatch: bool = True) -> dict[str, Any]:
         """
@@ -978,6 +1170,135 @@ class ControlCenterHub:
         self.state.remember({"kind": "mission.assigned", "at": utc_now_iso(), "mission_id": mission_id, "targets": targets})
         return {"mission": mission.to_dict(), "dispatched": dispatches}
 
+    async def ingest_system_event(self, payload: SystemEventInput, routed_via: Optional[str] = None) -> dict[str, Any]:
+        """
+        시스템 이벤트를 수집하고 알림/대응을 생성한다.
+        03/04/05/02 또는 사용자 입력에서 들어온 이벤트를 같은 흐름으로 처리한다.
+        """
+        event = self._build_event_record(payload)
+        self._record_event(event)
+        analysis = await self._analyze_event(event)
+        event.decision_strategy = str(analysis.get("analysis_source") or event.decision_strategy)
+        event.recommended_action = analysis.get("recommended_action")
+        event.target_agent_id = analysis.get("target_agent_id") or event.target_agent_id
+        event.route_mode = analysis.get("route_mode")
+        event.user_approval_required = bool(analysis.get("requires_user_approval", event.user_approval_required))
+        event.touch("analyzed")
+
+        alert = SystemAlertRecord(
+            alert_id=f"alert-{uuid4()}",
+            event_id=event.event_id,
+            alert_type=str(analysis.get("alert_type") or "system_event"),
+            severity=str(analysis.get("severity") or event.severity),
+            message=str(analysis.get("message") or event.summary),
+            status="waiting" if event.user_approval_required else "planned",
+            recommended_action=event.recommended_action,
+            target_agent_id=event.target_agent_id,
+            requires_user_approval=event.user_approval_required,
+            auto_remediated=False,
+            metadata={
+                "flow_id": event.flow_id,
+                "causation_id": event.causation_id,
+                "source_role": event.source_role,
+                "analysis_strategy": event.decision_strategy,
+                "analysis": analysis,
+                "routed_via": routed_via,
+            },
+        )
+        self._record_alert(alert)
+
+        response: Optional[SystemResponseRecord] = None
+        auto_response_allowed = bool(self.analysis_settings.get("auto_response", True))
+        if payload.auto_response is not None:
+            auto_response_allowed = bool(payload.auto_response)
+        if event.recommended_action and event.recommended_action != "alert_operator" and auto_response_allowed and not event.user_approval_required:
+            target = self._find_child_by_agent_id(event.target_agent_id or "") if event.target_agent_id else None
+            if target is None and analysis.get("target_role"):
+                target = self._find_child_by_role(str(analysis.get("target_role")))
+            if target is None:
+                direct_roles = set(self.registry_settings.get("direct_device_roles") or [])
+                if event.source_role in direct_roles:
+                    target = self._find_child_by_role(event.source_role)
+                if target is None and analysis.get("target_role") in direct_roles:
+                    target = self._find_child_by_role(str(analysis.get("target_role")))
+            if target is None:
+                control_ship_role = str(self.registry_settings.get("control_ship_role") or DEFAULT_CONTROL_SHIP_ROLE)
+                target = self._find_child_by_role(control_ship_role)
+
+            if target is not None:
+                route_mode = "via_regional_orchestrator" if target.role == str(self.registry_settings.get("control_ship_role") or DEFAULT_CONTROL_SHIP_ROLE) else "direct"
+                response = SystemResponseRecord(
+                    response_id=f"response-{uuid4()}",
+                    alert_id=alert.alert_id,
+                    action=str(event.recommended_action),
+                    target_agent_id=target.agent_id,
+                    target_endpoint=target.endpoint,
+                    route_mode=route_mode,
+                    status="dispatching",
+                    reason=str(analysis.get("llm_reason") or event.summary or "rule-based remediation"),
+                    task_id=event.flow_id or event.event_id,
+                    dispatch_result={},
+                    notes="auto response" if auto_response_allowed else "manual response",
+                )
+                response = self._record_response(response)
+                message = A2AMessageInput(
+                    message_type="task.assign",
+                    message_id=str(uuid4()),
+                    conversation_id=event.flow_id,
+                    task_id=response.task_id,
+                    from_agent_id=self.state.agent_id,
+                    to_agent_id=target.agent_id,
+                    role=target.role,
+                    scope=event.source_role,
+                    priority="high" if event.severity in {"warning", "critical"} else "normal",
+                    payload={
+                        "event": event.to_dict(),
+                        "alert": alert.to_dict(),
+                        "response": response.to_dict(),
+                        "command": {
+                            "action": event.recommended_action,
+                            "reason": response.reason,
+                            "target_role": analysis.get("target_role") or target.role,
+                        },
+                    },
+                    route_hint={"preferred_route": route_mode},
+                )
+                dispatch_result = await self._dispatch_message(message, target_id=target.agent_id, target_endpoint=target.endpoint)
+                response.dispatch_result = dispatch_result
+                response.touch("dispatched" if dispatch_result.get("status") == "sent" else "queued")
+                alert.auto_remediated = dispatch_result.get("status") == "sent"
+                alert.touch("in_progress" if alert.auto_remediated else "queued")
+                event.touch("responding")
+            else:
+                event.touch("waiting_user")
+        else:
+            event.touch("waiting_user" if event.user_approval_required else "analyzed")
+            if event.recommended_action == "alert_operator" or self.notification_settings.get("always_alert", True):
+                alert.touch("waiting_user" if event.user_approval_required else "notified")
+
+        self.state.registry_snapshot["last_event_at"] = utc_now_iso()
+        self.state.context["last_event"] = event.to_dict()
+        self.state.context["last_alert"] = alert.to_dict()
+        if response is not None:
+            self.state.context["last_response"] = response.to_dict()
+        self.state.remember(
+            {
+                "kind": "system.ingested",
+                "at": utc_now_iso(),
+                "event": event.to_dict(),
+                "alert": alert.to_dict(),
+                "response": response.to_dict() if response else None,
+            }
+        )
+        result: dict[str, Any] = {
+            "event": event.to_dict(),
+            "alert": alert.to_dict(),
+            "response": response.to_dict() if response else None,
+            "analysis": analysis,
+            "agent": self.state.to_dict(),
+        }
+        return result
+
     def reset(self) -> None:
         """인메모리 상태를 초기화한다. 개발·테스트 전용."""
         self.state.children = []
@@ -986,9 +1307,21 @@ class ControlCenterHub:
         self.state.outbox = []
         self.state.dispatches = []
         self.state.tasks = []
+        self.state.events = []
+        self.state.alerts = []
+        self.state.responses = []
+        self.state.registry_snapshot = {
+            "device_registry_url": self.registry_settings.get("device_registry_url"),
+            "control_ship_role": self.registry_settings.get("control_ship_role"),
+            "direct_device_roles": list(self.registry_settings.get("direct_device_roles") or []),
+            "auto_sync_on_start": bool(self.registry_settings.get("auto_sync_on_start", True)),
+            "sync_interval_seconds": int(self.registry_settings.get("sync_interval_seconds") or 30),
+        }
         self.state.memory = []
         self.state.context = {}
         self._child_index = {}
+        self._manual_child_ids = set()
+        self._registry_child_ids = set()
         self._mission_index = {}
         self._task_index = {}
 
@@ -1042,13 +1375,55 @@ async def _send_a2a_message(url: str, payload: dict[str, Any], timeout: float = 
 APP_SETTINGS = load_runtime_config(CONFIG_PATH)
 hub = ControlCenterHub(APP_SETTINGS)
 
-app = FastAPI(title="CoWater Control Center System Agent", version="0.1.0")
+app = FastAPI(title="CoWater System Center Agent", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=APP_SETTINGS["cors"]["allow_origins"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_registry_sync_task: Optional[asyncio.Task] = None
+
+
+@app.on_event("startup")
+async def startup_sync() -> None:
+    """시작 시 03 등록 서버와 동기화해 최신 child manifest를 불러온다."""
+    global _registry_sync_task
+    registry_cfg = APP_SETTINGS.get("registry", {})
+    if registry_cfg.get("auto_sync_on_start", True):
+        try:
+            await hub.sync_children_from_registry()
+        except Exception:
+            # 시작 실패가 전체 서버 실패로 이어지지 않도록 조용히 넘긴다.
+            pass
+    interval = int(registry_cfg.get("sync_interval_seconds") or 0)
+    if interval > 0 and _registry_sync_task is None:
+        async def _poll_registry() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                    await hub.sync_children_from_registry()
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    hub.state.remember({"kind": "registry.poll_failed", "at": utc_now_iso(), "error": str(exc)})
+        _registry_sync_task = asyncio.create_task(_poll_registry())
+
+
+@app.on_event("shutdown")
+async def shutdown_sync() -> None:
+    """백그라운드 registry polling task를 종료한다."""
+    global _registry_sync_task
+    if _registry_sync_task is not None:
+        _registry_sync_task.cancel()
+        try:
+            await _registry_sync_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+        _registry_sync_task = None
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1085,6 +1460,13 @@ def meta() -> dict[str, Any]:
     return {
         "server": APP_SETTINGS["server"],
         "agent": APP_SETTINGS["agent"],
+        "registry": APP_SETTINGS.get("registry", {}),
+        "analysis": {
+            "auto_response": APP_SETTINGS.get("analysis", {}).get("auto_response", True),
+            "llm_enabled": bool((APP_SETTINGS.get("analysis", {}).get("llm") or {}).get("provider") and (APP_SETTINGS.get("analysis", {}).get("llm") or {}).get("model")),
+            "strategy": "hybrid" if bool((APP_SETTINGS.get("analysis", {}).get("llm") or {}).get("provider") and (APP_SETTINGS.get("analysis", {}).get("llm") or {}).get("model")) else "rule",
+        },
+        "notifications": APP_SETTINGS.get("notifications", {}),
         "config_path": APP_SETTINGS["config_path"],
         "cors": APP_SETTINGS["cors"],
         "a2a": {
@@ -1100,6 +1482,10 @@ def meta() -> dict[str, Any]:
             "task.fail",
             "task.escalate",
             "status.report",
+            "event.report",
+            "system.event",
+            "system.alert",
+            "user.command",
         ],
     }
 
@@ -1108,6 +1494,12 @@ def meta() -> dict[str, Any]:
 def state() -> dict[str, Any]:
     """에이전트의 전체 런타임 상태(inbox·outbox·missions·memory 등)를 반환한다."""
     return hub.state.to_dict()
+
+
+@app.get("/registry")
+def registry() -> dict[str, Any]:
+    """동기화된 child registry snapshot을 반환한다."""
+    return hub.state.registry_snapshot
 
 
 @app.get("/manifest")
@@ -1183,6 +1575,63 @@ def heartbeat_child(agent_id: str) -> dict[str, Any]:
         return hub.heartbeat_child(agent_id).to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="child agent not found") from exc
+
+
+# ── 시스템 이벤트 / 알림 / 대응 ───────────────────────────────────────────
+
+@app.get("/events")
+def list_events() -> list[dict[str, Any]]:
+    """수집된 시스템 이벤트 목록을 반환한다."""
+    return [event.to_dict() for event in hub.state.events]
+
+
+@app.get("/alerts")
+def list_alerts() -> list[dict[str, Any]]:
+    """분석 결과로 생성된 알림 목록을 반환한다."""
+    return [alert.to_dict() for alert in hub.state.alerts]
+
+
+@app.get("/responses")
+def list_responses() -> list[dict[str, Any]]:
+    """알림에 대한 대응 기록을 반환한다."""
+    return [response.to_dict() for response in hub.state.responses]
+
+
+@app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
+async def ingest_event(request: SystemEventInput) -> dict[str, Any]:
+    """외부 시스템에서 들어온 실시간 이벤트를 분석하고 필요한 대응을 생성한다."""
+    return await hub.ingest_system_event(request)
+
+
+@app.post("/events/ingest/a2a", status_code=status.HTTP_201_CREATED)
+async def ingest_event_a2a(request: SendMessageRequest) -> dict[str, Any]:
+    """
+    A2A 메시지 형태로 들어오는 시스템 이벤트를 수신한다.
+    message.parts 안의 data가 event payload 역할을 한다.
+    """
+    return await hub.send_message(request)
+
+
+@app.post("/registry/sync")
+async def sync_registry() -> dict[str, Any]:
+    """03 디바이스 등록 서버와 동기화하여 최신 child manifest를 불러온다."""
+    return await hub.sync_children_from_registry()
+
+
+@app.post("/alerts/{alert_id}/ack")
+async def acknowledge_alert(alert_id: str, request: ResponseApprovalInput) -> dict[str, Any]:
+    """사용자 승인을 알림 상태에 기록한다."""
+    try:
+        alert = hub.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes)
+        store_url = str(APP_SETTINGS.get("notifications", {}).get("notification_store_url") or "").rstrip("/")
+        if store_url:
+            try:
+                await remote_acknowledge_alert(store_url, alert_id, {"approved": request.approved, "notes": request.notes})
+            except Exception as exc:
+                hub.state.remember({"kind": "alert.store_ack_failed", "at": utc_now_iso(), "error": str(exc), "alert_id": alert_id})
+        return alert.to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="alert not found") from exc
 
 
 # ── 미션 관리 ──────────────────────────────────────────────────────────────

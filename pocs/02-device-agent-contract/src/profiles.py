@@ -210,6 +210,10 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
         if device_type in profiles and isinstance(profile, dict):
             profiles[device_type].update(profile)
 
+    agent_cfg = raw.get("agent") or {}
+    agent_id = str(pick("COWATER_AGENT_ID", agent_cfg.get("id"), "device-hub-01"))
+    agent_role = str(pick("COWATER_AGENT_ROLE", agent_cfg.get("role"), "device_hub"))
+
     return {
         "config_path": str(config_path),
         "server": {
@@ -224,4 +228,8 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
             "secret_key": registry_secret_key,
         },
         "profiles": profiles,
+        "agent": {
+            "id": agent_id,
+            "role": agent_role,
+        },
     }

@@ -1,6 +1,6 @@
 # 05 Control Ship Agent
 
-You are the mid-tier `control_ship` coordination agent.
+You are the mid-tier `regional_orchestrator` coordination agent.
 
 ## Purpose
 

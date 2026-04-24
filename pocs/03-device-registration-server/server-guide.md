@@ -164,7 +164,7 @@ PUT /devices/{deviceId}/agent
 - `endpoint`: Agent가 디바이스 스트림과 연결되는 WebSocket 주소
 - `commandEndpoint`: 원격 사용자가 Agent에 명령을 보낼 때 쓰는 HTTP 주소
 - `llm_enabled`: 이 Agent가 LLM 기반 hybrid 판단을 사용하는지 여부
-- `role`: Agent 역할 식별자. 예: `usv`, `auv`, `rov`, `control_ship`
+- `role`: Agent 역할 식별자. 예: `system_center`, `regional_orchestrator`, `mission_orchestrator`, `device_agent`, `usv`, `auv`, `rov`
 - `skills`: 이 Agent가 수행할 수 있는 작업 이름 목록
 - `available_actions`: 실제 명령으로 허용할 액션 이름 목록
 - `connected`: 현재 연결 여부
@@ -172,6 +172,28 @@ PUT /devices/{deviceId}/agent
 
 이 서버는 판단용으로 필요한 최소 정보만 저장합니다.  
 상세 제약이나 장황한 설명은 Agent 쪽 `AGENT.md`와 `manifest`에서 관리하고, 03 서버는 라우팅과 연결 판단에 필요한 값만 유지합니다.
+
+### 1.3 알림/대응 원장
+
+03 서버는 디바이스 등록 원장 외에도 시스템 알림과 대응 기록의 canonical store 역할을 합니다.
+
+#### 엔드포인트
+```http
+POST /alerts/ingest
+GET /alerts
+GET /alerts/{alert_id}
+POST /alerts/{alert_id}/ack
+POST /responses/ingest
+GET /responses
+GET /responses/{response_id}
+```
+
+#### 의미
+- `alerts`: 시스템 이벤트 분석 결과로 생성된 알림
+- `responses`: 알림에 대한 자동/수동 대응 기록
+- `ack`: 사용자 승인/반려 상태 기록
+
+06 시스템 Agent는 알림을 생성하면 이 원장으로 게시하고, 사용자 승인이나 대응 결과가 생기면 같은 원장에 갱신합니다.
 
 Agent가 연결이 끊기면 `DELETE /devices/{deviceId}/agent?secretKey=...`로 연결 해제 상태를 저장합니다.
 

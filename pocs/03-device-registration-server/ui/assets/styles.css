@@ -112,6 +112,28 @@ button, input, select, textarea {
   justify-content: flex-end;
 }
 
+.header-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-menu a {
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+  transition: 0.2s ease;
+}
+
+.header-menu a:hover,
+.header-menu a.active {
+  color: var(--text);
+  border-color: rgba(45, 212, 191, 0.5);
+  background: rgba(45, 212, 191, 0.08);
+}
+
 .api-pill,
 .status-pill,
 .mini-pill {
@@ -373,6 +395,10 @@ th {
 
 tr:hover td {
   background: rgba(45, 212, 191, 0.04);
+}
+
+tbody tr.selected td {
+  background: rgba(45, 212, 191, 0.08);
 }
 
 .badge {

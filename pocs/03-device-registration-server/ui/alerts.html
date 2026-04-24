@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alerts - CoWater Device Server</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body data-page="alerts">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">03</div>
+        <div>
+          <h1>Alerts Ledger</h1>
+          <p>Canonical alert records, acknowledgement, and operational context.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="api-pill">
+          <span>API</span>
+          <input data-bind="apiBase" aria-label="API base URL">
+        </div>
+        <button class="button" id="refresh-alerts" type="button">Refresh</button>
+        <div class="header-menu">
+          <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+          <a href="devices.html" data-nav-link="devices">Devices</a>
+          <a href="register.html" data-nav-link="register">Register</a>
+          <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="settings.html" data-nav-link="settings">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="split" style="align-items: end;">
+          <div>
+            <h2>All Alerts</h2>
+            <p class="lead">These records are the canonical operational alerts stored by server 03.</p>
+          </div>
+          <div class="field">
+            <label for="alert-search">Search alerts</label>
+            <input id="alert-search" placeholder="id, source, type, or message">
+          </div>
+        </div>
+        <div id="alerts-error"></div>
+        <div class="table-wrap" style="margin-top: 18px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Alert</th>
+                <th>Status</th>
+                <th>Severity</th>
+                <th>Source</th>
+                <th>Type</th>
+                <th>Target</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-body">
+              <tr><td colspan="8" class="muted">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Selected Alert</h2>
+        <p class="lead">Open an alert to inspect the canonical record and acknowledge it here.</p>
+        <div id="alert-detail"></div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

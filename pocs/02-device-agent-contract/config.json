@@ -3,6 +3,10 @@
     "host": "127.0.0.1",
     "port": 9010
   },
+  "agent": {
+    "id": "device-hub-01",
+    "role": "device_hub"
+  },
   "cors": {
     "allow_origins": ["*"]
   },

@@ -27,8 +27,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
 CONFIG_PATH = Path(os.getenv("COWATER_CONTROL_SHIP_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 9011
-DEFAULT_AGENT_ID = "control_ship-01"
-DEFAULT_AGENT_ROLE = "control_ship"
+DEFAULT_AGENT_ID = "regional_orchestrator-01"
+DEFAULT_AGENT_ROLE = "regional_orchestrator"
 DEFAULT_PARENT_ID = "control_center-01"           # 상위 에이전트 ID (control_center)
 DEFAULT_PARENT_ENDPOINT = "http://127.0.0.1:9012"  # 상위 에이전트 HTTP 주소
 DEFAULT_CORS_ORIGINS = ["*"]
@@ -92,7 +92,7 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
 class ChildAgentRecord:
     """
     하위 에이전트(USV·AUV·ROV 등) 한 개의 등록 정보.
-    control_ship이 작업을 위임할 수 있는 대상 목록을 구성한다.
+    regional_orchestrator가 작업을 위임할 수 있는 대상 목록을 구성한다.
     """
     agent_id: str
     role: str
@@ -194,7 +194,7 @@ class TaskRecord:
 @dataclass
 class ControlShipState:
     """
-    control_ship 에이전트의 전체 런타임 상태.
+    regional_orchestrator 에이전트의 전체 런타임 상태.
     ControlShipHub 내부에서 단일 인스턴스로 관리된다.
     """
     agent_id: str
@@ -338,12 +338,12 @@ class SendMessageRequest(BaseModel):
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# ControlShipHub — control_ship 에이전트의 핵심 비즈니스 로직
+# RegionalOrchestratorHub — regional_orchestrator 에이전트의 핵심 비즈니스 로직
 # ────────────────────────────────────────────────────────────────────────────
 
 class ControlShipHub:
     """
-    control_ship 에이전트의 중앙 허브.
+    regional_orchestrator 에이전트의 중앙 허브.
 
     역할:
     - 상위(control_center)로부터 task.assign 수신 → 하위 에이전트에게 dispatch
@@ -517,7 +517,7 @@ class ControlShipHub:
         return {
             "name": self.state.agent_id,
             "displayName": "CoWater Control Ship Agent",
-            "description": "Mid-tier control_ship A2A agent for dispatching child agents and relaying status upstream.",
+            "description": "Mid-tier regional_orchestrator A2A agent for dispatching child agents and relaying status upstream.",
             "url": base_url,
             "version": "1.0.0",
             "protocolVersion": "1.0.0",
@@ -685,8 +685,17 @@ class ControlShipHub:
                         scope=payload.scope,
                         priority=payload.priority,
                         ttl=payload.ttl,
-                        payload={"parent_task": record.to_dict(), "command": payload.payload},
-                        route_hint={"preferred_route": "direct" if self.state.direct_route_allowed else "parent"},
+                        payload={
+                            "parent_task": record.to_dict(),
+                            "command": payload.payload,
+                            "from_agent_id": self.state.agent_id,
+                            # 하위 에이전트(02)가 처리 결과를 돌려보낼 엔드포인트
+                            "reply_endpoint": f"http://{self.settings['server']['host']}:{self.settings['server']['port']}",
+                        },
+                        route_hint={
+                            "preferred_route": "direct" if self.state.direct_route_allowed else "parent",
+                            "reply_to": f"http://{self.settings['server']['host']}:{self.settings['server']['port']}",
+                        },
                         received_at=utc_now_iso(),
                         routed_via=self.state.agent_id,
                         status="planned",  # 실제 전송은 하위 에이전트가 연결될 때

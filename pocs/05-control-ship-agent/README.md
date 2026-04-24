@@ -1,6 +1,6 @@
-# 05 Control Ship Agent
+# 05 Regional Orchestrator Agent
 
-This POC models the `control_ship` layer in the A2A hierarchy.
+This POC models the `regional_orchestrator` layer in the A2A hierarchy.
 
 ## What it does
 
@@ -36,6 +36,6 @@ python3 device_agent_server.py
 
 ## A2A flow
 
-- `control_center -> control_ship`: `task.assign`
-- `control_ship -> control_center`: `task.accept` / `status.report`
-- `control_ship -> device agents`: planned dispatch records
+- `system_center -> regional_orchestrator`: `task.assign`
+- `regional_orchestrator -> system_center`: `task.accept` / `status.report`
+- `regional_orchestrator -> device agents`: planned dispatch records

@@ -4,12 +4,38 @@
     "port": 9012
   },
   "agent": {
-    "id": "control_center-01",
-    "role": "control_center",
+    "id": "system_center-01",
+    "role": "system_center",
     "parent_id": "",
     "parent_endpoint": "",
     "direct_route_allowed": true,
     "mission_prefix": "mission"
+  },
+  "registry": {
+    "device_registry_url": "http://127.0.0.1:8003",
+    "control_ship_role": "regional_orchestrator",
+    "direct_device_roles": ["usv", "auv", "rov"],
+    "auto_sync_on_start": true,
+    "sync_interval_seconds": 30
+  },
+  "analysis": {
+    "auto_response": true,
+    "approval_required_actions": [
+      "mission.abort",
+      "system.shutdown",
+      "task.cancel"
+    ],
+    "llm": {
+      "provider": "ollama",
+      "model": "gemma4",
+      "base_url": "http://127.0.0.1:11434",
+      "temperature": 0.2
+    }
+  },
+  "notifications": {
+    "retain": 100,
+    "always_alert": true,
+    "notification_store_url": "http://127.0.0.1:8003"
   },
   "cors": {
     "allow_origins": ["*"]

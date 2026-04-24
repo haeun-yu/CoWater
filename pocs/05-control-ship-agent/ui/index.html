@@ -69,7 +69,7 @@
           <textarea id="payload" rows="6">{}</textarea>
         </div>
         <div class="row" style="grid-template-columns:1fr 1fr 1fr;">
-          <input id="from-agent" placeholder="control_ship-01">
+          <input id="from-agent" placeholder="regional_orchestrator-01">
           <input id="to-agent" placeholder="device-agent-id">
           <input id="task-id" placeholder="task-001">
         </div>
@@ -124,7 +124,7 @@
         target_endpoint: $("target-endpoint").value.trim() || null,
         message: {
           message_type: $("message-type").value,
-          from_agent_id: $("from-agent").value.trim() || 'control_ship-01',
+          from_agent_id: $("from-agent").value.trim() || 'regional_orchestrator-01',
           to_agent_id: $("to-agent").value.trim(),
           task_id: $("task-id").value.trim() || null,
           payload,
