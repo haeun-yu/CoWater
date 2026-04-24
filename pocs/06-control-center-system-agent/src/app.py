@@ -7,10 +7,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from uuid import uuid4
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -269,18 +268,6 @@ class SendMessageRequest(BaseModel):
     context_id: Optional[str] = Field(default=None, alias="contextId")
 
 
-class GetTaskRequest(BaseModel):
-    task_id: str = Field(alias="id")
-
-
-class ListTasksRequest(BaseModel):
-    status: Optional[str] = None
-
-
-class CancelTaskRequest(BaseModel):
-    task_id: str = Field(alias="id")
-
-
 @dataclass
 class TaskArtifactRecord:
     name: str
@@ -398,7 +385,7 @@ class ControlCenterHub:
 
     def _record_message(self, payload: A2AMessageInput, routed_via: Optional[str] = None, status_text: str = "received") -> MessageRecord:
         return MessageRecord(
-            message_id=payload.message_id or f"msg-{len(self.state.inbox) + len(self.state.outbox) + 1}",
+            message_id=payload.message_id or str(uuid4()),
             message_type=payload.message_type,
             from_agent_id=payload.from_agent_id,
             to_agent_id=payload.to_agent_id,
@@ -449,7 +436,7 @@ class ControlCenterHub:
             "supported_outputs": ["application/json", "text/plain"],
             "capabilities": {
                 "streaming": False,
-                "push_notifications": False,
+                "pushNotifications": False,
                 "direct_route_allowed": self.state.direct_route_allowed,
             },
             "parent_id": self.state.parent_id,
@@ -528,7 +515,7 @@ class ControlCenterHub:
                 return {"text": part.text}
         return {}
 
-    def send_message(self, request: SendMessageRequest) -> dict[str, Any]:
+    async def send_message(self, request: SendMessageRequest) -> dict[str, Any]:
         task = self._new_task("working")
         task.message = request.message.model_dump(by_alias=True)
         data = self._extract_message_data(request.message.parts)
@@ -546,7 +533,7 @@ class ControlCenterHub:
             payload=data,
             route_hint=data.get("route_hint") if isinstance(data.get("route_hint"), dict) else None,
         )
-        result = self.ingest_message(payload, routed_via="a2a/message:send")
+        result = await self.ingest_message(payload, routed_via="a2a/message:send")
         self._attach_task_artifacts(task, result)
         return {"task": task.to_dict()}
 
@@ -579,7 +566,7 @@ class ControlCenterHub:
             return [target for target in assigned if isinstance(target, dict)]
         return []
 
-    def create_mission(self, payload: MissionInput) -> dict[str, Any]:
+    async def create_mission(self, payload: MissionInput) -> dict[str, Any]:
         mission = MissionRecord(
             mission_id=self._mission_id(payload.mission_id),
             title=payload.title,
@@ -599,10 +586,10 @@ class ControlCenterHub:
         self.state.remember({"kind": "mission.created", "at": utc_now_iso(), "mission": mission.to_dict()})
         result = {"mission": mission.to_dict(), "dispatched": []}
         if payload.auto_dispatch and mission.assigned_targets:
-            result["dispatched"] = self._dispatch_targets(mission, mission.assigned_targets)
+            result["dispatched"] = await self._dispatch_targets(mission, mission.assigned_targets)
         return result
 
-    def _dispatch_targets(self, mission: MissionRecord, targets: list[dict[str, Any]], source_message: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+    async def _dispatch_targets(self, mission: MissionRecord, targets: list[dict[str, Any]], source_message: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
         dispatches: list[dict[str, Any]] = []
         for target in targets:
             target_id = str(target.get("agent_id") or target.get("id") or "")
@@ -610,7 +597,7 @@ class ControlCenterHub:
                 continue
             message = A2AMessageInput(
                 message_type="task.assign",
-                message_id=f"dispatch-{len(self.state.dispatches) + len(dispatches) + 1}",
+                message_id=str(uuid4()),
                 conversation_id=mission.conversation_id,
                 task_id=mission.task_id or mission.mission_id,
                 from_agent_id=self.state.agent_id,
@@ -625,11 +612,11 @@ class ControlCenterHub:
                 },
                 route_hint={"preferred_route": "direct" if self.state.direct_route_allowed else "parent"},
             )
-            dispatch = self._dispatch_message(message, target_id=target_id, target_endpoint=target.get("endpoint"))
+            dispatch = await self._dispatch_message(message, target_id=target_id, target_endpoint=target.get("endpoint"))
             dispatches.append(dispatch)
         return dispatches
 
-    def ingest_message(self, payload: A2AMessageInput, routed_via: Optional[str] = None) -> dict[str, Any]:
+    async def ingest_message(self, payload: A2AMessageInput, routed_via: Optional[str] = None) -> dict[str, Any]:
         record = self._record_message(payload, routed_via=routed_via)
         self.state.inbox.append(record)
         self.state.last_seen_at = utc_now_iso()
@@ -643,7 +630,7 @@ class ControlCenterHub:
         if payload.message_type == "task.assign":
             mission_payload = payload.payload.get("mission")
             if isinstance(mission_payload, dict):
-                created = self.create_mission(
+                created = await self.create_mission(
                     MissionInput(
                         mission_id=str(mission_payload.get("mission_id") or payload.task_id or ""),
                         title=str(mission_payload.get("title") or payload.payload.get("title") or "Untitled mission"),
@@ -676,10 +663,9 @@ class ControlCenterHub:
                 self._mission_index[mission.mission_id] = mission
                 self.state.missions = list(self._mission_index.values())
             if mission.assigned_targets:
-                dispatches = self._dispatch_targets(mission, mission.assigned_targets, source_message=record.to_dict())
-                out_messages.extend(MessageRecord(**item) for item in dispatches if isinstance(item, dict))  # pragma: no cover
+                await self._dispatch_targets(mission, mission.assigned_targets, source_message=record.to_dict())
             ack = MessageRecord(
-                message_id=f"ack-{record.message_id}",
+                message_id=str(uuid4()),
                 message_type="task.accept",
                 from_agent_id=self.state.agent_id,
                 to_agent_id=payload.from_agent_id,
@@ -713,7 +699,7 @@ class ControlCenterHub:
                 mission.notes = str(payload.payload.get("reason") or mission.notes or "")
 
         self.state.outbox.extend(out_messages)
-        self._report_upstream(record, out_messages)
+        await self._report_upstream(record, out_messages)
         return {
             "status": response_status,
             "agent": self.state.to_dict(),
@@ -721,12 +707,12 @@ class ControlCenterHub:
             "outbox": [msg.to_dict() for msg in out_messages],
         }
 
-    def _report_upstream(self, record: MessageRecord, out_messages: List[MessageRecord]) -> None:
+    async def _report_upstream(self, record: MessageRecord, out_messages: List[MessageRecord]) -> None:
         if not self.state.parent_endpoint:
             return
         report = {
             "message_type": "status.report",
-            "message_id": f"report-{record.message_id}",
+            "message_id": str(uuid4()),
             "conversation_id": record.conversation_id,
             "task_id": record.task_id,
             "from_agent_id": self.state.agent_id,
@@ -744,17 +730,17 @@ class ControlCenterHub:
             "route_hint": {"preferred_route": "upstream"},
         }
         try:
-            _send_a2a_message(self.state.parent_endpoint, report)
+            await _send_a2a_message(self.state.parent_endpoint, report)
             self.state.remember({"kind": "a2a.report", "at": utc_now_iso(), "target": self.state.parent_endpoint, "payload": report})
         except Exception as exc:
             self.state.remember({"kind": "a2a.report_failed", "at": utc_now_iso(), "error": str(exc)})
 
-    def _dispatch_message(self, payload: A2AMessageInput, target_id: str, target_endpoint: Optional[str] = None) -> dict[str, Any]:
+    async def _dispatch_message(self, payload: A2AMessageInput, target_id: str, target_endpoint: Optional[str] = None) -> dict[str, Any]:
         record = self._record_message(payload, routed_via=self.state.agent_id, status_text="dispatching")
         self.state.dispatches.append(record.to_dict())
         target = target_endpoint or self._child_index.get(target_id, ChildAgentRecord(target_id, "unknown")).endpoint
         if target:
-            _send_a2a_message(target, payload.model_dump())
+            await _send_a2a_message(target, payload.model_dump())
             record.status = "sent"
         else:
             record.status = "queued"
@@ -762,10 +748,10 @@ class ControlCenterHub:
         self.state.remember({"kind": "dispatch", "at": utc_now_iso(), "target": target_id, "status": record.status})
         return record.to_dict()
 
-    def dispatch(self, payload: DispatchInput) -> dict[str, Any]:
-        return self._dispatch_message(payload.message, payload.target_agent_id, payload.target_endpoint)
+    async def dispatch(self, payload: DispatchInput) -> dict[str, Any]:
+        return await self._dispatch_message(payload.message, payload.target_agent_id, payload.target_endpoint)
 
-    def assign_mission(self, mission_id: str, targets: list[dict[str, Any]], auto_dispatch: bool = True) -> dict[str, Any]:
+    async def assign_mission(self, mission_id: str, targets: list[dict[str, Any]], auto_dispatch: bool = True) -> dict[str, Any]:
         mission = self._mission_index.get(mission_id)
         if mission is None:
             raise KeyError(mission_id)
@@ -774,7 +760,7 @@ class ControlCenterHub:
         self.state.missions = list(self._mission_index.values())
         dispatches: list[dict[str, Any]] = []
         if auto_dispatch and targets:
-            dispatches = self._dispatch_targets(mission, targets)
+            dispatches = await self._dispatch_targets(mission, targets)
         self.state.remember({"kind": "mission.assigned", "at": utc_now_iso(), "mission_id": mission_id, "targets": targets})
         return {"mission": mission.to_dict(), "dispatched": dispatches}
 
@@ -792,34 +778,33 @@ class ControlCenterHub:
         self._task_index = {}
 
 
-def _post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+async def _post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
     try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            if not raw:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            if not resp.content:
                 return {}
-            return json.loads(raw.decode("utf-8"))
-    except HTTPError as exc:
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
         detail = ""
         try:
-            detail = json.loads(exc.read().decode("utf-8")).get("detail", "")
+            detail = exc.response.json().get("detail", "")
         except Exception:
             pass
-        raise RuntimeError(detail or f"HTTP {exc.code}") from exc
-    except URLError as exc:
+        raise RuntimeError(detail or f"HTTP {exc.response.status_code}") from exc
+    except httpx.RequestError as exc:
         raise RuntimeError(str(exc)) from exc
 
 
-def _send_a2a_message(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+async def _send_a2a_message(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
     body = {
         "message": {
             "role": "agent",
             "parts": [{"type": "data", "data": payload}],
         }
     }
-    return _post_json(f"{url.rstrip('/')}/message:send", body, timeout=timeout)
+    return await _post_json(f"{url.rstrip('/')}/message:send", body, timeout=timeout)
 
 
 APP_SETTINGS = load_runtime_config(CONFIG_PATH)
@@ -884,8 +869,8 @@ def manifest() -> dict[str, Any]:
 
 
 @app.post("/message:send")
-def message_send(request: SendMessageRequest) -> dict[str, Any]:
-    return hub.send_message(request)
+async def message_send(request: SendMessageRequest) -> dict[str, Any]:
+    return await hub.send_message(request)
 
 
 @app.get("/tasks")
@@ -938,16 +923,16 @@ def list_missions() -> list[dict[str, Any]]:
 
 
 @app.post("/missions", status_code=status.HTTP_201_CREATED)
-def create_mission(request: MissionInput) -> dict[str, Any]:
-    return hub.create_mission(request)
+async def create_mission(request: MissionInput) -> dict[str, Any]:
+    return await hub.create_mission(request)
 
 
 @app.post("/missions/{mission_id}/assign")
-def assign_mission(mission_id: str, request: dict[str, Any]) -> dict[str, Any]:
+async def assign_mission(mission_id: str, request: dict[str, Any]) -> dict[str, Any]:
     targets = request.get("targets") if isinstance(request.get("targets"), list) else []
     auto_dispatch = bool(request.get("auto_dispatch", True))
     try:
-        return hub.assign_mission(mission_id, [target for target in targets if isinstance(target, dict)], auto_dispatch=auto_dispatch)
+        return await hub.assign_mission(mission_id, [target for target in targets if isinstance(target, dict)], auto_dispatch=auto_dispatch)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="mission not found") from exc
 
@@ -967,15 +952,10 @@ def dispatches() -> list[dict[str, Any]]:
     return list(hub.state.dispatches)
 
 
-@app.post("/a2a/inbox")
-def a2a_inbox(request: A2AMessageInput) -> dict[str, Any]:
-    return hub.ingest_message(request)
-
-
 @app.post("/dispatch")
-def dispatch(request: DispatchInput) -> dict[str, Any]:
+async def dispatch(request: DispatchInput) -> dict[str, Any]:
     try:
-        return hub.dispatch(request)
+        return await hub.dispatch(request)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

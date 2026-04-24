@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 02 디바이스 에이전트 허브의 FastAPI 애플리케이션과 웹소켓 흐름을 정의한다.
+
 import asyncio
 import argparse
 from typing import Any, Optional
@@ -58,23 +60,50 @@ def meta() -> dict[str, Any]:
     }
 
 
-@app.get("/.well-known/agent.json")
-def agent_card() -> dict[str, Any]:
+def _build_agent_card() -> dict[str, Any]:
+    base_url = f"http://{APP_SETTINGS['server']['host']}:{APP_SETTINGS['server']['port']}"
     return {
         "name": "cowater-device-agent-hub",
-        "description": "Per-device Agent hub for USV, AUV, and ROV sessions.",
-        "url": f"http://{APP_SETTINGS['server']['host']}:{APP_SETTINGS['server']['port']}",
+        "displayName": "CoWater Device Agent Hub",
+        "description": "Per-device Agent hub for USV, AUV, and ROV telemetry sessions. Accepts WebSocket streams and issues rule-based recommendations.",
+        "url": base_url,
+        "version": "2.0.0",
+        "protocolVersion": "1.0.0",
         "capabilities": {
-            "stream_ingest": True,
-            "recommendations": True,
-            "commands": True,
+            "streaming": False,
+            "pushNotifications": False,
+            "extendedAgentCard": False,
         },
-        "registry": APP_SETTINGS["registry"],
-        "agent_types": ["usv", "auv", "rov"],
-        "agent_modes": ["static", "dynamic"],
-        "llm_optional": True,
-        "profiles": list(APP_SETTINGS["profiles"].keys()),
+        "defaultInputModes": ["application/json"],
+        "defaultOutputModes": ["application/json"],
+        "skills": [
+            {
+                "id": "stream_ingest",
+                "name": "Stream Ingest",
+                "description": "Accept device telemetry over WebSocket and extract position, motion, and sensor data.",
+            },
+            {
+                "id": "rule_recommendation",
+                "name": "Rule Recommendation",
+                "description": "Produce scoped action recommendations from device state without requiring an LLM.",
+            },
+            {
+                "id": "command_relay",
+                "name": "Command Relay",
+                "description": "Accept operator commands and forward them to the connected device session.",
+            },
+        ],
     }
+
+
+@app.get("/.well-known/agent-card.json")
+def agent_card() -> dict[str, Any]:
+    return _build_agent_card()
+
+
+@app.get("/.well-known/agent.json")
+def agent_card_legacy() -> dict[str, Any]:
+    return _build_agent_card()
 
 
 @app.get("/agents")
