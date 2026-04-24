@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 공통 디바이스 에이전트 동작과 프로필 적용 로직을 정의한다.
+
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 

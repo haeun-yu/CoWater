@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 디바이스별 에이전트 세션을 관리하고 03 등록 서버와 동기화한다.
+
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 

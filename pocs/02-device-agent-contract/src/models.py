@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 02 에이전트 허브에서 주고받는 상태, 추천, 명령의 데이터 구조를 정의한다.
+
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional

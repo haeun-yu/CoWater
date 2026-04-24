@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+# 타입별 Agent에게 계획 생성을 위임하는 호환 래퍼를 제공한다.
+
 from typing import Any
 
 from .agents import DeviceAgentBase, create_agent
 
 
 class AgentPlanner:
-    """Compatibility wrapper that delegates planning to a type-specific Agent."""
+    """타입별 Agent에게 계획 생성을 위임하는 호환 래퍼."""
 
     def __init__(self, profiles: dict[str, dict[str, Any]]) -> None:
         self._profiles = profiles

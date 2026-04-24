@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 03 등록 서버와 에이전트 연결 정보를 주고받는 HTTP 클라이언트를 제공한다.
+
 import asyncio
 import json
 import urllib.error

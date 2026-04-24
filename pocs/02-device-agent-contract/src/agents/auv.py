@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# AUV 디바이스에 대한 추천과 판단 규칙을 담는다.
+
 from typing import Any, List
 
 from ..models import AgentRecommendationRecord, DeviceAgentStateRecord
