@@ -203,8 +203,9 @@
         <span class="control-value" id="depth-value">-300m ~ 0m 표시</span>
         <div class="shortcuts">
             <strong>단축키</strong><br>
-            <kbd>1</kbd>/<kbd>2</kbd> 객체 선택<br>
-            <kbd>F</kbd> 타겟 포커싱<br>
+            <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> 이동<br>
+            <kbd>E</kbd> / <kbd>Q</kbd> 고도 올리기/내리기<br>
+            <kbd>1</kbd>/<kbd>2</kbd> 객체 선택 &nbsp;|&nbsp; <kbd>F</kbd> 포커싱<br>
             <kbd>L</kbd> 라벨 ON/OFF &nbsp;|&nbsp; <kbd>G</kbd> 그리드 ON/OFF
         </div>
     </div>
@@ -1135,19 +1136,88 @@ function onMouseMove(ev) {
 
 function onClick() { if(appState.hoveredId) uiManager.selectObject(appState.hoveredId); }
 
-// ─── 단축키 ──────────────────────────────────────────────────
-window.addEventListener('keydown', e=>{
-    if(document.activeElement.tagName==='INPUT') return;
-    const list=[...appState.objects,...appState.links];
-    const idx=list.findIndex(o=>o.id===appState.selectedId);
-    switch(e.key) {
+// ─── 키보드 이동 상태 ────────────────────────────────────────
+const keyState = {};
+
+window.addEventListener('keydown', e => {
+    if (document.activeElement.tagName === 'INPUT') return;
+    keyState[e.key] = true;
+
+    // 이동 키 스크롤 방지
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+
+    // 단발성 단축키
+    const list = [...appState.objects, ...appState.links];
+    const idx  = list.findIndex(o => o.id === appState.selectedId);
+    switch (e.key) {
         case '1': uiManager.selectObject(list[(idx-1+list.length)%list.length].id); break;
         case '2': uiManager.selectObject(list[(idx+1)%list.length].id); break;
-        case 'f': case 'F': { const t=appState.objects.find(o=>o.id===appState.selectedId); if(t){camera.position.copy(t.mesh.position).add(new THREE.Vector3(0,30,50));controls.target.copy(t.mesh.position);} break; }
-        case 'l': case 'L': appState.showLabels=!appState.showLabels; if(!appState.showLabels) appState.objects.forEach(o=>o.labelEl.style.display='none'); break;
-        case 'g': case 'G': appState.showGrid=!appState.showGrid; gridHelpers.forEach(g=>g.visible=appState.showGrid); break;
+        case 'f': case 'F': {
+            const t = appState.objects.find(o => o.id === appState.selectedId);
+            if (t) { camera.position.copy(t.mesh.position).add(new THREE.Vector3(0,30,50)); controls.target.copy(t.mesh.position); }
+            break;
+        }
+        case 'l': case 'L':
+            appState.showLabels = !appState.showLabels;
+            if (!appState.showLabels) appState.objects.forEach(o => o.labelEl.style.display = 'none');
+            break;
+        case 'g': case 'G':
+            appState.showGrid = !appState.showGrid;
+            gridHelpers.forEach(g => g.visible = appState.showGrid);
+            break;
     }
 });
+
+window.addEventListener('keyup', e => { keyState[e.key] = false; });
+
+// ─── 키보드 카메라 이동 (애니메이션 루프에서 매 프레임 호출) ──
+const _fwd   = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _move  = new THREE.Vector3();
+const _up    = new THREE.Vector3(0, 1, 0);
+
+function moveCameraByKeys(delta) {
+    if (document.activeElement.tagName === 'INPUT') return;
+
+    const moveForward  = keyState['w'] || keyState['W'] || keyState['ArrowUp'];
+    const moveBackward = keyState['s'] || keyState['S'] || keyState['ArrowDown'];
+    const moveLeft     = keyState['a'] || keyState['A'] || keyState['ArrowLeft'];
+    const moveRight    = keyState['d'] || keyState['D'] || keyState['ArrowRight'];
+    const moveUp       = keyState['e'] || keyState['E'] || keyState['PageUp'];
+    const moveDown     = keyState['q'] || keyState['Q'] || keyState['PageDown'];
+
+    if (!moveForward && !moveBackward && !moveLeft && !moveRight && !moveUp && !moveDown) return;
+
+    // 이동 속도: 카메라~타겟 거리에 비례해서 줌 레벨에 무관하게 자연스럽게 이동
+    const dist  = camera.position.distanceTo(controls.target);
+    const speed = Math.max(dist * 0.9, 20) * delta;
+
+    // 수평 전진 방향 (카메라가 바라보는 방향을 XZ 평면에 투영)
+    camera.getWorldDirection(_fwd);
+    _fwd.y = 0;
+    _fwd.normalize();
+
+    // 오른쪽 방향
+    _right.crossVectors(_fwd, _up).normalize();
+
+    _move.set(0, 0, 0);
+    if (moveForward)  _move.addScaledVector(_fwd,    speed);
+    if (moveBackward) _move.addScaledVector(_fwd,   -speed);
+    if (moveLeft)     _move.addScaledVector(_right, -speed);
+    if (moveRight)    _move.addScaledVector(_right,  speed);
+    if (moveUp)       _move.y +=  speed;
+    if (moveDown)     _move.y -= speed;
+
+    camera.position.add(_move);
+    controls.target.add(_move);
+    controls.update();
+
+    // 키보드 이동 중에는 추적/탑뷰 모드 해제
+    if (appState.cameraMode !== 'orbit') {
+        appState.cameraMode = 'orbit';
+        document.getElementById('camera-mode').value = 'orbit';
+    }
+}
 
 // ─── 메인 루프 ───────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -1155,6 +1225,7 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
     appState.time += delta;
+    moveCameraByKeys(delta);
     if (appState.objects.length>0) updateScene(delta);
     if (Math.floor(appState.time*5)%5===0 && appState.selectedId) uiManager.renderSelectedDetail();
     updateMap();
