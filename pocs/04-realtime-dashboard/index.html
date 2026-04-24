@@ -32,7 +32,7 @@
         .control-value { font-size: 0.8rem; color: #94a3b8; text-align: right; display: block; }
 
         .tabs { display: flex; margin-bottom: 10px; border-bottom: 1px solid #334155; }
-        .tab-btn { flex: 1; background: transparent; color: #94a3b8; border: none; padding: 8px 5px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; border-bottom: 2px solid transparent; }
+        .tab-btn { flex: 1; background: transparent; color: #94a3b8; border: none; padding: 8px 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s; border-bottom: 2px solid transparent; }
         .tab-btn:hover { color: #fff; }
         .tab-btn.active { color: #60a5fa; border-bottom: 2px solid #60a5fa; font-weight: bold; }
         .tab-content { display: none; }
@@ -86,11 +86,88 @@
         .conn-dot.wait { background: #fbbf24; animation: blink 1s infinite; }
         .conn-dot.off { background: #f87171; }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* ── 상단 호버 헤더 ── */
+        #header-trigger {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 8px;
+            z-index: 50; pointer-events: all;
+        }
+        #header {
+            position: fixed; top: 0; left: 0; width: 100vw; z-index: 49;
+            background: rgba(10, 17, 32, 0.92);
+            border-bottom: 1px solid rgba(96, 165, 250, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            transform: translateY(-100%);
+            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 24px; height: 56px; pointer-events: none;
+        }
+        #header.visible { transform: translateY(0); pointer-events: all; }
+
+        #header-logo { display: flex; align-items: center; gap: 10px; }
+        #header-logo .logo-icon { font-size: 1.4rem; line-height: 1; }
+        #header-logo .logo-text { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; letter-spacing: 0.03em; }
+        #header-logo .logo-sub { font-size: 0.72rem; color: #64748b; margin-top: 1px; }
+
+        #header-center { display: flex; align-items: center; gap: 20px; }
+        .header-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+        .header-stat .hs-val { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+        .header-stat .hs-lbl { font-size: 0.65rem; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; }
+        .header-divider { width: 1px; height: 28px; background: #1e293b; }
+
+        #header-right { display: flex; align-items: center; gap: 14px; }
+        #header-clock { font-size: 0.82rem; color: #94a3b8; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; white-space: nowrap; }
+        #header-registry-badge {
+            font-size: 0.72rem; padding: 3px 10px; border-radius: 20px;
+            border: 1px solid #334155; color: #94a3b8; background: rgba(30,41,59,0.6);
+            cursor: pointer; transition: border-color 0.2s, color 0.2s;
+        }
+        #header-registry-badge:hover { border-color: #60a5fa; color: #60a5fa; }
+        #header-registry-badge.ok { border-color: rgba(74,222,128,0.4); color: #4ade80; }
+        #header-registry-badge.offline { border-color: rgba(248,113,113,0.4); color: #f87171; }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
+
+<div id="header-trigger"></div>
+<header id="header">
+    <div id="header-logo">
+        <span class="logo-icon">🌊</span>
+        <div>
+            <div class="logo-text">CoWater</div>
+            <div class="logo-sub">실시간 디바이스 시각화</div>
+        </div>
+    </div>
+    <div id="header-center">
+        <div class="header-stat">
+            <span class="hs-val" id="hdr-devices">0</span>
+            <span class="hs-lbl">디바이스</span>
+        </div>
+        <div class="header-divider"></div>
+        <div class="header-stat">
+            <span class="hs-val" id="hdr-connected">0</span>
+            <span class="hs-lbl">Moth 연결</span>
+        </div>
+        <div class="header-divider"></div>
+        <div class="header-stat">
+            <span class="hs-val" id="hdr-links">0</span>
+            <span class="hs-lbl">통신 링크</span>
+        </div>
+        <div class="header-divider"></div>
+        <div class="header-stat">
+            <span class="hs-val" id="hdr-alerts" style="color:#4ade80">0</span>
+            <span class="hs-lbl">활성 경보</span>
+        </div>
+    </div>
+    <div id="header-right">
+        <span id="header-clock">--:--:--</span>
+        <span id="header-registry-badge" onclick="promptRegistryUrl()">03 서버: 확인 중</span>
+    </div>
+</header>
 
 <div id="canvas-container"></div>
 <div id="labels-container"></div>
@@ -135,18 +212,23 @@
 
 <div id="right-panel" class="panel">
     <div class="panel-header" onclick="uiManager.togglePanel('right')">
-        <h3>디바이스 & 경보 현황</h3>
+        <h3>디바이스 / 연결 / 경보 현황</h3>
         <span class="toggle-icon">▼</span>
     </div>
     <div class="panel-content">
+        <div id="selected-detail" style="margin-bottom:15px; display:none;"></div>
         <div class="tabs">
             <button class="tab-btn active" onclick="uiManager.switchTab('objects')">📡 디바이스 (<span id="obj-count">0</span>)</button>
+            <button class="tab-btn" onclick="uiManager.switchTab('links')">🔗 연결 (<span id="link-count">0</span>)</button>
             <button class="tab-btn" onclick="uiManager.switchTab('alerts')">⚠️ 경보 (<span id="alert-count">0</span>)</button>
         </div>
         <div id="tab-objects" class="tab-content active">
-            <div id="selected-detail" style="margin-bottom:15px; display:none;"></div>
-            <h4>전체 자산 및 통신 링크</h4>
             <div id="object-list-container"></div>
+        </div>
+        <div id="tab-links" class="tab-content">
+            <div id="link-list-container">
+                <div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>
+            </div>
         </div>
         <div id="tab-alerts" class="tab-content">
             <div id="alert-list-container">
@@ -190,8 +272,8 @@ const MOTH_NAME    = "cowater-sim-device-streams";
 const MOTH_SOURCE  = "base";
 const DEVICE_REGISTRY_URL = "http://localhost:8003";
 
-// ─── 디바이스 설정 ────────────────────────────────────────────
-const DEVICE_CONFIG = [
+// ─── 디바이스 템플릿 (초기 위치·타입 기본값, 서버에 해당 이름이 등록된 경우에만 활성화) ─────
+const DEVICE_TEMPLATES = [
     { id:"control-center-01",    type:"control_center",     name:"Control Center 01",   isStatic:true,  lat:37.0080, lon:129.3950, alt: 20 },
     { id:"control-ship-01",      type:"control_ship",       name:"Control Ship 01",      isStatic:true,  lat:37.0050, lon:129.4180, alt:  3 },
     { id:"ocean-power-tower-01", type:"ocean_power_tower",  name:"Ocean Power Tower 01", isStatic:true,  lat:36.9950, lon:129.4350, alt: 20 },
@@ -206,8 +288,8 @@ const DEVICE_CONFIG = [
     { id:"rov-03", type:"rov", name:"ROV 03", isStatic:false, lat:37.0080, lon:129.4330, alt:-150 },
 ];
 
-// 통신 링크 정의
-const LINK_CONFIG = [
+// 통신 링크 템플릿 (양쪽 디바이스가 모두 활성화된 경우에만 표시)
+const LINK_TEMPLATES = [
     { id:"lnk-cc-cs",  src:"control-center-01", dst:"control-ship-01",      type:"link_satellite", name:"위성 통신 (지휘-함정)",    packets:["지휘 통제 C2","AIS 상황 공유"] },
     { id:"lnk-cs-u1",  src:"control-ship-01",   dst:"usv-01",               type:"link_rf",        name:"RF 링크 (함정-USV01)",     packets:["웨이포인트 갱신"] },
     { id:"lnk-cs-u2",  src:"control-ship-01",   dst:"usv-02",               type:"link_rf",        name:"RF 링크 (함정-USV02)",     packets:["소나 데이터"] },
@@ -218,6 +300,10 @@ const LINK_CONFIG = [
     { id:"lnk-cs-r1",  src:"control-ship-01",   dst:"rov-01",               type:"link_acoustic",  name:"음향 링크 (함정-ROV01)",   packets:["ROV 조종 명령","카메라 스트림"] },
     { id:"lnk-cs-pt",  src:"control-ship-01",   dst:"ocean-power-tower-01", type:"link_rf",        name:"RF 링크 (함정-전력타워)", packets:["전력 상태","모니터링 데이터"] },
 ];
+
+// 실제 활성화된 목록 (syncDeviceRegistry 후 서버 등록 여부에 따라 결정)
+let DEVICE_CONFIG = [];
+let LINK_CONFIG = [];
 
 // ─── 좌표 변환 ────────────────────────────────────────────────
 const MAP_CENTER = { lat:37.003, lng:129.425 };
@@ -268,8 +354,9 @@ async function syncDeviceRegistry() {
         appState.registryDevices = Array.isArray(devices) ? devices : [];
         appState.registryStatus = 'ok';
 
+        // 서버에 등록된 이름 기준으로 템플릿 매칭
         const byName = new Map(appState.registryDevices.map(dev => [dev.name, dev]));
-        DEVICE_CONFIG.forEach(cfg => {
+        DEVICE_TEMPLATES.forEach(cfg => {
             const reg = byName.get(cfg.name) || null;
             cfg.registry = reg;
             cfg.registryId = reg?.id ?? null;
@@ -279,18 +366,18 @@ async function syncDeviceRegistry() {
             cfg.registryActions = reg?.actions || null;
             cfg.registryMainVideoTrackName = reg?.main_video_track_name || null;
         });
+
+        // 서버에 등록된 디바이스만 활성화
+        DEVICE_CONFIG = DEVICE_TEMPLATES.filter(cfg => cfg.registry !== null);
+        const activeIds = new Set(DEVICE_CONFIG.map(c => c.id));
+        LINK_CONFIG = LINK_TEMPLATES.filter(lk => activeIds.has(lk.src) && activeIds.has(lk.dst));
+
+        console.log(`Registry sync: ${DEVICE_CONFIG.length}/${DEVICE_TEMPLATES.length} devices active, ${LINK_CONFIG.length} links active`);
     } catch (error) {
         appState.registryDevices = [];
         appState.registryStatus = 'offline';
-        DEVICE_CONFIG.forEach(cfg => {
-            cfg.registry = null;
-            cfg.registryId = null;
-            cfg.registryToken = null;
-            cfg.registryAgent = null;
-            cfg.registryTracks = [];
-            cfg.registryActions = null;
-            cfg.registryMainVideoTrackName = null;
-        });
+        DEVICE_CONFIG = [];
+        LINK_CONFIG = [];
         console.warn(`Device registry unavailable: ${error.message}`);
     }
 }
@@ -465,6 +552,21 @@ async function loadTerrain() {
 
     await syncDeviceRegistry();
     hideLoading();
+
+    if (DEVICE_CONFIG.length === 0) {
+        document.getElementById('stats-container').innerHTML =
+            `<div style="color:#f87171;font-size:0.85rem;text-align:center;padding:10px;">
+                ${appState.registryStatus === 'offline'
+                    ? '⚠️ 03 서버에 연결할 수 없습니다.<br>서버 주소를 확인하세요.'
+                    : '⚠️ 등록된 디바이스가 없습니다.<br>03 서버에서 디바이스를 먼저 등록하세요.'}
+            </div>`;
+        document.getElementById('object-list-container').innerHTML =
+            `<div style="color:#64748b;font-size:0.82rem;text-align:center;padding:20px;">표시할 디바이스 없음</div>`;
+        updateConnStatus();
+        initMap();
+        return;
+    }
+
     initObjects();
     initLinks();
     initMap();
@@ -496,7 +598,7 @@ function initObjects() {
         connState[cfg.id] = 'connecting';
     });
     uiManager.renderObjectList();
-    document.getElementById('obj-count').innerText = appState.objects.length + LINK_CONFIG.length;
+    document.getElementById('obj-count').innerText = appState.objects.length;
 }
 
 // ─── 통신 링크 생성 ───────────────────────────────────────────
@@ -616,11 +718,14 @@ function connectTrack(deviceId, trackName, endpoint) {
 function updateConnStatus() {
     const c = {connected:0, connecting:0, disconnected:0};
     DEVICE_CONFIG.forEach(d => c[connState[d.id]||'connecting']++);
+    const regLabel = appState.registryStatus === 'offline'
+        ? `<span style="color:#f87171">서버 오프라인</span>`
+        : `<span style="color:#475569">${DEVICE_CONFIG.length}개 등록</span>`;
     document.getElementById('conn-status').innerHTML = `
         <span><span class="conn-dot on"></span>연결 ${c.connected}</span>
         <span><span class="conn-dot wait"></span>대기 ${c.connecting}</span>
         <span><span class="conn-dot off"></span>끊김 ${c.disconnected}</span>
-        <span style="color:#475569">| ${MOTH_NAME} | ${appState.registryStatus}</span>`;
+        <span style="color:#475569">| ${MOTH_NAME} |</span> ${regLabel}`;
 }
 
 // ─── 애니메이션 루프 ─────────────────────────────────────────
@@ -826,7 +931,7 @@ function updateMap() {
 const uiManager = {
     togglePanel(side) { document.getElementById(`${side}-panel`)?.classList.toggle('collapsed'); },
     switchTab(name) {
-        document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['objects','alerts'][i]===name));
+        document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['objects','links','alerts'][i]===name));
         document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
         document.getElementById(`tab-${name}`)?.classList.add('active');
     },
@@ -834,7 +939,8 @@ const uiManager = {
         appState.selectedId = id;
         document.querySelectorAll('.list-item').forEach(el=>el.classList.toggle('selected',el.dataset.id===id));
         this.renderSelectedDetail();
-        this.switchTab('objects');
+        const isLink = appState.links.some(l => l.id === id);
+        this.switchTab(isLink ? 'links' : 'objects');
     },
     renderObjectList() {
         let html = '';
@@ -849,7 +955,7 @@ const uiManager = {
                 ? `<span style="color:#94a3b8">registry #${reg.id}</span>`
                 : `<span style="color:#64748b">unregistered</span>`;
             const agentBadge = agent?.endpoint
-                ? `<span style="color:#94a3b8">agent ready</span>`
+                ? `<span style="color:#94a3b8">${agent.llm_enabled ? 'LLM enabled' : 'LLM disabled'}</span>`
                 : `<span style="color:#64748b">agent none</span>`;
             html += `<div class="list-item${dev.id===appState.selectedId?' selected':''}" data-id="${dev.id}" onclick="uiManager.selectObject('${dev.id}')">
                 <div class="title" style="border-left:3px solid ${cs}; padding-left:6px;">
@@ -860,13 +966,8 @@ const uiManager = {
                     <span>${regBadge} | ${agentBadge}</span>
                 </div></div>`;
         });
-        appState.links.forEach(lk => {
-            const cs = '#'+(COLORS[lk.type]||0x60a5fa).toString(16).padStart(6,'0');
-            html += `<div class="list-item${lk.id===appState.selectedId?' selected':''}" data-id="${lk.id}" style="border-left-color:${cs}" onclick="uiManager.selectObject('${lk.id}')">
-                <div class="title"><span>🔗 ${lk.name}</span></div>
-                <div style="font-size:0.75rem;color:#94a3b8;">Data Stream Active</div></div>`;
-        });
         document.getElementById('object-list-container').innerHTML = html;
+        this.renderLinkList();
 
         const conn = DEVICE_CONFIG.filter(c=>connState[c.id]==='connected').length;
         const registered = appState.objects.filter(o => o.config.registry).length;
@@ -876,6 +977,27 @@ const uiManager = {
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>Moth 연결:</span><strong style="color:${conn>0?'#4ade80':'#f87171'}">${conn} / ${appState.objects.length}</strong></div>
             <div style="display:flex;justify-content:space-between;font-size:0.85rem;"><span>통신 링크:</span><strong>${appState.links.length}개</strong></div>
             <div style="margin-top:8px;color:${appState.alerts.length>0?'#f87171':'#4ade80'};font-size:0.85rem;">발생 경보: ${appState.alerts.length}건</div>`;
+    },
+    renderLinkList() {
+        let html = '';
+        if (appState.links.length === 0) {
+            html = '<div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>';
+        } else {
+            const typeLabel = { link_rf:'RF', link_acoustic:'음향', link_satellite:'위성' };
+            appState.links.forEach(lk => {
+                const cs = '#'+(COLORS[lk.type]||0x60a5fa).toString(16).padStart(6,'0');
+                const sO = appState.objects.find(o=>o.id===lk.src);
+                const tO = appState.objects.find(o=>o.id===lk.dst);
+                const route = `${sO?.config.name||lk.src} ↔ ${tO?.config.name||lk.dst}`;
+                const tl = typeLabel[lk.type] || lk.type;
+                html += `<div class="list-item${lk.id===appState.selectedId?' selected':''}" data-id="${lk.id}" style="border-left-color:${cs}" onclick="uiManager.selectObject('${lk.id}')">
+                    <div class="title"><span>🔗 ${lk.name}</span><span style="font-size:0.72rem;color:#64748b;">${tl}</span></div>
+                    <div style="font-size:0.75rem;color:#94a3b8;margin-top:3px;">${route}</div>
+                </div>`;
+            });
+        }
+        document.getElementById('link-list-container').innerHTML = html;
+        document.getElementById('link-count').innerText = appState.links.length;
     },
     renderSelectedDetail() {
         const el = document.getElementById('selected-detail');
@@ -918,7 +1040,7 @@ const uiManager = {
                 : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">03 서버 등록 정보 없음</div>`;
 
             const agentHtml = streamAgent
-                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">Agent 주소</div><div class="badge" style="display:inline-block;max-width:100%;overflow-wrap:anywhere;">${streamAgent}</div></div>`
+                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">Agent 주소</div><div class="badge" style="display:inline-block;max-width:100%;overflow-wrap:anywhere;">${streamAgent}</div><div style="margin-top:6px;"><span class="badge ${agent?.llm_enabled ? 'ok' : 'warn'}">LLM ${agent?.llm_enabled ? 'enabled' : 'disabled'}</span></div></div>`
                 : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">Agent 주소 없음</div>`;
 
             const actionHtml = reg?.actions
@@ -937,6 +1059,7 @@ const uiManager = {
                     <span style="color:#94a3b8">03 ID:</span><span>${reg?.id ?? '—'}</span>
                     <span style="color:#94a3b8">03 토큰:</span><span>${reg?.token ? `${reg.token.slice(0, 8)}…` : '—'}</span>
                     <span style="color:#94a3b8">Agent:</span><span>${streamAgent || '—'}</span>
+                    <span style="color:#94a3b8">LLM:</span><span>${agent?.llm_enabled ? 'enabled' : 'disabled'}</span>
                     <span style="color:#94a3b8">Light:</span><span>${dev.lightOn ? 'ON' : 'OFF'}</span>
                 </div>${sensorHtml}
                 ${trackHtml}
@@ -985,7 +1108,7 @@ const uiManager = {
             appState.depthFilter=parseInt(e.target.value);
             document.getElementById('depth-value').innerText=`${appState.depthFilter}m ~ 0m 표시`;
         });
-        setInterval(()=>this.renderObjectList(), 3000);
+        setInterval(()=>{ this.renderObjectList(); this.renderLinkList(); }, 3000);
     }
 };
 
@@ -1038,7 +1161,73 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-window.onload = () => { initScene(); uiManager.init(); updateConnStatus(); animate(); };
+// ─── 헤더 호버 ──────────────────────────────────────────────
+(function() {
+    const trigger = document.getElementById('header-trigger');
+    const header  = document.getElementById('header');
+    let hideTimer = null;
+
+    function showHeader() {
+        clearTimeout(hideTimer);
+        header.classList.add('visible');
+    }
+    function scheduleHide() {
+        hideTimer = setTimeout(() => header.classList.remove('visible'), 300);
+    }
+
+    trigger.addEventListener('mouseenter', showHeader);
+    header.addEventListener('mouseenter',  showHeader);
+    trigger.addEventListener('mouseleave', scheduleHide);
+    header.addEventListener('mouseleave',  scheduleHide);
+})();
+
+// ─── 헤더 시계 & 통계 갱신 ──────────────────────────────────
+function updateHeader() {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('header-clock').textContent =
+        `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}  ${hh}:${mm}:${ss}`;
+
+    document.getElementById('hdr-devices').textContent   = appState.objects.length;
+    document.getElementById('hdr-links').textContent     = appState.links.length;
+    const conn = DEVICE_CONFIG.filter(c => connState[c.id] === 'connected').length;
+    document.getElementById('hdr-connected').textContent = conn;
+    const alertEl = document.getElementById('hdr-alerts');
+    alertEl.textContent = appState.alerts.length;
+    alertEl.style.color = appState.alerts.length > 0 ? '#f87171' : '#4ade80';
+
+    const badge = document.getElementById('header-registry-badge');
+    if (appState.registryStatus === 'ok') {
+        badge.textContent = `03 서버: ${DEVICE_CONFIG.length}개 등록`;
+        badge.className = 'ok';
+    } else if (appState.registryStatus === 'offline') {
+        badge.textContent = '03 서버: 오프라인';
+        badge.className = 'offline';
+    } else {
+        badge.textContent = '03 서버: 확인 중';
+        badge.className = '';
+    }
+}
+
+function promptRegistryUrl() {
+    const current = registryBaseUrl();
+    const input = prompt('03 레지스트리 서버 주소:', current);
+    if (input && input.trim()) {
+        localStorage.setItem('cowater.dashboard.registryUrl', input.trim());
+        location.reload();
+    }
+}
+
+window.onload = () => {
+    initScene();
+    uiManager.init();
+    updateConnStatus();
+    animate();
+    setInterval(updateHeader, 1000);
+    updateHeader();
+};
 </script>
 </body>
 </html>
