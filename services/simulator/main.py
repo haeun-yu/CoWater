@@ -8,6 +8,7 @@ from config import settings
 from moth_publisher import MothPublisher
 from redis_publisher import RedisPublisher
 from scenario_runner import ScenarioRunner
+from stream_publisher import DeviceStreamMothPublisher
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -27,15 +28,26 @@ async def main() -> None:
 
     moth_publisher = MothPublisher()
     redis_publisher = RedisPublisher()
-    runner = ScenarioRunner(scenario_path, [moth_publisher, redis_publisher])
+    stream_publishers = []
+    tasks = [
+        moth_publisher.run(),
+        redis_publisher.run(),
+    ]
+    if settings.publish_device_streams:
+        stream_publisher = DeviceStreamMothPublisher()
+        stream_publishers.append(stream_publisher)
+        tasks.append(stream_publisher.run())
+
+    runner = ScenarioRunner(
+        scenario_path,
+        [moth_publisher, redis_publisher],
+        stream_publishers=stream_publishers,
+    )
+    tasks.append(runner.run())
 
     logger.info("Starting simulator: scenario=%s time_scale=%.1fx", settings.scenario, settings.time_scale)
 
-    await asyncio.gather(
-        moth_publisher.run(),
-        redis_publisher.run(),
-        runner.run(),
-    )
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,8 @@ async def get_redis() -> aioredis.Redis:
             settings.redis_url,
             decode_responses=True,
             socket_connect_timeout=5,
-            socket_timeout=5,
+            socket_timeout=None,
+            health_check_interval=30,
         )
         await redis.ping()
         _redis = redis

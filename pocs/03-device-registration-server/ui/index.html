@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoWater Device Server Dashboard</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body data-page="dashboard">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">03</div>
+        <div>
+          <h1>Device Registration Server</h1>
+          <p>Register devices, inspect endpoints, and manage main video tracks.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="api-pill">
+          <span>API</span>
+          <input data-bind="apiBase" aria-label="API base URL">
+        </div>
+        <div class="header-menu">
+          <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+          <a href="devices.html" data-nav-link="devices">Devices</a>
+          <a href="register.html" data-nav-link="register">Register</a>
+          <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="settings.html" data-nav-link="settings">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-card">
+        <h2 class="hero-title">Manage every device from one place.</h2>
+        <p class="hero-subtitle">
+          This console is wired to the device registration server. It can register new devices,
+          inspect generated track addresses, edit device names, change the main video track, and
+          remove entries from the registry.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="register.html">Register device</a>
+          <a class="button" href="devices.html">Open device list</a>
+          <a class="button" href="alerts.html">Open alerts</a>
+          <a class="button" href="responses.html">Open responses</a>
+          <a class="button" href="settings.html">Server settings</a>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Server Snapshot</h2>
+        <div class="code" id="server-summary">Loading...</div>
+      </div>
+    </section>
+
+    <section class="metric-grid">
+      <article class="metric-card">
+        <div class="label">Devices</div>
+        <div class="value" id="count-devices">-</div>
+        <div class="hint">Total registered devices</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">Connected</div>
+        <div class="value" id="count-connected">-</div>
+        <div class="hint">Devices currently online</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">VIDEO tracks</div>
+        <div class="value" id="count-video">-</div>
+        <div class="hint">Tracks eligible for the main view</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">Core actions</div>
+        <div class="value" id="count-actions">-</div>
+        <div class="hint">Unique supported actions in registry</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">Open alerts</div>
+        <div class="value" id="count-open-alerts">-</div>
+        <div class="hint">Waiting for acknowledgement</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">Alerts</div>
+        <div class="value" id="count-alerts">-</div>
+        <div class="hint">Canonical alert records in 03</div>
+      </article>
+      <article class="metric-card">
+        <div class="label">Responses</div>
+        <div class="value" id="count-responses">-</div>
+        <div class="hint">Canonical response records in 03</div>
+      </article>
+    </section>
+
+    <section class="grid-2" style="margin-top: 18px;">
+      <div class="panel">
+        <h2>Recent Devices</h2>
+        <p class="lead">Quick access to the latest registered devices.</p>
+        <div id="recent-devices" class="track-list"></div>
+        <p class="footer-note" id="dashboard-error"></p>
+      </div>
+      <div class="panel">
+        <h2>Server Info</h2>
+        <p class="lead">Read-only metadata returned by <code>/meta</code>.</p>
+        <div class="split">
+          <div class="device-card">
+            <div class="muted">Host</div>
+            <strong id="meta-host">-</strong>
+          </div>
+          <div class="device-card">
+            <div class="muted">Port</div>
+            <strong id="meta-port">-</strong>
+          </div>
+        </div>
+        <div class="device-card" style="margin-top: 14px;">
+          <div class="muted">Ping endpoint</div>
+          <strong id="meta-ping">-</strong>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

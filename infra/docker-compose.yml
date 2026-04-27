@@ -148,8 +148,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-qwen2.5:1.5b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      CHAT_OLLAMA_MODEL: ${CHAT_OLLAMA_MODEL:-gemma4:e2b}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
@@ -179,9 +179,10 @@ services:
       ANOMALY_ROT_THRESHOLD: ${ANOMALY_ROT_THRESHOLD:-20.0}
       ANOMALY_HEADING_THRESHOLD: ${ANOMALY_HEADING_THRESHOLD:-45.0}
       ANOMALY_SPEED_THRESHOLD: ${ANOMALY_SPEED_THRESHOLD:-5.0}
+      MINE_DETECTION_CONFIDENCE_THRESHOLD: ${MINE_DETECTION_CONFIDENCE_THRESHOLD:-0.4}
+      MINE_DETECTION_EMIT_COOLDOWN_SEC: ${MINE_DETECTION_EMIT_COOLDOWN_SEC:-30}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "7704:8001"
+    # Port exposed via agent-gateway (7704)
     depends_on:
       redis:
         condition: service_healthy
@@ -206,10 +207,9 @@ services:
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
       # Mac/Windows: host.docker.internal / Linux: localhost 또는 172.17.0.1
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "7705:8001"
+    # Port exposed via agent-gateway (7705)
     depends_on:
       redis:
         condition: service_healthy
@@ -228,6 +228,14 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379}
       CORE_API_URL: ${CORE_API_URL:-http://core:8000}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Port exposed via agent-gateway (7706)
     # ports:
@@ -255,7 +263,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
       VLLM_URL: ${VLLM_URL:-http://vllm:8000}
       VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -309,8 +317,8 @@ services:
   # ─────────────────────────────────────────────────────
   simulator:
     build:
-      context: ../services/simulator
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/simulator/Dockerfile
     container_name: cowater-simulator
     restart: "no"
     profiles:
@@ -397,8 +405,8 @@ services:
   #       ollama serve &
   #       pid=$$! &&
   #       sleep 5 &&
-  #       ollama pull ${OLLAMA_MODEL:-qwen2.5:3b} &&
-  #       ollama pull ${CHAT_OLLAMA_MODEL:-qwen2.5:3b} &&
+  #       ollama pull ${OLLAMA_MODEL:-gemma4:e2b} &&
+  #       ollama pull ${CHAT_OLLAMA_MODEL:-gemma4:e2b} &&
   #       kill $$pid || true
   #     "
   #   environment:

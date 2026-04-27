@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Responses - CoWater Device Server</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body data-page="responses">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">03</div>
+        <div>
+          <h1>Responses Ledger</h1>
+          <p>Canonical response and dispatch records for alerts and follow-up actions.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="api-pill">
+          <span>API</span>
+          <input data-bind="apiBase" aria-label="API base URL">
+        </div>
+        <button class="button" id="refresh-responses" type="button">Refresh</button>
+        <div class="header-menu">
+          <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+          <a href="devices.html" data-nav-link="devices">Devices</a>
+          <a href="register.html" data-nav-link="register">Register</a>
+          <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="settings.html" data-nav-link="settings">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="split" style="align-items: end;">
+          <div>
+            <h2>All Responses</h2>
+            <p class="lead">These records capture how alerts were routed, dispatched, and resolved.</p>
+          </div>
+          <div class="field">
+            <label for="response-search">Search responses</label>
+            <input id="response-search" placeholder="id, alert, action, or target">
+          </div>
+        </div>
+        <div id="responses-error"></div>
+        <div class="table-wrap" style="margin-top: 18px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Response</th>
+                <th>Alert</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Target</th>
+                <th>Route</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="responses-body">
+              <tr><td colspan="7" class="muted">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Selected Response</h2>
+        <p class="lead">Open a response to inspect the recorded dispatch payload and result.</p>
+        <div id="response-detail"></div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

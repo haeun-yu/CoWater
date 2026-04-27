@@ -1,0 +1,13 @@
+{
+  "mission_id": "mine-clearance-alpha",
+  "devices": ["control-usv-01", "auv-01", "rov-01"],
+  "timeline": [
+    {"at_s": 0, "event": "mission.started", "device_id": "control-usv-01"},
+    {"at_s": 10, "event": "survey.started", "device_id": "auv-01"},
+    {"at_s": 30, "event": "sonar.contact", "device_id": "auv-01"},
+    {"at_s": 35, "event": "detect.mine", "device_id": "auv-01"},
+    {"at_s": 50, "event": "operator.approved_rov_deploy", "device_id": "control-usv-01"},
+    {"at_s": 70, "event": "rov.deployed", "device_id": "rov-01"},
+    {"at_s": 120, "event": "mine.neutralized", "device_id": "rov-01"}
+  ]
+}

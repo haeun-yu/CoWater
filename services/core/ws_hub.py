@@ -9,7 +9,7 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
-Topic = Literal["platforms", "alerts", "replay", "events"]
+Topic = Literal["platforms", "alerts", "reports", "replay", "events"]
 
 
 class WebSocketHub:
@@ -17,6 +17,7 @@ class WebSocketHub:
         self._connections: dict[Topic, set[WebSocket]] = {
             "platforms": set(),
             "alerts": set(),
+            "reports": set(),
             "replay": set(),
             "events": set(),
         }
@@ -24,12 +25,14 @@ class WebSocketHub:
         self._broadcast_success_count: dict[Topic, int] = {
             "platforms": 0,
             "alerts": 0,
+            "reports": 0,
             "replay": 0,
             "events": 0,
         }
         self._broadcast_failure_count: dict[Topic, int] = {
             "platforms": 0,
             "alerts": 0,
+            "reports": 0,
             "replay": 0,
             "events": 0,
         }

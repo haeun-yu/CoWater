@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoWater 02 Device Agent Dashboard</title>
+  <style>
+    :root {
+      --bg: #07111f;
+      --panel: rgba(15, 23, 42, 0.88);
+      --panel-2: rgba(30, 41, 59, 0.86);
+      --line: #223047;
+      --text: #e5eefb;
+      --muted: #8da2bf;
+      --accent: #68d391;
+      --accent-2: #60a5fa;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --static: #c084fc;
+      --dynamic: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.14), transparent 35%),
+        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.12), transparent 30%),
+        linear-gradient(180deg, #04101f 0%, #07111f 45%, #050b15 100%);
+    }
+    a { color: inherit; text-decoration: none; }
+    button, input, select { font: inherit; }
+    .shell {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      padding: 24px;
+      border-right: 1px solid rgba(148, 163, 184, 0.12);
+      background: rgba(2, 8, 23, 0.68);
+      backdrop-filter: blur(18px);
+    }
+    .main {
+      padding: 24px;
+    }
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, rgba(96,165,250,.18), rgba(34,197,94,.18));
+      border: 1px solid rgba(148,163,184,.2);
+      font-weight: 700;
+      color: white;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
+    .block {
+      background: var(--panel);
+      border: 1px solid rgba(148,163,184,.16);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.28);
+    }
+    .stack { display: grid; gap: 16px; }
+    .stack.tight { gap: 10px; }
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .title-row h2, .title-row h3 { margin: 0; }
+    .title-row small { color: var(--muted); }
+    .input-row {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .input-row label { color: var(--muted); font-size: .8rem; }
+    .input-row input, .input-row select {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,.2);
+      background: rgba(15,23,42,.95);
+      color: var(--text);
+      padding: 10px 12px;
+      outline: none;
+    }
+    .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .button {
+      border: 1px solid rgba(148,163,184,.18);
+      background: rgba(30,41,59,.95);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .button.primary { background: linear-gradient(135deg, rgba(96,165,250,.95), rgba(34,197,94,.85)); color: #07111f; font-weight: 700; }
+    .button:hover { filter: brightness(1.08); }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 16px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: .8rem; }
+    .metric .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(30,41,59,.9);
+      border: 1px solid rgba(148,163,184,.16);
+      color: var(--text);
+      font-size: .78rem;
+    }
+    .badge.ok { background: rgba(34,197,94,.12); color: #86efac; }
+    .badge.warn { background: rgba(251,191,36,.12); color: #fcd34d; }
+    .badge.off { background: rgba(248,113,113,.12); color: #fca5a5; }
+    .badge.static { background: rgba(192,132,252,.14); color: #ddd6fe; }
+    .badge.dynamic { background: rgba(34,197,94,.14); color: #bbf7d0; }
+    .agents {
+      display: grid;
+      gap: 12px;
+      max-height: 66vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .agent-card {
+      background: var(--panel-2);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 16px;
+      padding: 14px;
+      cursor: pointer;
+      transition: transform .15s ease, border-color .15s ease;
+    }
+    .agent-card:hover { transform: translateY(-1px); border-color: rgba(96,165,250,.35); }
+    .agent-card.active { border-color: rgba(96,165,250,.6); box-shadow: inset 0 0 0 1px rgba(96,165,250,.25); }
+    .agent-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .agent-name { font-weight: 700; }
+    .agent-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: .8rem; }
+    .agent-detail-grid {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+    }
+    .json-box {
+      background: rgba(2,6,23,.88);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 16px;
+      padding: 14px;
+      overflow: auto;
+      max-height: 320px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: .8rem;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+    .timeline {
+      display: grid;
+      gap: 10px;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .timeline-item {
+      background: rgba(15,23,42,.9);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .timeline-item .k { color: var(--muted); font-size: .76rem; margin-bottom: 4px; }
+    .timeline-item .v { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .82rem; white-space: pre-wrap; }
+    .layer-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .layer-panel {
+      background: rgba(15,23,42,.82);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 14px;
+      padding: 12px;
+      min-height: 180px;
+      display: grid;
+      gap: 8px;
+    }
+    .layer-panel .layer-name {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+    }
+    .layer-panel .layer-meta {
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .muted { color: var(--muted); }
+    .error { color: #fca5a5; }
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { border-right: none; border-bottom: 1px solid rgba(148,163,184,.12); }
+      .agent-detail-grid { grid-template-columns: 1fr; }
+      .layer-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">02</div>
+        <div>
+          <h1>Device Agent Dashboard</h1>
+          <p>USV / AUV / ROV 세션 모니터링</p>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="block">
+          <div class="title-row">
+            <div>
+              <h3>연결 정보</h3>
+              <small>REST 기반 조회</small>
+            </div>
+          </div>
+          <div class="input-row">
+            <label for="api-base">API Base</label>
+            <input id="api-base" type="text" value="http://127.0.0.1:9010">
+          </div>
+          <div class="button-row" style="margin-top:12px;">
+            <button class="button primary" id="refresh-btn">새로고침</button>
+            <button class="button" id="auto-btn">Auto: ON</button>
+          </div>
+          <div style="margin-top:12px;" class="badges" id="global-badges"></div>
+        </div>
+
+        <div class="block">
+          <div class="title-row">
+            <div>
+              <h3>요약</h3>
+              <small>세션과 LLM 사용 상태</small>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <div class="metric"><div class="label">Agents</div><div class="value" id="metric-agents">0</div></div>
+            <div class="metric"><div class="label">Connected</div><div class="value" id="metric-connected">0</div></div>
+            <div class="metric"><div class="label">LLM On</div><div class="value" id="metric-llm-on">0</div></div>
+            <div class="metric"><div class="label">LLM Off</div><div class="value" id="metric-llm-off">0</div></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="title-row">
+            <div>
+              <h3>필터</h3>
+              <small>타입</small>
+            </div>
+          </div>
+          <div class="input-row">
+            <label for="filter-type">Agent Type</label>
+            <select id="filter-type">
+              <option value="">All</option>
+              <option value="usv">USV</option>
+              <option value="auv">AUV</option>
+              <option value="rov">ROV</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="stack">
+        <div class="block">
+          <div class="title-row">
+            <div>
+              <h2>세션 목록</h2>
+              <small>등록 토큰별 Agent 상태</small>
+            </div>
+            <small id="last-updated">대기 중</small>
+          </div>
+          <div id="agent-list" class="agents"></div>
+          <div id="empty-state" class="muted" style="display:none; padding: 16px 0;">아직 활성 Agent 세션이 없습니다.</div>
+        </div>
+
+        <div class="agent-detail-grid">
+          <div class="block">
+            <div class="title-row">
+              <div>
+                <h3>선택된 Agent</h3>
+                <small id="selected-subtitle">세션을 선택해주세요.</small>
+              </div>
+            </div>
+            <div id="selected-summary" class="stack tight"></div>
+            <div style="margin-top:14px;">
+              <h3 style="margin-bottom:10px;">마지막 수신 데이터</h3>
+              <div id="last-payload" class="json-box">-</div>
+            </div>
+            <div style="margin-top:14px;">
+              <h3 style="margin-bottom:10px;">Planner / Decision / Execution / Feedback</h3>
+              <div class="layer-grid">
+                <div class="layer-panel">
+                  <div class="layer-name">Planner <span class="badge">telemetry</span></div>
+                  <div class="layer-meta" id="plan-meta">-</div>
+                  <div id="plan-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Decision <span class="badge">rule / hybrid</span></div>
+                  <div class="layer-meta" id="decision-meta">-</div>
+                  <div id="decision-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Execution <span class="badge">command</span></div>
+                  <div class="layer-meta" id="execution-meta">-</div>
+                  <div id="execution-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+                <div class="layer-panel">
+                  <div class="layer-name">Feedback <span class="badge">memory</span></div>
+                  <div class="layer-meta" id="feedback-meta">-</div>
+                  <div id="feedback-json" class="json-box" style="max-height: 180px;">-</div>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:14px;">
+              <h3 style="margin-bottom:10px;">명령 전송</h3>
+              <div id="command-presets" class="button-row" style="margin-bottom:12px;"></div>
+              <div class="input-row" style="margin-top:0;">
+                <label for="command-reason">Reason</label>
+                <input id="command-reason" name="reason" placeholder="why this command is being sent">
+              </div>
+              <div class="input-row" style="margin-top:0;">
+                <label for="command-priority">Priority</label>
+                <select id="command-priority" name="priority">
+                  <option value="low">low</option>
+                  <option value="normal" selected>normal</option>
+                  <option value="high">high</option>
+                </select>
+              </div>
+              <div class="muted" id="command-context" style="margin-top:8px; font-size:.8rem;">작업 버튼을 선택하면 필요한 값이 자동으로 채워집니다.</div>
+              <form id="command-form" class="stack tight" style="margin-top:10px;">
+                <div class="input-row" style="margin-top:0;">
+                  <div id="command-action-note" class="muted" style="font-size:.8rem;">선택된 버튼으로 명령을 보낼 수 있습니다.</div>
+                </div>
+                <div class="button-row">
+                  <button type="submit" class="button primary" id="command-submit">Send Selected Action</button>
+                  <button type="button" class="button" id="command-reset">Reset</button>
+                </div>
+              </form>
+              <div id="command-result" class="json-box" style="margin-top:12px; max-height: 180px;">-</div>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="title-row">
+              <div>
+                <h3>메모리 / 추천</h3>
+                <small>Agent가 기억한 최근 이벤트</small>
+              </div>
+            </div>
+            <div id="memory-list" class="timeline"></div>
+            <div style="margin-top:14px;">
+              <h3 style="margin-bottom:10px;">추천 결과</h3>
+              <div id="recommendation-list" class="timeline"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "cowater.agentDashboard.apiBase";
+    const DEFAULT_API_BASE = "http://127.0.0.1:9010";
+
+    const state = {
+      meta: null,
+      agents: [],
+      selectedToken: null,
+      selectedAction: null,
+      autoRefresh: true,
+      timer: null,
+    };
+
+    function apiBase() {
+      return document.getElementById("api-base").value.trim() || DEFAULT_API_BASE;
+    }
+
+    function setApiBase(value) {
+      localStorage.setItem(STORAGE_KEY, value);
+      document.getElementById("api-base").value = value;
+    }
+
+    function apiUrl(path) {
+      return new URL(path, apiBase()).toString();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function pretty(value) {
+      return JSON.stringify(value, null, 2);
+    }
+
+    async function requestJson(path, options = {}) {
+      const response = await fetch(apiUrl(path), {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      const body = contentType.includes("application/json") ? await response.json() : await response.text();
+      if (!response.ok) {
+        throw new Error(body?.detail || `HTTP ${response.status}`);
+      }
+      return body;
+    }
+
+    function badge(text, cls = "") {
+      return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
+    }
+
+    function formatTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function updateGlobalBadges(meta) {
+      const host = document.getElementById("global-badges");
+      host.innerHTML = [
+        badge(`Types: ${(meta?.agent_types || ["usv", "auv", "rov"]).join(", ")}`),
+        badge("Decision: rule or hybrid", "ok"),
+      ].join("");
+    }
+
+    function renderMetrics(agents) {
+      const connected = agents.filter((a) => a.connected).length;
+      const llmOn = agents.filter((a) => a.llm_enabled).length;
+      const llmOff = agents.length - llmOn;
+      document.getElementById("metric-agents").textContent = String(agents.length);
+      document.getElementById("metric-connected").textContent = String(connected);
+      document.getElementById("metric-llm-on").textContent = String(llmOn);
+      document.getElementById("metric-llm-off").textContent = String(llmOff);
+    }
+
+    function matchesFilter(agent) {
+      const type = document.getElementById("filter-type").value;
+      if (type && agent.device_type !== type) return false;
+      return true;
+    }
+
+    function renderAgentList(agents) {
+      const host = document.getElementById("agent-list");
+      const filtered = agents.filter(matchesFilter);
+      document.getElementById("empty-state").style.display = filtered.length ? "none" : "block";
+      host.innerHTML = filtered.map((agent) => {
+        const active = agent.token === state.selectedToken ? "active" : "";
+        const connectedCls = agent.connected ? "ok" : "off";
+        return `
+          <div class="agent-card ${active}" data-token="${escapeHtml(agent.token)}">
+            <div class="agent-head">
+              <div>
+                <div class="agent-name">${escapeHtml(agent.device_name || agent.device_id || agent.token)}</div>
+                <div class="agent-meta">
+                  ${badge(agent.device_type || "-", "")}
+                  ${badge(agent.llm_enabled ? "LLM enabled" : "LLM disabled", agent.llm_enabled ? "ok" : "warn")}
+                  ${badge(agent.connected ? "connected" : "disconnected", connectedCls)}
+                  ${badge(`token ${agent.token.slice(0, 8)}`)}
+                </div>
+              </div>
+              <div class="muted" style="font-size:.76rem;">${formatTime(agent.last_seen_at)}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      host.querySelectorAll("[data-token]").forEach((node) => {
+        node.addEventListener("click", () => {
+          state.selectedToken = node.getAttribute("data-token");
+          renderAgentList(state.agents);
+          renderSelectedAgent(state.agents.find((item) => item.token === state.selectedToken));
+        });
+      });
+    }
+
+    function renderSelectedAgent(agent) {
+      const summary = document.getElementById("selected-summary");
+      const subtitle = document.getElementById("selected-subtitle");
+      const lastPayload = document.getElementById("last-payload");
+      const planJson = document.getElementById("plan-json");
+      const decisionJson = document.getElementById("decision-json");
+      const executionJson = document.getElementById("execution-json");
+      const feedbackJson = document.getElementById("feedback-json");
+      const planMeta = document.getElementById("plan-meta");
+      const decisionMeta = document.getElementById("decision-meta");
+      const executionMeta = document.getElementById("execution-meta");
+      const feedbackMeta = document.getElementById("feedback-meta");
+      const memoryHost = document.getElementById("memory-list");
+      const recHost = document.getElementById("recommendation-list");
+
+      if (!agent) {
+        subtitle.textContent = "세션을 선택해주세요.";
+        summary.innerHTML = "";
+        lastPayload.textContent = "-";
+        planJson.textContent = "-";
+        decisionJson.textContent = "-";
+        executionJson.textContent = "-";
+        feedbackJson.textContent = "-";
+        planMeta.textContent = "-";
+        decisionMeta.textContent = "-";
+        executionMeta.textContent = "-";
+        feedbackMeta.textContent = "-";
+        memoryHost.innerHTML = `<div class="muted">표시할 메모리가 없습니다.</div>`;
+        recHost.innerHTML = `<div class="muted">추천 결과가 없습니다.</div>`;
+        setCommandControlsEnabled(false);
+        return;
+      }
+
+      setCommandControlsEnabled(Boolean(agent.connected));
+      subtitle.textContent = `${agent.device_name || agent.device_id || agent.token} · ${agent.device_type || "-"} · ${agent.llm_enabled ? "LLM enabled" : "LLM disabled"}`;
+      summary.innerHTML = `
+        <div class="badges">
+          ${badge(`token ${agent.token}`)}
+          ${badge(`device_id ${agent.device_id || "-"}`)}
+          ${badge(`registry ${agent.registry_id ?? "-"}`)}
+          ${badge(`LLM ${agent.llm_enabled ? "enabled" : "disabled"}`, agent.llm_enabled ? "ok" : "warn")}
+          ${badge(`Decision ${agent.context?.decision_strategy || (agent.llm_enabled ? "hybrid" : "rule")}`, agent.context?.decision_strategy || (agent.llm_enabled ? "hybrid" : "rule"))}
+        </div>
+        <div class="badges">
+          ${badge(`skills ${Array.isArray(agent.skills) ? agent.skills.join(", ") : "-"}`)}
+          ${badge(`tools ${Array.isArray(agent.tools) ? agent.tools.join(", ") : "-"}`)}
+          ${badge(`constraints ${Array.isArray(agent.constraints) ? agent.constraints.join(", ") : "-"}`)}
+        </div>
+        <div class="badges">
+          ${agent.context?.decision?.selected_action ? badge(`selected ${agent.context.decision.selected_action}`, "ok") : badge("selected -", "warn")}
+          ${agent.context?.decision?.selected_priority ? badge(`priority ${agent.context.decision.selected_priority}`) : ""}
+        </div>
+        <div class="badges">
+          ${badge(`actions ${Array.isArray(agent.available_actions) ? agent.available_actions.join(", ") : "-"}`)}
+        </div>
+        <div class="badges">
+          ${badge(`connected ${agent.connected ? "yes" : "no"}`, agent.connected ? "ok" : "off")}
+          ${badge(`connected_at ${formatTime(agent.connected_at)}`)}
+          ${badge(`last_seen ${formatTime(agent.last_seen_at)}`)}
+        </div>
+      `;
+      lastPayload.textContent = agent.last_payload ? pretty(agent.last_payload) : "-";
+      planJson.textContent = agent.last_plan ? pretty(agent.last_plan) : "-";
+      decisionJson.textContent = agent.last_decision ? pretty(agent.last_decision) : "-";
+      executionJson.textContent = agent.last_execution ? pretty(agent.last_execution) : "-";
+      feedbackJson.textContent = agent.last_feedback ? pretty(agent.last_feedback) : "-";
+      planMeta.textContent = agent.last_plan
+        ? `${formatTime(agent.last_plan.at)} · ${agent.last_plan.stream || "telemetry"} · candidates ${Array.isArray(agent.last_plan.candidates) ? agent.last_plan.candidates.length : 0}`
+        : "-";
+      decisionMeta.textContent = agent.last_decision
+        ? `${agent.last_decision.strategy || (agent.llm_enabled ? "hybrid" : "rule")} · ${agent.last_decision.selected_action || "-"}`
+        : "-";
+      executionMeta.textContent = agent.last_execution
+        ? `${agent.last_execution.delivered ? "delivered" : "failed"} · ${agent.last_execution.source || "external"}`
+        : "-";
+      feedbackMeta.textContent = agent.last_feedback
+        ? `${agent.last_feedback.status || "-"} · ${agent.last_feedback.source || "-"}`
+        : "-";
+      memoryHost.innerHTML = (agent.memory || []).slice().reverse().map((item) => `
+        <div class="timeline-item">
+          <div class="k">${escapeHtml(formatTime(item.at || item.timestamp || ""))} · ${escapeHtml(item.kind || "event")}</div>
+          <div class="v">${escapeHtml(pretty(item))}</div>
+        </div>
+      `).join("") || `<div class="muted">표시할 메모리가 없습니다.</div>`;
+
+      recHost.innerHTML = (agent.recommendations || []).slice().reverse().map((item) => `
+        <div class="timeline-item">
+          <div class="k">${escapeHtml(item.priority || "normal")} · ${escapeHtml(item.action || "-")}</div>
+          <div class="v">${escapeHtml(item.reason || "-")}</div>
+        </div>
+      `).join("") || `<div class="muted">추천 결과가 없습니다.</div>`;
+    }
+
+    function setCommandResult(value) {
+      document.getElementById("command-result").textContent =
+        typeof value === "string" ? value : pretty(value);
+    }
+
+    function setCommandControlsEnabled(enabled) {
+      const form = document.getElementById("command-form");
+      if (form) {
+        form.querySelectorAll("input, select, textarea, button").forEach((node) => {
+          if (node.id === "command-reset") return;
+          node.disabled = !enabled;
+        });
+      }
+      const host = document.getElementById("command-presets");
+      if (host) {
+        host.querySelectorAll("button").forEach((button) => {
+          button.disabled = !enabled;
+        });
+      }
+    }
+
+    function setCommandContext(text) {
+      const note = document.getElementById("command-action-note");
+      if (note) note.textContent = text;
+      const context = document.getElementById("command-context");
+      if (context) context.textContent = text;
+    }
+
+    function humanizeAction(action) {
+      return String(action || "-")
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
+    }
+
+    function buildRouteFromAgent(agent, step = 0.001) {
+      const payload = agent?.last_payload || {};
+      const position = payload.position || {};
+      const lat = Number(position.latitude);
+      const lon = Number(position.longitude);
+      const alt = Number(position.altitude || 0);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) {
+        return [];
+      }
+      return [
+        { latitude: lat, longitude: lon, altitude: alt },
+        { latitude: lat + step, longitude: lon, altitude: alt },
+        { latitude: lat + step, longitude: lon + step, altitude: alt },
+        { latitude: lat, longitude: lon + step, altitude: alt },
+      ];
+    }
+
+    async function sendCommand(command, reason = "", priority = "normal") {
+      const token = state.selectedToken;
+      if (!token) {
+        setCommandResult("선택된 Agent가 없습니다.");
+        return;
+      }
+      if (!command || !command.action) {
+        setCommandResult("선택된 작업이 없습니다.");
+        return;
+      }
+      try {
+        const result = await requestJson(`/agents/${encodeURIComponent(token)}/command`, {
+          method: "POST",
+          body: JSON.stringify({
+            action: command.action,
+            reason: reason || command.reason || null,
+            priority,
+            params: command.params || {},
+          }),
+        });
+        setCommandResult(result);
+      } catch (error) {
+        setCommandResult(`전송 실패: ${error.message}`);
+      }
+    }
+
+    function currentCommandMeta(agent, action) {
+      const payload = agent?.last_payload || {};
+      const position = payload.position || {};
+      const parentDeviceId = payload.parent_device_id || agent?.context?.last_envelope?.parent_device_id || null;
+      const currentDepth = Number.isFinite(Number(position.altitude)) ? Number(position.altitude) : -10;
+      const route = buildRouteFromAgent(agent);
+
+      switch (action) {
+        case "patrol_route":
+        case "route_move":
+          return {
+            command: { action, params: { route } },
+            note: `${humanizeAction(action)}: 현재 위치 기반 순찰 경로`,
+          };
+        case "move_to_device":
+        case "follow_target":
+          return {
+            command: { action, params: parentDeviceId ? { device_id: parentDeviceId } : {} },
+            note: `${humanizeAction(action)}: 상위 디바이스로 이동`,
+          };
+        case "hold_depth":
+          return {
+            command: { action, params: { depth: currentDepth } },
+            note: "Hold Depth: 현재 수심 유지",
+          };
+        case "slow_down":
+          return {
+            command: { action, params: { target_speed_mps: Math.max(0.1, Number(payload.motion?.speed || 0) * 0.5) } },
+            note: "Slow Down: 현재 속도를 낮춤",
+          };
+        case "charge_at_tower":
+          return {
+            command: { action, params: { target_device_id: "ocean-power-tower-01" } },
+            note: "Charge At Tower: 전력 타워로 이동",
+          };
+        case "camera_mode_switch":
+          return {
+            command: { action, params: { mode: "inspection" } },
+            note: "Camera Mode: inspection",
+          };
+        case "sonar_scan_plan":
+          return {
+            command: { action, params: { mode: "scan" } },
+            note: "Sonar Scan Plan: scan",
+          };
+        default:
+          return {
+            command: { action, params: {} },
+            note: humanizeAction(action),
+          };
+      }
+    }
+
+    function renderCommandPresets(agent) {
+      const host = document.getElementById("command-presets");
+      if (!host) return;
+      if (!agent) {
+        host.innerHTML = `<span class="muted">Agent를 선택하면 프리셋이 표시됩니다.</span>`;
+        setCommandControlsEnabled(false);
+        setCommandContext("Agent를 선택하면 가능한 작업 버튼이 표시됩니다.");
+        return;
+      }
+      const allowed = Array.isArray(agent.available_actions) && agent.available_actions.length
+        ? agent.available_actions
+        : (agent.context?.profile?.agent_side || []);
+      const presets = allowed.map((action) => {
+        const meta = currentCommandMeta(agent, action);
+        return {
+          action,
+          label: humanizeAction(action),
+          command: meta.command,
+          note: meta.note,
+        };
+      });
+
+      if (!state.selectedAction || !presets.some((preset) => preset.action === state.selectedAction)) {
+        state.selectedAction = presets[0]?.action || null;
+      }
+
+      host.innerHTML = presets
+        .map((preset) => `
+          <button type="button" class="button" data-preset-action="${escapeHtml(preset.action)}">
+            ${escapeHtml(preset.label)}
+          </button>
+        `)
+        .join("");
+      setCommandControlsEnabled(Boolean(agent.connected));
+      setCommandContext(agent.connected ? "버튼을 누르면 명령이 즉시 전송됩니다." : "Agent가 disconnected 상태입니다.");
+
+      host.querySelectorAll("[data-preset-action]").forEach((button) => {
+        const action = button.getAttribute("data-preset-action");
+        const preset = presets.find((item) => item.action === action);
+        button.addEventListener("click", async () => {
+          if (!preset) return;
+          if (!agent.connected) {
+            setCommandResult("Agent가 disconnected 상태라 명령을 보낼 수 없습니다.");
+            return;
+          }
+          state.selectedAction = preset.action;
+          setCommandContext(preset.note);
+          await sendCommand(
+            preset.command,
+            document.getElementById("command-reason").value.trim(),
+            document.getElementById("command-priority").value,
+          );
+        });
+      });
+    }
+
+    async function refresh() {
+      const meta = await requestJson("/meta");
+      const agents = await requestJson("/agents");
+      state.meta = meta;
+      state.agents = agents;
+      renderMetrics(agents);
+      updateGlobalBadges(meta);
+      renderAgentList(agents);
+
+      if (state.selectedToken && !agents.some((agent) => agent.token === state.selectedToken)) {
+        state.selectedToken = null;
+      }
+      const selected = agents.find((agent) => agent.token === state.selectedToken) || agents[0] || null;
+      if (!state.selectedToken && selected) {
+        state.selectedToken = selected.token;
+        renderAgentList(agents);
+      }
+      renderSelectedAgent(selected);
+      renderCommandPresets(selected);
+      document.getElementById("last-updated").textContent = `updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    function scheduleRefresh() {
+      if (state.timer) clearInterval(state.timer);
+      if (!state.autoRefresh) return;
+      state.timer = setInterval(() => {
+        refresh().catch((error) => {
+          document.getElementById("last-updated").textContent = `error: ${error.message}`;
+        });
+      }, 2500);
+    }
+
+    function bindEvents() {
+      const input = document.getElementById("api-base");
+      input.value = localStorage.getItem(STORAGE_KEY) || DEFAULT_API_BASE;
+      input.addEventListener("change", () => {
+        setApiBase(input.value);
+        refresh().catch((error) => {
+          document.getElementById("last-updated").textContent = `error: ${error.message}`;
+        });
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        refresh().catch((error) => {
+          document.getElementById("last-updated").textContent = `error: ${error.message}`;
+        });
+      });
+
+      document.getElementById("auto-btn").addEventListener("click", () => {
+        state.autoRefresh = !state.autoRefresh;
+        document.getElementById("auto-btn").textContent = `Auto: ${state.autoRefresh ? "ON" : "OFF"}`;
+        scheduleRefresh();
+      });
+
+      document.getElementById("filter-type").addEventListener("change", () => renderAgentList(state.agents));
+
+      const commandForm = document.getElementById("command-form");
+      const commandReset = document.getElementById("command-reset");
+      if (commandReset) {
+        commandReset.addEventListener("click", () => {
+          document.getElementById("command-reason").value = "";
+          document.getElementById("command-priority").value = "normal";
+          setCommandResult("-");
+        });
+      }
+      if (commandForm) {
+        commandForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const token = state.selectedToken;
+          if (!token) {
+            setCommandResult("선택된 Agent가 없습니다.");
+            return;
+          }
+          const selected = state.agents.find((agent) => agent.token === token);
+          if (!selected?.connected) {
+            setCommandResult("Agent가 disconnected 상태라 명령을 보낼 수 없습니다.");
+            return;
+          }
+          const action = state.selectedAction || (selected.available_actions || [])[0];
+          const meta = currentCommandMeta(selected, action);
+          await sendCommand(
+            meta.command,
+            document.getElementById("command-reason").value.trim(),
+            document.getElementById("command-priority").value,
+          );
+        });
+      }
+    }
+
+    bindEvents();
+    refresh()
+      .then(() => scheduleRefresh())
+      .catch((error) => {
+        document.getElementById("last-updated").textContent = `error: ${error.message}`;
+        document.getElementById("agent-list").innerHTML = `<div class="error">불러오기 실패: ${escapeHtml(error.message)}</div>`;
+      });
+  </script>
+</body>
+</html>

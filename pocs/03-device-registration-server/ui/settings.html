@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings - CoWater Device Server</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body data-page="settings">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">03</div>
+        <div>
+          <h1>Server Settings</h1>
+          <p>Configure local browser settings and inspect live server metadata.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="api-pill">
+          <span>API</span>
+          <input data-bind="apiBase" aria-label="API base URL">
+        </div>
+        <div class="status-pill">
+          <span>Health</span>
+          <span id="health-status">checking...</span>
+        </div>
+        <div class="header-menu">
+          <a href="index.html" data-nav-link="dashboard">Dashboard</a>
+          <a href="devices.html" data-nav-link="devices">Devices</a>
+          <a href="register.html" data-nav-link="register">Register</a>
+          <a href="alerts.html" data-nav-link="alerts">Alerts</a>
+          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="settings.html" data-nav-link="settings">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="grid-2">
+      <section class="panel">
+        <h2>Browser Configuration</h2>
+        <p class="lead">These settings are stored in your browser only.</p>
+        <div class="form-grid">
+          <div class="field">
+            <label for="settings-api-base-input">API base URL</label>
+            <input id="settings-api-base-input" data-bind="apiBase" placeholder="http://127.0.0.1:8003">
+          </div>
+          <div class="field">
+            <label for="settings-secret-key-input">Secret key</label>
+            <input id="settings-secret-key-input" data-bind="secretKey" placeholder="server-secret">
+          </div>
+        </div>
+        <p class="footer-note">
+          Current API base: <code id="settings-api-base-value">-</code>
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Server Metadata</h2>
+        <p class="lead">This is the raw payload from <code>/meta</code>.</p>
+        <div id="meta-json" class="code">Loading...</div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top: 18px;">
+      <h2>Endpoint Reference</h2>
+      <div class="table-wrap">
+        <table style="min-width: 0;">
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>GET</td><td>/health</td><td>Health check</td></tr>
+            <tr><td>GET</td><td>/meta</td><td>Server information</td></tr>
+            <tr><td>GET</td><td>/devices</td><td>List devices</td></tr>
+            <tr><td>POST</td><td>/devices</td><td>Register device</td></tr>
+            <tr><td>GET</td><td>/devices/{deviceId}</td><td>Read one device</td></tr>
+            <tr><td>PATCH</td><td>/devices/{deviceId}</td><td>Rename device</td></tr>
+            <tr><td>PATCH</td><td>/devices/{deviceId}/main-video-track</td><td>Change main VIDEO track</td></tr>
+            <tr><td>DELETE</td><td>/devices/{deviceId}</td><td>Remove device</td></tr>
+            <tr><td>POST</td><td>/alerts/ingest</td><td>Store canonical alert</td></tr>
+            <tr><td>GET</td><td>/alerts</td><td>List alerts</td></tr>
+            <tr><td>GET</td><td>/alerts/{alertId}</td><td>Read one alert</td></tr>
+            <tr><td>POST</td><td>/alerts/{alertId}/ack</td><td>Acknowledge alert</td></tr>
+            <tr><td>POST</td><td>/responses/ingest</td><td>Store canonical response</td></tr>
+            <tr><td>GET</td><td>/responses</td><td>List responses</td></tr>
+            <tr><td>GET</td><td>/responses/{responseId}</td><td>Read one response</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

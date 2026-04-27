@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     raw_payload_protocols: str = "ais,ros,mavlink,nmea"
     raw_payload_max_bytes: int = 4096
     raw_payload_ttl_sec: int = 86400
+    project_position_streams_to_platform_reports: bool = False
 
     # Moth 재연결 설정
     reconnect_delay_s: float = 5.0

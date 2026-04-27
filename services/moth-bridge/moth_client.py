@@ -1,10 +1,14 @@
 """
 Moth RSSP WebSocket 클라이언트.
 
-SKILL.md 가이드라인 준수:
-- MIME text 메시지를 먼저 수신한 후 binary payload를 처리
+Moth 프로토콜 규칙 (sub):
+- Sub URL: /pang/ws/sub?channel=<type>&name=<name>&source=base&track=<track>&mode=single
+- 연결 후 text frame(MIME)을 먼저 수신한 뒤 binary payload 처리
+- mode=single: 30초 이내 데이터 수신 없으면 서버가 연결 종료
+- WebSocket-level ping 미지원 → ping_interval=None 필수
 - 연결 드롭 시 자동 재연결
 - transport-level 에러는 예외로 전파 (silent fallback 없음)
+- track 값: pub/sub 모두 "data" 사용 (track=streams는 ~1s 후 서버 종료)
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from urllib.parse import urlencode
 import websockets
 from websockets.exceptions import ConnectionClosedError
 
-from adapters import ADAPTER_REGISTRY, ProtocolAdapter, ParsedReport
+from adapters import ADAPTER_REGISTRY, ProtocolAdapter, ParsedReport, ParsedStreamMessage
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -39,9 +43,10 @@ class ChannelConfig:
 class MothChannelClient:
     """단일 Moth 채널을 구독하는 클라이언트."""
 
-    def __init__(self, config: ChannelConfig, on_report) -> None:
+    def __init__(self, config: ChannelConfig, on_report, on_stream=None) -> None:
         self._config = config
         self._on_report = on_report  # async callback(ParsedReport)
+        self._on_stream = on_stream  # async callback(ParsedStreamMessage)
 
     def _build_url(self) -> str:
         params = {
@@ -84,7 +89,8 @@ class MothChannelClient:
         url = self._build_url()
         logger.info("Connecting to Moth channel '%s' → %s", self._config.name, url)
 
-        async with websockets.connect(url) as ws:
+        # ping_interval=None: Moth 서버는 WebSocket ping에 응답하지 않음
+        async with websockets.connect(url, ping_interval=None) as ws:
             logger.info("Connected: channel='%s'", self._config.name)
             current_mime: str | None = None
 
@@ -103,6 +109,19 @@ class MothChannelClient:
                             "Binary payload received before MIME on channel '%s' — skipping",
                             self._config.name,
                         )
+                        continue
+                    stream_messages = self._config.adapter.parse_streams(
+                        message, current_mime
+                    )
+                    if stream_messages:
+                        if self._on_stream is None:
+                            logger.warning(
+                                "Stream payload received on '%s' but no stream callback is configured",
+                                self._config.name,
+                            )
+                        else:
+                            for stream_message in stream_messages:
+                                await self._on_stream(stream_message)
                         continue
                     report = self._config.adapter.parse(message, current_mime)
                     if report is not None:

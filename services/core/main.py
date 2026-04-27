@@ -14,6 +14,7 @@ from db import AsyncSessionLocal, engine, Base
 from api.alerts import router as alerts_router
 from api.auth import router as auth_router
 from api.commands import router as commands_router
+from api.device_streams import router as device_streams_router
 from api.platforms import router as platforms_router
 from api.reports import router as reports_router
 from api.ws import router as ws_router
@@ -23,6 +24,7 @@ from redis_client import close_redis, get_redis
 from services.alert_consumer import consume_alerts
 from services.track_consumer import consume_platform_reports
 from services.event_consumer import consume_events
+from services.device_stream_consumer import consume_device_streams
 from ws_hub import hub
 import models  # noqa: F401 - import models to register all ORM models
 
@@ -111,6 +113,10 @@ async def lifespan(app: FastAPI):
             _run_with_reconnect(consume_events, "event-consumer", redis),
             name="event-consumer",
         ),
+        asyncio.create_task(
+            _run_with_reconnect(consume_device_streams, "device-stream-consumer", redis),
+            name="device-stream-consumer",
+        ),
     ]
     logger.info("CoWater Core Backend started")
 
@@ -141,6 +147,7 @@ app.include_router(alerts_router)
 app.include_router(reports_router)
 app.include_router(auth_router)
 app.include_router(commands_router)
+app.include_router(device_streams_router)
 app.include_router(zones_router)
 app.include_router(ws_router)
 app.include_router(uva_router)

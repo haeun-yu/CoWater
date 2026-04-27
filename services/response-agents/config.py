@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-haiku-4-5-20251001"
     ollama_url: str = "http://host.docker.internal:11434"
-    ollama_model: str = "qwen2.5:3b"
+    ollama_model: str = "gemma4:e2b"
     ollama_think: bool = False
     vllm_url: str = "http://localhost:8000"
     vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"

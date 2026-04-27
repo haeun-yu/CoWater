@@ -93,6 +93,21 @@ def test_channel_resolution_with_alert():
     assert channel == "analyze.anomaly.alert-uuid-123"
 
 
+def test_channel_resolution_with_mine_detection():
+    event = Event(
+        flow_id="test-flow",
+        type=EventType.DETECT_MINE,
+        agent_id="detection-mine",
+        payload={
+            "platform_id": "auv-01",
+            "contact_id": "contact-123",
+        },
+    )
+
+    channel = get_channel_for_event(event)
+    assert channel == "detect.mine.auv-01"
+
+
 def test_causation_chain():
     """Event chain: detect → analyze → respond"""
     # 1. Detection event

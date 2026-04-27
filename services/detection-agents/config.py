@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     anomaly_heading_threshold: float = 45.0  # degrees
     anomaly_speed_threshold: float = 5.0  # knots
 
+    # Mine detection from sonar stream
+    mine_detection_confidence_threshold: float = 0.4
+    mine_detection_emit_cooldown_sec: int = 30
+
     # Zone Agent
     ais_check_interval_sec: int = 20
     zone_reload_interval_sec: int = 300

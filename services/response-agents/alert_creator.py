@@ -36,6 +36,8 @@ class ResponseAlertCreatorAgent(ResponseAgent):
             await self._handle_cpa_detect(event)
         elif event.type == EventType.DETECT_ZONE:
             await self._handle_zone_detect(event)
+        elif event.type == EventType.DETECT_MINE:
+            await self._handle_mine_detect(event)
 
     async def _handle_anomaly_analysis(self, event: Event) -> None:
         """비정상 분석 결과 → Alert 생성"""
@@ -187,6 +189,54 @@ class ResponseAlertCreatorAgent(ResponseAgent):
                     "platform_id": platform_id,
                     "alert_type": "zone_intrusion",
                     "severity": payload.get("severity", "warning"),
+                    "message": message,
+                },
+                flow_id=event.flow_id,
+                causation_id=event.event_id,
+            )
+
+    async def _handle_mine_detect(self, event: Event) -> None:
+        payload = event.payload
+        platform_id = payload.get("platform_id")
+        contact_id = payload.get("contact_id")
+        if not platform_id or not contact_id:
+            return
+
+        confidence = payload.get("confidence")
+        confidence_pct = (
+            f"{float(confidence) * 100:.0f}%" if confidence is not None else "N/A"
+        )
+        severity = payload.get("severity", "warning")
+        message = (
+            f"기뢰 의심 표적 감지: {platform_id} "
+            f"contact={contact_id} confidence={confidence_pct}"
+        )
+        alert_id = await self.create_alert(
+            alert_type="mine_detected",
+            severity=severity,
+            platform_ids=[platform_id],
+            message=message,
+            recommendation="소나 접촉 위치를 재확인하고 ROV 투입 승인 절차를 검토하세요.",
+            metadata={
+                "contact_id": contact_id,
+                "classification": payload.get("classification"),
+                "confidence": confidence,
+                "range_m": payload.get("range_m"),
+                "bearing_deg": payload.get("bearing_deg"),
+                "ping_id": payload.get("ping_id"),
+                "device_type": payload.get("device_type"),
+            },
+            dedup_key=f"mine:{platform_id}:{contact_id}",
+        )
+        if alert_id:
+            await self.emit_response_event(
+                event_type=EventType.RESPOND_ALERT,
+                payload={
+                    "alert_id": alert_id,
+                    "alert_ids": [alert_id],
+                    "platform_id": platform_id,
+                    "alert_type": "mine_detected",
+                    "severity": severity,
                     "message": message,
                 },
                 flow_id=event.flow_id,

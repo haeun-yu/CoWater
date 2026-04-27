@@ -1,0 +1,7 @@
+services:
+  command-control:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/08-command-control
+    volumes:
+      - ../..:/workspace
+    command: python3 src/command.py --role operator --format pretty approve rov deploy

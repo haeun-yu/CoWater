@@ -12,7 +12,7 @@ import redis.asyncio as aioredis
 import uvicorn
 import yaml
 
-from adapters import ADAPTER_REGISTRY, ParsedReport
+from adapters import ADAPTER_REGISTRY, GeoPoint, ParsedReport, ParsedStreamMessage
 from config import settings
 from moth_client import ChannelConfig, MothChannelClient
 from shared.events import build_event, platform_report_channel
@@ -176,15 +176,77 @@ async def run_moth(redis: aioredis.Redis) -> None:
             )
         return publish_report
 
-    tasks = [
-        asyncio.create_task(
-            MothChannelClient(ch, make_publish_callback(ch.is_simulator)).run(),
-            name=f"moth-{ch.name}",
+    def make_stream_callback(is_simulator: bool, publish_report):
+        async def publish_stream(message: ParsedStreamMessage) -> None:
+            subject = f"{message.stream.strip('.')}.{message.device_id}"
+            payload_dict = message.to_redis_payload()
+            if is_simulator:
+                payload_dict["is_simulator"] = True
+            payload = json.dumps(payload_dict)
+
+            try:
+                await _redis_write_with_retry(
+                    lambda: redis.publish(subject, payload),
+                    label=f"publish-stream:{subject}",
+                )
+            except Exception:
+                logger.exception("Failed to publish stream to Redis: %s", subject)
+                return
+
+            if (
+                settings.project_position_streams_to_platform_reports
+                and message.stream == "telemetry.position"
+            ):
+                report = _position_stream_to_report(message)
+                if report is not None:
+                    await publish_report(report)
+
+            logger.debug(
+                "Published stream: stream=%s device=%s qos=%s",
+                message.stream,
+                message.device_id,
+                message.qos,
+            )
+
+        return publish_stream
+
+    tasks = []
+    for ch in channels:
+        publish_report = make_publish_callback(ch.is_simulator)
+        publish_stream = make_stream_callback(ch.is_simulator, publish_report)
+        tasks.append(
+            asyncio.create_task(
+                MothChannelClient(ch, publish_report, publish_stream).run(),
+                name=f"moth-{ch.name}",
+            )
         )
-        for ch in channels
-    ]
     logger.info("Moth Bridge started — subscribing to %d channel(s)", len(tasks))
     await asyncio.gather(*tasks)
+
+
+def _position_stream_to_report(message: ParsedStreamMessage) -> ParsedReport | None:
+    payload = message.payload
+    lat = payload.get("lat")
+    lon = payload.get("lon")
+    if lat is None or lon is None:
+        logger.warning("telemetry.position missing lat/lon for %s", message.device_id)
+        return None
+
+    return ParsedReport(
+        platform_id=message.device_id,
+        timestamp=message.timestamp,
+        position=GeoPoint(lat=float(lat), lon=float(lon)),
+        depth_m=payload.get("depth_m"),
+        altitude_m=payload.get("altitude_m"),
+        sog=payload.get("sog"),
+        cog=payload.get("cog"),
+        heading=payload.get("heading"),
+        rot=payload.get("rot"),
+        nav_status=payload.get("nav_status"),
+        platform_type=message.device_type,
+        name=payload.get("name") or message.device_id,
+        source_protocol=payload.get("source_protocol", "custom"),
+    )
 
 
 async def run_relay() -> None:

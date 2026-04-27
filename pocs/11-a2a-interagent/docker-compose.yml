@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  detection-agent:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/11-a2a-interagent
+    volumes:
+      - ../..:/workspace
+    command: >
+      sh -c "pip install -r requirements.txt -q &&
+             python src/detection_agent_server.py"
+    ports:
+      - "8011:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client; c=http.client.HTTPConnection('localhost', 8001, timeout=5); c.request('GET', '/health'); print(c.getresponse().status)"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  learning-agent:
+    image: python:3.12-slim
+    working_dir: /workspace/pocs/11-a2a-interagent
+    volumes:
+      - ../..:/workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DETECTION_AGENT_URL=http://detection-agent:8001
+    command: >
+      sh -c "pip install -r requirements.txt -q &&
+             sleep 5 &&
+             python src/learning_agent_client.py"
+    depends_on:
+      detection-agent:
+        condition: service_healthy
