@@ -161,7 +161,7 @@ class MothPublisher:
         track_endpoint = None
         for track in tracks:
             endpoint = track.get("endpoint") if isinstance(track, dict) else None
-            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/pub"):
+            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/meb"):
                 track_endpoint = endpoint
                 break
 
