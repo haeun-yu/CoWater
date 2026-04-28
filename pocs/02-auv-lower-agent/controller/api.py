@@ -146,6 +146,13 @@ def run(default_config_path: Path) -> None:
     import argparse
     import os
 
+    # Python logging 설정 (stdout으로 로그 출력)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--host", default=None)

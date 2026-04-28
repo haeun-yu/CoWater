@@ -202,20 +202,27 @@ class MothPublisher:
         - ping_timeout=10: 10초 내에 pong 응답 없으면 연결 끊김
         """
         if not self.enabled or websockets is None:
+            logger.debug("MothPublisher 비활성화 또는 websockets 미설치")
             return
 
         # 이미 연결되어 있으면 스킵
         if self.ws is not None and not self._ws_is_closed():
+            logger.debug(f"Moth 이미 연결됨 (is_closed={self._ws_is_closed()})")
             return
 
         try:
-            logger.info(f"Moth 연결 중: {self.moth_url}")
+            logger.info(f"Moth 연결 시작: {self.moth_url}")
+            logger.debug(f"  WebSocket 설정: ping_interval=30, ping_timeout=10")
             self.ws = await websockets.connect(self.moth_url, ping_interval=30, ping_timeout=10)
             self.is_connected = True
-            logger.info("Moth 연결 성공")
+            logger.info(f"Moth 연결 성공: {self.moth_url}")
+            logger.debug(f"  WebSocket 상태: {self.ws}")
         except Exception as e:
-            logger.error(f"Moth 연결 실패 (url={self.moth_url}): {e}")
+            logger.error(f"Moth 연결 실패: {type(e).__name__}: {str(e)}")
+            logger.error(f"  URL: {self.moth_url}")
+            logger.error(f"  상세: {repr(e)}")
             self.is_connected = False
+            self.ws = None
 
     async def _reconnect_loop(self) -> None:
         """
@@ -227,15 +234,17 @@ class MothPublisher:
         Default: 5초마다 확인 (환경변수로 커스터마이징 가능)
         """
         reconnect_interval = self.moth_config.get("reconnect_interval_seconds", 5)
+        logger.info(f"Moth 재연결 루프 시작 (간격: {reconnect_interval}초)")
 
         while True:
             try:
                 # 연결 끊김 감지 시 재연결 시도
                 if not self.is_connected or self.ws is None or self._ws_is_closed():
+                    logger.debug(f"Moth 연결 끊김 감지: is_connected={self.is_connected}, ws={self.ws is not None}, closed={self._ws_is_closed()}")
                     await self.connect()
                 await asyncio.sleep(reconnect_interval)
             except Exception as e:
-                logger.debug(f"재연결 오류: {e}")
+                logger.warning(f"재연결 루프 오류: {type(e).__name__}: {e}")
                 await asyncio.sleep(reconnect_interval)
 
     async def publish_heartbeat(self) -> None:
