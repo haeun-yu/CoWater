@@ -34,6 +34,39 @@ DEFAULT_MOTH_URL = "wss://cobot.center:8287"
 HEARTBEAT_CHANNEL = "device.heartbeat"
 
 
+def _extract_base_url(raw_url: str) -> str:
+    parsed = urlsplit((raw_url or "").strip())
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _join_base_and_endpoint(base_url: str, endpoint: str) -> str:
+    endpoint = (endpoint or "").strip()
+    if not endpoint:
+        return base_url
+
+    parsed_endpoint = urlsplit(endpoint)
+    if parsed_endpoint.scheme and parsed_endpoint.netloc:
+        return endpoint
+
+    parsed_base = urlsplit(base_url)
+    return urlunsplit(
+        (
+            parsed_base.scheme,
+            parsed_base.netloc,
+            parsed_endpoint.path,
+            parsed_endpoint.query,
+            "",
+        )
+    )
+
+
+def _build_fallback_pub_endpoint(device_id: int | None) -> str:
+    name = str(device_id) if device_id is not None else "unknown"
+    return f"/pang/ws/pub?channel=instant&name={name}&source=base&track=ping"
+
+
 class MothPublisher:
     """
     Moth WebSocket 발행자: 센서 데이터 및 하트비트 실시간 전송
@@ -60,6 +93,11 @@ class MothPublisher:
         self.state = state
         self.moth_config = config.get("moth", {})
         configured_url = self.moth_config.get("server_url", DEFAULT_MOTH_URL)
+        configured_base_url = _extract_base_url(configured_url)
+        if configured_base_url in ALLOWED_MOTH_URLS:
+            self.moth_base_url = configured_base_url
+        else:
+            self.moth_base_url = DEFAULT_MOTH_URL
         self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
         self.enabled = self.moth_config.get("enabled", True)
         self.ws: Optional[Any] = None
@@ -68,6 +106,30 @@ class MothPublisher:
         # Server의 Device Registration 응답에서 할당받은 topics
         self.heartbeat_topic: Optional[str] = None
         self.telemetry_topics: dict[str, str] = {}  # {track_type: topic}
+
+    def _ws_is_closed(self) -> bool:
+        """websockets 버전 차이를 흡수해 종료 상태를 판별합니다."""
+        if self.ws is None:
+            return True
+
+        closed_attr = getattr(self.ws, "closed", None)
+        if isinstance(closed_attr, bool):
+            return closed_attr
+        if closed_attr is not None:
+            try:
+                return bool(closed_attr)
+            except Exception:
+                pass
+
+        state = getattr(self.ws, "state", None)
+        if state is not None:
+            state_name = getattr(state, "name", str(state)).upper()
+            if state_name in {"CLOSED", "CLOSING"}:
+                return True
+            if state_name in {"OPEN", "OPENING", "CONNECTING"}:
+                return False
+
+        return False
 
     async def initialize(self, registration_response: dict[str, Any]) -> None:
         """
@@ -87,8 +149,28 @@ class MothPublisher:
             logger.info("MothPublisher 비활성화 또는 websockets 미설치")
             return
 
-        configured_url = self.moth_config.get("server_url", self.moth_url)
-        self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
+        configured_url = self.moth_config.get("server_url", self.moth_base_url)
+        configured_base_url = _extract_base_url(configured_url)
+        if configured_base_url in ALLOWED_MOTH_URLS:
+            self.moth_base_url = configured_base_url
+        else:
+            self.moth_base_url = DEFAULT_MOTH_URL
+
+        tracks = registration_response.get("tracks", [])
+        track_endpoint = None
+        for track in tracks:
+            endpoint = track.get("endpoint") if isinstance(track, dict) else None
+            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/pub"):
+                track_endpoint = endpoint
+                break
+
+        if track_endpoint:
+            self.moth_url = _join_base_and_endpoint(self.moth_base_url, track_endpoint)
+        else:
+            self.moth_url = _join_base_and_endpoint(
+                self.moth_base_url,
+                _build_fallback_pub_endpoint(registration_response.get("id") or self.state.registry_id),
+            )
 
         self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
 
@@ -115,7 +197,7 @@ class MothPublisher:
             return
 
         # 이미 연결되어 있으면 스킵
-        if self.ws is not None and not self.ws.closed:
+        if self.ws is not None and not self._ws_is_closed():
             return
 
         try:
