@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 from typing import Any, List
 
 from fastapi import FastAPI, HTTPException, Response, status
@@ -297,6 +298,13 @@ def update_device_connectivity_state(device_id: int, request: DeviceConnectivity
 
 
 def main() -> None:
+    # Python logging 설정 (stdout으로 로그 출력)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", help="Override bind host from config/env")
     parser.add_argument("--port", type=int, help="Override bind port from config/env")
