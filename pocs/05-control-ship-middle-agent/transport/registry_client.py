@@ -63,7 +63,7 @@ def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
 
 class RegistryClient:
     def __init__(self, config: dict[str, Any]) -> None:
-        self.url = str(config.get("url") or "http://127.0.0.1:8286").rstrip("/")
+        self.url = str(config.get("url") or "http://127.0.0.1:8280").rstrip("/")
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
 

@@ -43,7 +43,7 @@ docker compose logs -f core
 ```bash
 cd pocs
 
-# Device Registration Server 시작 (포트 8286)
+# Device Registration Server 시작 (포트 8280)
 cd pocs/00-device-registration-server
 python -m src.device_registration_server --port 8286
 
