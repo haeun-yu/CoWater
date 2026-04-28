@@ -1,53 +1,51 @@
 # CoWater PoC 워크스페이스
 
-이 워크스페이스는 기존 통합형 CoWater 구조를 기능별로 분해한 독립 PoC 모음입니다. 각 PoC는 과거 전체 스택 없이도 실행하고 검토할 수 있어야 합니다.
+이 워크스페이스는 계층형 무인체 Agent 시스템을 1~6번 PoC로 다시 정리합니다. `00-device-registration-server`는 번호 체계 밖의 공통 인프라로, 각 하위/중간 Agent가 시작 시 자신의 디바이스 정보를 등록하고 id/token을 발급받는 역할을 합니다.
 
 ## PoC 경계
 
-| PoC | 목적 | 주요 출력 |
+| PoC | 목적 | 실행 단위 |
 | --- | --- | --- |
-| `01-device-streams` | 디바이스 멀티 스트림 생성 | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
-| `02-device-agent-contract` | `usv`, `auv`, `rov`용 디바이스별 Agent 허브 | `ws://.../agents/{token}` |
-| `03-device-registration-server` | 디바이스 등록과 주소 생성 | 디바이스 메타데이터 검증 |
-| `04-realtime-dashboard` | 실시간 관제 UI | 지도/상태/경보 UI 프로토타입 |
-| `05-control-ship-agent` | 중간 조정자 `control_ship` A2A 허브 | 하위 디스패치와 상위 상태 보고 |
-| `06-control-center-system-agent` | 최상위 `control_center` A2A 허브 | 미션 계획과 직접 라우팅 |
-| `07-mission-simulator` | 임무 시나리오 재생 | 시나리오 이벤트 JSONL |
-| `08-command-control` | 승인, 권한, 명령 경로 검증 | `respond.command.*` |
-| `09-report-learning` | 보고서와 피드백 루프 | 임무 요약과 학습 제안 |
-| `10-mcp-detection` | MCP 기반 탐지 도구 호출 | Claude tool_use 분석 결과 |
-| `11-a2a-interagent` | A2A 기반 에이전트 간 제안/적용 | rule update task 결과 |
+| `00-device-registration-server` | 디바이스 id/name/token/agent endpoint 등록 | 공통 API 서버 |
+| `01-usv-lower-agent` | USV 시뮬레이터 + 하위 실행 판단 Agent | USV 1대당 프로세스 1개 |
+| `02-auv-lower-agent` | AUV 시뮬레이터 + 하위 실행 판단 Agent | AUV 1대당 프로세스 1개 |
+| `03-rov-lower-agent` | ROV 시뮬레이터 + 하위 실행 판단 Agent | ROV 1대당 프로세스 1개 |
+| `04-usv-middle-agent` | 중계/조율 USV 시뮬레이터 + 중간 계층 Agent | 현장 relay USV 1대당 프로세스 1개 |
+| `05-control-ship-middle-agent` | Control Ship 시뮬레이터 + 중간 계층 Agent | Control Ship 1대당 프로세스 1개 |
+| `06-system-supervisor-agent` | 상위 System Supervisor Agent | 시스템 운영 감독 프로세스 |
 
-## 실행 가능한 체인
+기존 `01-device-streams`, `02-device-agent-contract`, `05-control-ship-agent`, `06-control-center-system-agent`는 재편 전 참고 구현으로 남아 있습니다.
 
-현재 다음 PoC들은 독립 실행 가능합니다.
+## 실행
+
+먼저 공통 등록 서버를 실행합니다.
 
 ```bash
-# 01: 멀티 스트림 디바이스 JSONL 생성
-python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/device-streams.jsonl
-
-# 02: 디바이스별 Agent 허브 실행
-python3 pocs/02-device-agent-contract/device_agent_server.py
-
-# 03: 디바이스 등록 및 메타데이터 조회
-python3 pocs/03-device-registration-server/src/device_registration_server.py
-
-# 05: control ship A2A 허브 실행
-python3 pocs/05-control-ship-agent/device_agent_server.py
-
-# 06: control center A2A 허브 실행
-python3 pocs/06-control-center-system-agent/device_agent_server.py
+python3 pocs/00-device-registration-server/device_registration_server.py --host 127.0.0.1 --port 8003
 ```
 
-## 위계 메모
+각 Agent는 독립 터미널에서 실행합니다. 같은 PoC를 두 번 실행하면 `COWATER_INSTANCE_ID`가 없는 한 런타임 instance id가 새로 생성되어 서로 다른 디바이스로 등록됩니다.
 
-현재 A2A 위계 데모는 `06-control-center-system-agent -> 05-control-ship-agent -> 02-device-agent-contract` 입니다.
-독립 워크플로 PoC는 트리에 남아 있을 수 있지만, 더 이상 주 제어 경로 데모는 아닙니다.
+```bash
+python3 pocs/01-usv-lower-agent/device_agent.py --port 9111
+python3 pocs/01-usv-lower-agent/device_agent.py --port 9112
+python3 pocs/02-auv-lower-agent/device_agent.py --port 9121
+python3 pocs/03-rov-lower-agent/device_agent.py --port 9131
+python3 pocs/04-usv-middle-agent/device_agent.py --port 9141
+python3 pocs/05-control-ship-middle-agent/device_agent.py --port 9151
+python3 pocs/06-system-supervisor-agent/system_agent.py --port 9161
+```
 
-## 규칙
+## 통신 경계
 
-- PoC끼리는 서로의 내부 구현을 import하지 않습니다.
-- 공유 계약은 `packages/schemas`에만 둡니다.
-- 통합은 파일, HTTP, WebSocket, 이벤트 버스를 통해서만 합니다.
-- 각 PoC는 제외 범위를 명확히 적습니다.
-- 기존 `services/` 스택은 재구축 중 참고용 legacy 자료로 취급합니다.
+- MCP: 상위 System Supervisor Agent와 API 서버 사이의 확장 지점입니다. 이번 구현에서는 상위 Agent manifest에 `mcp_api_client` tool을 명시하고, 실제 MCP 서버화는 API 서버 쪽 후속 작업으로 남깁니다.
+- A2A: Agent 간 이벤트/작업 통신입니다. 새 런타임은 최신 A2A 형태의 JSON-RPC `message/send`를 `/`에서 받고, 기존 PoC 호환을 위해 `/message:send`도 제공합니다.
+- Moth: 실시간 디바이스 데이터 스트림 경계입니다. 이번 재편의 각 PoC simulator는 telemetry 상태와 track manifest를 생성하고, 기존 Moth 직접 송신 구현은 `01-device-streams`를 참고 구현으로 유지합니다.
+
+## 설계 규칙
+
+- 하위 Agent와 중간 Agent는 같은 디렉터리 구조와 인터페이스를 사용하지만, 구현 파일은 각 PoC 내부에 둡니다.
+- 디바이스별 차이는 각 PoC의 `config.json`과 `agent/`, `simulator/`, `skills/`, `tools/` 구현으로 표현합니다.
+- 중간 계층은 선택 사항입니다. 상위 Agent는 중간 Agent가 없으면 하위 Agent로 직접 라우팅할 수 있습니다.
+- 각 디바이스 프로세스는 시작 시 등록 서버에 등록하고, 받은 id/token을 `.runtime/{instance_id}.json`에 저장합니다.
+- LLM은 `gemma4` 설정을 기본으로 manifest에 남기되, 실시간 판단 루프는 안전한 rule 기반 결정을 먼저 수행합니다.

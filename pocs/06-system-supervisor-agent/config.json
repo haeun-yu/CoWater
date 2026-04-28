@@ -1,0 +1,22 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9161 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": false },
+  "agent": {
+    "id": "system-supervisor-agent",
+    "name": "System Supervisor Agent",
+    "role": "system_supervisor",
+    "layer": "system",
+    "description": "Upper-layer supervisor agent for mission planning, approval, priority, and response strategy.",
+    "children_required": false,
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "capabilities": {
+      "skills": ["mission_planning", "fleet_supervision", "priority_decision", "response_strategy", "approval_control"],
+      "tools": ["mcp_api_client", "device_registry_reader", "a2a_router", "mission_planner", "alert_response_planner"],
+      "actions": ["mission.plan", "mission.assign", "task.assign", "approve_response", "route_direct", "route_via_middle"],
+      "constraints": ["mcp_only_to_api_server", "direct_route_allowed_when_no_middle_layer", "approval_required_for_destructive_actions"],
+      "tracks": []
+    }
+  },
+  "simulation": {},
+  "cors": { "allow_origins": ["*"] }
+}

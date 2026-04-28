@@ -1,0 +1,35 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9151 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "agent": {
+    "id": "control-ship-middle-agent",
+    "name": "Control Ship Middle Agent",
+    "role": "regional_orchestrator",
+    "layer": "middle",
+    "device_type": "control_ship",
+    "description": "Middle-layer field coordination agent running on a control ship.",
+    "children_required": false,
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "rules": { "max_speed_mps": 8.0, "battery_warn_percent": 20 },
+    "capabilities": {
+      "skills": ["field_coordination", "mission_redistribution", "multi_device_status_fusion", "operator_relay"],
+      "tools": ["child_registry", "a2a_router", "dispatch_planner", "moth_stream_reader", "command_executor"],
+      "actions": ["task.assign", "coordinate_children", "relay_status", "redistribute_mission", "hold_position", "return_to_base"],
+      "constraints": ["middle_layer_optional", "must_preserve_child_identity", "can_route_direct_to_system"],
+      "tracks": [
+        { "type": "GPS", "name": "gps" },
+        { "type": "ODOMETRY", "name": "ship_motion" },
+        { "type": "TOPIC", "name": "field_status" },
+        { "type": "TOPIC", "name": "telemetry" }
+      ]
+    }
+  },
+  "simulation": {
+    "interval_seconds": 5,
+    "start_position": { "latitude": 37.005, "longitude": 129.418, "altitude": 3.0 },
+    "speed_range": [0.0, 1.0],
+    "altitude_range": [3.0, 3.0]
+  },
+  "cors": { "allow_origins": ["*"] }
+}
+

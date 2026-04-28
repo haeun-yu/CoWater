@@ -1,53 +1,57 @@
 # CoWater PoC Workspace
 
-This workspace replaces the old integrated CoWater shape with small, independent
-proofs of concept. Each PoC must be runnable and reviewable without requiring the
-whole historical stack.
+This workspace now models the layered unmanned-vehicle Agent system as PoCs 1-6. `00-device-registration-server` is shared infrastructure: lower and middle Agents register their local device metadata at startup and receive an id/token.
 
-## PoC Boundaries
+## Boundaries
 
-| PoC | Purpose | Primary Output |
+| PoC | Purpose | Runtime Unit |
 | --- | --- | --- |
-| `01-device-streams` | Multi-stream device generation | `telemetry.*`, `sensor.*`, `device.event.*` JSONL |
-| `02-device-agent-contract` | Per-device Agent hub for `usv`, `auv`, `rov` | `ws://.../agents/{token}` |
-| `03-device-registration-server` | Device registration and address generation | Device metadata validation |
-| `04-realtime-dashboard` | Real-time operator UI | Map/status/alert UI prototype |
-| `05-control-ship-agent` | Mid-tier `control_ship` A2A hub | Child dispatch and upstream status reports |
-| `06-control-center-system-agent` | Top-tier `control_center` A2A hub | Mission planning and direct routing |
-| `07-mission-simulator` | End-to-end mission scenario demo | Scenario replay |
-| `08-command-control` | Approval, authorization, command path | `respond.command.*` |
-| `09-report-learning` | Reports and feedback loop | Incident reports and suggestions |
+| `00-device-registration-server` | Device id/name/token/agent endpoint registry | Shared API server |
+| `01-usv-lower-agent` | USV simulator + lower execution Agent | One process per USV |
+| `02-auv-lower-agent` | AUV simulator + lower execution Agent | One process per AUV |
+| `03-rov-lower-agent` | ROV simulator + lower execution Agent | One process per ROV |
+| `04-usv-middle-agent` | Relay/coordination USV simulator + middle Agent | One process per relay USV |
+| `05-control-ship-middle-agent` | Control Ship simulator + middle Agent | One process per control ship |
+| `06-system-supervisor-agent` | Upper System Supervisor Agent | One system supervisor process |
 
-## Runnable Chain
+Older PoCs such as `01-device-streams`, `02-device-agent-contract`, `05-control-ship-agent`, and `06-control-center-system-agent` remain as reference implementations.
 
-The following PoCs are currently executable:
+## Run
+
+Start the shared registry first:
 
 ```bash
-# 01: generate multi-stream device JSONL
-python3 pocs/01-device-streams/src/simulator.py --ticks 3 --output pocs/_out/device-streams.jsonl
-
-# 02: run per-device agent hub
-python3 pocs/02-device-agent-contract/device_agent_server.py
-
-# 03: register and inspect device metadata
-python3 pocs/03-device-registration-server/src/device_registration_server.py
-
-# 05: run the control ship A2A hub
-python3 pocs/05-control-ship-agent/device_agent_server.py
-
-# 06: run the control center A2A hub
-python3 pocs/06-control-center-system-agent/device_agent_server.py
+python3 pocs/00-device-registration-server/device_registration_server.py --host 127.0.0.1 --port 8003
 ```
 
-## Hierarchy Note
+Run Agents from separate terminals. Running the same PoC twice creates two device instances unless you pin `COWATER_INSTANCE_ID`.
 
-The active A2A hierarchy demo is `06-control-center-system-agent -> 05-control-ship-agent -> 02-device-agent-contract`.
-Standalone workflow PoCs may still exist in the tree, but they are not the primary control-path demo anymore.
+```bash
+python3 pocs/01-usv-lower-agent/device_agent.py --port 9111
+python3 pocs/01-usv-lower-agent/device_agent.py --port 9112
+python3 pocs/02-auv-lower-agent/device_agent.py --port 9121
+python3 pocs/03-rov-lower-agent/device_agent.py --port 9131
+python3 pocs/04-usv-middle-agent/device_agent.py --port 9141
+python3 pocs/05-control-ship-middle-agent/device_agent.py --port 9151
+python3 pocs/06-system-supervisor-agent/system_agent.py --port 9161
+```
 
-## Rules
+## Communication
 
-- PoCs do not import implementation code from other PoCs.
-- Shared contracts live in `packages/schemas`.
-- Integration happens through files, HTTP, WebSocket, or an event bus.
-- A PoC should state its excluded scope explicitly.
-- The old `services/` stack is legacy reference material during the rebuild.
+- MCP: reserved for System Supervisor Agent to API server integration. This pass declares the `mcp_api_client` tool in the supervisor manifest; turning the API server into an MCP server is a follow-up.
+- A2A: Agent-to-Agent event/task communication. The new runtime accepts JSON-RPC `message/send` at `/` and keeps `/message:send` for compatibility with existing PoCs.
+- Moth: real-time data stream boundary. Each PoC simulator produces telemetry state and track manifests; the previous direct Moth publisher remains in `01-device-streams` as reference code.
+
+## Local Structure
+
+Each PoC is intentionally self-contained. Shared implementation code is not imported from another PoC.
+
+```text
+agent/       decision loop, manifest, runtime state
+controller/  HTTP, A2A, and command endpoints
+simulator/   device state, motion, sensors, telemetry
+skills/      capability catalog used by the Agent
+tools/       executable helpers used by skills/agent/controller
+transport/   registry and external protocol clients
+storage/     local id/token persistence
+```

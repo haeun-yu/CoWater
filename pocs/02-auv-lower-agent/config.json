@@ -1,0 +1,36 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9121 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "agent": {
+    "id": "auv-local-agent",
+    "name": "AUV Local Agent",
+    "role": "auv",
+    "layer": "lower",
+    "device_type": "auv",
+    "description": "Lower-layer execution agent for a single AUV.",
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "rules": { "max_speed_mps": 2.0, "battery_warn_percent": 30 },
+    "capabilities": {
+      "skills": ["subsurface_navigation", "depth_holding", "sonar_survey", "local_safety_judgement"],
+      "tools": ["telemetry_reader", "depth_controller", "sonar_interpreter", "command_executor"],
+      "actions": ["route_move", "hold_depth", "surface", "return_to_base", "slow_down"],
+      "constraints": ["respect_depth_limits", "surface_for_recovery"],
+      "tracks": [
+        { "type": "GPS", "name": "gps" },
+        { "type": "TOPIC", "name": "pressure" },
+        { "type": "TOPIC", "name": "side_scan_sonar" },
+        { "type": "TOPIC", "name": "temperature" },
+        { "type": "BATTERY", "name": "battery" },
+        { "type": "TOPIC", "name": "telemetry" }
+      ]
+    }
+  },
+  "simulation": {
+    "interval_seconds": 3,
+    "start_position": { "latitude": 37.002, "longitude": 129.428, "altitude": -25.0 },
+    "speed_range": [0.3, 2.0],
+    "altitude_range": [-80.0, -5.0]
+  },
+  "cors": { "allow_origins": ["*"] }
+}
+

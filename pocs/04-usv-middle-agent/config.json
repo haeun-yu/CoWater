@@ -1,0 +1,36 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9141 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "agent": {
+    "id": "relay-usv-middle-agent",
+    "name": "Relay USV Middle Agent",
+    "role": "regional_orchestrator",
+    "layer": "middle",
+    "device_type": "usv",
+    "description": "Middle-layer USV that can coordinate nearby lower agents and relay underwater communications.",
+    "children_required": false,
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "rules": { "max_speed_mps": 2.5, "battery_warn_percent": 30 },
+    "capabilities": {
+      "skills": ["field_coordination", "surface_navigation", "underwater_data_relay", "mission_redistribution"],
+      "tools": ["child_registry", "a2a_router", "acoustic_relay", "command_executor", "safety_validator"],
+      "actions": ["task.assign", "coordinate_children", "relay_status", "route_move", "hold_position", "return_to_base", "slow_down"],
+      "constraints": ["middle_layer_optional", "can_route_direct_to_system", "relay_low_bandwidth_children"],
+      "tracks": [
+        { "type": "GPS", "name": "gps" },
+        { "type": "ODOMETRY", "name": "imu" },
+        { "type": "TOPIC", "name": "acoustic_modem" },
+        { "type": "BATTERY", "name": "battery" },
+        { "type": "TOPIC", "name": "telemetry" }
+      ]
+    }
+  },
+  "simulation": {
+    "interval_seconds": 2,
+    "start_position": { "latitude": 37.006, "longitude": 129.421, "altitude": 0.0 },
+    "speed_range": [0.5, 3.0],
+    "altitude_range": [0.0, 0.8]
+  },
+  "cors": { "allow_origins": ["*"] }
+}
+

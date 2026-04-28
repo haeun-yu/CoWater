@@ -1,0 +1,37 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9131 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "agent": {
+    "id": "rov-local-agent",
+    "name": "ROV Local Agent",
+    "role": "rov",
+    "layer": "lower",
+    "device_type": "rov",
+    "description": "Lower-layer execution agent for a single ROV.",
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "rules": { "max_speed_mps": 1.0, "battery_warn_percent": 30 },
+    "capabilities": {
+      "skills": ["inspection", "camera_operation", "lighting_control", "local_safety_judgement"],
+      "tools": ["telemetry_reader", "camera_controller", "light_controller", "command_executor"],
+      "actions": ["hold_position", "return_to_base", "slow_down", "light_on", "light_off", "camera_mode_switch"],
+      "constraints": ["avoid_fast_motion_in_deep_water", "keep_camera_view_stable"],
+      "tracks": [
+        { "type": "VIDEO", "name": "camera" },
+        { "type": "TOPIC", "name": "light" },
+        { "type": "TOPIC", "name": "pressure" },
+        { "type": "TOPIC", "name": "temperature" },
+        { "type": "TOPIC", "name": "profiling_sonar" },
+        { "type": "BATTERY", "name": "battery" },
+        { "type": "TOPIC", "name": "telemetry" }
+      ]
+    }
+  },
+  "simulation": {
+    "interval_seconds": 1,
+    "start_position": { "latitude": 37.003, "longitude": 129.43, "altitude": -60.0 },
+    "speed_range": [0.1, 1.5],
+    "altitude_range": [-200.0, -20.0]
+  },
+  "cors": { "allow_origins": ["*"] }
+}
+

@@ -1,0 +1,35 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9111 },
+  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "agent": {
+    "id": "usv-local-agent",
+    "name": "USV Local Agent",
+    "role": "usv",
+    "layer": "lower",
+    "device_type": "usv",
+    "description": "Lower-layer execution agent for a single USV.",
+    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "rules": { "max_speed_mps": 2.5, "battery_warn_percent": 30 },
+    "capabilities": {
+      "skills": ["surface_navigation", "route_following", "target_tracking", "local_safety_judgement"],
+      "tools": ["telemetry_reader", "route_planner", "command_executor", "safety_validator"],
+      "actions": ["route_move", "hold_position", "return_to_base", "slow_down", "follow_target"],
+      "constraints": ["stay_on_surface", "respect_local_safety_limits"],
+      "tracks": [
+        { "type": "GPS", "name": "gps" },
+        { "type": "ODOMETRY", "name": "imu" },
+        { "type": "TOPIC", "name": "sonar" },
+        { "type": "BATTERY", "name": "battery" },
+        { "type": "TOPIC", "name": "telemetry" }
+      ]
+    }
+  },
+  "simulation": {
+    "interval_seconds": 2,
+    "start_position": { "latitude": 37.005, "longitude": 129.425, "altitude": 0.0 },
+    "speed_range": [0.5, 3.0],
+    "altitude_range": [0.0, 0.8]
+  },
+  "cors": { "allow_origins": ["*"] }
+}
+
