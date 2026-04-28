@@ -125,6 +125,7 @@ class HeartbeatMonitor:
     async def _reassign_children(self, offline_parent: Any) -> None:
         """
         When a middle layer agent goes offline, reassign its children to another parent
+        or clear parent_id if no replacement is available (direct_to_system mode)
         """
         try:
             logger.info(f"Reassigning children of offline parent {offline_parent.id}")
@@ -149,9 +150,74 @@ class HeartbeatMonitor:
                     )
                     child.parent_id = new_parent.id
                     child.updated_at = datetime.utcnow().isoformat()
+                else:
+                    # No available parent - switch to direct_to_system mode
+                    logger.warning(
+                        f"No available parent for child {child.id} ({child.name}). "
+                        f"Switching to direct_to_system mode."
+                    )
+                    child.parent_id = None
+                    child.updated_at = datetime.utcnow().isoformat()
+
+                # Send A2A notification about assignment change
+                await self._notify_child_assignment(child)
 
         except Exception as e:
             logger.error(f"Error reassigning children: {e}")
+
+    async def _notify_child_assignment(self, child: Any) -> None:
+        """
+        Send A2A layer.assignment notification to child agent
+        """
+        try:
+            if not child.agent or not child.agent.endpoint:
+                return
+
+            parent = self.registry._devices.get(child.parent_id) if child.parent_id else None
+            route_mode = "via_parent" if parent else "direct_to_system"
+
+            # Build layer.assignment message
+            assignment = {
+                "message_type": "layer.assignment",
+                "device_id": child.id,
+                "device_name": child.name,
+                "device_type": child.device_type,
+                "layer": child.layer,
+                "route_mode": route_mode,
+                "parent_id": parent.id if parent else None,
+                "parent_name": parent.name if parent else None,
+                "parent_endpoint": parent.agent.endpoint if parent else None,
+                "parent_command_endpoint": parent.agent.command_endpoint if parent else None,
+                "force_parent_routing": child.force_parent_routing,
+                "a2a": {
+                    "endpoint": child.agent.endpoint,
+                    "command_endpoint": child.agent.command_endpoint,
+                },
+            }
+
+            # Send via A2A
+            import urllib.request
+            import json
+
+            body = {
+                "message": {
+                    "role": "server",
+                    "parts": [{"type": "data", "data": assignment}],
+                },
+                "metadata": {"source": "device-registration-server", "reason": "middle_parent_offline"},
+            }
+
+            req = urllib.request.Request(
+                f"{str(child.agent.endpoint).rstrip('/')}/message:send",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=0.5).close()
+            logger.info(f"A2A assignment notification sent to child {child.id}")
+
+        except Exception as e:
+            logger.debug(f"Failed to send assignment notification to {child.id}: {e}")
 
     def _find_best_parent(
         self,
@@ -202,14 +268,16 @@ class HeartbeatMonitor:
             logger.error(f"Error finding best parent: {e}")
             return None
 
-    def record_heartbeat(self, device_id: int, status: str = "online") -> None:
+    def record_heartbeat(self, device_id: int, status: str = "online", latitude: Optional[float] = None, longitude: Optional[float] = None) -> None:
         """
-        Record that a device sent a heartbeat (update last_seen_at)
+        Record that a device sent a heartbeat (update last_seen_at and location if available)
         상태 변경 시에만 DB에 반영 (online ↔ offline)
 
         Args:
             device_id: Device ID
             status: "online" or "offline"
+            latitude: Device latitude (optional)
+            longitude: Device longitude (optional)
         """
         try:
             device = self.registry.get_device(device_id)
@@ -219,6 +287,12 @@ class HeartbeatMonitor:
 
                 # Update last_seen_at (always)
                 device.agent.last_seen_at = datetime.now(timezone.utc).isoformat()
+
+                # Update location if provided
+                if latitude is not None and longitude is not None:
+                    device.latitude = latitude
+                    device.longitude = longitude
+                    device.last_location_update = datetime.now(timezone.utc).isoformat()
 
                 # Update connected flag only if status changed
                 if current_status != new_status:

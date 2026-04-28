@@ -140,14 +140,16 @@ class MothHeartbeatSubscriber:
             payload = data.get("payload", {})
             device_id = payload.get("device_id")
             status = payload.get("status", "online")
+            latitude = payload.get("latitude")
+            longitude = payload.get("longitude")
 
             if device_id is None:
                 logger.warning(f"Invalid heartbeat: device_id 없음 - {payload}")
                 return
 
-            # HeartbeatMonitor에 기록
-            self.registry.heartbeat_monitor.record_heartbeat(device_id, status)
-            logger.debug(f"Heartbeat 기록: device_id={device_id}, status={status}")
+            # HeartbeatMonitor에 기록 (위치 정보 포함)
+            self.registry.heartbeat_monitor.record_heartbeat(device_id, status, latitude, longitude)
+            logger.debug(f"Heartbeat 기록: device_id={device_id}, status={status}, location=({latitude}, {longitude})")
 
         except json.JSONDecodeError:
             logger.debug(f"JSON 파싱 실패: {msg}")

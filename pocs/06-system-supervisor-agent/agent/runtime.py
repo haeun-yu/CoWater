@@ -58,10 +58,6 @@ class AgentRuntime:
         return f"http://{host}:{port}"
 
     def register(self) -> None:
-        if self.state.layer == "system":
-            self.state.connected = True
-            return
-
         if self.identity.get("registry_id") and self.identity.get("token"):
             self.state.registry_id = int(self.identity["registry_id"])
             self.state.token = str(self.identity["token"])

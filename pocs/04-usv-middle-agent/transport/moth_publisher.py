@@ -162,6 +162,7 @@ class MothPublisher:
         - layer: "lower", "middle", "system"
         - status: "online" 또는 "offline"
         - battery_percent: 현재 배터리 상태
+        - route_mode: 동적으로 결정 (AUV 수중/수면 상태 고려)
         """
         if not self.heartbeat_topic:
             return
@@ -169,14 +170,36 @@ class MothPublisher:
         # Heartbeat payload 구성
         payload = self._heartbeat_payload()
 
-        if self.state.route_mode == "via_parent" and self.state.parent_endpoint:
+        # route_mode를 동적으로 결정
+        route_mode = self._determine_route_mode()
+        payload["route_mode"] = route_mode
+
+        if route_mode == "via_parent" and self.state.parent_endpoint:
             self._send_heartbeat_to_parent(payload)
             return
 
         await self.publish_heartbeat_payload(payload)
 
+    def _determine_route_mode(self) -> str:
+        """
+        Dynamically determine route_mode based on device type and state
+
+        - ROV: always via_parent (force_parent_routing)
+        - AUV: via_parent only when submerged, direct when at surface
+        - Others: use state.route_mode
+        """
+        if self.state.force_parent_routing:
+            return "via_parent"
+
+        # AUV: check submersion state
+        if hasattr(self.state, 'is_submerged') and self.state.is_submerged:
+            return "via_parent"
+
+        # Default fallback
+        return self.state.route_mode
+
     def _heartbeat_payload(self) -> dict[str, Any]:
-        return {
+        heartbeat = {
             "device_id": self.state.registry_id,
             "agent_id": self.state.agent_id,
             "layer": self.state.layer,
@@ -188,6 +211,13 @@ class MothPublisher:
             "force_parent_routing": self.state.force_parent_routing,
             "battery_percent": self.state.last_telemetry.get("battery_percent", 100) if self.state.last_telemetry else 100,
         }
+
+        # Include location if available
+        if self.state.latitude is not None and self.state.longitude is not None:
+            heartbeat["latitude"] = self.state.latitude
+            heartbeat["longitude"] = self.state.longitude
+
+        return heartbeat
 
     def _send_heartbeat_to_parent(self, payload: dict[str, Any]) -> None:
         try:
