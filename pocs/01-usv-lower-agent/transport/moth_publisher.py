@@ -336,14 +336,14 @@ class MothPublisher:
             # Moth에 발행 (두 채널에 발행: 공통 채널 + device-specific 채널)
             # 1. device.heartbeat (POC 00의 meb 구독이 받는 공통 채널)
             msg1 = json.dumps(
-                {"type": "publish", "topic": "device.heartbeat", "payload": payload}
+                {"type": "publish", "channel": "device.heartbeat", "payload": payload}
             )
             await self.ws.send(msg1)
 
             # 2. device.heartbeat.{device_id} (device-specific 채널)
             if self.heartbeat_topic != "device.heartbeat":
                 msg2 = json.dumps(
-                    {"type": "publish", "topic": self.heartbeat_topic, "payload": payload}
+                    {"type": "publish", "channel": self.heartbeat_topic, "payload": payload}
                 )
                 await self.ws.send(msg2)
         except Exception as e:
@@ -379,7 +379,7 @@ class MothPublisher:
                     json.dumps(
                         {
                             "type": "publish",
-                            "topic": self.telemetry_topics["GPS"],
+                            "channel": self.telemetry_topics["GPS"],
                             "payload": gps_payload,
                         }
                     )
@@ -400,7 +400,7 @@ class MothPublisher:
                     json.dumps(
                         {
                             "type": "publish",
-                            "topic": self.telemetry_topics["BATTERY"],
+                            "channel": self.telemetry_topics["BATTERY"],
                             "payload": battery_payload,
                         }
                     )
@@ -421,7 +421,7 @@ class MothPublisher:
                     json.dumps(
                         {
                             "type": "publish",
-                            "topic": self.telemetry_topics["ODOMETRY"],
+                            "channel": self.telemetry_topics["ODOMETRY"],
                             "payload": motion_payload,
                         }
                     )
@@ -441,7 +441,7 @@ class MothPublisher:
                     json.dumps(
                         {
                             "type": "publish",
-                            "topic": self.telemetry_topics["DEPTH"],
+                            "channel": self.telemetry_topics["DEPTH"],
                             "payload": depth_payload,
                         }
                     )
