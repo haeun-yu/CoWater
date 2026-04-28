@@ -3,9 +3,11 @@
 ## 📚 문서 구조
 
 ### 1. [MINE_REMOVAL_GUIDE.md](MINE_REMOVAL_GUIDE.md)
+
 **완전한 기뢰 제거 시나리오 가이드**
 
 **포함 내용**:
+
 - ✅ Moth Heartbeat 실시간 모니터링
 - ✅ ROV 유선 연결 강제 (임의 middle layer)
 - ✅ AUV 수중음향 조건부 연결
@@ -19,9 +21,11 @@
 ---
 
 ### 2. [DEPLOYMENT.md](DEPLOYMENT.md)
+
 **배포 및 운영 완전 가이드**
 
 **포함 내용**:
+
 - ✅ 로컬 개발 환경 (단일 호스트)
 - ✅ 분산 배포 (멀티 호스트)
 - ✅ SSH 터널 원격 접근
@@ -37,12 +41,15 @@
 ## 🚀 빠른 시작 (3분)
 
 ### 1단계: POC 기능 이해
+
 → [MINE_REMOVAL_GUIDE.md](MINE_REMOVAL_GUIDE.md) 읽기
 
 ### 2단계: 배포 선택
+
 → [DEPLOYMENT.md](DEPLOYMENT.md)에서 적절한 시나리오 선택
 
 ### 3단계: 실행 및 테스트
+
 → 선택한 시나리오의 단계별 명령 실행
 
 ---
@@ -58,14 +65,9 @@
 
 ## 📖 문서 선택 가이드
 
-| 목표 | 문서 |
-|------|------|
+| 목표                 | 문서                                           |
+| -------------------- | ---------------------------------------------- |
 | POC 시스템 기능 이해 | [MINE_REMOVAL_GUIDE.md](MINE_REMOVAL_GUIDE.md) |
-| 로컬 테스트 실행 | [DEPLOYMENT.md](DEPLOYMENT.md#빠른-시작-3분) |
-| 분산 환경 배포 | [DEPLOYMENT.md](DEPLOYMENT.md#분산-배포-멀티-호스트) |
-| 보안 설정 | [DEPLOYMENT.md](DEPLOYMENT.md#보안-설정) |
-| 시뮬레이터 실행 | [DEPLOYMENT.md](DEPLOYMENT.md#시뮬레이터-실행) |
-| 문제 해결 | [DEPLOYMENT.md](DEPLOYMENT.md#트러블슈팅) |
 
 ---
 

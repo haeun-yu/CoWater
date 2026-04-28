@@ -3,7 +3,7 @@ const STORAGE_KEYS = {
   secretKey: "cowater.deviceRegistration.secretKey",
 };
 
-const DEFAULT_API_BASE = "http://127.0.0.1:8286";
+const DEFAULT_API_BASE = "http://127.0.0.1:9100";
 let selectedAlertId = null;
 
 function getApiBase() {
@@ -62,8 +62,11 @@ async function requestJson(path, options = {}) {
   const isJson = contentType.includes("application/json");
   const body = isJson ? await response.json() : await response.text();
   if (!response.ok) {
-    const detail = body && typeof body === "object" && "detail" in body ? body.detail : body;
-    throw new Error(typeof detail === "string" ? detail : `HTTP ${response.status}`);
+    const detail =
+      body && typeof body === "object" && "detail" in body ? body.detail : body;
+    throw new Error(
+      typeof detail === "string" ? detail : `HTTP ${response.status}`,
+    );
   }
   return body;
 }
@@ -141,9 +144,11 @@ function renderEndpointList(device) {
       `
     : "";
 
-  return agentBlock + device.tracks
-    .map(
-      (track) => `
+  return (
+    agentBlock +
+    device.tracks
+      .map(
+        (track) => `
         <div class="device-card">
           <div class="device-head">
             <div>
@@ -156,8 +161,9 @@ function renderEndpointList(device) {
           </div>
         </div>
       `,
-    )
-    .join("");
+      )
+      .join("")
+  );
 }
 
 async function loadMeta() {
@@ -236,18 +242,30 @@ async function initDashboardPage() {
     setText("meta-port", String(meta.server.port));
     setText("meta-ping", meta.server.ping_endpoint);
     setText("count-devices", String(devices.length));
-    setText("count-connected", String(devices.filter((d) => d.connected).length));
+    setText(
+      "count-connected",
+      String(devices.filter((d) => d.connected).length),
+    );
     setText("count-video", String(countTracks(devices, "VIDEO")));
     setText("count-actions", String(coreActionsCount(devices)));
     setText("count-alerts", String(alerts.length));
     setText("count-responses", String(responses.length));
-    setText("count-open-alerts", String(alerts.filter((alert) => alert.status === "waiting").length));
-    setHtml("server-summary", `
+    setText(
+      "count-open-alerts",
+      String(alerts.filter((alert) => alert.status === "waiting").length),
+    );
+    setHtml(
+      "server-summary",
+      `
       <div class="code">${escapeHtml(prettyJson(meta))}</div>
-    `);
+    `,
+    );
     renderDashboardDevices(devices);
   } catch (error) {
-    setHtml("dashboard-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "dashboard-error",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 
@@ -323,7 +341,10 @@ async function initDevicesPage() {
       refresh.onclick = async () => initDevicesPage();
     }
   } catch (error) {
-    setHtml("devices-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "devices-error",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 
@@ -437,7 +458,10 @@ function renderAlertsTable(alerts, filterText = "") {
       const alertId = button.getAttribute("data-alert-ack-yes");
       await requestJson(`/alerts/${alertId}/ack`, {
         method: "POST",
-        body: JSON.stringify({ approved: true, notes: "Approved from registry UI" }),
+        body: JSON.stringify({
+          approved: true,
+          notes: "Approved from registry UI",
+        }),
       });
       selectedAlertId = alertId;
       await initAlertsPage();
@@ -450,14 +474,18 @@ function renderAlertsTable(alerts, filterText = "") {
       const alertId = button.getAttribute("data-alert-ack-no");
       await requestJson(`/alerts/${alertId}/ack`, {
         method: "POST",
-        body: JSON.stringify({ approved: false, notes: "Rejected from registry UI" }),
+        body: JSON.stringify({
+          approved: false,
+          notes: "Rejected from registry UI",
+        }),
       });
       selectedAlertId = alertId;
       await initAlertsPage();
     });
   });
 
-  const active = alerts.find((alert) => alert.alert_id === selectedAlertId) || alerts[0];
+  const active =
+    alerts.find((alert) => alert.alert_id === selectedAlertId) || alerts[0];
   if (!selectedAlertId && active) {
     selectedAlertId = active.alert_id;
   }
@@ -533,7 +561,9 @@ function renderResponsesTable(responses, filterText = "") {
 
   body.querySelectorAll("[data-response-row]").forEach((row) => {
     row.addEventListener("click", () => {
-      const response = responses.find((item) => item.response_id === row.getAttribute("data-response-row"));
+      const response = responses.find(
+        (item) => item.response_id === row.getAttribute("data-response-row"),
+      );
       renderResponseDetail(response || null);
     });
   });
@@ -555,7 +585,10 @@ async function initAlertsPage() {
       refresh.onclick = async () => initAlertsPage();
     }
   } catch (error) {
-    setHtml("alerts-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "alerts-error",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 
@@ -573,7 +606,10 @@ async function initResponsesPage() {
       refresh.onclick = async () => initResponsesPage();
     }
   } catch (error) {
-    setHtml("responses-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "responses-error",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 
@@ -595,14 +631,19 @@ function addTrackRow(container, initial = {}) {
         "GPS",
         "TRAJECTORY",
       ]
-        .map((type) => `<option value="${type}" ${initial.type === type ? "selected" : ""}>${type}</option>`)
+        .map(
+          (type) =>
+            `<option value="${type}" ${initial.type === type ? "selected" : ""}>${type}</option>`,
+        )
         .join("")}
     </select>
     <input data-track-field="name" placeholder="Track name" value="${escapeHtml(initial.name || "")}">
     <input data-track-field="endpoint" placeholder="Optional endpoint" value="${escapeHtml(initial.endpoint || "")}">
     <button type="button" class="button danger" data-remove-track>Remove</button>
   `;
-  row.querySelector("[data-remove-track]").addEventListener("click", () => row.remove());
+  row
+    .querySelector("[data-remove-track]")
+    .addEventListener("click", () => row.remove());
   container.appendChild(row);
 }
 
@@ -610,13 +651,17 @@ function readTracks(container) {
   return Array.from(container.querySelectorAll(".track-row")).map((row) => {
     const type = row.querySelector("[data-track-field='type']").value;
     const name = row.querySelector("[data-track-field='name']").value.trim();
-    const endpoint = row.querySelector("[data-track-field='endpoint']").value.trim();
+    const endpoint = row
+      .querySelector("[data-track-field='endpoint']")
+      .value.trim();
     return endpoint ? { type, name, endpoint } : { type, name };
   });
 }
 
 function readActions(form) {
-  const core = Array.from(form.querySelectorAll("[data-core-action]:checked")).map((node) => node.value);
+  const core = Array.from(
+    form.querySelectorAll("[data-core-action]:checked"),
+  ).map((node) => node.value);
   const customText = form.querySelector("[data-custom-actions]");
   const custom = customText
     ? customText.value
@@ -653,13 +698,19 @@ async function initRegisterPage() {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        setHtml("register-result", `<div class="code">${escapeHtml(prettyJson(result))}</div>`);
+        setHtml(
+          "register-result",
+          `<div class="code">${escapeHtml(prettyJson(result))}</div>`,
+        );
         form.reset();
         tracks.innerHTML = "";
         addTrackRow(tracks, { type: "VIDEO", name: "video_main" });
         addTrackRow(tracks, { type: "CONTROL", name: "control" });
       } catch (error) {
-        setHtml("register-result", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+        setHtml(
+          "register-result",
+          `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+        );
       }
     };
   }
@@ -669,14 +720,20 @@ async function initDevicePage() {
   bindConfigInputs();
   const id = qs("id");
   if (!id) {
-    setHtml("device-error", `<div class="panel">Missing <code>?id=</code> query parameter.</div>`);
+    setHtml(
+      "device-error",
+      `<div class="panel">Missing <code>?id=</code> query parameter.</div>`,
+    );
     return;
   }
   const form = document.getElementById("device-edit-form");
   const mainTrackForm = document.getElementById("main-track-form");
   const deleteButton = document.getElementById("delete-device");
   try {
-    const [device, meta] = await Promise.all([requestJson(`/devices/${id}`), loadMeta()]);
+    const [device, meta] = await Promise.all([
+      requestJson(`/devices/${id}`),
+      loadMeta(),
+    ]);
     setText("device-name", device.name);
     setText("device-id", String(device.id));
     setText("device-token", device.token);
@@ -684,11 +741,20 @@ async function initDevicePage() {
     setText("device-created", formatTimestamp(device.created_at));
     setText("device-updated", formatTimestamp(device.updated_at));
     setText("device-main", device.main_video_track_name || "-");
-    setHtml("device-json", `<div class="code">${escapeHtml(prettyJson(device))}</div>`);
+    setHtml(
+      "device-json",
+      `<div class="code">${escapeHtml(prettyJson(device))}</div>`,
+    );
     setHtml("device-tracks", renderEndpointList(device));
-    setHtml("device-server", `<div class="code">${escapeHtml(prettyJson(device.server))}</div>`);
+    setHtml(
+      "device-server",
+      `<div class="code">${escapeHtml(prettyJson(device.server))}</div>`,
+    );
     setText("device-agent", device.agent?.endpoint || "-");
-    setText("device-agent-connection", device.agent?.connected ? "connected" : "disconnected");
+    setText(
+      "device-agent-connection",
+      device.agent?.connected ? "connected" : "disconnected",
+    );
     setText("device-agent-command", device.agent?.command_endpoint || "-");
     setText(
       "device-agent-state",
@@ -701,7 +767,9 @@ async function initDevicePage() {
         event.preventDefault();
         await requestJson(`/devices/${id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: form.querySelector("[name='name']").value }),
+          body: JSON.stringify({
+            name: form.querySelector("[name='name']").value,
+          }),
         });
         await initDevicePage();
       };
@@ -709,17 +777,21 @@ async function initDevicePage() {
 
     if (mainTrackForm) {
       const select = mainTrackForm.querySelector("[name='name']");
-      const videoTracks = device.tracks.filter((track) => track.type === "VIDEO");
+      const videoTracks = device.tracks.filter(
+        (track) => track.type === "VIDEO",
+      );
       select.innerHTML = videoTracks
-        .map((track) => `<option value="${escapeHtml(track.name)}">${escapeHtml(track.name)}</option>`)
+        .map(
+          (track) =>
+            `<option value="${escapeHtml(track.name)}">${escapeHtml(track.name)}</option>`,
+        )
         .join("");
       if (device.main_video_track_name) {
         select.value = device.main_video_track_name;
       }
-      mainTrackForm.querySelector(".helper").textContent =
-        videoTracks.length
-          ? `Detected VIDEO tracks from ${meta.server.host}:${meta.server.port}`
-          : "No VIDEO track is available on this device.";
+      mainTrackForm.querySelector(".helper").textContent = videoTracks.length
+        ? `Detected VIDEO tracks from ${meta.server.host}:${meta.server.port}`
+        : "No VIDEO track is available on this device.";
       mainTrackForm.onsubmit = async (event) => {
         event.preventDefault();
         await requestJson(`/devices/${id}/main-video-track`, {
@@ -738,20 +810,35 @@ async function initDevicePage() {
       };
     }
   } catch (error) {
-    setHtml("device-error", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "device-error",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 
 async function initSettingsPage() {
   bindConfigInputs();
   try {
-    const [health, meta] = await Promise.all([requestJson("/health"), loadMeta()]);
-    setHtml("health-status", `<span class="badge ok">${escapeHtml(health.status)}</span>`);
-    setHtml("meta-json", `<div class="code">${escapeHtml(prettyJson(meta))}</div>`);
+    const [health, meta] = await Promise.all([
+      requestJson("/health"),
+      loadMeta(),
+    ]);
+    setHtml(
+      "health-status",
+      `<span class="badge ok">${escapeHtml(health.status)}</span>`,
+    );
+    setHtml(
+      "meta-json",
+      `<div class="code">${escapeHtml(prettyJson(meta))}</div>`,
+    );
     setText("settings-api-base-value", getApiBase());
   } catch (error) {
     setHtml("health-status", `<span class="badge danger">offline</span>`);
-    setHtml("meta-json", `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`);
+    setHtml(
+      "meta-json",
+      `<div class="panel"><strong>Failed:</strong> ${escapeHtml(error.message)}</div>`,
+    );
   }
 }
 

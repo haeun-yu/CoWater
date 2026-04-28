@@ -4,7 +4,7 @@
     "port": 9141
   },
   "registry": {
-    "url": "http://127.0.0.1:8286",
+    "url": "http://127.0.0.1:9100",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 1
@@ -100,18 +100,10 @@
       "longitude": 129.421,
       "altitude": 0.0
     },
-    "speed_range": [
-      0.5,
-      3.0
-    ],
-    "altitude_range": [
-      0.0,
-      0.8
-    ]
+    "speed_range": [0.5, 3.0],
+    "altitude_range": [0.0, 0.8]
   },
   "cors": {
-    "allow_origins": [
-      "*"
-    ]
+    "allow_origins": ["*"]
   }
 }

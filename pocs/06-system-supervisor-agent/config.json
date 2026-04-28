@@ -1,7 +1,7 @@
 {
   "server": { "host": "127.0.0.1", "port": 9161 },
   "registry": {
-    "url": "http://127.0.0.1:8286",
+    "url": "http://127.0.0.1:9100",
     "secret_key": "server-secret",
     "required": false,
     "heartbeat_interval_seconds": 1
