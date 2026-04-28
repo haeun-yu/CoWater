@@ -1,37 +1,78 @@
 {
   "server": { "host": "127.0.0.1", "port": 9131 },
-  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "registry": {
+    "url": "http://127.0.0.1:8003",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 10
+  },
   "agent": {
     "id": "rov-local-agent",
     "name": "ROV Local Agent",
     "role": "rov",
     "layer": "lower",
     "device_type": "rov",
+    "connectivity": "wired",
+    "requires_parent": true,
     "description": "Lower-layer execution agent for a single ROV.",
-    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
     "rules": { "max_speed_mps": 1.0, "battery_warn_percent": 30 },
     "capabilities": {
-      "skills": ["inspection", "camera_operation", "lighting_control", "local_safety_judgement"],
-      "tools": ["telemetry_reader", "camera_controller", "light_controller", "command_executor"],
-      "actions": ["hold_position", "return_to_base", "slow_down", "light_on", "light_off", "camera_mode_switch"],
-      "constraints": ["avoid_fast_motion_in_deep_water", "keep_camera_view_stable"],
+      "skills": [
+        "precise_manipulation",
+        "high_resolution_inspection",
+        "deep_water_operations",
+        "tether_management"
+      ],
+      "tools": [
+        "high_def_camera",
+        "lights",
+        "manipulator_arm",
+        "tether_monitor",
+        "pressure_sensor",
+        "safety_validator"
+      ],
+      "actions": [
+        "move_forward",
+        "move_up",
+        "rotate",
+        "grab_object",
+        "release_object",
+        "adjust_lights",
+        "record_video"
+      ],
+      "constraints": [
+        "avoid_fast_motion_in_deep_water",
+        "keep_camera_view_stable"
+      ],
       "tracks": [
-        { "type": "VIDEO", "name": "camera" },
-        { "type": "TOPIC", "name": "light" },
-        { "type": "TOPIC", "name": "pressure" },
-        { "type": "TOPIC", "name": "temperature" },
-        { "type": "TOPIC", "name": "profiling_sonar" },
-        { "type": "BATTERY", "name": "battery" },
-        { "type": "TOPIC", "name": "telemetry" }
+        { "type": "VIDEO", "name": "main_camera", "frequency_hz": 30 },
+        { "type": "TOPIC", "name": "tether_tension", "frequency_hz": 1 },
+        { "type": "PRESSURE", "name": "depth", "frequency_hz": 10 },
+        { "type": "BATTERY", "name": "power", "frequency_hz": 0.5 }
       ]
     }
   },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
   "simulation": {
     "interval_seconds": 1,
-    "start_position": { "latitude": 37.003, "longitude": 129.43, "altitude": -60.0 },
+    "start_position": {
+      "latitude": 37.003,
+      "longitude": 129.43,
+      "altitude": -60.0
+    },
     "speed_range": [0.1, 1.5],
     "altitude_range": [-200.0, -20.0]
   },
   "cors": { "allow_origins": ["*"] }
 }
-

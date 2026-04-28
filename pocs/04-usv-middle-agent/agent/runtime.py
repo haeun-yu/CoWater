@@ -18,6 +18,7 @@ from storage.identity_store import IdentityStore
 from tools.command_executor import CommandExecutor
 from tools.telemetry_reader import TelemetryReader
 from transport.registry_client import RegistryClient
+from transport.moth_publisher import MothPublisher
 
 
 class AgentRuntime:
@@ -45,8 +46,33 @@ class AgentRuntime:
         self.telemetry_reader = TelemetryReader()
         self.simulator = DeviceSimulator(self.config.get("simulation", {}), self.skills.list_tracks())
         self.command_controller = CommandController(CommandExecutor())
+        self.moth_publisher = MothPublisher(self.config, self.state)
+        # ← NEW: Load tools dynamically
+        self.tools: dict[str, Any] = {}
+        self._load_tools()
 
-    def _resolve_instance_id(self) -> str:
+    def _load_tools(self) -> None:
+        """Dynamically load tool classes from tools directory"""
+        tools_dir = self.config_path.parent / "tools"
+        if not tools_dir.exists():
+            return
+
+        for py_file in tools_dir.glob("*.py"):
+            if py_file.name.startswith("_"):
+                continue
+            module_name = py_file.stem
+            # Convert snake_case to PascalCase: battery_monitor → BatteryMonitor
+            class_name = "".join(word.capitalize() for word in module_name.split("_"))
+            try:
+                module = importlib.import_module(f"tools.{module_name}")
+                cls = getattr(module, class_name, None)
+                if cls:
+                    self.tools[module_name] = cls()
+                    logger.debug(f"Loaded tool: {module_name} ({class_name})")
+            except Exception as e:
+                logger.debug(f"Failed to load tool {module_name}: {e}")
+
+ -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
         if explicit:
             return str(explicit)
@@ -67,7 +93,8 @@ class AgentRuntime:
             self.state.token = str(self.identity["token"])
             self.state.registered_at = self.identity.get("registered_at")
             try:
-                self._upsert_agent()
+                asyncio.create_task(self.moth_publisher.initialize(created))
+        self._upsert_agent()
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
                 return
@@ -84,6 +111,7 @@ class AgentRuntime:
         self.state.registered_at = utc_now()
         self.state.connected = True
         self.state.last_seen_at = utc_now()
+        asyncio.create_task(self.moth_publisher.initialize(created))
         self._upsert_agent()
         self.identity_store.write(
             {
@@ -111,7 +139,13 @@ class AgentRuntime:
 
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
+            asyncio.create_task(self.moth_publisher.heartbeat_loop())
             return
+
+        await self.moth_publisher.connect()
+        asyncio.create_task(self.moth_publisher._reconnect_loop())
+        asyncio.create_task(self.moth_publisher.heartbeat_loop())
+
         while True:
             await asyncio.sleep(self.simulator.interval_seconds())
             telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
@@ -119,7 +153,61 @@ class AgentRuntime:
             self.state.last_telemetry = telemetry
             decision = self.decision_engine.decide(self.state, telemetry)
             self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
+            await self.moth_publisher.publish_telemetry(telemetry)
 
-    def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
+    def _update_tools_from_telemetry(self, telemetry: dict[str, Any]) -> None:
+        """Update tool states based on telemetry (enhances realism)"""
+        # GPS: update position from telemetry
+        if "gps_reader" in self.tools and "position" in telemetry:
+            pos = telemetry["position"]
+            if isinstance(pos, dict) and "latitude" in pos and "longitude" in pos:
+                self.tools["gps_reader"].update_position(
+                    pos["latitude"],
+                    pos["longitude"],
+                    pos.get("altitude", 0.0),
+                )
+
+        # Battery: simulate discharge based on power consumption
+        if "battery_monitor" in self.tools:
+            # Estimate consumption: 0.3% per iteration at cruising, more under heavy load
+            motor_status = self.tools.get("motor_control", {}).get_status() if "motor_control" in self.tools else {}
+            thrust_magnitude = abs(motor_status.get("forward_thrust", 0.0)) if motor_status else 0.0
+            consumption = 0.2 + (thrust_magnitude * 0.3)  # 0.2-0.5% per iteration
+            self.tools["battery_monitor"].discharge(consumption)
+
+        # IMU: update orientation from motion
+        if "imu_reader" in self.tools and "motion" in telemetry:
+            motion = telemetry["motion"]
+            if isinstance(motion, dict):
+                # Heading from telemetry's heading or COG
+                heading = motion.get("heading") or telemetry.get("navigation", {}).get("cog", 0.0)
+                self.tools["imu_reader"].set_orientation(
+                    roll=motion.get("roll", 0.0),
+                    pitch=motion.get("pitch", 0.0),
+                    yaw=float(heading),
+                )
+
+    def _apply_decision_to_tools(self, decision: dict[str, Any]) -> None:
+        """Apply decision recommendations to tools for realistic feedback loop"""
+        for rec in decision.get("recommendations", []):
+            action = rec.get("action")
+            params = rec.get("params", {})
+
+            if action == "slow_down" and "motor_control" in self.tools:
+                target_speed = params.get("target_speed_mps", 2.0)
+                max_thrust = target_speed / 10.0
+                self.tools["motor_control"].set_thrust(max(0.0, max_thrust), 0.0)
+
+            elif action == "stop" and "motor_control" in self.tools:
+                self.tools["motor_control"].stop()
+
+            elif action == "change_heading" and "motor_control" in self.tools:
+                heading_delta = params.get("heading_degrees", 0.0)
+                yaw_thrust = max(-1.0, min(1.0, heading_delta / 45.0))
+                if "motor_control" in self.tools:
+                    current_status = self.tools["motor_control"].get_status()
+                    self.tools["motor_control"].set_thrust(current_status["forward_thrust"], yaw_thrust)
+
+ -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
 

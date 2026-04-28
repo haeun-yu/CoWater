@@ -17,6 +17,18 @@ DEFAULT_AGENT_PATH_PREFIX = "/agents"
 DEFAULT_AGENT_COMMAND_SCHEME = "http"
 DEFAULT_AGENT_COMMAND_PATH_PREFIX = "/agents"
 DEFAULT_CORS_ORIGINS = ["*"]
+
+# ← NEW: Heartbeat & Re-binding
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 10
+DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 30
+DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS = 500
+DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS = 1
+
+# ← NEW: Moth (WebSocket for position updates)
+DEFAULT_MOTH_SERVER_URL = "wss://cobot.center:8287"
+DEFAULT_MOTH_HEARTBEAT_TOPIC_TEMPLATE = "device.heartbeat.{device_id}"
+DEFAULT_MOTH_TELEMETRY_TOPIC_TEMPLATE = "device.telemetry.{device_id}.{track_type}"
+
 CONFIG_PATH = Path(os.getenv("COWATER_DEVICE_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
 
 
@@ -32,6 +44,9 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
     agent_cfg = raw.get("agent") or {}
     device_cfg = raw.get("device") or {}
     cors_cfg = raw.get("cors") or {}
+    heartbeat_cfg = raw.get("heartbeat") or {}
+    rebinding_cfg = raw.get("rebinding") or {}
+    moth_cfg = raw.get("moth") or {}
 
     def pick(env_name: str, value: Any, default: Any) -> Any:
         env_value = os.getenv(env_name)
@@ -109,6 +124,47 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(cors_origins, list) or not cors_origins:
         cors_origins = list(DEFAULT_CORS_ORIGINS)
 
+    # ← NEW: Heartbeat
+    heartbeat_interval = int(pick(
+        "COWATER_HEARTBEAT_INTERVAL_SECONDS",
+        heartbeat_cfg.get("interval_seconds"),
+        DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+    ))
+    heartbeat_timeout = int(pick(
+        "COWATER_HEARTBEAT_TIMEOUT_SECONDS",
+        heartbeat_cfg.get("timeout_seconds"),
+        DEFAULT_HEARTBEAT_TIMEOUT_SECONDS
+    ))
+
+    # ← NEW: Re-binding
+    rebinding_threshold = int(pick(
+        "COWATER_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS",
+        rebinding_cfg.get("distance_delta_threshold_meters"),
+        DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS
+    ))
+    rebinding_check_interval = int(pick(
+        "COWATER_REBINDING_CHECK_INTERVAL_SECONDS",
+        rebinding_cfg.get("check_interval_seconds"),
+        DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS
+    ))
+
+    # ← NEW: Moth
+    moth_url = str(pick(
+        "COWATER_MOTH_SERVER_URL",
+        moth_cfg.get("server_url"),
+        DEFAULT_MOTH_SERVER_URL
+    ))
+    moth_heartbeat_topic = str(pick(
+        "COWATER_MOTH_HEARTBEAT_TOPIC_TEMPLATE",
+        moth_cfg.get("heartbeat_topic_template"),
+        DEFAULT_MOTH_HEARTBEAT_TOPIC_TEMPLATE
+    ))
+    moth_telemetry_topic = str(pick(
+        "COWATER_MOTH_TELEMETRY_TOPIC_TEMPLATE",
+        moth_cfg.get("telemetry_topic_template"),
+        DEFAULT_MOTH_TELEMETRY_TOPIC_TEMPLATE
+    ))
+
     return {
         "config_path": str(config_path),
         "secret_key": secret_key,
@@ -127,6 +183,19 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
         },
         "cors": {
             "allow_origins": cors_origins,
+        },
+        "heartbeat": {
+            "interval_seconds": heartbeat_interval,
+            "timeout_seconds": heartbeat_timeout,
+        },
+        "rebinding": {
+            "distance_delta_threshold_meters": rebinding_threshold,
+            "check_interval_seconds": rebinding_check_interval,
+        },
+        "moth": {
+            "server_url": moth_url,
+            "heartbeat_topic_template": moth_heartbeat_topic,
+            "telemetry_topic_template": moth_telemetry_topic,
         },
     }
 

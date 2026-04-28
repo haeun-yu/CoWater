@@ -1,35 +1,83 @@
 {
   "server": { "host": "127.0.0.1", "port": 9151 },
-  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "registry": {
+    "url": "http://127.0.0.1:8003",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 10
+  },
   "agent": {
     "id": "control-ship-middle-agent",
     "name": "Control Ship Middle Agent",
     "role": "regional_orchestrator",
     "layer": "middle",
     "device_type": "control_ship",
-    "description": "Middle-layer field coordination agent running on a control ship.",
+    "connectivity": "wired+wireless",
+    "requires_parent": false,
     "children_required": false,
-    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "description": "Middle-layer field coordination agent running on a control ship.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
     "rules": { "max_speed_mps": 8.0, "battery_warn_percent": 20 },
     "capabilities": {
-      "skills": ["field_coordination", "mission_redistribution", "multi_device_status_fusion", "operator_relay"],
-      "tools": ["child_registry", "a2a_router", "dispatch_planner", "moth_stream_reader", "command_executor"],
-      "actions": ["task.assign", "coordinate_children", "relay_status", "redistribute_mission", "hold_position", "return_to_base"],
-      "constraints": ["middle_layer_optional", "must_preserve_child_identity", "can_route_direct_to_system"],
+      "skills": [
+        "surface_navigation",
+        "field_command_center",
+        "rov_tether_management",
+        "wired_communication",
+        "multi_mission_coordination"
+      ],
+      "tools": [
+        "gps_reader",
+        "wired_link_monitor",
+        "rov_tether_controller",
+        "child_registry",
+        "a2a_router",
+        "command_executor",
+        "video_processor",
+        "safety_validator"
+      ],
+      "actions": [
+        "route_move",
+        "hold_position",
+        "manage_tether_length",
+        "coordinate_children",
+        "manage_rov_power",
+        "capture_video",
+        "relay_data"
+      ],
+      "constraints": [
+        "middle_layer_optional",
+        "must_preserve_child_identity",
+        "can_route_direct_to_system"
+      ],
       "tracks": [
-        { "type": "GPS", "name": "gps" },
-        { "type": "ODOMETRY", "name": "ship_motion" },
-        { "type": "TOPIC", "name": "field_status" },
-        { "type": "TOPIC", "name": "telemetry" }
+        { "type": "GPS", "name": "gps", "frequency_hz": 1 },
+        { "type": "ODOMETRY", "name": "ship_motion", "frequency_hz": 1 },
+        { "type": "TOPIC", "name": "wired_link", "frequency_hz": 10 },
+        { "type": "VIDEO", "name": "rov_video", "frequency_hz": 30 }
       ]
     }
   },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
   "simulation": {
     "interval_seconds": 5,
-    "start_position": { "latitude": 37.005, "longitude": 129.418, "altitude": 3.0 },
+    "start_position": {
+      "latitude": 37.005,
+      "longitude": 129.418,
+      "altitude": 3.0
+    },
     "speed_range": [0.0, 1.0],
     "altitude_range": [3.0, 3.0]
   },
   "cors": { "allow_origins": ["*"] }
 }
-

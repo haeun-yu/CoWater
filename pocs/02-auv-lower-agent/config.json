@@ -1,36 +1,78 @@
 {
   "server": { "host": "127.0.0.1", "port": 9121 },
-  "registry": { "url": "http://127.0.0.1:8003", "secret_key": "server-secret", "required": true },
+  "registry": {
+    "url": "http://127.0.0.1:8003",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 10
+  },
   "agent": {
     "id": "auv-local-agent",
     "name": "AUV Local Agent",
     "role": "auv",
     "layer": "lower",
     "device_type": "auv",
+    "connectivity": "acoustic",
+    "requires_parent": true,
     "description": "Lower-layer execution agent for a single AUV.",
-    "llm": { "provider": "ollama", "model": "gemma4", "enabled": true },
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
     "rules": { "max_speed_mps": 2.0, "battery_warn_percent": 30 },
     "capabilities": {
-      "skills": ["subsurface_navigation", "depth_holding", "sonar_survey", "local_safety_judgement"],
-      "tools": ["telemetry_reader", "depth_controller", "sonar_interpreter", "command_executor"],
-      "actions": ["route_move", "hold_depth", "surface", "return_to_base", "slow_down"],
+      "skills": [
+        "underwater_navigation",
+        "depth_control",
+        "sonar_scanning",
+        "acoustic_communication",
+        "mission_execution"
+      ],
+      "tools": [
+        "depth_sensor",
+        "pressure_monitor",
+        "acoustic_modem",
+        "sonar_scanner",
+        "battery_monitor",
+        "thruster_control",
+        "safety_validator"
+      ],
+      "actions": [
+        "dive_to_depth",
+        "hold_depth",
+        "surface",
+        "follow_route",
+        "scan_area",
+        "abort_mission",
+        "emergency_ascent"
+      ],
       "constraints": ["respect_depth_limits", "surface_for_recovery"],
       "tracks": [
-        { "type": "GPS", "name": "gps" },
-        { "type": "TOPIC", "name": "pressure" },
-        { "type": "TOPIC", "name": "side_scan_sonar" },
-        { "type": "TOPIC", "name": "temperature" },
-        { "type": "BATTERY", "name": "battery" },
-        { "type": "TOPIC", "name": "telemetry" }
+        { "type": "DEPTH", "name": "pressure", "frequency_hz": 10 },
+        { "type": "TOPIC", "name": "acoustic_modem", "frequency_hz": 0.1 },
+        { "type": "TOPIC", "name": "sonar", "frequency_hz": 2 },
+        { "type": "BATTERY", "name": "battery", "frequency_hz": 0.5 },
+        { "type": "ODOMETRY", "name": "inertial", "frequency_hz": 20 }
       ]
     }
   },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
   "simulation": {
     "interval_seconds": 3,
-    "start_position": { "latitude": 37.002, "longitude": 129.428, "altitude": -25.0 },
+    "start_position": {
+      "latitude": 37.002,
+      "longitude": 129.428,
+      "altitude": -25.0
+    },
     "speed_range": [0.3, 2.0],
     "altitude_range": [-80.0, -5.0]
   },
   "cors": { "allow_origins": ["*"] }
 }
-

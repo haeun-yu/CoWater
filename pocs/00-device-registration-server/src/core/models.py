@@ -228,6 +228,15 @@ class DeviceRecord:
     tracks: List[TrackRecord]
     actions: DeviceActionsRecord
     main_video_track_name: Optional[str] = None
+    # ← NEW: Device hierarchy & location
+    device_type: Optional[str] = None
+    layer: Optional[str] = None
+    connectivity: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    parent_id: Optional[int] = None
+    last_location_update: Optional[str] = None
+    last_error: Optional[str] = None
 
     def resolved_main_video_track_name(self) -> Optional[str]:
         if self.main_video_track_name:
@@ -249,6 +258,14 @@ class DeviceRecord:
             "agent": self.agent.to_dict(),
             "tracks": [track.to_dict() for track in self.tracks],
             "actions": self.actions.to_dict(),
+            # ← NEW
+            "device_type": self.device_type,
+            "layer": self.layer,
+            "connectivity": self.connectivity,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "parent_id": self.parent_id,
+            "last_location_update": self.last_location_update,
         }
 
 
@@ -256,6 +273,7 @@ class TrackInput(BaseModel):
     type: TRACK_TYPES
     name: str
     endpoint: Optional[str] = None
+    frequency_hz: Optional[float] = None  # ← NEW
 
 
 class DeviceActionsInput(BaseModel):
@@ -268,6 +286,13 @@ class DeviceRegistrationRequest(BaseModel):
     name: str
     tracks: List[TrackInput]
     actions: DeviceActionsInput = Field(default_factory=DeviceActionsInput)
+    # ← NEW: Device hierarchy & location
+    device_type: Optional[str] = None
+    layer: Optional[str] = None
+    connectivity: Optional[str] = None
+    location: Optional[dict] = None
+    requires_parent: bool = False
+    parent_id: Optional[int] = None
 
 
 class DeviceRenameRequest(BaseModel):
@@ -276,4 +301,41 @@ class DeviceRenameRequest(BaseModel):
 
 class MainVideoTrackRequest(BaseModel):
     name: str
+
+
+# ← NEW: Heartbeat & Topic Models
+class TelemetryTopicInfo(BaseModel):
+    track_type: str
+    track_name: str
+    topic: str
+
+
+class DeviceRegistrationResponse(BaseModel):
+    id: int
+    token: str
+    agent_id: str
+    name: str
+    parent_id: Optional[int] = None
+    parent_endpoint: Optional[str] = None
+    parent_command_endpoint: Optional[str] = None
+    heartbeat_topic: str
+    telemetry_topics: List[TelemetryTopicInfo] = Field(default_factory=list)
+    registered_at: str
+    last_seen_at: str
+
+
+class HeartbeatUpdate(BaseModel):
+    device_id: int
+    agent_id: str
+    layer: str
+    timestamp: str
+    status: str
+    battery_percent: float
+
+
+class LocationUpdate(BaseModel):
+    device_id: int
+    latitude: float
+    longitude: float
+    timestamp: str
 

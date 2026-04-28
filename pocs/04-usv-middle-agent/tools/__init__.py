@@ -1,2 +1,1 @@
-"""Tool package for this standalone PoC."""
-
+"""Tools for USV Middle Agent"""
