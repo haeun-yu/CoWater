@@ -199,16 +199,31 @@ class HeartbeatMonitor:
             logger.error(f"Error finding best parent: {e}")
             return None
 
-    def record_heartbeat(self, device_id: int) -> None:
+    def record_heartbeat(self, device_id: int, status: str = "online") -> None:
         """
         Record that a device sent a heartbeat (update last_seen_at)
-        Called when device sends heartbeat via HTTP or Moth
+        상태 변경 시에만 DB에 반영 (online ↔ offline)
+
+        Args:
+            device_id: Device ID
+            status: "online" or "offline"
         """
         try:
             device = self.registry.get_device(device_id)
             if device:
+                current_status = "online" if device.connected else "offline"
+                new_status = "online" if status == "online" else "offline"
+
+                # Update last_seen_at (always)
                 device.agent.last_seen_at = datetime.utcnow().isoformat()
-                device.connected = True
-                logger.debug(f"Heartbeat recorded for device {device_id}")
+
+                # Update connected flag only if status changed
+                if current_status != new_status:
+                    device.connected = (new_status == "online")
+                    device.updated_at = datetime.utcnow().isoformat()
+                    logger.info(f"Device {device_id} status changed: {current_status} → {new_status}")
+                else:
+                    # Just update last_seen_at, don't change updated_at
+                    logger.debug(f"Heartbeat recorded for device {device_id} (status unchanged)")
         except Exception as e:
             logger.error(f"Error recording heartbeat: {e}")

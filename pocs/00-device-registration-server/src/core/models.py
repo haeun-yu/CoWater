@@ -242,6 +242,11 @@ class DeviceRecord:
     # ← NEW: Moth topics for telemetry & heartbeat
     heartbeat_topic: Optional[str] = None
     telemetry_topics: List[Dict[str, str]] = field(default_factory=list)
+    # ← NEW: AUV submersion state & connectivity constraints
+    is_submerged: bool = False  # AUV 수중 여부
+    submerged_at: Optional[str] = None  # 잠수 시간
+    surfaced_at: Optional[str] = None  # 수면 시간
+    force_parent_routing: bool = False  # ROV: 항상 parent를 통한 라우팅
 
     def resolved_main_video_track_name(self) -> Optional[str]:
         if self.main_video_track_name:
@@ -274,6 +279,11 @@ class DeviceRecord:
             # ← NEW: Moth topics
             "heartbeat_topic": self.heartbeat_topic,
             "telemetry_topics": self.telemetry_topics,
+            # ← NEW: AUV submersion state
+            "is_submerged": self.is_submerged,
+            "submerged_at": self.submerged_at,
+            "surfaced_at": self.surfaced_at,
+            "force_parent_routing": self.force_parent_routing,
         }
 
 
@@ -342,8 +352,17 @@ class HeartbeatUpdate(BaseModel):
 
 
 class LocationUpdate(BaseModel):
-    device_id: int
     latitude: float
     longitude: float
-    timestamp: str
+
+
+class AUVSubmersionRequest(BaseModel):
+    """AUV submersion state update request"""
+    is_submerged: bool
+
+
+class DeviceConnectivityStateRequest(BaseModel):
+    """Device connectivity state update (for ROV wired/wireless, AUV surface/submerged routing)"""
+    parent_id: Optional[int] = None  # ROV wired connection through middle layer
+    force_parent_routing: bool = False  # ROV: always route through parent
 

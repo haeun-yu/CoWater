@@ -17,6 +17,7 @@ from src.core.models import (
     resolve_default_main_video_track_name,
     utc_now_iso,
 )
+from src.registry.heartbeat_monitor import HeartbeatMonitor
 
 
 class DeviceRegistry:
@@ -33,6 +34,8 @@ class DeviceRegistry:
         agent_path_prefix: str,
         agent_command_scheme: str,
         agent_command_path_prefix: str,
+        heartbeat_interval_seconds: int = 10,
+        heartbeat_timeout_seconds: int = 30,
     ) -> None:
         self._secret_key = secret_key
         self._server = DeviceServerInformationRecord(host=host, port=port, ping_endpoint=ping_endpoint)
@@ -46,6 +49,11 @@ class DeviceRegistry:
         }
         self._devices: Dict[int, DeviceRecord] = {}
         self._next_id = 1
+        self.heartbeat_monitor = HeartbeatMonitor(
+            registry=self,
+            interval_seconds=heartbeat_interval_seconds,
+            timeout_seconds=heartbeat_timeout_seconds,
+        )
 
     def server_dict(self) -> dict[str, object]:
         return self._server.to_dict()
@@ -285,5 +293,63 @@ class DeviceRegistry:
             device.layer = layer
         if connectivity is not None:
             device.connectivity = connectivity
+        device.updated_at = utc_now_iso()
+        return device
+
+    def update_auv_submersion(self, device_id: int, is_submerged: bool) -> DeviceRecord:
+        """AUV 수중/수면 상태 업데이트"""
+        device = self.get_device(device_id)
+        if device.device_type != "AUV":
+            raise ValueError("Only AUV devices can be marked as submerged")
+
+        now = utc_now_iso()
+        device.is_submerged = is_submerged
+        if is_submerged:
+            device.submerged_at = now
+        else:
+            device.surfaced_at = now
+        device.updated_at = now
+        return device
+
+    def update_device_connectivity_state(
+        self,
+        device_id: int,
+        *,
+        parent_id: Optional[int] = None,
+        force_parent_routing: bool = False
+    ) -> DeviceRecord:
+        """
+        디바이스 연결 상태 업데이트
+
+        - ROV: 반드시 parent_id를 통한 유선 연결
+          → parent_id는 어떤 middle layer 에이전트든 가능 (Control Ship, Control USV 등)
+          → force_parent_routing=True로 설정되어 모든 통신이 parent를 통함
+        - AUV: 수중 시에만 parent_id를 통한 연결 (자동으로 관리됨)
+        """
+        device = self.get_device(device_id)
+
+        # ROV: 유선 연결 강제 (parent는 어떤 middle layer든 가능)
+        if device.device_type == "ROV":
+            if parent_id is None:
+                raise ValueError("ROV must have parent_id for wired connection")
+            parent_device = self.get_device(parent_id)
+            if parent_device.device_type not in ["USV", "CONTROL_SHIP"]:
+                # parent가 middle layer인지 확인 (선택적)
+                pass
+            device.parent_id = parent_id
+            device.force_parent_routing = True
+
+        # AUV: 수중 시만 parent 연결
+        elif device.device_type == "AUV":
+            if device.is_submerged and parent_id is None:
+                raise ValueError("Submerged AUV must have parent_id for underwater acoustic communication")
+            device.parent_id = parent_id if device.is_submerged else None
+
+        # 기타 디바이스
+        else:
+            if parent_id is not None:
+                device.parent_id = parent_id
+
+        device.force_parent_routing = force_parent_routing
         device.updated_at = utc_now_iso()
         return device

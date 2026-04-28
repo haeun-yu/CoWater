@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.runtime import AgentRuntime
 from agent.state import utc_now
-from controller.a2a import A2ASendRequest, build_task, extract_message_data
-from controller.commands import CommandRequest
+from pocs.shared.a2a import A2ASendRequest, build_task, extract_message_data
+from pocs.shared.command import CommandRequest
 
 
 def create_app(runtime: AgentRuntime) -> FastAPI:

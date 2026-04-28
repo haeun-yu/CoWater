@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from typing import Any, List
 
 from fastapi import FastAPI, HTTPException, Response, status
@@ -11,8 +12,10 @@ from src.core.config import APP_SETTINGS
 from src.core.models import (
     AlertAckRequest,
     AlertIngestRequest,
+    AUVSubmersionRequest,
     CORE_ACTIONS,
     DeviceAgentRegistrationRequest,
+    DeviceConnectivityStateRequest,
     DeviceRegistrationRequest,
     DeviceRenameRequest,
     LocationUpdate,
@@ -22,6 +25,7 @@ from src.core.models import (
 )
 from src.registry.alert_registry import AlertRegistry
 from src.registry.device_registry import DeviceRegistry
+from src.transport.moth_subscriber import MothHeartbeatSubscriber
 
 
 registry = DeviceRegistry(
@@ -35,8 +39,15 @@ registry = DeviceRegistry(
     agent_path_prefix=APP_SETTINGS["agent"]["path_prefix"],
     agent_command_scheme=APP_SETTINGS["agent"]["command_scheme"],
     agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
+    heartbeat_interval_seconds=APP_SETTINGS["heartbeat"]["interval_seconds"],
+    heartbeat_timeout_seconds=APP_SETTINGS["heartbeat"]["timeout_seconds"],
 )
 alert_registry = AlertRegistry()
+
+moth_subscriber = MothHeartbeatSubscriber(
+    registry=registry,
+    moth_server_url=APP_SETTINGS["moth"]["server_url"],
+)
 
 app = FastAPI(title="CoWater Device Registration Server", version="1.0.0")
 app.add_middleware(
@@ -45,6 +56,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """서버 시작 시 Moth 구독 시작"""
+    await moth_subscriber.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """서버 종료 시 Moth 구독 중지"""
+    await moth_subscriber.stop()
 
 
 @app.get("/health")
@@ -222,6 +245,39 @@ def update_device_metadata(device_id: int, request: dict[str, Any]) -> Response:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="device not found") from exc
+
+
+@app.patch("/devices/{device_id}/auv-submersion")
+def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict[str, Any]:
+    """AUV 수중/수면 상태 업데이트 (수중음향통신 라우팅 활성화)"""
+    try:
+        device = registry.update_auv_submersion(device_id, request.is_submerged)
+        return device.to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/devices/{device_id}/connectivity-state")
+def update_device_connectivity_state(device_id: int, request: DeviceConnectivityStateRequest) -> dict[str, Any]:
+    """
+    디바이스 연결 상태 업데이트
+
+    - ROV: parent_id를 통한 유선 연결 강제 (항상 중간 계층을 통해야 함)
+    - AUV: 수중 시에만 parent_id를 통한 음향통신 (수면 시 직접 연결)
+    """
+    try:
+        device = registry.update_device_connectivity_state(
+            device_id,
+            parent_id=request.parent_id,
+            force_parent_routing=request.force_parent_routing
+        )
+        return device.to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def main() -> None:
