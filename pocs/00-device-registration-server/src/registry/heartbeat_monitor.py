@@ -113,7 +113,9 @@ class HeartbeatMonitor:
                         logger.warning(f"Device {device.id} ({device.name}) marked as offline (no heartbeat)")
                         device.connected = False
                         device.agent.connected = False
-                        device.last_error = f"Heartbeat timeout at {datetime.utcnow().isoformat()}"
+                        device.last_error = f"Heartbeat timeout at {datetime.now(timezone.utc).isoformat()}"
+                        device.updated_at = datetime.now(timezone.utc).isoformat()
+                        self.registry._persist_device(device)
 
                         # If middle layer agent goes offline, reassign its children
                         if device.layer == "middle":
@@ -149,7 +151,7 @@ class HeartbeatMonitor:
                         f"Reassigning child {child.id} ({child.name}) from parent {offline_parent.id} to {new_parent.id}"
                     )
                     child.parent_id = new_parent.id
-                    child.updated_at = datetime.utcnow().isoformat()
+                    child.updated_at = datetime.now(timezone.utc).isoformat()
                 else:
                     # No available parent - switch to direct_to_system mode
                     logger.warning(
@@ -157,7 +159,9 @@ class HeartbeatMonitor:
                         f"Switching to direct_to_system mode."
                     )
                     child.parent_id = None
-                    child.updated_at = datetime.utcnow().isoformat()
+                    child.updated_at = datetime.now(timezone.utc).isoformat()
+
+                self.registry._persist_device(child)
 
                 # Send A2A notification about assignment change
                 await self._notify_child_assignment(child)
@@ -299,7 +303,10 @@ class HeartbeatMonitor:
                     device.connected = (new_status == "online")
                     device.agent.connected = device.connected
                     device.updated_at = datetime.now(timezone.utc).isoformat()
+                    self.registry._persist_device(device)
                     logger.info(f"Device {device_id} status changed: {current_status} → {new_status}")
+                elif latitude is not None and longitude is not None:
+                    self.registry._persist_device(device)
                 else:
                     # Just update last_seen_at, don't change updated_at
                     logger.debug(f"Heartbeat recorded for device {device_id} (status unchanged)")

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -45,9 +46,12 @@ def normalize_track_name(name: str) -> str:
 
 
 def build_track_endpoint(device_id: int, track_name: str, track_type: str) -> str:
+    channel_name = f"device-{device_id}"
+    normalized_track = normalize_track_name(track_name or track_type)
     return (
         "/pang/ws/meb"
-        f"?channel=instant&name=health_check&source=base&track=base"
+        f"?channel=instant&name={quote(channel_name)}"
+        f"&source=base&track={quote(normalized_track)}"
     )
 
 

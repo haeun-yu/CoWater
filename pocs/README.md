@@ -214,7 +214,7 @@ pocs/
 ├─ 03-rov-lower-agent/               ← Lower Agent (ROV)
 ├─ 04-usv-middle-agent/              ← Middle Agent (Relay)
 ├─ 05-control-ship-middle-agent/     ← Middle Agent (Control)
-├─ 06-system-supervisor-agent/       ← System Agent (미구현)
+├─ 06-system-supervisor-agent/       ← System Supervisor Agent
 └─ README.md                          ← 이 문서
 ```
 
@@ -335,7 +335,7 @@ MOTH_SERVER_URL=wss://cobot.center:8287
 
 ## 📋 다음 단계
 
-### 미구현 (선택사항)
+### 추가 검증 필요 (선택사항)
 
 **Phase 5: Integration Testing**
 

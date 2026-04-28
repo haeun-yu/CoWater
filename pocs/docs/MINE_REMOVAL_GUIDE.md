@@ -1,7 +1,7 @@
 # CoWater 기뢰 제거 시나리오 완전 가이드
 
-**최종 구현 상태**: 모든 기능 완성 ✅  
-**작성일**: 2026-04-28
+**최종 구현 상태**: 핵심 라우팅/등록/시나리오 스모크 검증 완료 ✅
+**작성일**: 2026-04-29
 
 ---
 
@@ -269,7 +269,7 @@ PATCH /devices/3/connectivity-state { "parent_id": 2 }
 **Step 1: Supervisor가 기뢰 제거 임무 발령**
 
 ```bash
-POST /agents/{supervisor_token}/message:send
+POST /message:send
 {
   "message": {
     "role": "user",
@@ -331,19 +331,35 @@ Supervisor에 보고
 ```bash
 # 1. Device Registration Server 시작
 cd pocs/00-device-registration-server
-python -m src.device_registration_server --port 8200
+python device_registration_server.py --port 9100
 
 # 2. Lower Agents 시작
-cd pocs/01-usv-lower-agent && python -m src.main --port 9010
-cd pocs/02-auv-lower-agent && python -m src.main --port 9011
-cd pocs/03-rov-lower-agent && python -m src.main --port 9012
+python pocs/01-usv-lower-agent/device_agent.py --port 9111
+python pocs/02-auv-lower-agent/device_agent.py --port 9112
+python pocs/03-rov-lower-agent/device_agent.py --port 9113
 
 # 3. Middle Layer 시작
-cd pocs/04-usv-middle-agent && python -m src.main --port 9013
-cd pocs/05-control-ship-middle-agent && python -m src.main --port 9014
+python pocs/04-usv-middle-agent/device_agent.py --port 9114
+python pocs/05-control-ship-middle-agent/device_agent.py --port 9115
 
 # 4. Supervisor 시작
-cd pocs/06-system-supervisor-agent && python -m src.main --port 9015
+python pocs/06-system-supervisor-agent/system_agent.py --port 9116
+```
+
+### 시나리오 스모크 테스트
+
+외부 Moth/Ollama 서버 없이 레지스트리 라우팅과 기뢰제거 절차를 검증하려면:
+
+```bash
+python pocs/docs/run_mine_removal_scenario.py --format timeline
+```
+
+성공 시 다음 조건이 모두 `OK`로 출력됩니다:
+
+```text
+OK auv_submerged_via_parent
+OK rov_wired_force_parent
+OK unique_track_endpoints
 ```
 
 ### 테스트 체크리스트
@@ -376,7 +392,7 @@ curl -X PATCH http://localhost:9100/devices/2/auv-submersion \
 
 ## 핵심 요약
 
-✅ **완성된 기능**:
+✅ **검증된 기능**:
 
 - Moth heartbeat 실시간 모니터링 (3초 timeout)
 - ROV 유선 연결 강제 (임의 middle layer 선택 가능)
@@ -391,9 +407,8 @@ curl -X PATCH http://localhost:9100/devices/2/auv-submersion \
 - `pocs/shared/a2a.py`, `pocs/shared/command.py`
 - POC 01-06의 모든 controller/api.py
 
-✅ **배포 준비 상태**: 테스트 및 운영 가능
+✅ **배포 준비 상태**: 로컬 스모크 테스트 가능. 실제 Moth/Ollama/장시간 WebSocket 운영 검증은 별도 필요.
 
 ---
 
-**마지막 업데이트**: 2026-04-28  
-**작성자**: Claude Haiku 4.5 + User
+**마지막 업데이트**: 2026-04-29
