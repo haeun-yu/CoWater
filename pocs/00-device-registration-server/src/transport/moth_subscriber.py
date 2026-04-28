@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 MOTH_HEALTHCHECK_PATH = "/pang/ws/meb"
-MOTH_HEALTHCHECK_QUERY = "channel=instant&name=health_check&source=base&track=ping"
+MOTH_HEALTHCHECK_QUERY = "channel=instant&name=base&source=base&track=base"
 DEFAULT_MOTH_URL = f"wss://cobot.center:8287{MOTH_HEALTHCHECK_PATH}?{MOTH_HEALTHCHECK_QUERY}"
 
 
