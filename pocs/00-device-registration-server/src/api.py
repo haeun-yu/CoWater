@@ -15,6 +15,7 @@ from src.core.models import (
     DeviceAgentRegistrationRequest,
     DeviceRegistrationRequest,
     DeviceRenameRequest,
+    LocationUpdate,
     MainVideoTrackRequest,
     ResponseIngestRequest,
     TRACK_TYPES,
@@ -192,6 +193,35 @@ def get_response(response_id: str) -> dict[str, Any]:
         return alert_registry.get_response(response_id).to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="response not found") from exc
+
+
+@app.post("/devices/{device_id}/location")
+def update_device_location(device_id: int, request: LocationUpdate) -> dict[str, Any]:
+    """POC 01-05 에이전트의 텔레메트리 기반 위치 업데이트"""
+    try:
+        device = registry.update_device_location(
+            device_id,
+            latitude=request.latitude,
+            longitude=request.longitude
+        )
+        return device.to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+
+
+@app.patch("/devices/{device_id}/metadata")
+def update_device_metadata(device_id: int, request: dict[str, Any]) -> Response:
+    """디바이스 메타데이터 업데이트 (device_type, layer, connectivity)"""
+    try:
+        registry.update_device_metadata(
+            device_id,
+            device_type=request.get("device_type"),
+            layer=request.get("layer"),
+            connectivity=request.get("connectivity")
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
 
 
 def main() -> None:

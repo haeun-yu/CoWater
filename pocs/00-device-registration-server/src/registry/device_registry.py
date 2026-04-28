@@ -120,6 +120,13 @@ class DeviceRegistry:
             tracks.append(stored_track)
 
         now = utc_now_iso()
+        # 요청에서 위치 정보 추출
+        latitude = None
+        longitude = None
+        if request.location and isinstance(request.location, dict):
+            latitude = request.location.get("latitude")
+            longitude = request.location.get("longitude")
+
         return DeviceRecord(
             id=device_id,
             token=token,
@@ -142,6 +149,13 @@ class DeviceRegistry:
                 custom=list(request.actions.custom),
             ),
             main_video_track_name=resolve_default_main_video_track_name(tracks),
+            device_type=request.device_type,
+            layer=request.layer,
+            connectivity=request.connectivity,
+            latitude=latitude,
+            longitude=longitude,
+            parent_id=request.parent_id,
+            last_location_update=now if (latitude or longitude) else None,
         )
 
     def register(self, request: DeviceRegistrationRequest) -> DeviceRecord:
@@ -237,4 +251,26 @@ class DeviceRegistry:
         device.connected = False
         device.agent.last_seen_at = now
         device.updated_at = now
+        return device
+
+    def update_device_location(self, device_id: int, latitude: float, longitude: float) -> DeviceRecord:
+        """디바이스 위치 정보 업데이트 (POC 01-05 에이전트의 텔레메트리 기반)"""
+        device = self.get_device(device_id)
+        device.latitude = latitude
+        device.longitude = longitude
+        device.last_location_update = utc_now_iso()
+        device.updated_at = device.last_location_update
+        return device
+
+    def update_device_metadata(self, device_id: int, *, device_type: Optional[str] = None,
+                              layer: Optional[str] = None, connectivity: Optional[str] = None) -> DeviceRecord:
+        """디바이스 메타데이터 업데이트"""
+        device = self.get_device(device_id)
+        if device_type is not None:
+            device.device_type = device_type
+        if layer is not None:
+            device.layer = layer
+        if connectivity is not None:
+            device.connectivity = connectivity
+        device.updated_at = utc_now_iso()
         return device

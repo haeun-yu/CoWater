@@ -474,6 +474,10 @@ async function syncDeviceRegistry() {
             cfg.registryTracks = reg?.tracks || [];
             cfg.registryActions = reg?.actions || null;
             cfg.registryMainVideoTrackName = reg?.main_video_track_name || null;
+            // POC 00 서버에서 제공하는 위치 정보 (있으면 템플릿 기본값 덮어쓰기)
+            if (reg?.latitude !== undefined && reg?.latitude !== null) cfg.lat = reg.latitude;
+            if (reg?.longitude !== undefined && reg?.longitude !== null) cfg.lon = reg.longitude;
+            if (reg?.device_type) cfg.type = reg.device_type;
         });
 
         // 서버에 등록된 디바이스만 활성화
