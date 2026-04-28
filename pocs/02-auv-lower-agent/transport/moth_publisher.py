@@ -90,7 +90,7 @@ class MothPublisher:
         configured_url = self.moth_config.get("server_url", self.moth_url)
         self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
 
-        self.heartbeat_topic = HEARTBEAT_CHANNEL
+        self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
 
         # 각 track type별 telemetry topic 저장
         telemetry_topics_list = registration_response.get("telemetry_topics", [])

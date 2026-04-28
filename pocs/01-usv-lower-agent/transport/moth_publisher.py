@@ -173,7 +173,7 @@ class MothPublisher:
                 _build_fallback_pub_endpoint(registration_response.get("id") or self.state.registry_id),
             )
 
-        self.heartbeat_topic = HEARTBEAT_CHANNEL
+        self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
 
         # 각 track type별 telemetry topic 저장
         telemetry_topics_list = registration_response.get("telemetry_topics", [])
