@@ -17,6 +17,7 @@ from src.core.models import (
     TrackRecord,
     build_agent_command_endpoint,
     build_agent_endpoint,
+    build_heartbeat_endpoint,
     build_track_endpoint,
     device_record_from_dict,
     resolve_default_main_video_track_name,
@@ -189,8 +190,9 @@ class DeviceRegistry:
         if request.location and isinstance(request.location, dict):
             altitude = request.location.get("altitude")
 
-        # Moth topics 생성 (템플릿 사용)
+        # Moth topics 생성 (템플릿 사용) 및 heartbeat endpoint
         heartbeat_topic = self._heartbeat_topic_template.format(device_id=device_id)
+        heartbeat_endpoint = build_heartbeat_endpoint(device_id)
         telemetry_topics = [
             {
                 "track_type": track.type,
@@ -230,6 +232,7 @@ class DeviceRegistry:
             parent_id=request.parent_id,
             last_location_update=now if (latitude is not None or longitude is not None) else None,
             heartbeat_topic=heartbeat_topic,
+            heartbeat_endpoint=heartbeat_endpoint,
             telemetry_topics=telemetry_topics,
             is_submerged=bool(request.device_type == "AUV" and isinstance(altitude, (int, float)) and altitude < 0),
             force_parent_routing=bool(request.device_type == "ROV"),

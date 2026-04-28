@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 MOTH_HEALTHCHECK_PATH = "/pang/ws/meb"
-MOTH_HEALTHCHECK_QUERY = "channel=instant&name=health_check&source=base&track=base"
+MOTH_HEALTHCHECK_QUERY = "channel=instant&name=heartbeat&source=base&track=base"
 DEFAULT_MOTH_URL = f"wss://cobot.center:8287{MOTH_HEALTHCHECK_PATH}?{MOTH_HEALTHCHECK_QUERY}"
 
 
@@ -36,9 +36,10 @@ def _extract_base_url(raw_url: str) -> str:
     return ""
 
 
-def _build_healthcheck_url(base_url: str) -> str:
+def _build_healthcheck_url(base_url: str, query: str = "") -> str:
     parsed = urlsplit(base_url)
-    return urlunsplit((parsed.scheme, parsed.netloc, MOTH_HEALTHCHECK_PATH, MOTH_HEALTHCHECK_QUERY, ""))
+    final_query = query if query else MOTH_HEALTHCHECK_QUERY
+    return urlunsplit((parsed.scheme, parsed.netloc, MOTH_HEALTHCHECK_PATH, final_query, ""))
 
 
 class MothHeartbeatSubscriber:
@@ -58,7 +59,9 @@ class MothHeartbeatSubscriber:
         self.registry = registry
         requested_base_url = _extract_base_url(moth_server_url)
         selected_base_url = requested_base_url if requested_base_url in ALLOWED_MOTH_BASE_URLS else "wss://cobot.center:8287"
-        self.moth_server_url = _build_healthcheck_url(selected_base_url)
+        parsed = urlsplit(moth_server_url)
+        query_string = parsed.query if parsed.query else ""
+        self.moth_server_url = _build_healthcheck_url(selected_base_url, query_string)
         self.ws: Optional[Any] = None
         self.is_connected = False
         self.is_running = False

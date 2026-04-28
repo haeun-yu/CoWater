@@ -23,6 +23,6 @@
     "timeout_seconds": 3
   },
   "moth": {
-    "server_url": "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=health_check&source=base&track=ping"
+    "server_url": "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base"
   }
 }

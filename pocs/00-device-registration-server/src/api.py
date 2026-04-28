@@ -300,7 +300,7 @@ def update_device_connectivity_state(device_id: int, request: DeviceConnectivity
 def main() -> None:
     # Python logging 설정 (stdout으로 로그 출력)
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
     )

@@ -55,6 +55,13 @@ def build_track_endpoint(device_id: int, track_name: str, track_type: str) -> st
     )
 
 
+def build_heartbeat_endpoint(device_id: int) -> str:
+    return (
+        "/pang/ws/meb"
+        "?channel=instant&name=heartbeat&source=base&track=base"
+    )
+
+
 def build_agent_endpoint(scheme: str, host: str, port: int, path_prefix: str, token: str) -> str:
     prefix = path_prefix.rstrip("/")
     return f"{scheme}://{host}:{port}{prefix}/{token}"
@@ -248,6 +255,7 @@ class DeviceRecord:
     last_error: Optional[str] = None
     # ← NEW: Moth topics for telemetry & heartbeat
     heartbeat_topic: Optional[str] = None
+    heartbeat_endpoint: Optional[str] = None
     telemetry_topics: List[Dict[str, str]] = field(default_factory=list)
     # ← NEW: AUV submersion state & connectivity constraints
     is_submerged: bool = False  # AUV 수중 여부
@@ -285,6 +293,7 @@ class DeviceRecord:
             "last_location_update": self.last_location_update,
             # ← NEW: Moth topics
             "heartbeat_topic": self.heartbeat_topic,
+            "heartbeat_endpoint": self.heartbeat_endpoint,
             "telemetry_topics": self.telemetry_topics,
             # ← NEW: AUV submersion state
             "is_submerged": self.is_submerged,
@@ -435,6 +444,7 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         parent_id=data.get("parent_id"),
         last_location_update=data.get("last_location_update"),
         heartbeat_topic=data.get("heartbeat_topic"),
+        heartbeat_endpoint=data.get("heartbeat_endpoint"),
         telemetry_topics=list(data.get("telemetry_topics") or []),
         is_submerged=bool(data.get("is_submerged", False)),
         submerged_at=data.get("submerged_at"),

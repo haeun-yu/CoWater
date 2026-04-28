@@ -99,9 +99,12 @@ class MothPublisher:
         else:
             self.moth_base_url = DEFAULT_MOTH_BASE_URL
         self.moth_url = _join_base_and_endpoint(self.moth_base_url, _build_fallback_pub_endpoint(None))
+        self.heartbeat_url: Optional[str] = None
         self.enabled = self.moth_config.get("enabled", True)
         self.ws: Optional[Any] = None
+        self.heartbeat_ws: Optional[Any] = None
         self.is_connected = False
+        self.heartbeat_connected = False
 
         # Server의 Device Registration 응답에서 할당받은 topics
         self.heartbeat_topic: Optional[str] = None
@@ -178,6 +181,15 @@ class MothPublisher:
 
         self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
 
+        # heartbeat_endpoint 설정 (별도의 heartbeat 연결용)
+        heartbeat_endpoint = registration_response.get("heartbeat_endpoint")
+        if heartbeat_endpoint:
+            self.heartbeat_url = _join_base_and_endpoint(self.moth_base_url, heartbeat_endpoint)
+            logger.info(f"Heartbeat URL (dedicated endpoint): {self.heartbeat_url}")
+        else:
+            self.heartbeat_url = self.moth_url
+            logger.debug("Heartbeat URL은 telemetry URL과 동일합니다 (별도 endpoint 미제공)")
+
         # 각 track type별 telemetry topic 저장
         telemetry_topics_list = registration_response.get("telemetry_topics", [])
         for topic_info in telemetry_topics_list:
@@ -187,7 +199,8 @@ class MothPublisher:
                 self.telemetry_topics[track_type] = topic
 
         logger.info(f"MothPublisher 초기화 완료")
-        logger.info(f"  Moth 서버: {self.moth_url}")
+        logger.info(f"  Telemetry Moth 서버: {self.moth_url}")
+        logger.info(f"  Heartbeat Moth 서버: {self.heartbeat_url}")
         logger.info(f"  Heartbeat 토픽: {self.heartbeat_topic}")
         logger.info(f"  Telemetry 토픽: {len(self.telemetry_topics)}개")
         for track_type, topic in self.telemetry_topics.items():
@@ -195,7 +208,7 @@ class MothPublisher:
 
     async def connect(self) -> None:
         """
-        Moth WebSocket 서버에 연결
+        Moth WebSocket 서버에 연결 (Telemetry용)
 
         WebSocket 연결 설정:
         - ping_interval=30: 30초마다 ping 전송 (연결 유지)
@@ -224,6 +237,42 @@ class MothPublisher:
             self.is_connected = False
             self.ws = None
 
+    async def connect_heartbeat(self) -> None:
+        """Heartbeat 전용 Moth WebSocket 연결"""
+        if not self.enabled or websockets is None or not self.heartbeat_url:
+            return
+
+        if self.heartbeat_ws is not None and not self._ws_is_closed_heartbeat():
+            return
+
+        try:
+            logger.info(f"Heartbeat Moth 연결 시작: {self.heartbeat_url}")
+            self.heartbeat_ws = await websockets.connect(self.heartbeat_url, ping_interval=30, ping_timeout=10)
+            self.heartbeat_connected = True
+            logger.info(f"Heartbeat Moth 연결 성공: {self.heartbeat_url}")
+        except Exception as e:
+            logger.error(f"Heartbeat Moth 연결 실패: {type(e).__name__}: {str(e)}")
+            self.heartbeat_connected = False
+            self.heartbeat_ws = None
+
+    def _ws_is_closed_heartbeat(self) -> bool:
+        """Heartbeat WebSocket 종료 상태 판별"""
+        if self.heartbeat_ws is None:
+            return True
+        closed_attr = getattr(self.heartbeat_ws, "closed", None)
+        if isinstance(closed_attr, bool):
+            return closed_attr
+        if closed_attr is not None:
+            try:
+                return bool(closed_attr)
+            except Exception:
+                pass
+        state = getattr(self.heartbeat_ws, "state", None)
+        if state is not None:
+            state_name = getattr(state, "name", str(state)).upper()
+            return state_name in {"CLOSED", "CLOSING"}
+        return False
+
     async def _reconnect_loop(self) -> None:
         """
         자동 재연결 루프 (백그라운드 task)
@@ -238,10 +287,13 @@ class MothPublisher:
 
         while True:
             try:
-                # 연결 끊김 감지 시 재연결 시도
+                # Telemetry 연결 상태 확인 및 재연결
                 if not self.is_connected or self.ws is None or self._ws_is_closed():
                     logger.debug(f"Moth 연결 끊김 감지: is_connected={self.is_connected}, ws={self.ws is not None}, closed={self._ws_is_closed()}")
                     await self.connect()
+                # Heartbeat 연결 상태 확인 및 재연결
+                if not self.heartbeat_connected or self.heartbeat_ws is None or self._ws_is_closed_heartbeat():
+                    await self.connect_heartbeat()
                 await asyncio.sleep(reconnect_interval)
             except Exception as e:
                 logger.warning(f"재연결 루프 오류: {type(e).__name__}: {e}")
@@ -336,36 +388,40 @@ class MothPublisher:
         if not self.heartbeat_topic:
             logger.warning(f"Heartbeat 발행 불가: heartbeat_topic 미설정")
             return
-        if not self.is_connected:
-            logger.warning(f"Heartbeat 발행 불가: Moth 미연결 (is_connected={self.is_connected})")
-            return
-        if self.ws is None:
-            logger.warning(f"Heartbeat 발행 불가: ws is None")
-            return
-        if self._ws_is_closed():
-            logger.warning(f"Heartbeat 발행 불가: WebSocket closed")
-            return
+
+        # Heartbeat 전용 연결 사용, 없으면 일반 연결 사용
+        hb_ws = self.heartbeat_ws if self.heartbeat_connected and self.heartbeat_ws else None
+        if hb_ws is None:
+            if not self.is_connected or self.ws is None or self._ws_is_closed():
+                logger.warning(f"Heartbeat 발행 불가: Moth 미연결")
+                return
+            hb_ws = self.ws
+
         try:
             # Moth에 발행 (두 채널에 발행: 공통 채널 + device-specific 채널)
             # 1. device.heartbeat (POC 00의 meb 구독이 받는 공통 채널)
             msg1 = json.dumps(
                 {"type": "publish", "channel": "device.heartbeat", "payload": payload}
             )
-            await self.ws.send(msg1)
-            logger.debug(f"Heartbeat 발행 (공통채널): Moth={self.moth_url}, channel=device.heartbeat, device_id={payload.get('device_id')}")
+            await hb_ws.send(msg1)
+            heartbeat_url = self.heartbeat_url if self.heartbeat_connected else self.moth_url
+            logger.debug(f"Heartbeat 발행 (공통채널): Moth={heartbeat_url}, channel=device.heartbeat, device_id={payload.get('device_id')}")
 
             # 2. device.heartbeat.{device_id} (device-specific 채널)
             if self.heartbeat_topic != "device.heartbeat":
                 msg2 = json.dumps(
                     {"type": "publish", "channel": self.heartbeat_topic, "payload": payload}
                 )
-                await self.ws.send(msg2)
-                logger.debug(f"Heartbeat 발행 (전용채널): Moth={self.moth_url}, channel={self.heartbeat_topic}, device_id={payload.get('device_id')}")
+                await hb_ws.send(msg2)
+                logger.debug(f"Heartbeat 발행 (전용채널): Moth={heartbeat_url}, channel={self.heartbeat_topic}, device_id={payload.get('device_id')}")
 
             logger.info(f"Heartbeat 발행 완료: device_id={payload.get('device_id')}, topics=[device.heartbeat, {self.heartbeat_topic}]")
         except Exception as e:
             logger.error(f"Heartbeat 발행 실패: {e}")
-            self.is_connected = False
+            if self.heartbeat_connected:
+                self.heartbeat_connected = False
+            else:
+                self.is_connected = False
 
     async def publish_telemetry(self, telemetry: dict[str, Any]) -> None:
         """
