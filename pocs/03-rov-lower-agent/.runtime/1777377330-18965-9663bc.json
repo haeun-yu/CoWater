@@ -1,0 +1,52 @@
+{
+  "agent_id": "rov-local-agent-1777377330-18965-9663bc",
+  "name": "ROV Local Agent 1777377330-18965-9663bc",
+  "registry_id": 11,
+  "token": "e2eef8f8-0615-4bdf-bddb-6e516f83ec4c",
+  "registered_at": "2026-04-28T11:55:30.848555+00:00",
+  "tracks": [
+    {
+      "type": "VIDEO",
+      "name": "main_camera",
+      "endpoint": "/pang/ws/pub?channel=instant&name=11&source=base&track=main_camera"
+    },
+    {
+      "type": "TOPIC",
+      "name": "tether_tension",
+      "endpoint": "/pang/ws/pub?channel=instant&name=11&source=base&track=tether_tension"
+    },
+    {
+      "type": "PRESSURE",
+      "name": "depth",
+      "endpoint": "/pang/ws/pub?channel=instant&name=11&source=base&track=depth"
+    },
+    {
+      "type": "BATTERY",
+      "name": "power",
+      "endpoint": "/pang/ws/pub?channel=instant&name=11&source=base&track=power"
+    }
+  ],
+  "heartbeat_topic": "device.heartbeat.11",
+  "telemetry_topics": [
+    {
+      "track_type": "VIDEO",
+      "track_name": "main_camera",
+      "topic": "device.telemetry.11.VIDEO"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "tether_tension",
+      "topic": "device.telemetry.11.TOPIC"
+    },
+    {
+      "track_type": "PRESSURE",
+      "track_name": "depth",
+      "topic": "device.telemetry.11.PRESSURE"
+    },
+    {
+      "track_type": "BATTERY",
+      "track_name": "power",
+      "topic": "device.telemetry.11.BATTERY"
+    }
+  ]
+}

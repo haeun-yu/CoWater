@@ -65,7 +65,7 @@ def _join_base_and_endpoint(base_url: str, endpoint: str) -> str:
 
 def _build_fallback_pub_endpoint(device_id: int | None) -> str:
     name = str(device_id) if device_id is not None else "unknown"
-    return f"/pang/ws/pub?channel=instant&name={name}&source=base&track=ping"
+    return f"/pang/ws/meb?channel=instant&name={name}&source=base&track=ping"
 
 
 class MothPublisher:
@@ -161,7 +161,7 @@ class MothPublisher:
         track_endpoint = None
         for track in tracks:
             endpoint = track.get("endpoint") if isinstance(track, dict) else None
-            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/pub"):
+            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/meb"):
                 track_endpoint = endpoint
                 break
 
