@@ -64,7 +64,7 @@ def _join_base_and_endpoint(base_url: str, endpoint: str) -> str:
 
 
 def _build_fallback_pub_endpoint(device_id: int | None) -> str:
-    return f"/pang/ws/meb?channel=instant&name=base&source=base&track=base"
+    return f"/pang/ws/meb?channel=instant&name=health_check&source=base&track=base"
 
 
 class MothPublisher:
