@@ -1,5 +1,5 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9161 },
+  "server": { "host": "127.0.0.1", "port": 9116 },
   "registry": {
     "url": "http://127.0.0.1:9100",
     "secret_key": "server-secret",

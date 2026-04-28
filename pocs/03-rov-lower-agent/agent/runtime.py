@@ -258,9 +258,6 @@ class AgentRuntime:
 
         System Layer (POC 06)인 경우는 heartbeat만 발송
         """
-        # 빠른 확인용 파일 기록
-            f.write("simulation_loop started\n")
-
         try:
             if self.state.layer == "system":
                 # System layer: heartbeat만, telemetry는 발송하지 않음

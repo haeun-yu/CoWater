@@ -327,7 +327,9 @@ class DeviceRegistry:
         device_name = request.name.strip()
         if not device_name:
             raise ValueError("device name must not be empty")
-        if not request.tracks:
+        # System layer는 센서를 가지지 않을 수 있으므로 tracks 검증을 스킵
+        is_system_layer = str(request.layer or "").lower() == "system"
+        if not request.tracks and not is_system_layer:
             raise ValueError("tracks must not be empty")
 
         existing = self._get_device_by_name(device_name)

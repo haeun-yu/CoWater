@@ -183,8 +183,12 @@ class MothPublisher:
             if track_type and topic:
                 self.telemetry_topics[track_type] = topic
 
-        logger.info(f"MothPublisher 초기화 완료: Moth={self.moth_url}, {len(self.telemetry_topics)}개 telemetry topics")
-        logger.debug(f"Heartbeat topic: {self.heartbeat_topic}")
+        logger.info(f"MothPublisher 초기화 완료")
+        logger.info(f"  Moth 서버: {self.moth_url}")
+        logger.info(f"  Heartbeat 토픽: {self.heartbeat_topic}")
+        logger.info(f"  Telemetry 토픽: {len(self.telemetry_topics)}개")
+        for track_type, topic in self.telemetry_topics.items():
+            logger.debug(f"    {track_type}: {topic}")
 
     async def connect(self) -> None:
         """
