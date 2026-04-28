@@ -740,95 +740,103 @@ function initLinks() {
 
 // ─── Moth WebSocket ───────────────────────────────────────────
 function connectMoth() {
-    DEVICE_CONFIG.forEach(cfg => {
-        const tracks = Array.isArray(cfg.registryTracks) ? cfg.registryTracks : [];
-        if (!tracks.length) {
-            connState[cfg.id] = 'disconnected';
-            appState.registryStatus = appState.registryStatus === 'ok'
-                ? 'ok (no tracks)'
-                : appState.registryStatus;
-            return;
-        }
-        tracks.forEach(track => connectTrack(cfg.id, track.name, track.endpoint));
-    });
+    // 하트비트 토픽에 구독 (모든 디바이스의 상태를 한 번에 수신)
+    connectHeartbeatSubscription();
 }
 
-function normalizeWsUrl(endpoint) {
-    if (!endpoint) return null;
-    if (endpoint.startsWith("ws://") || endpoint.startsWith("wss://")) return endpoint;
-    return `${MOTH_BASE}${endpoint}`;
-}
-
-function connectTrack(deviceId, trackName, endpoint) {
-    const wsUrl = normalizeWsUrl(endpoint);
-    if (!wsUrl) {
-        console.warn(`[${deviceId}/${trackName}] Missing registry endpoint`);
-        return;
-    }
-    const socketKey = `${deviceId}:${trackName}`;
+function connectHeartbeatSubscription() {
+    const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=health_check&source=base&track=base`;
     const ws = new WebSocket(wsUrl);
-    sockets[socketKey] = ws;
-    let countedOpen = false;
+    sockets['heartbeat'] = ws;
 
     ws.onopen = () => {
-        if (!countedOpen) {
-            countedOpen = true;
-            connCounts[deviceId] = (connCounts[deviceId] || 0) + 1;
-        }
-        connState[deviceId] = 'connected';
-        const dev = appState.objects.find(d => d.id === deviceId);
-        if (dev) dev.connStatus = 'connected';
-        updateConnStatus();
+        console.log('[Moth] 하트비트 구독 연결 성공:', wsUrl);
+        // device.heartbeat 채널 구독
+        const subMsg = {
+            "type": "subscribe",
+            "channel": "device.heartbeat",
+            "channel_type": "meb"
+        };
+        ws.send(JSON.stringify(subMsg));
     };
+
     ws.onmessage = (ev) => {
-        if (typeof ev.data === 'string') return;
-        ev.data.arrayBuffer().then(buf => {
-            if (!buf.byteLength) return;
+        if (typeof ev.data === 'string') {
             try {
-                const msg = JSON.parse(new TextDecoder().decode(buf));
-                const env = msg.envelope || {}, pay = msg.payload || {};
-                const devId = env.device_id || deviceId;
-                const dev = appState.objects.find(d => d.id === devId);
+                const msg = JSON.parse(ev.data);
+
+                // 구독 확인 메시지 무시
+                if (msg.type === 'subscribe' || msg.action === 'subscribe') return;
+
+                // 하트비트 메시지 처리 (type: publish 확인)
+                if (msg.type !== 'publish') return;
+
+                // 올바른 채널인지 확인
+                const channel = msg.channel || msg.topic;
+                if (channel !== 'device.heartbeat') return;
+
+                // 페이로드에서 디바이스 ID 추출
+                const payload = msg.payload || {};
+                const deviceId = payload.device_id;
+                if (!deviceId) return;
+
+                const dev = appState.objects.find(d => d.id === deviceId);
                 if (!dev) return;
-                dev.lastEnvelope = env;
-                dev.lastPayload  = pay;
-                if (pay.position) {
-                    const p = pay.position;
-                    dev.scenePos = toScene(p.latitude, p.longitude, p.altitude);
+
+                // 디바이스 상태 업데이트
+                dev.connStatus = 'connected';
+                connState[deviceId] = 'connected';
+
+                // 위치 정보 업데이트 (있으면)
+                if (payload.latitude !== undefined && payload.longitude !== undefined) {
+                    dev.scenePos = toScene(payload.latitude, payload.longitude, payload.altitude || 0);
                 }
-                if (pay.motion) { dev.heading = pay.motion.heading||0; dev.speed = pay.motion.speed||0; }
-                const commandLight = pay.command && typeof pay.command === 'object' ? pay.command.light_on : undefined;
-                const ledLightSensor = (() => {
-                    const sensors = pay.sensors || {};
-                    for (const sensor of Object.values(sensors)) {
-                        if (sensor && sensor.type === 'led_light') return sensor.status;
-                    }
-                    return undefined;
-                })();
-                if (typeof commandLight === 'boolean') {
-                    dev.lightOn = commandLight;
-                } else if (typeof ledLightSensor === 'string') {
-                    dev.lightOn = ledLightSensor === 'on';
+
+                // 모션 정보 업데이트
+                if (payload.heading !== undefined) dev.heading = payload.heading;
+                if (payload.speed !== undefined) dev.speed = payload.speed;
+
+                // 배터리 정보 저장
+                if (payload.battery_percent !== undefined) {
+                    if (!dev.lastPayload) dev.lastPayload = {};
+                    dev.lastPayload.battery = payload.battery_percent;
                 }
-                if (appState.selectedId === devId) uiManager.renderSelectedDetail();
-            } catch(e) {}
-        });
+
+                // 타임스탬프 저장
+                dev.lastEnvelope = {
+                    timestamp: payload.timestamp || new Date().toISOString(),
+                    device_id: deviceId,
+                    agent_id: payload.agent_id
+                };
+
+                updateConnStatus();
+                if (appState.selectedId === deviceId) uiManager.renderSelectedDetail();
+            } catch(e) {
+                console.warn('[Moth] 메시지 파싱 실패:', e);
+            }
+        }
     };
-    ws.onerror = ws.onclose = () => {
-        delete sockets[socketKey];
-        if (countedOpen) {
-            countedOpen = false;
-            connCounts[deviceId] = Math.max((connCounts[deviceId] || 1) - 1, 0);
-        }
-        if ((connCounts[deviceId] || 0) <= 0) {
-            connState[deviceId] = 'disconnected';
-            const dev = appState.objects.find(d => d.id === deviceId);
-            if (dev) dev.connStatus = 'disconnected';
-        }
+
+    ws.onerror = () => {
+        console.error('[Moth] 하트비트 구독 에러');
         updateConnStatus();
-        setTimeout(() => connectTrack(deviceId, trackName, endpoint), 5000);
+    };
+
+    ws.onclose = () => {
+        console.warn('[Moth] 하트비트 구독 연결 종료, 5초 후 재연결...');
+        delete sockets['heartbeat'];
+        DEVICE_CONFIG.forEach(cfg => {
+            if (connState[cfg.id] === 'connected') {
+                connState[cfg.id] = 'disconnected';
+                const dev = appState.objects.find(d => d.id === cfg.id);
+                if (dev) dev.connStatus = 'disconnected';
+            }
+        });
+        updateConnStatus();
+        setTimeout(connectHeartbeatSubscription, 5000);
     };
 }
+
 
 function updateConnStatus() {
     const c = {connected:0, connecting:0, disconnected:0};
@@ -974,7 +982,19 @@ function initMap() {
         const icon = L.divIcon({ className:'', html:`<div style="background:${cs};width:10px;height:10px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.8);"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
         const marker = L.marker([dev.config.lat, dev.config.lon], {icon}).addTo(mapState.map);
         marker.bindTooltip(dev.config.name, {direction:'top', offset:[0,-8]});
-        marker.on('click', () => uiManager.selectObject(dev.id));
+
+        let lastMarkerClickTime = 0;
+        marker.on('click', () => {
+            const now = Date.now();
+            const isDoubleClick = (now - lastMarkerClickTime) < DOUBLE_CLICK_DELAY;
+            lastMarkerClickTime = now;
+
+            if (isDoubleClick) {
+                uiManager.selectObject(dev.id, true);
+            } else {
+                uiManager.selectObject(dev.id);
+            }
+        });
         mapState.markers[dev.id] = marker;
     });
 
@@ -1021,12 +1041,24 @@ const uiManager = {
         document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
         document.getElementById(`tab-${name}`)?.classList.add('active');
     },
-    selectObject(id) {
+    selectObject(id, openDetail = false) {
         appState.selectedId = id;
         document.querySelectorAll('.list-item').forEach(el=>el.classList.toggle('selected',el.dataset.id===id));
         this.renderSelectedDetail();
         const isLink = appState.links.some(l => l.id === id);
         this.switchTab(isLink ? 'links' : 'objects');
+
+        // 더블클릭 또는 명시적 요청 시 상세보기 페이지로 이동
+        if (openDetail && !isLink) {
+            const dev = appState.objects.find(d => d.id === id);
+            if (dev) {
+                sessionStorage.setItem('cowater.device.id', dev.id);
+                sessionStorage.setItem('cowater.device.name', dev.config.name);
+                sessionStorage.setItem('cowater.device.type', dev.config.type);
+                sessionStorage.setItem('cowater.device.registryId', dev.config.registryId || '');
+                window.location.href = 'device-detail.html';
+            }
+        }
     },
     renderObjectList() {
         let html = '';
@@ -1043,7 +1075,7 @@ const uiManager = {
             const agentBadge = agent?.endpoint
                 ? `<span style="color:#94a3b8">${agent.llm_enabled ? 'LLM enabled' : 'LLM disabled'}</span>`
                 : `<span style="color:#64748b">agent none</span>`;
-            html += `<div class="list-item${dev.id===appState.selectedId?' selected':''}" data-id="${dev.id}" onclick="uiManager.selectObject('${dev.id}')">
+            html += `<div class="list-item${dev.id===appState.selectedId?' selected':''}" data-id="${dev.id}" onclick="uiManager.selectObject('${dev.id}')" ondblclick="uiManager.selectObject('${dev.id}', true)">
                 <div class="title" style="border-left:3px solid ${cs}; padding-left:6px;">
                     <span>${dev.config.name}</span><span class="${sc}">${sl}</span>
                 </div>
@@ -1053,6 +1085,13 @@ const uiManager = {
                 </div></div>`;
         });
         document.getElementById('object-list-container').innerHTML = html;
+        // 목록 렌더링 후 더블클릭 리스너 재추가
+        document.querySelectorAll('.list-item').forEach(el => {
+            el.addEventListener('dblclick', () => {
+                const id = el.dataset.id;
+                uiManager.selectObject(id, true);
+            });
+        });
         this.renderLinkList();
 
         const conn = DEVICE_CONFIG.filter(c=>connState[c.id]==='connected').length;
@@ -1218,7 +1257,21 @@ function onMouseMove(ev) {
     } else { document.body.style.cursor='default'; appState.hoveredId=null; tip.style.display='none'; }
 }
 
-function onClick() { if(appState.hoveredId) uiManager.selectObject(appState.hoveredId); }
+let lastClickTime = 0;
+const DOUBLE_CLICK_DELAY = 300;
+
+function onClick() {
+    if (!appState.hoveredId) return;
+    const now = Date.now();
+    const isDoubleClick = (now - lastClickTime) < DOUBLE_CLICK_DELAY;
+    lastClickTime = now;
+
+    if (isDoubleClick) {
+        uiManager.selectObject(appState.hoveredId, true);
+    } else {
+        uiManager.selectObject(appState.hoveredId);
+    }
+}
 
 // ─── 키보드 이동 상태 ────────────────────────────────────────
 const keyState = {};
@@ -1378,8 +1431,20 @@ function promptRegistryUrl() {
 
 setInterval(syncRegistryAlerts, 15000);
 
-window.onload = () => {
+window.onload = async () => {
     initScene();
+    setProgress(0.3, 'Device Registry 동기화 중...');
+    await syncDeviceRegistry();
+    setProgress(0.5, '3D 객체 생성 중...');
+    initObjects();
+    setProgress(0.7, '통신 링크 초기화 중...');
+    initLinks();
+    setProgress(0.8, '미니맵 초기화 중...');
+    initMap();
+    setProgress(0.9, 'Moth 연결 중...');
+    connectMoth();
+    setProgress(1.0, '로드 완료');
+    hideLoading();
     uiManager.init();
     updateConnStatus();
     animate();

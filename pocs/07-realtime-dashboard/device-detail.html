@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoWater 디바이스 상세보기</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        header {
+            background: rgba(10, 17, 32, 0.95);
+            border-bottom: 1px solid rgba(96, 165, 250, 0.25);
+            backdrop-filter: blur(12px);
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .back-btn {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            border-color: #60a5fa;
+            color: #60a5fa;
+        }
+
+        .header-title h1 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #f1f5f9;
+        }
+
+        .header-title p {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .header-status {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .status-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .status-label {
+            font-size: 0.65rem;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-dot.online { background: #4ade80; }
+        .status-dot.offline { background: #f87171; }
+        .status-dot.connecting { background: #fbbf24; }
+
+        main {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        .panel {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5);
+        }
+
+        .panel h2 {
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #475569;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 8px 12px;
+        }
+
+        .info-label {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #e2e8f0;
+            font-size: 0.85rem;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }
+
+        .info-value.status-ok { color: #4ade80; }
+        .info-value.status-warn { color: #fbbf24; }
+        .info-value.status-error { color: #f87171; }
+
+        .sensor-card {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .sensor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .sensor-name {
+            font-weight: 600;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+        }
+
+        .sensor-type {
+            font-size: 0.7rem;
+            color: #64748b;
+            background: #0f172a;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .sensor-value {
+            color: #4ade80;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sensor-timestamp {
+            font-size: 0.7rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
+        .chart-container {
+            height: 300px;
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            margin-top: 12px;
+        }
+
+        .chart-bar {
+            flex: 1;
+            background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%);
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .chart-bar:hover {
+            opacity: 1;
+        }
+
+        .chart-bar-label {
+            position: absolute;
+            bottom: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 0.65rem;
+            color: #64748b;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #64748b;
+            padding: 40px 20px;
+        }
+
+        .empty-state svg {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: rgba(30, 41, 59, 0.6);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #475569;
+            border-top-color: #60a5fa;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .refresh-btn {
+            background: rgba(96, 165, 250, 0.1);
+            border: 1px solid #334155;
+            color: #60a5fa;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(96, 165, 250, 0.2);
+            border-color: #60a5fa;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            color: #60a5fa;
+            border-bottom-color: #60a5fa;
+            font-weight: 600;
+        }
+
+        .tab-btn:hover {
+            color: #e2e8f0;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .alert-banner {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 15px;
+            color: #fecaca;
+            font-size: 0.85rem;
+        }
+
+        .success-banner {
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 15px;
+            color: #bbf7d0;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-left">
+        <button class="back-btn" onclick="window.history.back()">← 돌아가기</button>
+        <div class="header-title">
+            <h1 id="device-name">디바이스 로딩 중...</h1>
+            <p id="device-type">—</p>
+        </div>
+    </div>
+    <div class="header-status">
+        <div class="status-item">
+            <div class="status-label">상태</div>
+            <div class="status-value">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">연결 중</span>
+            </div>
+        </div>
+        <button class="refresh-btn" onclick="refreshSensorData()">새로고침</button>
+    </div>
+</header>
+
+<main>
+    <div id="connection-alert" class="connection-status" style="display:none;">
+        <div class="loading-spinner"></div>
+        <span id="connection-text">센서 스트림 연결 중...</span>
+    </div>
+
+    <div class="grid">
+        <!-- 기본 정보 패널 -->
+        <div class="panel">
+            <h2>🔍 기본 정보</h2>
+            <div class="info-grid">
+                <div class="info-label">디바이스 ID</div>
+                <div class="info-value" id="info-device-id">—</div>
+
+                <div class="info-label">Registry ID</div>
+                <div class="info-value" id="info-registry-id">—</div>
+
+                <div class="info-label">위도</div>
+                <div class="info-value" id="info-latitude">—</div>
+
+                <div class="info-label">경도</div>
+                <div class="info-value" id="info-longitude">—</div>
+
+                <div class="info-label">고도/수심</div>
+                <div class="info-value" id="info-altitude">—</div>
+
+                <div class="info-label">헤딩</div>
+                <div class="info-value" id="info-heading">—</div>
+
+                <div class="info-label">속도</div>
+                <div class="info-value" id="info-speed">—</div>
+
+                <div class="info-label">배터리</div>
+                <div class="info-value" id="info-battery">—</div>
+
+                <div class="info-label">마지막 수신</div>
+                <div class="info-value" id="info-timestamp">—</div>
+            </div>
+        </div>
+
+        <!-- 실시간 센서 데이터 패널 -->
+        <div class="panel">
+            <h2>📊 실시간 센서 데이터</h2>
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('overview')">개요</button>
+                <button class="tab-btn" onclick="switchTab('gps')">GPS</button>
+                <button class="tab-btn" onclick="switchTab('imu')">IMU</button>
+                <button class="tab-btn" onclick="switchTab('sensors')">센서</button>
+            </div>
+
+            <div id="tab-overview" class="tab-content active">
+                <div id="sensors-container">
+                    <div class="empty-state">
+                        <p>센서 데이터를 기다리는 중...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-gps" class="tab-content">
+                <div id="gps-data">
+                    <div class="empty-state">
+                        <p>GPS 데이터를 기다리는 중...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-imu" class="tab-content">
+                <div id="imu-data">
+                    <div class="empty-state">
+                        <p>IMU 데이터를 기다리는 중...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-sensors" class="tab-content">
+                <div id="detailed-sensors">
+                    <div class="empty-state">
+                        <p>센서 목록을 기다리는 중...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 히스토리 차트 패널 -->
+    <div class="panel" id="chart-panel" style="display:none;">
+        <h2>📈 센서 히스토리</h2>
+        <div class="chart-container" id="chart-container">
+            <div class="empty-state">히스토리 데이터 없음</div>
+        </div>
+    </div>
+</main>
+
+<script>
+const MOTH_BASE = "wss://cobot.center:8287";
+const MOTH_CHANNEL = "instant";
+const MOTH_NAME = "health_check";
+const MOTH_SOURCE = "base";
+const MOTH_TRACK = "base";
+
+let deviceId = null;
+let deviceName = null;
+let deviceType = null;
+let registryId = null;
+let wsConnection = null;
+let sensorData = {};
+let sensorHistory = {};
+
+function loadDeviceInfo() {
+    deviceId = sessionStorage.getItem('cowater.device.id');
+    deviceName = sessionStorage.getItem('cowater.device.name');
+    deviceType = sessionStorage.getItem('cowater.device.type');
+    registryId = sessionStorage.getItem('cowater.device.registryId');
+
+    if (!deviceId || !deviceName) {
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#f87171;font-size:1.2rem;">디바이스 정보를 찾을 수 없습니다.<br><a href="index.html" style="color:#60a5fa;text-decoration:underline;margin-top:20px;display:block;">대시보드로 돌아가기</a></div>';
+        return;
+    }
+
+    document.getElementById('device-name').textContent = deviceName;
+    document.getElementById('device-type').textContent = (deviceType || '—').replace(/_/g, ' ');
+    document.getElementById('info-device-id').textContent = deviceId;
+    document.getElementById('info-registry-id').textContent = registryId || '—';
+
+    connectToSensorStream();
+}
+
+function connectToSensorStream() {
+    const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=${MOTH_CHANNEL}&name=${MOTH_NAME}&source=${MOTH_SOURCE}&track=${MOTH_TRACK}`;
+    console.log('[Moth] 센서 스트림 연결 시작:', wsUrl);
+
+    wsConnection = new WebSocket(wsUrl);
+
+    wsConnection.onopen = () => {
+        console.log('[Moth] 센서 스트림 연결 성공');
+        showConnectionStatus(true, '센서 스트림 연결됨');
+
+        // 디바이스 특정 텔레메트리 채널 구독 (소문자 타입명 사용)
+        const telemetryChannels = [
+            `device.telemetry.${deviceId}.gps`,
+            `device.telemetry.${deviceId}.imu`,
+            `device.telemetry.${deviceId}.pressure`,
+            `device.telemetry.${deviceId}.temperature`,
+            `device.telemetry.${deviceId}.battery`,
+            `device.telemetry.${deviceId}.motion`,
+            `device.telemetry.${deviceId}.odometry`,
+            // 대문자 형식도 시도
+            `device.telemetry.${deviceId}.GPS`,
+            `device.telemetry.${deviceId}.IMU`,
+            `device.telemetry.${deviceId}.BATTERY`,
+            `device.telemetry.${deviceId}.ODOMETRY`,
+        ];
+
+        telemetryChannels.forEach(channel => {
+            const subMsg = {
+                type: 'subscribe',
+                channel: channel,
+                channel_type: 'meb'
+            };
+            wsConnection.send(JSON.stringify(subMsg));
+        });
+
+        console.log(`[Moth] ${telemetryChannels.length}개 텔레메트리 채널 구독 시도`);
+    };
+
+    wsConnection.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+            try {
+                const msg = JSON.parse(ev.data);
+
+                // 구독 확인 메시지 무시
+                if (msg.type === 'subscribe' || msg.action === 'subscribe') return;
+
+                // publish 메시지만 처리
+                if (msg.type !== 'publish') return;
+
+                handleTelemetryMessage(msg);
+            } catch(e) {
+                console.warn('[Moth] 메시지 파싱 실패:', e);
+            }
+        }
+    };
+
+    wsConnection.onerror = () => {
+        console.error('[Moth] 센서 스트림 에러');
+        showConnectionStatus(false, '연결 실패');
+    };
+
+    wsConnection.onclose = () => {
+        console.warn('[Moth] 센서 스트림 연결 종료, 5초 후 재연결...');
+        showConnectionStatus(false, '연결 종료됨');
+        setTimeout(connectToSensorStream, 5000);
+    };
+}
+
+function handleTelemetryMessage(msg) {
+    const channel = (msg.channel || msg.topic || '').toLowerCase();
+    const payload = msg.payload || msg.data || msg;
+
+    // 채널 타입 추출 (소문자로 정규화)
+    let sensorType = null;
+    if (channel.includes('gps')) sensorType = 'gps';
+    else if (channel.includes('imu')) sensorType = 'imu';
+    else if (channel.includes('pressure')) sensorType = 'pressure';
+    else if (channel.includes('temperature')) sensorType = 'temperature';
+    else if (channel.includes('battery')) sensorType = 'battery';
+    else if (channel.includes('motion') || channel.includes('odometry')) sensorType = 'motion';
+
+    if (!sensorType) {
+        console.debug('[Moth] 알 수 없는 센서 타입:', channel);
+        return;
+    }
+
+    const data = payload;
+    const timestamp = new Date().toLocaleTimeString();
+
+    // 센서 데이터 저장
+    if (!sensorData[sensorType]) sensorData[sensorType] = {};
+    sensorData[sensorType] = { ...data, timestamp };
+
+    // 위치 정보 갱신 (GPS 또는 motion 에서)
+    if (sensorType === 'gps' && data.latitude !== undefined && data.longitude !== undefined) {
+        document.getElementById('info-latitude').textContent = data.latitude.toFixed(5);
+        document.getElementById('info-longitude').textContent = data.longitude.toFixed(5);
+    }
+
+    if (sensorType === 'motion') {
+        if (data.heading !== undefined) document.getElementById('info-heading').textContent = data.heading.toFixed(1) + '°';
+        if (data.speed !== undefined) document.getElementById('info-speed').textContent = data.speed.toFixed(2) + ' m/s';
+        if (data.altitude !== undefined) document.getElementById('info-altitude').textContent = data.altitude.toFixed(1) + ' m';
+    }
+
+    if (sensorType === 'battery') {
+        const batteryPercent = data.percent !== undefined ? data.percent : data.level;
+        if (batteryPercent !== undefined) {
+            document.getElementById('info-battery').textContent = batteryPercent.toFixed(0) + '%';
+        }
+    }
+
+    document.getElementById('info-timestamp').textContent = timestamp;
+
+    // UI 갱신
+    renderSensorData();
+    showConnectionStatus(true, '센서 데이터 수신 중');
+}
+
+function renderSensorData() {
+    const container = document.getElementById('sensors-container');
+    let html = '';
+
+    // GPS 센서
+    if (sensorData.gps) {
+        const gps = sensorData.gps;
+        html += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">📍 GPS</span>
+                    <span class="sensor-type">gps</span>
+                </div>
+                <div class="sensor-value">
+                    ${gps.latitude?.toFixed(5) || '—'}, ${gps.longitude?.toFixed(5) || '—'}
+                </div>
+                <div class="sensor-timestamp">고도: ${gps.altitude?.toFixed(1) || '—'} m</div>
+                <div class="sensor-timestamp">수신: ${gps.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // IMU 센서
+    if (sensorData.imu) {
+        const imu = sensorData.imu;
+        html += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">🧭 IMU</span>
+                    <span class="sensor-type">imu</span>
+                </div>
+                <div style="font-size:0.8rem;color:#cbd5e1;">
+                    Roll: ${imu.roll?.toFixed(1) || '—'}° |
+                    Pitch: ${imu.pitch?.toFixed(1) || '—'}° |
+                    Yaw: ${imu.yaw?.toFixed(1) || '—'}°
+                </div>
+                <div class="sensor-timestamp">수신: ${imu.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // 기압/수심 센서
+    if (sensorData.pressure) {
+        const pressure = sensorData.pressure;
+        html += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">📏 깊이</span>
+                    <span class="sensor-type">pressure</span>
+                </div>
+                <div class="sensor-value">
+                    ${pressure.depth_m?.toFixed(1) || '—'} m
+                </div>
+                <div class="sensor-timestamp">압력: ${pressure.pressure_pa?.toFixed(0) || '—'} Pa</div>
+                <div class="sensor-timestamp">수신: ${pressure.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // 온도 센서
+    if (sensorData.temperature) {
+        const temp = sensorData.temperature;
+        html += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">🌡️ 온도</span>
+                    <span class="sensor-type">temperature</span>
+                </div>
+                <div class="sensor-value">
+                    ${temp.temperature_c?.toFixed(1) || '—'} °C
+                </div>
+                <div class="sensor-timestamp">수신: ${temp.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // 배터리 센서
+    if (sensorData.battery) {
+        const battery = sensorData.battery;
+        const percent = battery.percent !== undefined ? battery.percent : battery.level;
+        html += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">🔋 배터리</span>
+                    <span class="sensor-type">battery</span>
+                </div>
+                <div class="sensor-value">
+                    ${percent?.toFixed(0) || '—'}%
+                </div>
+                <div class="sensor-timestamp">수신: ${battery.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    if (!html) {
+        html = '<div class="empty-state"><p>센서 데이터를 기다리는 중...</p></div>';
+    }
+
+    container.innerHTML = html;
+
+    // GPS 탭 갱신
+    if (sensorData.gps) {
+        document.getElementById('gps-data').innerHTML = `
+            <div class="info-grid">
+                <div class="info-label">위도</div>
+                <div class="info-value">${sensorData.gps.latitude?.toFixed(6) || '—'}</div>
+                <div class="info-label">경도</div>
+                <div class="info-value">${sensorData.gps.longitude?.toFixed(6) || '—'}</div>
+                <div class="info-label">고도</div>
+                <div class="info-value">${sensorData.gps.altitude?.toFixed(1) || '—'} m</div>
+                <div class="info-label">정확도</div>
+                <div class="info-value">${sensorData.gps.accuracy?.toFixed(1) || '—'} m</div>
+                <div class="info-label">수신</div>
+                <div class="info-value">${sensorData.gps.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // IMU 탭 갱신
+    if (sensorData.imu) {
+        document.getElementById('imu-data').innerHTML = `
+            <div class="info-grid">
+                <div class="info-label">Roll</div>
+                <div class="info-value">${sensorData.imu.roll?.toFixed(2) || '—'} °</div>
+                <div class="info-label">Pitch</div>
+                <div class="info-value">${sensorData.imu.pitch?.toFixed(2) || '—'} °</div>
+                <div class="info-label">Yaw</div>
+                <div class="info-value">${sensorData.imu.yaw?.toFixed(2) || '—'} °</div>
+                <div class="info-label">Acc X</div>
+                <div class="info-value">${sensorData.imu.accel_x?.toFixed(3) || '—'} m/s²</div>
+                <div class="info-label">Acc Y</div>
+                <div class="info-value">${sensorData.imu.accel_y?.toFixed(3) || '—'} m/s²</div>
+                <div class="info-label">Acc Z</div>
+                <div class="info-value">${sensorData.imu.accel_z?.toFixed(3) || '—'} m/s²</div>
+                <div class="info-label">수신</div>
+                <div class="info-value">${sensorData.imu.timestamp || '—'}</div>
+            </div>
+        `;
+    }
+
+    // 상세 센서 탭 갱신
+    let detailedSensorsHtml = '';
+    Object.entries(sensorData).forEach(([type, data]) => {
+        detailedSensorsHtml += `
+            <div class="sensor-card">
+                <div class="sensor-header">
+                    <span class="sensor-name">${type.toUpperCase()}</span>
+                    <span class="sensor-type">${type}</span>
+                </div>
+                <pre style="background:#0f172a;padding:8px;border-radius:4px;font-size:0.7rem;overflow-x:auto;color:#4ade80;">${JSON.stringify(data, null, 2)}</pre>
+            </div>
+        `;
+    });
+    if (detailedSensorsHtml) {
+        document.getElementById('detailed-sensors').innerHTML = detailedSensorsHtml;
+    }
+}
+
+function switchTab(tabName) {
+    // 모든 탭 비활성화
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // 선택된 탭 활성화
+    const tabEl = document.getElementById(`tab-${tabName}`);
+    if (tabEl) tabEl.classList.add('active');
+
+    // 버튼 활성화
+    event.target.classList.add('active');
+}
+
+function showConnectionStatus(connected, text) {
+    const alertEl = document.getElementById('connection-alert');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const connectionText = document.getElementById('connection-text');
+
+    if (connected) {
+        alertEl.style.display = 'none';
+        statusDot.className = 'status-dot online';
+        statusText.textContent = '온라인';
+        statusText.className = 'status-value status-ok';
+    } else {
+        alertEl.style.display = 'flex';
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = '오프라인';
+        statusText.className = 'status-value status-error';
+        connectionText.textContent = text;
+    }
+}
+
+function refreshSensorData() {
+    console.log('[Refresh] 센서 데이터 새로고침');
+    sensorData = {};
+    renderSensorData();
+}
+
+// 페이지 로드
+window.onload = loadDeviceInfo;
+
+// 언로드 시 WebSocket 종료
+window.addEventListener('beforeunload', () => {
+    if (wsConnection) wsConnection.close();
+});
+</script>
+
+</body>
+</html>
