@@ -62,6 +62,31 @@ class MothHeartbeatSubscriber:
         self.ws: Optional[Any] = None
         self.is_connected = False
         self.is_running = False
+        self._binary_ping_interval_seconds = 10
+
+    def _ws_is_closed(self) -> bool:
+        """websockets 버전별 연결 객체 차이를 흡수해 종료 상태를 판별합니다."""
+        if self.ws is None:
+            return True
+
+        closed_attr = getattr(self.ws, "closed", None)
+        if isinstance(closed_attr, bool):
+            return closed_attr
+        if closed_attr is not None:
+            try:
+                return bool(closed_attr)
+            except Exception:
+                pass
+
+        state = getattr(self.ws, "state", None)
+        if state is not None:
+            state_name = getattr(state, "name", str(state)).upper()
+            if state_name in {"CLOSED", "CLOSING"}:
+                return True
+            if state_name in {"OPEN", "OPENING", "CONNECTING"}:
+                return False
+
+        return False
 
     async def connect(self) -> None:
         """Moth WebSocket 서버에 연결"""
@@ -69,15 +94,17 @@ class MothHeartbeatSubscriber:
             logger.info("websockets 미설치 - Moth 구독 비활성화")
             return
 
-        if self.ws is not None and not self.ws.closed:
+        if self.ws is not None and not self._ws_is_closed():
             return
 
         try:
             logger.info(f"Moth 연결 중: {self.moth_server_url}")
             self.ws = await websockets.connect(
                 self.moth_server_url,
-                ping_interval=30,
-                ping_timeout=10
+                # Moth는 애플리케이션 레벨 바이너리 ping을 사용하므로
+                # websockets 내부 keepalive(ping/pong)는 비활성화합니다.
+                ping_interval=None,
+                ping_timeout=None,
             )
             self.is_connected = True
             logger.info("Moth 연결 성공")
@@ -92,7 +119,7 @@ class MothHeartbeatSubscriber:
         meb 채널은 모든 디바이스의 heartbeat을 통합 수신하는 broadcast stream입니다.
         각 디바이스가 자신의 heartbeat을 발행할 때, 이 구독이 모든 heartbeat을 수신합니다.
         """
-        if not self.is_connected or self.ws is None or self.ws.closed:
+        if not self.is_connected or self.ws is None or self._ws_is_closed():
             return
 
         try:
@@ -111,7 +138,7 @@ class MothHeartbeatSubscriber:
     async def _receive_loop(self) -> None:
         """Moth로부터 heartbeat 메시지 수신 루프"""
         while self.is_running:
-            if not self.is_connected or self.ws is None or self.ws.closed:
+            if not self.is_connected or self.ws is None or self._ws_is_closed():
                 await asyncio.sleep(1)
                 continue
 
@@ -127,7 +154,20 @@ class MothHeartbeatSubscriber:
                 self.is_connected = False
                 await asyncio.sleep(1)
 
-    async def _handle_message(self, msg: str) -> None:
+    async def _binary_ping_loop(self) -> None:
+        """Moth ping track 규격에 맞춰 바이너리 ping 프레임을 주기 전송합니다."""
+        while self.is_running:
+            try:
+                if self.is_connected and self.ws is not None and not self._ws_is_closed():
+                    await self.ws.send(b"ping")
+                    logger.debug("Moth 바이너리 ping 전송")
+                await asyncio.sleep(self._binary_ping_interval_seconds)
+            except Exception as e:
+                logger.warning(f"Moth 바이너리 ping 전송 실패: {e}")
+                self.is_connected = False
+                await asyncio.sleep(1)
+
+    async def _handle_message(self, msg: str | bytes) -> None:
         """
         Moth로부터 수신한 메시지 처리
 
@@ -146,6 +186,10 @@ class MothHeartbeatSubscriber:
         }
         """
         try:
+            if isinstance(msg, (bytes, bytearray)):
+                logger.debug("Moth 바이너리 프레임 수신")
+                return
+
             data = json.loads(msg)
             if data.get("type") != "publish":
                 return
@@ -179,7 +223,7 @@ class MothHeartbeatSubscriber:
 
         while self.is_running:
             try:
-                if not self.is_connected or self.ws is None or self.ws.closed:
+                if not self.is_connected or self.ws is None or self._ws_is_closed():
                     await self.connect()
                     if self.is_connected:
                         await self.subscribe_heartbeat_meb()
@@ -205,11 +249,12 @@ class MothHeartbeatSubscriber:
         # 백그라운드 루프 시작
         asyncio.create_task(self._receive_loop())
         asyncio.create_task(self._reconnect_loop())
+        asyncio.create_task(self._binary_ping_loop())
 
     async def stop(self) -> None:
         """Moth 구독 중지"""
         self.is_running = False
-        if self.ws is not None and not self.ws.closed:
+        if self.ws is not None and not self._ws_is_closed():
             try:
                 await self.ws.close()
             except Exception as e:

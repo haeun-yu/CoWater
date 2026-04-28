@@ -42,6 +42,8 @@ registry = DeviceRegistry(
     agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
     heartbeat_interval_seconds=APP_SETTINGS["heartbeat"]["interval_seconds"],
     heartbeat_timeout_seconds=APP_SETTINGS["heartbeat"]["timeout_seconds"],
+    heartbeat_topic_template=APP_SETTINGS["moth"]["heartbeat_topic_template"],
+    telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
 )
 alert_registry = AlertRegistry()
 

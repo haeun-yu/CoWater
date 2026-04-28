@@ -19,6 +19,7 @@ import logging
 import urllib.request
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     import websockets
@@ -29,9 +30,42 @@ if TYPE_CHECKING:
     from agent.state import AgentState
 
 logger = logging.getLogger(__name__)
-ALLOWED_MOTH_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
-DEFAULT_MOTH_URL = "wss://cobot.center:8287"
+ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
+DEFAULT_MOTH_BASE_URL = "wss://cobot.center:8287"
 HEARTBEAT_CHANNEL = "device.heartbeat"
+
+
+def _extract_base_url(raw_url: str) -> str:
+    parsed = urlsplit((raw_url or "").strip())
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _join_base_and_endpoint(base_url: str, endpoint: str) -> str:
+    endpoint = (endpoint or "").strip()
+    if not endpoint:
+        return base_url
+
+    parsed_endpoint = urlsplit(endpoint)
+    if parsed_endpoint.scheme and parsed_endpoint.netloc:
+        return endpoint
+
+    parsed_base = urlsplit(base_url)
+    return urlunsplit(
+        (
+            parsed_base.scheme,
+            parsed_base.netloc,
+            parsed_endpoint.path,
+            parsed_endpoint.query,
+            "",
+        )
+    )
+
+
+def _build_fallback_pub_endpoint(device_id: int | None) -> str:
+    name = str(device_id) if device_id is not None else "unknown"
+    return f"/pang/ws/pub?channel=instant&name={name}&source=base&track=ping"
 
 
 class MothPublisher:
@@ -59,8 +93,13 @@ class MothPublisher:
         self.config = config
         self.state = state
         self.moth_config = config.get("moth", {})
-        configured_url = self.moth_config.get("server_url", DEFAULT_MOTH_URL)
-        self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
+        configured_url = self.moth_config.get("server_url", DEFAULT_MOTH_BASE_URL)
+        configured_base_url = _extract_base_url(configured_url)
+        if configured_base_url in ALLOWED_MOTH_BASE_URLS:
+            self.moth_base_url = configured_base_url
+        else:
+            self.moth_base_url = DEFAULT_MOTH_BASE_URL
+        self.moth_url = _join_base_and_endpoint(self.moth_base_url, _build_fallback_pub_endpoint(None))
         self.enabled = self.moth_config.get("enabled", True)
         self.ws: Optional[Any] = None
         self.is_connected = False
@@ -68,6 +107,30 @@ class MothPublisher:
         # Server의 Device Registration 응답에서 할당받은 topics
         self.heartbeat_topic: Optional[str] = None
         self.telemetry_topics: dict[str, str] = {}  # {track_type: topic}
+
+    def _ws_is_closed(self) -> bool:
+        """websockets 버전 차이를 흡수해 종료 상태를 판별합니다."""
+        if self.ws is None:
+            return True
+
+        closed_attr = getattr(self.ws, "closed", None)
+        if isinstance(closed_attr, bool):
+            return closed_attr
+        if closed_attr is not None:
+            try:
+                return bool(closed_attr)
+            except Exception:
+                pass
+
+        state = getattr(self.ws, "state", None)
+        if state is not None:
+            state_name = getattr(state, "name", str(state)).upper()
+            if state_name in {"CLOSED", "CLOSING"}:
+                return True
+            if state_name in {"OPEN", "OPENING", "CONNECTING"}:
+                return False
+
+        return False
 
     async def initialize(self, registration_response: dict[str, Any]) -> None:
         """
@@ -87,8 +150,28 @@ class MothPublisher:
             logger.info("MothPublisher 비활성화 또는 websockets 미설치")
             return
 
-        configured_url = self.moth_config.get("server_url", self.moth_url)
-        self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
+        configured_url = self.moth_config.get("server_url", self.moth_base_url)
+        configured_base_url = _extract_base_url(configured_url)
+        if configured_base_url in ALLOWED_MOTH_BASE_URLS:
+            self.moth_base_url = configured_base_url
+        else:
+            self.moth_base_url = DEFAULT_MOTH_BASE_URL
+
+        tracks = registration_response.get("tracks", [])
+        track_endpoint = None
+        for track in tracks:
+            endpoint = track.get("endpoint") if isinstance(track, dict) else None
+            if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/pub"):
+                track_endpoint = endpoint
+                break
+
+        if track_endpoint:
+            self.moth_url = _join_base_and_endpoint(self.moth_base_url, track_endpoint)
+        else:
+            self.moth_url = _join_base_and_endpoint(
+                self.moth_base_url,
+                _build_fallback_pub_endpoint(registration_response.get("id") or self.state.registry_id),
+            )
 
         self.heartbeat_topic = HEARTBEAT_CHANNEL
 
@@ -115,7 +198,7 @@ class MothPublisher:
             return
 
         # 이미 연결되어 있으면 스킵
-        if self.ws is not None and not self.ws.closed:
+        if self.ws is not None and not self._ws_is_closed():
             return
 
         try:
@@ -124,7 +207,7 @@ class MothPublisher:
             self.is_connected = True
             logger.info("Moth 연결 성공")
         except Exception as e:
-            logger.error(f"Moth 연결 실패: {e}")
+            logger.error(f"Moth 연결 실패 (url={self.moth_url}): {e}")
             self.is_connected = False
 
     async def _reconnect_loop(self) -> None:
@@ -141,7 +224,7 @@ class MothPublisher:
         while True:
             try:
                 # 연결 끊김 감지 시 재연결 시도
-                if not self.is_connected or self.ws is None or self.ws.closed:
+                if not self.is_connected or self.ws is None or self._ws_is_closed():
                     await self.connect()
                 await asyncio.sleep(reconnect_interval)
             except Exception as e:
@@ -233,7 +316,7 @@ class MothPublisher:
             logger.debug(f"Parent heartbeat relay failed: {e}")
 
     async def publish_heartbeat_payload(self, payload: dict[str, Any]) -> None:
-        if not self.heartbeat_topic or not self.is_connected or self.ws is None or self.ws.closed:
+        if not self.heartbeat_topic or not self.is_connected or self.ws is None or self._ws_is_closed():
             return
         try:
             # Moth에 발행
@@ -260,7 +343,7 @@ class MothPublisher:
         Args:
             telemetry: 현재 센서 데이터 딕셔너리
         """
-        if not self.is_connected or self.ws is None or self.ws.closed:
+        if not self.is_connected or self.ws is None or self._ws_is_closed():
             return
 
         # ===== GPS/Position 데이터 발행 (Dynamic re-binding 판단 용) =====
@@ -365,4 +448,4 @@ class MothPublisher:
                 await asyncio.sleep(interval)
                 await self.publish_heartbeat()
             except Exception as e:
-                logger.debug(f"Heartbeat loop 오류: {e}")
+                logger.warning(f"Heartbeat loop 오류: {e}")

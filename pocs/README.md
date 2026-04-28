@@ -86,7 +86,6 @@ python3 device_registration_server.py --host 127.0.0.1 --port 9100
 
 # 또는
 
-cd /Users/teamgrit/Documents/CoWater
 source .venv/bin/activate
 cd pocs/00-device-registration-server
 python device_registration_server.py --port 9100
@@ -98,10 +97,22 @@ python device_registration_server.py --port 9100
 # Terminal 1: USV
 python3 pocs/01-usv-lower-agent/device_agent.py --port 9111
 
+source .venv/bin/activate
+python -m pip install -r pocs/01-usv-lower-agent/requirements.txt
+python pocs/01-usv-lower-agent/device_agent.py --port 9111
+
 # Terminal 2: AUV
 python3 pocs/02-auv-lower-agent/device_agent.py --port 9121
 
+source .venv/bin/activate
+python -m pip install -r pocs/02-auv-lower-agent/requirements.txt
+python3 pocs/02-auv-lower-agent/device_agent.py --port 9121
+
 # Terminal 3: ROV
+python3 pocs/03-rov-lower-agent/device_agent.py --port 9131
+
+source .venv/bin/activate
+python -m pip install -r pocs/03-rov-lower-agent/requirements.txt
 python3 pocs/03-rov-lower-agent/device_agent.py --port 9131
 ```
 

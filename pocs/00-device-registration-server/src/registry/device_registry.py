@@ -38,6 +38,8 @@ class DeviceRegistry:
         agent_command_path_prefix: str,
         heartbeat_interval_seconds: int = 1,
         heartbeat_timeout_seconds: int = 3,
+        heartbeat_topic_template: str = "device.heartbeat.{device_id}",
+        telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
     ) -> None:
         self._secret_key = secret_key
         self._server = DeviceServerInformationRecord(host=host, port=port, ping_endpoint=ping_endpoint)
@@ -51,6 +53,8 @@ class DeviceRegistry:
         }
         self._devices: Dict[int, DeviceRecord] = {}
         self._next_id = 1
+        self._heartbeat_topic_template = heartbeat_topic_template
+        self._telemetry_topic_template = telemetry_topic_template
         self.heartbeat_monitor = HeartbeatMonitor(
             registry=self,
             interval_seconds=heartbeat_interval_seconds,
@@ -137,13 +141,13 @@ class DeviceRegistry:
             latitude = request.location.get("latitude")
             longitude = request.location.get("longitude")
 
-        # Moth topics 생성
-        heartbeat_topic = "device.heartbeat"
+        # Moth topics 생성 (템플릿 사용)
+        heartbeat_topic = self._heartbeat_topic_template.format(device_id=device_id)
         telemetry_topics = [
             {
                 "track_type": track.type,
                 "track_name": track.name,
-                "topic": f"device.telemetry.{device_id}.{track.name.lower()}"
+                "topic": self._telemetry_topic_template.format(device_id=device_id, track_type=track.type)
             }
             for track in tracks
         ]
