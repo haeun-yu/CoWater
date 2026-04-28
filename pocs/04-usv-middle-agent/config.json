@@ -1,0 +1,109 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9114
+  },
+  "registry": {
+    "url": "http://127.0.0.1:9100",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 1
+  },
+  "agent": {
+    "id": "relay-usv-middle-agent",
+    "name": "Relay USV Middle Agent",
+    "role": "regional_orchestrator",
+    "layer": "middle",
+    "device_type": "USV",
+    "connectivity": "wireless",
+    "requires_parent": false,
+    "children_required": false,
+    "description": "Middle-layer USV that can coordinate nearby lower agents and relay underwater communications.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
+    "rules": {
+      "max_speed_mps": 2.5,
+      "battery_warn_percent": 30
+    },
+    "capabilities": {
+      "skills": [
+        "surface_navigation",
+        "field_coordination",
+        "acoustic_relay",
+        "mission_redistribution",
+        "child_monitoring",
+        "battery_management"
+      ],
+      "tools": [
+        "gps_reader",
+        "battery_monitor",
+        "motor_control",
+        "child_registry",
+        "acoustic_relay",
+        "a2a_router",
+        "route_planner",
+        "command_executor",
+        "safety_validator"
+      ],
+      "actions": [
+        "route_move",
+        "hold_position",
+        "return_to_base",
+        "coordinate_children",
+        "relay_acoustic_data",
+        "redistribute_mission",
+        "monitor_children_health"
+      ],
+      "constraints": [
+        "middle_layer_optional",
+        "can_route_direct_to_system",
+        "relay_low_bandwidth_children"
+      ],
+      "tracks": [
+        {
+          "type": "GPS",
+          "name": "gps",
+          "frequency_hz": 1
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "imu",
+          "frequency_hz": 10
+        },
+        {
+          "type": "TOPIC",
+          "name": "acoustic_modem",
+          "frequency_hz": 1
+        },
+        {
+          "type": "BATTERY",
+          "name": "battery",
+          "frequency_hz": 0.5
+        }
+      ]
+    }
+  },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
+  "simulation": {
+    "interval_seconds": 1,
+    "start_position": {
+      "latitude": 37.006,
+      "longitude": 129.421,
+      "altitude": 0.0
+    },
+    "speed_range": [0.5, 3.0],
+    "altitude_range": [0.0, 0.8]
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}

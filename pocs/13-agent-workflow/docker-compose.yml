@@ -1,7 +1,0 @@
-services:
-  agent-workflow:
-    image: python:3.12-slim
-    working_dir: /workspace/pocs/06-agent-workflow
-    volumes:
-      - ../..:/workspace
-    command: python3 src/workflow.py --input sample-events/detect-mine.json --format timeline

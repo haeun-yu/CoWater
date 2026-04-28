@@ -1,0 +1,62 @@
+{
+  "agent_id": "auv-local-agent-1777377325-18903-92e8dc",
+  "name": "AUV Local Agent 1777377325-18903-92e8dc",
+  "registry_id": 10,
+  "token": "21d8a24b-8c86-4fef-9631-ec84f41210fb",
+  "registered_at": "2026-04-28T11:55:25.813182+00:00",
+  "tracks": [
+    {
+      "type": "DEPTH",
+      "name": "pressure",
+      "endpoint": "/pang/ws/pub?channel=instant&name=10&source=base&track=pressure"
+    },
+    {
+      "type": "TOPIC",
+      "name": "acoustic_modem",
+      "endpoint": "/pang/ws/pub?channel=instant&name=10&source=base&track=acoustic_modem"
+    },
+    {
+      "type": "TOPIC",
+      "name": "sonar",
+      "endpoint": "/pang/ws/pub?channel=instant&name=10&source=base&track=sonar"
+    },
+    {
+      "type": "BATTERY",
+      "name": "battery",
+      "endpoint": "/pang/ws/pub?channel=instant&name=10&source=base&track=battery"
+    },
+    {
+      "type": "ODOMETRY",
+      "name": "inertial",
+      "endpoint": "/pang/ws/pub?channel=instant&name=10&source=base&track=inertial"
+    }
+  ],
+  "heartbeat_topic": "device.heartbeat.10",
+  "telemetry_topics": [
+    {
+      "track_type": "DEPTH",
+      "track_name": "pressure",
+      "topic": "device.telemetry.10.DEPTH"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "acoustic_modem",
+      "topic": "device.telemetry.10.TOPIC"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "sonar",
+      "topic": "device.telemetry.10.TOPIC"
+    },
+    {
+      "track_type": "BATTERY",
+      "track_name": "battery",
+      "topic": "device.telemetry.10.BATTERY"
+    },
+    {
+      "track_type": "ODOMETRY",
+      "track_name": "inertial",
+      "topic": "device.telemetry.10.ODOMETRY"
+    }
+  ]
+}

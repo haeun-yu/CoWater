@@ -1,0 +1,52 @@
+{
+  "agent_id": "relay-usv-middle-agent-1777377335-19027-ffc95a",
+  "name": "Relay USV Middle Agent 1777377335-19027-ffc95a",
+  "registry_id": 12,
+  "token": "f5133207-0ed8-4c50-8d08-f136c9984313",
+  "registered_at": "2026-04-28T11:55:35.854042+00:00",
+  "tracks": [
+    {
+      "type": "GPS",
+      "name": "gps",
+      "endpoint": "/pang/ws/pub?channel=instant&name=12&source=base&track=gps"
+    },
+    {
+      "type": "ODOMETRY",
+      "name": "imu",
+      "endpoint": "/pang/ws/pub?channel=instant&name=12&source=base&track=imu"
+    },
+    {
+      "type": "TOPIC",
+      "name": "acoustic_modem",
+      "endpoint": "/pang/ws/pub?channel=instant&name=12&source=base&track=acoustic_modem"
+    },
+    {
+      "type": "BATTERY",
+      "name": "battery",
+      "endpoint": "/pang/ws/pub?channel=instant&name=12&source=base&track=battery"
+    }
+  ],
+  "heartbeat_topic": "device.heartbeat.12",
+  "telemetry_topics": [
+    {
+      "track_type": "GPS",
+      "track_name": "gps",
+      "topic": "device.telemetry.12.GPS"
+    },
+    {
+      "track_type": "ODOMETRY",
+      "track_name": "imu",
+      "topic": "device.telemetry.12.ODOMETRY"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "acoustic_modem",
+      "topic": "device.telemetry.12.TOPIC"
+    },
+    {
+      "track_type": "BATTERY",
+      "track_name": "battery",
+      "topic": "device.telemetry.12.BATTERY"
+    }
+  ]
+}

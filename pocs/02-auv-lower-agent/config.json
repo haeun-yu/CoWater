@@ -1,0 +1,106 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9112
+  },
+  "registry": {
+    "url": "http://127.0.0.1:9100",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 1
+  },
+  "agent": {
+    "id": "auv-local-agent",
+    "name": "AUV Local Agent",
+    "role": "auv",
+    "layer": "lower",
+    "device_type": "AUV",
+    "connectivity": "acoustic",
+    "requires_parent": false,
+    "description": "Lower-layer execution agent for a single AUV.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
+    "rules": {
+      "max_speed_mps": 2.0,
+      "battery_warn_percent": 30
+    },
+    "capabilities": {
+      "skills": [
+        "underwater_navigation",
+        "depth_control",
+        "sonar_scanning",
+        "acoustic_communication",
+        "mission_execution"
+      ],
+      "tools": [
+        "depth_sensor",
+        "pressure_monitor",
+        "acoustic_modem",
+        "sonar_scanner",
+        "battery_monitor",
+        "thruster_control",
+        "safety_validator"
+      ],
+      "actions": [
+        "dive_to_depth",
+        "hold_depth",
+        "surface",
+        "follow_route",
+        "scan_area",
+        "abort_mission",
+        "emergency_ascent"
+      ],
+      "constraints": ["respect_depth_limits", "surface_for_recovery"],
+      "tracks": [
+        {
+          "type": "DEPTH",
+          "name": "pressure",
+          "frequency_hz": 10
+        },
+        {
+          "type": "TOPIC",
+          "name": "acoustic_modem",
+          "frequency_hz": 0.1
+        },
+        {
+          "type": "TOPIC",
+          "name": "sonar",
+          "frequency_hz": 2
+        },
+        {
+          "type": "BATTERY",
+          "name": "battery",
+          "frequency_hz": 0.5
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "inertial",
+          "frequency_hz": 20
+        }
+      ]
+    }
+  },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
+  "simulation": {
+    "interval_seconds": 1,
+    "start_position": {
+      "latitude": 37.002,
+      "longitude": 129.428,
+      "altitude": -25.0
+    },
+    "speed_range": [0.3, 2.0],
+    "altitude_range": [-80.0, -5.0]
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}

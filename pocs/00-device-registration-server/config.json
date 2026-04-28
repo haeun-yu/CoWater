@@ -1,0 +1,28 @@
+{
+  "device": {
+    "secret_key": "server-secret"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9100,
+    "ping_endpoint": "/pang/ping"
+  },
+  "agent": {
+    "scheme": "ws",
+    "host": "127.0.0.1",
+    "port": 9010,
+    "path_prefix": "/agents",
+    "command_scheme": "http",
+    "command_path_prefix": "/agents"
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  },
+  "heartbeat": {
+    "interval_seconds": 1,
+    "timeout_seconds": 3
+  },
+  "moth": {
+    "server_url": "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=health_check&source=base&track=ping"
+  }
+}

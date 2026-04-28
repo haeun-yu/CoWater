@@ -1,0 +1,106 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9111
+  },
+  "registry": {
+    "url": "http://127.0.0.1:9100",
+    "secret_key": "server-secret",
+    "required": true,
+    "heartbeat_interval_seconds": 1
+  },
+  "agent": {
+    "id": "usv-local-agent",
+    "name": "USV Local Agent",
+    "role": "usv",
+    "layer": "lower",
+    "device_type": "USV",
+    "connectivity": "wireless",
+    "requires_parent": false,
+    "description": "Lower-layer execution agent for a single USV.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
+    "rules": {
+      "max_speed_mps": 2.5,
+      "battery_warn_percent": 30
+    },
+    "capabilities": {
+      "skills": [
+        "surface_navigation",
+        "route_following",
+        "target_tracking",
+        "local_safety_judgement",
+        "battery_management"
+      ],
+      "tools": [
+        "gps_reader",
+        "imu_reader",
+        "battery_monitor",
+        "motor_control",
+        "route_planner",
+        "obstacle_detector",
+        "safety_validator"
+      ],
+      "actions": [
+        "route_move",
+        "hold_position",
+        "return_to_base",
+        "slow_down",
+        "follow_target",
+        "abort_mission",
+        "emergency_stop"
+      ],
+      "constraints": ["stay_on_surface", "respect_local_safety_limits"],
+      "tracks": [
+        {
+          "type": "GPS",
+          "name": "gps",
+          "frequency_hz": 1
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "imu",
+          "frequency_hz": 10
+        },
+        {
+          "type": "TOPIC",
+          "name": "sonar",
+          "frequency_hz": 2
+        },
+        {
+          "type": "BATTERY",
+          "name": "battery",
+          "frequency_hz": 0.5
+        },
+        {
+          "type": "TOPIC",
+          "name": "telemetry",
+          "frequency_hz": 1
+        }
+      ]
+    }
+  },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
+  "simulation": {
+    "interval_seconds": 1,
+    "start_position": {
+      "latitude": 37.005,
+      "longitude": 129.425,
+      "altitude": 0.0
+    },
+    "speed_range": [0.5, 3.0],
+    "altitude_range": [0.0, 0.8]
+  },
+  "cors": {
+    "allow_origins": ["*"]
+  }
+}

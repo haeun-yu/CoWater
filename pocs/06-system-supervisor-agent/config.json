@@ -1,0 +1,67 @@
+{
+  "server": { "host": "127.0.0.1", "port": 9116 },
+  "registry": {
+    "url": "http://127.0.0.1:9100",
+    "secret_key": "server-secret",
+    "required": false,
+    "heartbeat_interval_seconds": 1
+  },
+  "agent": {
+    "id": "system-supervisor-agent",
+    "name": "System Supervisor Agent",
+    "role": "system_supervisor",
+    "layer": "system",
+    "device_type": "SYSTEM",
+    "connectivity": "none",
+    "requires_parent": false,
+    "children_required": false,
+    "description": "Upper-layer supervisor agent for mission planning, approval, priority, and response strategy.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 30
+    },
+    "capabilities": {
+      "skills": [
+        "mission_planning",
+        "fleet_supervision",
+        "priority_decision",
+        "response_strategy",
+        "approval_control",
+        "performance_analysis"
+      ],
+      "tools": [
+        "device_registry_reader",
+        "mcp_api_client",
+        "a2a_router",
+        "mission_planner",
+        "alert_response_planner",
+        "fleet_monitor",
+        "analytics_engine"
+      ],
+      "actions": [
+        "mission.plan",
+        "mission.assign",
+        "task.assign",
+        "approve_response",
+        "route_direct",
+        "route_via_middle",
+        "escalate_alert"
+      ],
+      "constraints": [
+        "mcp_only_to_api_server",
+        "direct_route_allowed_when_no_middle_layer",
+        "approval_required_for_destructive_actions"
+      ],
+      "tracks": []
+    }
+  },
+  "moth": {
+    "enabled": false,
+    "server_url": "wss://cobot.center:8287"
+  },
+  "simulation": {},
+  "cors": { "allow_origins": ["*"] }
+}

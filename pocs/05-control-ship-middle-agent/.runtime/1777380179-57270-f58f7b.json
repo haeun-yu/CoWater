@@ -1,0 +1,52 @@
+{
+  "agent_id": "control-ship-middle-agent-1777380179-57270-f58f7b",
+  "name": "Control Ship Middle Agent 1777380179-57270-f58f7b",
+  "registry_id": 54,
+  "token": "bb680653-55ea-4c9a-b36a-0335ac96891b",
+  "registered_at": "2026-04-28T12:42:59.116787+00:00",
+  "tracks": [
+    {
+      "type": "GPS",
+      "name": "gps",
+      "endpoint": "/pang/ws/meb?channel=instant&name=54&source=base&track=gps"
+    },
+    {
+      "type": "ODOMETRY",
+      "name": "ship_motion",
+      "endpoint": "/pang/ws/meb?channel=instant&name=54&source=base&track=ship_motion"
+    },
+    {
+      "type": "TOPIC",
+      "name": "wired_link",
+      "endpoint": "/pang/ws/meb?channel=instant&name=54&source=base&track=wired_link"
+    },
+    {
+      "type": "VIDEO",
+      "name": "rov_video",
+      "endpoint": "/pang/ws/meb?channel=instant&name=54&source=base&track=rov_video"
+    }
+  ],
+  "heartbeat_topic": "device.heartbeat.54",
+  "telemetry_topics": [
+    {
+      "track_type": "GPS",
+      "track_name": "gps",
+      "topic": "device.telemetry.54.GPS"
+    },
+    {
+      "track_type": "ODOMETRY",
+      "track_name": "ship_motion",
+      "topic": "device.telemetry.54.ODOMETRY"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "wired_link",
+      "topic": "device.telemetry.54.TOPIC"
+    },
+    {
+      "track_type": "VIDEO",
+      "track_name": "rov_video",
+      "topic": "device.telemetry.54.VIDEO"
+    }
+  ]
+}
