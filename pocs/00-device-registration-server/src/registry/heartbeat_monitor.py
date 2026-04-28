@@ -1,3 +1,13 @@
+"""
+Heartbeat Monitor: Device 건강 상태 모니터링 (Server 측)
+
+Device들로부터 정기적으로 수신되는 heartbeat를 추적하여:
+1. Offline Device 감지: 30초 이상 heartbeat 없으면 offline 표시
+2. 자동 재할당: Middle Agent offline 시, 자식 devices를 다른 parent로 자동 재할당
+
+Moth WebSocket을 통해 device.heartbeat.{device_id} topic을 수신합니다.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +20,16 @@ logger = logging.getLogger(__name__)
 
 class HeartbeatMonitor:
     """
-    Monitors device heartbeats and marks devices as offline if no heartbeat received.
-    Also handles re-assigning children when a middle layer agent goes offline.
+    Device Heartbeat 모니터: 장애 감지 및 자동 복구
+
+    주요 기능:
+    1. 주기적 heartbeat 확인: 설정된 interval마다 모든 device 상태 검사
+    2. Timeout 감지: timeout 기간 동안 heartbeat 미수신 device를 offline으로 표시
+    3. 자동 재할당: Middle layer agent offline 시, 자식들을 새로운 parent로 자동 재할당
+
+    Config:
+    - HEARTBEAT_INTERVAL_SECONDS: 모니터링 체크 주기 (기본 10초)
+    - HEARTBEAT_TIMEOUT_SECONDS: Offline 판정 timeout (기본 30초)
     """
 
     def __init__(
@@ -21,16 +39,34 @@ class HeartbeatMonitor:
         timeout_seconds: int = 30,
         distance_calculator: Optional[Callable] = None,
     ):
+        """
+        Heartbeat Monitor 초기화
+
+        Args:
+            db_session: SQLAlchemy DB 세션
+            interval_seconds: 모니터링 체크 주기 (초, 기본 10초)
+            timeout_seconds: Offline 판정 timeout (초, 기본 30초)
+            distance_calculator: 거리 계산 함수 (기본: Haversine)
+        """
         self.db_session = db_session
-        self.interval_seconds = interval_seconds
-        self.timeout_seconds = timeout_seconds
+        self.interval_seconds = interval_seconds  # 모니터링 체크 주기
+        self.timeout_seconds = timeout_seconds  # Offline timeout
         self.distance_calculator = distance_calculator or self._default_distance
         self.is_running = False
 
     def _default_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
-        Simple distance calculation (Haversine formula)
-        Returns distance in meters
+        Haversine 공식으로 두 위치 간 거리 계산
+
+        위도/경도로 표현된 두 지점 사이의 대원거리를 계산합니다.
+        동적 재연결 판단에 사용됩니다.
+
+        Args:
+            lat1, lon1: 지점 1 (위도, 경도, 도 단위)
+            lat2, lon2: 지점 2 (위도, 경도, 도 단위)
+
+        Returns:
+            float: 거리 (미터)
         """
         from math import radians, cos, sin, asin, sqrt
 
