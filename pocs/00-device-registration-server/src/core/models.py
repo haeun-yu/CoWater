@@ -47,7 +47,7 @@ def normalize_track_name(name: str) -> str:
 def build_track_endpoint(device_id: int, track_name: str, track_type: str) -> str:
     return (
         "/pang/ws/meb"
-        f"?channel=instant&name={device_id}&source=base&track={normalize_track_name(track_name)}"
+        f"?channel=instant&name=base&source=base&track=base"
     )
 
 
