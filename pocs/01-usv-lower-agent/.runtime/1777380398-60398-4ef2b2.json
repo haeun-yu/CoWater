@@ -1,0 +1,62 @@
+{
+  "agent_id": "usv-local-agent-1777380398-60398-4ef2b2",
+  "name": "USV Local Agent 1777380398-60398-4ef2b2",
+  "registry_id": 62,
+  "token": "ea60a021-813c-4438-9f03-da7654b5801f",
+  "registered_at": "2026-04-28T12:46:38.637697+00:00",
+  "tracks": [
+    {
+      "type": "GPS",
+      "name": "gps",
+      "endpoint": "/pang/ws/meb?channel=instant&name=62&source=base&track=gps"
+    },
+    {
+      "type": "ODOMETRY",
+      "name": "imu",
+      "endpoint": "/pang/ws/meb?channel=instant&name=62&source=base&track=imu"
+    },
+    {
+      "type": "TOPIC",
+      "name": "sonar",
+      "endpoint": "/pang/ws/meb?channel=instant&name=62&source=base&track=sonar"
+    },
+    {
+      "type": "BATTERY",
+      "name": "battery",
+      "endpoint": "/pang/ws/meb?channel=instant&name=62&source=base&track=battery"
+    },
+    {
+      "type": "TOPIC",
+      "name": "telemetry",
+      "endpoint": "/pang/ws/meb?channel=instant&name=62&source=base&track=telemetry"
+    }
+  ],
+  "heartbeat_topic": "device.heartbeat.62",
+  "telemetry_topics": [
+    {
+      "track_type": "GPS",
+      "track_name": "gps",
+      "topic": "device.telemetry.62.GPS"
+    },
+    {
+      "track_type": "ODOMETRY",
+      "track_name": "imu",
+      "topic": "device.telemetry.62.ODOMETRY"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "sonar",
+      "topic": "device.telemetry.62.TOPIC"
+    },
+    {
+      "track_type": "BATTERY",
+      "track_name": "battery",
+      "topic": "device.telemetry.62.BATTERY"
+    },
+    {
+      "track_type": "TOPIC",
+      "track_name": "telemetry",
+      "topic": "device.telemetry.62.TOPIC"
+    }
+  ]
+}
