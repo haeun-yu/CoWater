@@ -122,7 +122,15 @@ python3 pocs/03-rov-lower-agent/device_agent.py --port 9131
 # Terminal 4: Relay USV
 python3 pocs/04-usv-middle-agent/device_agent.py --port 9141
 
+source .venv/bin/activate
+python -m pip install -r pocs/04-usv-middle-agent/requirements.txt
+python3 pocs/04-usv-middle-agent/device_agent.py --port 9141
+
 # Terminal 5: Control Ship
+python3 pocs/05-control-ship-middle-agent/device_agent.py --port 9151
+
+source .venv/bin/activate
+python -m pip install -r pocs/05-control-ship-middle-agent/requirements.txt
 python3 pocs/05-control-ship-middle-agent/device_agent.py --port 9151
 ```
 

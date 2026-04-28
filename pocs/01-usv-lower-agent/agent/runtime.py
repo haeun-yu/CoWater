@@ -164,8 +164,21 @@ class AgentRuntime:
                 self._refresh_assignment()
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
+                logger.info(f"기존 등록 재사용: registry_id={self.state.registry_id}")
                 return
-            except Exception:
+            except Exception as exc:
+                # 서버가 일시적으로 내려가 있어도 로컬 캐시로 Moth 초기화 가능
+                if self.identity.get("tracks") or self.identity.get("heartbeat_topic"):
+                    self._registration_response = {
+                        "id": self.state.registry_id,
+                        "token": self.state.token,
+                        "tracks": self.identity.get("tracks", []),
+                        "heartbeat_topic": self.identity.get("heartbeat_topic"),
+                        "telemetry_topics": self.identity.get("telemetry_topics", []),
+                    }
+                    self.state.connected = False
+                    logger.warning(f"서버 연결 실패, 로컬 캐시로 Moth 초기화: {exc}")
+                    return
                 self.state.remember({"kind": "identity_reconnect_failed", "at": utc_now()})
 
         created = self.registry_client.register_device(
@@ -193,6 +206,9 @@ class AgentRuntime:
                 "registry_id": self.state.registry_id,
                 "token": self.state.token,
                 "registered_at": self.state.registered_at,
+                "tracks": created.get("tracks", []),
+                "heartbeat_topic": created.get("heartbeat_topic"),
+                "telemetry_topics": created.get("telemetry_topics", []),
             }
         )
 
@@ -242,54 +258,70 @@ class AgentRuntime:
 
         System Layer (POC 06)인 경우는 heartbeat만 발송
         """
-        if self.state.layer == "system":
-            # System layer: heartbeat만, telemetry는 발송하지 않음
+        try:
+            if self.state.layer == "system":
+                # System layer: heartbeat만, telemetry는 발송하지 않음
+                asyncio.create_task(self.moth_publisher.heartbeat_loop())
+                return
+
+            # ===== Moth 연결 초기화 =====
+            # 1. Registration response에서 topics 초기화
+            # 2. WebSocket 연결
+            # 3. 자동 재연결 loop, 주기적 heartbeat 시작
+            logger.info(f"Simulation loop 시작: registry_id={self.state.registry_id}")
+
+            if hasattr(self, '_registration_response') and self._registration_response:
+                await self.moth_publisher.initialize(self._registration_response)
+                logger.debug(f"Moth topics initialized: heartbeat_topic={self.moth_publisher.heartbeat_topic}")
+            else:
+                logger.warning("No registration response for Moth initialization")
+
+            await self.moth_publisher.connect()
+            if self.moth_publisher.is_connected:
+                logger.info("Moth connected successfully")
+            else:
+                logger.warning("Moth connection failed")
+
+            asyncio.create_task(self.moth_publisher._reconnect_loop())
             asyncio.create_task(self.moth_publisher.heartbeat_loop())
-            return
 
-        # ===== Moth 연결 초기화 =====
-        # 1. Registration response에서 topics 초기화
-        # 2. WebSocket 연결
-        # 3. 자동 재연결 loop, 주기적 heartbeat 시작
-        if hasattr(self, '_registration_response') and self._registration_response:
-            await self.moth_publisher.initialize(self._registration_response)
-        await self.moth_publisher.connect()
-        asyncio.create_task(self.moth_publisher._reconnect_loop())
-        asyncio.create_task(self.moth_publisher.heartbeat_loop())
+            # ===== 메인 simulation loop =====
+            while True:
+                # 설정된 주기만큼 대기 (interval_seconds, 기본값 2초)
+                await asyncio.sleep(self.simulator.interval_seconds())
 
-        # ===== 메인 simulation loop =====
-        while True:
-            # 설정된 주기만큼 대기 (interval_seconds, 기본값 2초)
-            await asyncio.sleep(self.simulator.interval_seconds())
+                # 1️⃣ 센서 데이터 생성 및 정규화
+                telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
+                self.state.last_seen_at = utc_now()
+                self.state.last_telemetry = telemetry
 
-            # 1️⃣ 센서 데이터 생성 및 정규화
-            telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
-            self.state.last_seen_at = utc_now()
-            self.state.last_telemetry = telemetry
+                # 1-b️⃣ [SYNC GPS] Simulator 위치를 AgentState에 동기화
+                if "position" in telemetry and isinstance(telemetry["position"], dict):
+                    pos = telemetry["position"]
+                    if "latitude" in pos:
+                        self.state.latitude = float(pos["latitude"])
+                    if "longitude" in pos:
+                        self.state.longitude = float(pos["longitude"])
 
-            # 1-b️⃣ [SYNC GPS] Simulator 위치를 AgentState에 동기화
-            if "position" in telemetry and isinstance(telemetry["position"], dict):
-                pos = telemetry["position"]
-                if "latitude" in pos:
-                    self.state.latitude = float(pos["latitude"])
-                if "longitude" in pos:
-                    self.state.longitude = float(pos["longitude"])
+                # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
+                # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
+                self._update_tools_from_telemetry(telemetry)
 
-            # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
-            # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
-            self._update_tools_from_telemetry(telemetry)
+                # 3️⃣ 의사결정 (Rule 기반 + 비동기 LLM)
+                decision = self.decision_engine.decide(self.state, telemetry)
+                self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
-            # 3️⃣ 의사결정 (Rule 기반 + 비동기 LLM)
-            decision = self.decision_engine.decide(self.state, telemetry)
-            self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
+                # 4️⃣ [ENHANCED] Decision 권장사항을 Tools에 적용
+                # 의사결정 결과가 실제로 motor_control 등에 반영됨
+                self._apply_decision_to_tools(decision)
 
-            # 4️⃣ [ENHANCED] Decision 권장사항을 Tools에 적용
-            # 의사결정 결과가 실제로 motor_control 등에 반영됨
-            self._apply_decision_to_tools(decision)
+                # 5️⃣ Moth로 Telemetry 발행
+                # Real-time streaming: server에서 위치 업데이트 받고 dynamic re-binding 판단
+                await self.moth_publisher.publish_telemetry(telemetry)
 
-            # 5️⃣ Moth로 Telemetry 발행
-            # Real-time streaming: server에서 위치 업데이트 받고 dynamic re-binding 판단
-            await self.moth_publisher.publish_telemetry(telemetry)
+        except Exception as e:
+            logger.error(f"Simulation loop 에러: {e}", exc_info=True)
+            raise
 
     def _update_tools_from_telemetry(self, telemetry: dict[str, Any]) -> None:
         """

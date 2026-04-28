@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -16,10 +18,14 @@ from src.core.models import (
     build_agent_command_endpoint,
     build_agent_endpoint,
     build_track_endpoint,
+    device_record_from_dict,
     resolve_default_main_video_track_name,
     utc_now_iso,
 )
+from src.registry.device_database import DeviceDatabase
 from src.registry.heartbeat_monitor import HeartbeatMonitor
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceRegistry:
@@ -40,6 +46,7 @@ class DeviceRegistry:
         heartbeat_timeout_seconds: int = 3,
         heartbeat_topic_template: str = "device.heartbeat.{device_id}",
         telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
+        db_path: Optional[Path] = None,
     ) -> None:
         self._secret_key = secret_key
         self._server = DeviceServerInformationRecord(host=host, port=port, ping_endpoint=ping_endpoint)
@@ -51,8 +58,6 @@ class DeviceRegistry:
             "command_scheme": agent_command_scheme,
             "command_path_prefix": agent_command_path_prefix,
         }
-        self._devices: Dict[int, DeviceRecord] = {}
-        self._next_id = 1
         self._heartbeat_topic_template = heartbeat_topic_template
         self._telemetry_topic_template = telemetry_topic_template
         self.heartbeat_monitor = HeartbeatMonitor(
@@ -60,6 +65,46 @@ class DeviceRegistry:
             interval_seconds=heartbeat_interval_seconds,
             timeout_seconds=heartbeat_timeout_seconds,
         )
+
+        # SQLite 영구 저장소
+        resolved_db_path = db_path or Path(__file__).resolve().parents[2] / ".data" / "devices.db"
+        self._db = DeviceDatabase(resolved_db_path)
+
+        # DB에서 기존 디바이스 로드
+        self._devices: Dict[int, DeviceRecord] = {}
+        self._next_id = self._db.load_next_id()
+        self._load_from_db()
+
+    def _load_from_db(self) -> None:
+        """서버 시작 시 SQLite에서 기존 디바이스 복원"""
+        rows = self._db.load_all()
+        for device_id, data in rows.items():
+            try:
+                device = device_record_from_dict(data)
+                # 재시작 후 연결 상태는 offline으로 초기화
+                device.connected = False
+                device.agent.connected = False
+                self._devices[device_id] = device
+            except Exception as e:
+                logger.warning(f"디바이스 {device_id} 복원 실패: {e}")
+        if self._devices:
+            logger.info(f"DB에서 {len(self._devices)}개 디바이스 복원됨")
+        # next_id를 DB + 현재 최대 id 기준으로 재계산
+        if self._devices:
+            self._next_id = max(self._next_id, max(self._devices.keys()) + 1)
+
+    def _persist_device(self, device: DeviceRecord) -> None:
+        """디바이스를 SQLite에 저장 (upsert)"""
+        try:
+            self._db.save_device(
+                device_id=device.id,
+                name=device.name,
+                data=device.to_dict(),
+                created_at=device.created_at,
+                updated_at=device.updated_at,
+            )
+        except Exception as e:
+            logger.error(f"디바이스 {device.id} DB 저장 실패: {e}")
 
     def server_dict(self) -> dict[str, object]:
         return self._server.to_dict()
@@ -273,6 +318,7 @@ class DeviceRegistry:
             device.force_parent_routing = device.device_type == "ROV" and parent is not None
             if previous_parent_id != device.parent_id or previous_force != device.force_parent_routing:
                 device.updated_at = utc_now_iso()
+                self._persist_device(device)
                 changed.append(self._routing_assignment(device))
         return changed
 
@@ -294,12 +340,14 @@ class DeviceRegistry:
             )
             self._apply_server_parent_assignment(device)
             self._devices[existing.id] = device
+            self._persist_device(device)
             if device.layer == "middle":
                 self._refresh_lower_assignments()
             return device
 
         device_id = self._next_id
         self._next_id += 1
+        self._db.save_next_id(self._next_id)
         device = self._build_device_record(
             device_id=device_id,
             created_at=utc_now_iso(),
@@ -308,6 +356,7 @@ class DeviceRegistry:
         )
         self._apply_server_parent_assignment(device)
         self._devices[device_id] = device
+        self._persist_device(device)
         if device.layer == "middle":
             self._refresh_lower_assignments()
         return device
@@ -321,6 +370,7 @@ class DeviceRegistry:
             raise ValueError("device name already exists")
         device.name = normalized_name
         device.updated_at = utc_now_iso()
+        self._persist_device(device)
         return device
 
     def update_main_video_track(self, device_id: int, track_name: str) -> DeviceRecord:
@@ -341,6 +391,7 @@ class DeviceRegistry:
         if device_id not in self._devices:
             raise KeyError(device_id)
         del self._devices[device_id]
+        self._db.delete_device(device_id)
 
     def attach_agent(self, device_id: int, request: DeviceAgentRegistrationRequest) -> DeviceRecord:
         self._validate_secret_key(request.secretKey)
@@ -365,6 +416,7 @@ class DeviceRegistry:
             device.agent.connected_at = device.agent.connected_at or now
         device.agent.last_seen_at = request.last_seen_at or now
         device.updated_at = now
+        self._persist_device(device)
         assignments = [self._routing_assignment(device)]
         if device.layer == "middle":
             assignments.extend(self._refresh_lower_assignments())
@@ -380,6 +432,7 @@ class DeviceRegistry:
         device.connected = False
         device.agent.last_seen_at = now
         device.updated_at = now
+        self._persist_device(device)
         return device
 
     def update_device_location(self, device_id: int, latitude: float, longitude: float) -> DeviceRecord:
@@ -389,6 +442,7 @@ class DeviceRegistry:
         device.longitude = longitude
         device.last_location_update = utc_now_iso()
         device.updated_at = device.last_location_update
+        self._persist_device(device)
         return device
 
     def update_device_metadata(self, device_id: int, *, device_type: Optional[str] = None,
@@ -420,6 +474,7 @@ class DeviceRegistry:
             device.surfaced_at = now
             device.parent_id = None
         device.updated_at = now
+        self._persist_device(device)
         return device
 
     def update_device_connectivity_state(
@@ -463,4 +518,5 @@ class DeviceRegistry:
         if device.device_type != "ROV":
             device.force_parent_routing = force_parent_routing
         device.updated_at = utc_now_iso()
+        self._persist_device(device)
         return device

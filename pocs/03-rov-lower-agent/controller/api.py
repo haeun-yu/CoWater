@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ from agent.state import utc_now
 from controller.a2a import A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(runtime: AgentRuntime) -> FastAPI:
     app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0")
@@ -23,6 +26,15 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         allow_headers=["*"],
     )
 
+    async def _run_simulation_loop_with_logging() -> None:
+        """Wrapper to catch and log simulation_loop exceptions"""
+        try:
+            logger.info("Starting simulation loop...")
+            await runtime.simulation_loop()
+        except Exception as e:
+            logger.error(f"Simulation loop failed: {e}", exc_info=True)
+            raise
+
     @app.on_event("startup")
     async def startup() -> None:
         try:
@@ -31,7 +43,7 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             runtime.state.remember({"kind": "registration_error", "at": utc_now(), "error": str(exc)})
             if runtime.registry_client.required:
                 raise
-        asyncio.create_task(runtime.simulation_loop())
+        asyncio.create_task(_run_simulation_loop_with_logging())
 
     @app.get("/health")
     def health() -> dict[str, Any]:

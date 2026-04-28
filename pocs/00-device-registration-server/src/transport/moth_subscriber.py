@@ -107,10 +107,11 @@ class MothHeartbeatSubscriber:
                 ping_timeout=None,
             )
             self.is_connected = True
-            logger.info("Moth 연결 성공")
+            logger.info(f"Moth 연결 성공 - URL: {self.moth_server_url}")
         except Exception as e:
             logger.error(f"Moth 연결 실패 (url={self.moth_server_url}): {e}")
             self.is_connected = False
+            raise
 
     async def subscribe_heartbeat_meb(self) -> None:
         """
@@ -120,6 +121,7 @@ class MothHeartbeatSubscriber:
         각 디바이스가 자신의 heartbeat을 발행할 때, 이 구독이 모든 heartbeat을 수신합니다.
         """
         if not self.is_connected or self.ws is None or self._ws_is_closed():
+            logger.warning("Cannot subscribe: not connected to Moth")
             return
 
         try:
@@ -130,7 +132,7 @@ class MothHeartbeatSubscriber:
                 "channel_type": "meb",
             }
             await self.ws.send(json.dumps(subscribe_msg))
-            logger.info("Moth meb 채널 구독: instant/health_check/track=ping")
+            logger.info("Moth meb 채널 구독 완료: device.heartbeat 채널")
         except Exception as e:
             logger.error(f"meb 채널 구독 실패: {e}")
             self.is_connected = False
@@ -144,10 +146,10 @@ class MothHeartbeatSubscriber:
 
             try:
                 msg = await asyncio.wait_for(self.ws.recv(), timeout=60)
+                logger.debug(f"Moth 메시지 수신: {type(msg).__name__}")
                 await self._handle_message(msg)
             except asyncio.TimeoutError:
-                # 60초 동안 메시지 없음 - 재연결 시도
-                logger.warning("Moth 수신 timeout - 재연결 시도")
+                logger.warning("Moth 수신 timeout (60초) - 재연결 시도")
                 self.is_connected = False
             except Exception as e:
                 logger.error(f"Moth 수신 오류: {e}")
@@ -191,13 +193,17 @@ class MothHeartbeatSubscriber:
                 return
 
             data = json.loads(msg)
+
             if data.get("type") != "publish":
+                logger.debug(f"Non-publish message type: {data.get('type')}")
                 return
 
             channel = data.get("channel") or data.get("topic") or ""
             if channel != "device.heartbeat":
+                logger.debug(f"Ignored non-heartbeat channel: {channel}")
                 return
 
+            logger.debug(f"Processing heartbeat from channel: {channel}")
             payload = data.get("payload", {})
             device_id = payload.get("device_id")
             status = payload.get("status", "online")

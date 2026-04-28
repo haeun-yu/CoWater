@@ -368,3 +368,72 @@ class DeviceConnectivityStateRequest(BaseModel):
     """Device connectivity state update (for ROV wired/wireless, AUV surface/submerged routing)"""
     parent_id: Optional[int] = None  # ROV wired connection through middle layer
     force_parent_routing: bool = False  # ROV: always route through parent
+
+
+def device_record_from_dict(data: dict) -> "DeviceRecord":
+    """JSON dict에서 DeviceRecord 재구성 (SQLite 로드 시 사용)"""
+    server_d = data.get("server") or {}
+    server = DeviceServerInformationRecord(
+        host=server_d.get("host", ""),
+        port=int(server_d.get("port", 0)),
+        ping_endpoint=server_d.get("ping_endpoint", ""),
+    )
+
+    agent_d = data.get("agent") or {}
+    agent = DeviceAgentInformationRecord(
+        scheme=agent_d.get("scheme", "http"),
+        host=agent_d.get("host", ""),
+        port=int(agent_d.get("port", 0)),
+        path_prefix=agent_d.get("path_prefix", ""),
+        endpoint=agent_d.get("endpoint", ""),
+        command_endpoint=agent_d.get("command_endpoint", ""),
+        role=agent_d.get("role"),
+        llm_enabled=bool(agent_d.get("llm_enabled", False)),
+        skills=list(agent_d.get("skills") or []),
+        available_actions=list(agent_d.get("available_actions") or []),
+        connected=bool(agent_d.get("connected", False)),
+        connected_at=agent_d.get("connected_at"),
+        last_seen_at=agent_d.get("last_seen_at"),
+    )
+
+    tracks = [
+        TrackRecord(
+            type=t.get("type", ""),
+            name=t.get("name", ""),
+            endpoint=t.get("endpoint", ""),
+        )
+        for t in (data.get("tracks") or [])
+    ]
+
+    actions_d = data.get("actions") or {}
+    actions = DeviceActionsRecord(
+        core=list(actions_d.get("core") or []),
+        custom=list(actions_d.get("custom") or []),
+    )
+
+    return DeviceRecord(
+        id=int(data["id"]),
+        token=str(data["token"]),
+        name=str(data["name"]),
+        connected=bool(data.get("connected", False)),
+        created_at=str(data["created_at"]),
+        updated_at=str(data["updated_at"]),
+        server=server,
+        agent=agent,
+        tracks=tracks,
+        actions=actions,
+        main_video_track_name=data.get("main_video_track_name"),
+        device_type=data.get("device_type"),
+        layer=data.get("layer"),
+        connectivity=data.get("connectivity"),
+        latitude=data.get("latitude"),
+        longitude=data.get("longitude"),
+        parent_id=data.get("parent_id"),
+        last_location_update=data.get("last_location_update"),
+        heartbeat_topic=data.get("heartbeat_topic"),
+        telemetry_topics=list(data.get("telemetry_topics") or []),
+        is_submerged=bool(data.get("is_submerged", False)),
+        submerged_at=data.get("submerged_at"),
+        surfaced_at=data.get("surfaced_at"),
+        force_parent_routing=bool(data.get("force_parent_routing", False)),
+    )

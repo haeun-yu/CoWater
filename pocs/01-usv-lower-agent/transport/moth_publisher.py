@@ -316,16 +316,32 @@ class MothPublisher:
             logger.debug(f"Parent heartbeat relay failed: {e}")
 
     async def publish_heartbeat_payload(self, payload: dict[str, Any]) -> None:
-        if not self.heartbeat_topic or not self.is_connected or self.ws is None or self._ws_is_closed():
+        if not self.heartbeat_topic:
+            logger.warning(f"Heartbeat 발행 불가: heartbeat_topic 미설정")
+            return
+        if not self.is_connected:
+            logger.warning(f"Heartbeat 발행 불가: Moth 미연결 (is_connected={self.is_connected})")
+            return
+        if self.ws is None:
+            logger.warning(f"Heartbeat 발행 불가: ws is None")
+            return
+        if self._ws_is_closed():
+            logger.warning(f"Heartbeat 발행 불가: WebSocket closed")
             return
         try:
-            # Moth에 발행
-            await self.ws.send(
-                json.dumps(
+            # Moth에 발행 (두 채널에 발행: 공통 채널 + device-specific 채널)
+            # 1. device.heartbeat (POC 00의 meb 구독이 받는 공통 채널)
+            msg1 = json.dumps(
+                {"type": "publish", "topic": "device.heartbeat", "payload": payload}
+            )
+            await self.ws.send(msg1)
+
+            # 2. device.heartbeat.{device_id} (device-specific 채널)
+            if self.heartbeat_topic != "device.heartbeat":
+                msg2 = json.dumps(
                     {"type": "publish", "topic": self.heartbeat_topic, "payload": payload}
                 )
-            )
-            logger.debug(f"Heartbeat 발행: {self.heartbeat_topic}")
+                await self.ws.send(msg2)
         except Exception as e:
             logger.error(f"Heartbeat 발행 실패: {e}")
             self.is_connected = False
