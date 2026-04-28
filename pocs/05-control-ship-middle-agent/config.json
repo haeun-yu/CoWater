@@ -7,14 +7,14 @@
     "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 10
+    "heartbeat_interval_seconds": 1
   },
   "agent": {
     "id": "control-ship-middle-agent",
     "name": "Control Ship Middle Agent",
     "role": "regional_orchestrator",
     "layer": "middle",
-    "device_type": "control_ship",
+    "device_type": "CONTROL_SHIP",
     "connectivity": "wired+wireless",
     "requires_parent": false,
     "children_required": false,

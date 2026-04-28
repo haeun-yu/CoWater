@@ -7,16 +7,16 @@
     "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 10
+    "heartbeat_interval_seconds": 1
   },
   "agent": {
     "id": "rov-local-agent",
     "name": "ROV Local Agent",
     "role": "rov",
     "layer": "lower",
-    "device_type": "rov",
+    "device_type": "ROV",
     "connectivity": "wired",
-    "requires_parent": true,
+    "requires_parent": false,
     "description": "Lower-layer execution agent for a single ROV.",
     "llm": {
       "provider": "ollama",
@@ -79,8 +79,7 @@
           "frequency_hz": 0.5
         }
       ]
-    },
-    "parent_id": 5
+    }
   },
   "moth": {
     "enabled": true,

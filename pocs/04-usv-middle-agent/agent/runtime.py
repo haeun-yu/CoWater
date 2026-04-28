@@ -160,6 +160,8 @@ class AgentRuntime:
             self.state.registered_at = self.identity.get("registered_at")
             try:
                 self._upsert_agent()
+                self._registration_response = self.registry_client.get_device(self.state.registry_id)
+                self._refresh_assignment()
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
                 return
@@ -174,8 +176,6 @@ class AgentRuntime:
             layer=self.agent_config.get("layer"),
             connectivity=self.agent_config.get("connectivity"),
             location=self.config.get("simulation", {}).get("start_position"),
-            requires_parent=self.agent_config.get("requires_parent", False),
-            parent_id=self.agent_config.get("parent_id"),
         )
         self.state.registry_id = int(created["id"])
         self.state.token = str(created["token"])
@@ -185,6 +185,7 @@ class AgentRuntime:
         # Store registration response for Moth initialization in simulation_loop
         self._registration_response = created
         self._upsert_agent()
+        self._refresh_assignment()
         self.identity_store.write(
             {
                 "agent_id": self.state.agent_id,
@@ -194,6 +195,22 @@ class AgentRuntime:
                 "registered_at": self.state.registered_at,
             }
         )
+
+    def apply_assignment(self, assignment: dict[str, Any]) -> None:
+        self.state.parent_id = assignment.get("parent_id")
+        self.state.parent_endpoint = assignment.get("parent_endpoint")
+        self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
+        self.state.route_mode = str(assignment.get("route_mode") or "direct_to_system")
+        self.state.force_parent_routing = bool(assignment.get("force_parent_routing", False))
+        self.state.remember({"kind": "layer_assignment", "at": utc_now(), "assignment": assignment})
+
+    def _refresh_assignment(self) -> None:
+        if self.state.registry_id is None:
+            return
+        try:
+            self.apply_assignment(self.registry_client.get_assignment(self.state.registry_id))
+        except Exception as exc:
+            self.state.remember({"kind": "assignment_refresh_failed", "at": utc_now(), "error": str(exc)})
 
     def _upsert_agent(self) -> None:
         if self.state.registry_id is None or not self.state.token:
@@ -357,4 +374,3 @@ class AgentRuntime:
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
-

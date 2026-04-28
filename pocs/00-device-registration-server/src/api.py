@@ -14,6 +14,7 @@ from src.core.models import (
     AlertIngestRequest,
     AUVSubmersionRequest,
     CORE_ACTIONS,
+    DEVICE_TYPES,
     DeviceAgentRegistrationRequest,
     DeviceConnectivityStateRequest,
     DeviceRegistrationRequest,
@@ -62,11 +63,13 @@ app.add_middleware(
 async def startup_event() -> None:
     """서버 시작 시 Moth 구독 시작"""
     await moth_subscriber.start()
+    asyncio.create_task(registry.heartbeat_monitor.start())
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """서버 종료 시 Moth 구독 중지"""
+    await registry.heartbeat_monitor.stop()
     await moth_subscriber.stop()
 
 
@@ -81,6 +84,7 @@ def meta() -> dict[str, Any]:
         "server": registry.server_dict(),
         "agent": registry.agent_dict(),
         "track_types": list(TRACK_TYPES.__args__),
+        "device_types": list(DEVICE_TYPES.__args__),
         "core_actions": list(CORE_ACTIONS.__args__),
         "alerts": {
             "ingest": "/alerts/ingest",
@@ -102,6 +106,14 @@ def register_device(request: DeviceRegistrationRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return device.to_dict()
+
+
+@app.get("/devices/{device_id}/assignment")
+def get_device_assignment(device_id: int) -> dict[str, Any]:
+    try:
+        return registry.assignment_for(device_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
 
 
 @app.get("/devices")
@@ -252,6 +264,7 @@ def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict
     """AUV 수중/수면 상태 업데이트 (수중음향통신 라우팅 활성화)"""
     try:
         device = registry.update_auv_submersion(device_id, request.is_submerged)
+        registry.notify_assignment(registry.assignment_for(device_id))
         return device.to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="device not found") from exc
@@ -273,6 +286,7 @@ def update_device_connectivity_state(device_id: int, request: DeviceConnectivity
             parent_id=request.parent_id,
             force_parent_routing=request.force_parent_routing
         )
+        registry.notify_assignment(registry.assignment_for(device_id))
         return device.to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="device not found") from exc
@@ -292,4 +306,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

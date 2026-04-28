@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+import json
+import urllib.request
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from src.core.models import (
@@ -34,8 +36,8 @@ class DeviceRegistry:
         agent_path_prefix: str,
         agent_command_scheme: str,
         agent_command_path_prefix: str,
-        heartbeat_interval_seconds: int = 10,
-        heartbeat_timeout_seconds: int = 30,
+        heartbeat_interval_seconds: int = 1,
+        heartbeat_timeout_seconds: int = 3,
     ) -> None:
         self._secret_key = secret_key
         self._server = DeviceServerInformationRecord(host=host, port=port, ping_endpoint=ping_endpoint)
@@ -136,7 +138,7 @@ class DeviceRegistry:
             longitude = request.location.get("longitude")
 
         # Moth topics 생성
-        heartbeat_topic = f"device.heartbeat.{device_id}"
+        heartbeat_topic = "device.heartbeat"
         telemetry_topics = [
             {
                 "track_type": track.type,
@@ -173,11 +175,102 @@ class DeviceRegistry:
             connectivity=request.connectivity,
             latitude=latitude,
             longitude=longitude,
-            parent_id=request.parent_id,
+            parent_id=None,
             last_location_update=now if (latitude or longitude) else None,
             heartbeat_topic=heartbeat_topic,
             telemetry_topics=telemetry_topics,
         )
+
+    def _find_middle_parent(self, child: DeviceRecord, *, exclude_id: Optional[int] = None) -> Optional[DeviceRecord]:
+        candidates = [
+            device
+            for device in self.list_devices()
+            if device.layer == "middle" and device.id != exclude_id
+        ]
+        if not candidates:
+            return None
+        if child.latitude is None or child.longitude is None:
+            return candidates[0]
+
+        def distance_key(parent: DeviceRecord) -> float:
+            if parent.latitude is None or parent.longitude is None:
+                return float("inf")
+            lat_delta = child.latitude - parent.latitude
+            lon_delta = child.longitude - parent.longitude
+            return lat_delta * lat_delta + lon_delta * lon_delta
+
+        return min(candidates, key=distance_key)
+
+    def _apply_server_parent_assignment(self, device: DeviceRecord) -> None:
+        if device.layer != "lower":
+            device.parent_id = None
+            device.force_parent_routing = False
+            return
+
+        parent = self._find_middle_parent(device)
+        device.parent_id = parent.id if parent else None
+        device.force_parent_routing = device.device_type == "ROV" and parent is not None
+
+    def _routing_assignment(self, device: DeviceRecord) -> dict[str, Any]:
+        parent = self._devices.get(device.parent_id) if device.parent_id is not None else None
+        route_mode = "via_parent" if parent else "direct_to_system"
+        return {
+            "message_type": "layer.assignment",
+            "device_id": device.id,
+            "device_name": device.name,
+            "device_type": device.device_type,
+            "layer": device.layer,
+            "route_mode": route_mode,
+            "parent_id": parent.id if parent else None,
+            "parent_name": parent.name if parent else None,
+            "parent_endpoint": parent.agent.endpoint if parent else None,
+            "parent_command_endpoint": parent.agent.command_endpoint if parent else None,
+            "force_parent_routing": device.force_parent_routing,
+            "a2a": {
+                "endpoint": device.agent.endpoint,
+                "command_endpoint": device.agent.command_endpoint,
+            },
+        }
+
+    def assignment_for(self, device_id: int) -> dict[str, Any]:
+        return self._routing_assignment(self.get_device(device_id))
+
+    def notify_assignment(self, assignment: dict[str, Any]) -> None:
+        endpoint = assignment.get("a2a", {}).get("endpoint")
+        if not endpoint:
+            return
+        body = {
+            "message": {
+                "role": "server",
+                "parts": [{"type": "data", "data": assignment}],
+            },
+            "metadata": {"source": "device-registration-server"},
+        }
+        try:
+            req = urllib.request.Request(
+                f"{str(endpoint).rstrip('/')}/message:send",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=0.5).close()
+        except Exception:
+            pass
+
+    def _refresh_lower_assignments(self, *, exclude_parent_id: Optional[int] = None) -> list[dict[str, Any]]:
+        changed: list[dict[str, Any]] = []
+        for device in self.list_devices():
+            if device.layer != "lower":
+                continue
+            previous_parent_id = device.parent_id
+            previous_force = device.force_parent_routing
+            parent = self._find_middle_parent(device, exclude_id=exclude_parent_id)
+            device.parent_id = parent.id if parent else None
+            device.force_parent_routing = device.device_type == "ROV" and parent is not None
+            if previous_parent_id != device.parent_id or previous_force != device.force_parent_routing:
+                device.updated_at = utc_now_iso()
+                changed.append(self._routing_assignment(device))
+        return changed
 
     def register(self, request: DeviceRegistrationRequest) -> DeviceRecord:
         self._validate_secret_key(request.secretKey)
@@ -195,7 +288,10 @@ class DeviceRegistry:
                 device_name=device_name,
                 request=request,
             )
+            self._apply_server_parent_assignment(device)
             self._devices[existing.id] = device
+            if device.layer == "middle":
+                self._refresh_lower_assignments()
             return device
 
         device_id = self._next_id
@@ -206,7 +302,10 @@ class DeviceRegistry:
             device_name=device_name,
             request=request,
         )
+        self._apply_server_parent_assignment(device)
         self._devices[device_id] = device
+        if device.layer == "middle":
+            self._refresh_lower_assignments()
         return device
 
     def rename(self, device_id: int, name: str) -> DeviceRecord:
@@ -262,6 +361,11 @@ class DeviceRegistry:
             device.agent.connected_at = device.agent.connected_at or now
         device.agent.last_seen_at = request.last_seen_at or now
         device.updated_at = now
+        assignments = [self._routing_assignment(device)]
+        if device.layer == "middle":
+            assignments.extend(self._refresh_lower_assignments())
+        for assignment in assignments:
+            self.notify_assignment(assignment)
         return device
 
     def detach_agent(self, device_id: int, secret_key: str) -> DeviceRecord:
@@ -306,8 +410,11 @@ class DeviceRegistry:
         device.is_submerged = is_submerged
         if is_submerged:
             device.submerged_at = now
+            parent = self._find_middle_parent(device)
+            device.parent_id = parent.id if parent else None
         else:
             device.surfaced_at = now
+            device.parent_id = None
         device.updated_at = now
         return device
 
@@ -333,9 +440,8 @@ class DeviceRegistry:
             if parent_id is None:
                 raise ValueError("ROV must have parent_id for wired connection")
             parent_device = self.get_device(parent_id)
-            if parent_device.device_type not in ["USV", "CONTROL_SHIP"]:
-                # parent가 middle layer인지 확인 (선택적)
-                pass
+            if parent_device.layer != "middle":
+                raise ValueError("ROV parent must be a middle layer device")
             device.parent_id = parent_id
             device.force_parent_routing = True
 
@@ -350,6 +456,7 @@ class DeviceRegistry:
             if parent_id is not None:
                 device.parent_id = parent_id
 
-        device.force_parent_routing = force_parent_routing
+        if device.device_type != "ROV":
+            device.force_parent_routing = force_parent_routing
         device.updated_at = utc_now_iso()
         return device

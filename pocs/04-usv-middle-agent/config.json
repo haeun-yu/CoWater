@@ -7,14 +7,14 @@
     "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 10
+    "heartbeat_interval_seconds": 1
   },
   "agent": {
     "id": "relay-usv-middle-agent",
     "name": "Relay USV Middle Agent",
     "role": "regional_orchestrator",
     "layer": "middle",
-    "device_type": "usv",
+    "device_type": "USV",
     "connectivity": "wireless",
     "requires_parent": false,
     "children_required": false,

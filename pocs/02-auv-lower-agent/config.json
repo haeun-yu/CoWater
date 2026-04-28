@@ -7,16 +7,16 @@
     "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 10
+    "heartbeat_interval_seconds": 1
   },
   "agent": {
     "id": "auv-local-agent",
     "name": "AUV Local Agent",
     "role": "auv",
     "layer": "lower",
-    "device_type": "auv",
+    "device_type": "AUV",
     "connectivity": "acoustic",
-    "requires_parent": true,
+    "requires_parent": false,
     "description": "Lower-layer execution agent for a single AUV.",
     "llm": {
       "provider": "ollama",
@@ -86,8 +86,7 @@
           "frequency_hz": 20
         }
       ]
-    },
-    "parent_id": 5
+    }
   },
   "moth": {
     "enabled": true,

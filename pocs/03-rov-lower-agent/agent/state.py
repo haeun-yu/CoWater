@@ -17,6 +17,11 @@ class AgentState:
     instance_id: str
     name: str
     device_type: Optional[str] = None
+    parent_id: Optional[int] = None
+    parent_endpoint: Optional[str] = None
+    parent_command_endpoint: Optional[str] = None
+    route_mode: str = "direct_to_system"
+    force_parent_routing: bool = False
     token: Optional[str] = None
     registry_id: Optional[int] = None
     latitude: Optional[float] = None
@@ -44,4 +49,3 @@ class AgentState:
         data["outbox"] = self.outbox[-50:]
         data["memory"] = self.memory[-30:]
         return data
-

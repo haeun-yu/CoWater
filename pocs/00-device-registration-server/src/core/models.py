@@ -23,6 +23,9 @@ TRACK_TYPES = Literal[
     "PRESSURE",
 ]
 
+DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
+LAYERS = Literal["lower", "middle", "system"]
+
 CORE_ACTIONS = Literal[
     "SLAM_NAVIGATION",
     "MAP_NAVIGATION",
@@ -305,8 +308,8 @@ class DeviceRegistrationRequest(BaseModel):
     tracks: List[TrackInput]
     actions: DeviceActionsInput = Field(default_factory=DeviceActionsInput)
     # ← NEW: Device hierarchy & location
-    device_type: Optional[str] = None
-    layer: Optional[str] = None
+    device_type: Optional[DEVICE_TYPES] = None
+    layer: Optional[LAYERS] = None
     connectivity: Optional[str] = None
     location: Optional[dict] = None
     requires_parent: bool = False
@@ -365,4 +368,3 @@ class DeviceConnectivityStateRequest(BaseModel):
     """Device connectivity state update (for ROV wired/wireless, AUV surface/submerged routing)"""
     parent_id: Optional[int] = None  # ROV wired connection through middle layer
     force_parent_routing: bool = False  # ROV: always route through parent
-

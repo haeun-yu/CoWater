@@ -11,7 +11,7 @@ Moth WebSocket을 통해 device.heartbeat.{device_id} topic을 수신합니다.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 import logging
 
@@ -36,7 +36,7 @@ class HeartbeatMonitor:
         self,
         registry: Any,
         interval_seconds: int = 10,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 3,
         distance_calculator: Optional[Callable] = None,
     ):
         """
@@ -101,15 +101,18 @@ class HeartbeatMonitor:
     async def _check_all_devices(self) -> None:
         """Check all devices for timeout"""
         try:
-            timeout_threshold = datetime.utcnow() - timedelta(seconds=self.timeout_seconds)
+            timeout_threshold = datetime.now(timezone.utc) - timedelta(seconds=self.timeout_seconds)
 
             # Check all devices in registry
             for device in list(self.registry.list_devices()):
                 if device.connected and device.agent.last_seen_at:
-                    last_seen = datetime.fromisoformat(device.agent.last_seen_at)
+                    last_seen = datetime.fromisoformat(device.agent.last_seen_at.replace("Z", "+00:00"))
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=timezone.utc)
                     if last_seen < timeout_threshold:
                         logger.warning(f"Device {device.id} ({device.name}) marked as offline (no heartbeat)")
                         device.connected = False
+                        device.agent.connected = False
                         device.last_error = f"Heartbeat timeout at {datetime.utcnow().isoformat()}"
 
                         # If middle layer agent goes offline, reassign its children
@@ -215,12 +218,13 @@ class HeartbeatMonitor:
                 new_status = "online" if status == "online" else "offline"
 
                 # Update last_seen_at (always)
-                device.agent.last_seen_at = datetime.utcnow().isoformat()
+                device.agent.last_seen_at = datetime.now(timezone.utc).isoformat()
 
                 # Update connected flag only if status changed
                 if current_status != new_status:
                     device.connected = (new_status == "online")
-                    device.updated_at = datetime.utcnow().isoformat()
+                    device.agent.connected = device.connected
+                    device.updated_at = datetime.now(timezone.utc).isoformat()
                     logger.info(f"Device {device_id} status changed: {current_status} → {new_status}")
                 else:
                     # Just update last_seen_at, don't change updated_at

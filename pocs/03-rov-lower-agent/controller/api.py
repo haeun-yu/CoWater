@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.runtime import AgentRuntime
 from agent.state import utc_now
-from pocs.shared.a2a import A2ASendRequest, build_task, extract_message_data
-from pocs.shared.command import CommandRequest
+from controller.a2a import A2ASendRequest, build_task, extract_message_data
+from controller.commands import CommandRequest
 
 
 def create_app(runtime: AgentRuntime) -> FastAPI:
@@ -86,6 +86,16 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     def children() -> dict[str, Any]:
         return {"children": list(runtime.state.children.values())}
 
+    @app.post("/children/heartbeat")
+    async def relay_child_heartbeat(payload: dict[str, Any]) -> dict[str, Any]:
+        child_id = str(payload.get("agent_id") or payload.get("device_id"))
+        runtime.state.children.setdefault(child_id, {})["last_heartbeat_at"] = utc_now()
+        runtime.state.children[child_id]["heartbeat"] = payload
+        publisher = getattr(runtime, "moth_publisher", None)
+        if publisher is not None:
+            await publisher.publish_heartbeat_payload(dict(payload, relayed_by=runtime.state.registry_id))
+        return {"relayed": True, "child": child_id}
+
     @app.get("/tasks")
     def tasks() -> dict[str, Any]:
         return {"tasks": list(runtime.state.tasks.values()), "nextPageToken": ""}
@@ -102,6 +112,9 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         child_id = str(child.get("agent_id"))
         runtime.state.children[child_id] = dict(child, agent_id=child_id, registered_at=utc_now())
         result = {"registered": True, "child_id": child_id}
+    elif msg_type == "layer.assignment":
+        runtime.apply_assignment(data)
+        result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
     elif msg_type == "task.assign":
         command = {
             "action": str(data.get("action") or data.get("command") or "hold_position"),

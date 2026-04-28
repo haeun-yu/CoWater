@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from src.registry.device_registry import DeviceRegistry
 
 logger = logging.getLogger(__name__)
+ALLOWED_MOTH_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
+DEFAULT_MOTH_URL = "wss://cobot.center:8287"
 
 
 class MothHeartbeatSubscriber:
@@ -39,7 +41,7 @@ class MothHeartbeatSubscriber:
             moth_server_url: Moth 서버 URL (wss://host:port)
         """
         self.registry = registry
-        self.moth_server_url = moth_server_url
+        self.moth_server_url = moth_server_url if moth_server_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
         self.ws: Optional[Any] = None
         self.is_connected = False
         self.is_running = False
@@ -131,8 +133,8 @@ class MothHeartbeatSubscriber:
             if data.get("type") != "publish":
                 return
 
-            channel = data.get("channel", "")
-            if not channel.startswith("device.heartbeat"):
+            channel = data.get("channel") or data.get("topic") or ""
+            if channel != "device.heartbeat":
                 return
 
             payload = data.get("payload", {})

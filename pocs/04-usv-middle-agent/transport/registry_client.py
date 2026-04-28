@@ -45,9 +45,25 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]
         raise
 
 
+def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        logger.error(f"HTTP error getting {url}: {e.code}")
+        raise
+    except urllib.error.URLError as e:
+        logger.error(f"Network error getting {url}: {e.reason}")
+        raise
+    except TimeoutError as e:
+        logger.error(f"Timeout getting {url}: {e}")
+        raise
+
+
 class RegistryClient:
     def __init__(self, config: dict[str, Any]) -> None:
-        self.url = str(config.get("url") or "http://127.0.0.1:8003").rstrip("/")
+        self.url = str(config.get("url") or "http://127.0.0.1:8286").rstrip("/")
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
 
@@ -80,8 +96,6 @@ class RegistryClient:
             body["location"] = location
         if requires_parent:
             body["requires_parent"] = requires_parent
-        if parent_id is not None:
-            body["parent_id"] = parent_id
         return post_json(f"{self.url}/devices", body)
 
     def upsert_agent(
@@ -111,3 +125,8 @@ class RegistryClient:
             },
         )
 
+    def get_assignment(self, registry_id: int) -> dict[str, Any]:
+        return get_json(f"{self.url}/devices/{registry_id}/assignment")
+
+    def get_device(self, registry_id: int) -> dict[str, Any]:
+        return get_json(f"{self.url}/devices/{registry_id}")

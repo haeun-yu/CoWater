@@ -3,7 +3,7 @@ const STORAGE_KEYS = {
   secretKey: "cowater.deviceRegistration.secretKey",
 };
 
-const DEFAULT_API_BASE = "http://127.0.0.1:8003";
+const DEFAULT_API_BASE = "http://127.0.0.1:8286";
 let selectedAlertId = null;
 
 function getApiBase() {

@@ -82,7 +82,7 @@
 
 ```bash
 cd pocs/00-device-registration-server
-python3 device_registration_server.py --host 127.0.0.1 --port 8003
+python3 device_registration_server.py --host 127.0.0.1 --port 8286
 ```
 
 ### 2️⃣ Lower Agent 시작
@@ -219,8 +219,8 @@ MOTH_SERVER_URL=wss://cobot.center:8287
 ```json
 {
   "registry": {
-    "url": "http://127.0.0.1:8003",
-    "heartbeat_interval_seconds": 10
+    "url": "http://127.0.0.1:8286",
+    "heartbeat_interval_seconds": 1
   },
   "moth": {
     "enabled": true,
@@ -230,7 +230,7 @@ MOTH_SERVER_URL=wss://cobot.center:8287
     "provider": "ollama",
     "endpoint": "http://localhost:11434",
     "enabled": true,
-    "timeout_seconds": 30
+    "timeout_seconds": 3
   }
 }
 ```

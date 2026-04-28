@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import urllib.request
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from agent.state import AgentState
 
 logger = logging.getLogger(__name__)
+ALLOWED_MOTH_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
+DEFAULT_MOTH_URL = "wss://cobot.center:8287"
+HEARTBEAT_CHANNEL = "device.heartbeat"
 
 
 class MothPublisher:
@@ -55,7 +59,8 @@ class MothPublisher:
         self.config = config
         self.state = state
         self.moth_config = config.get("moth", {})
-        self.moth_url = self.moth_config.get("server_url", "wss://cobot.center:8287")
+        configured_url = self.moth_config.get("server_url", DEFAULT_MOTH_URL)
+        self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
         self.enabled = self.moth_config.get("enabled", True)
         self.ws: Optional[Any] = None
         self.is_connected = False
@@ -82,17 +87,10 @@ class MothPublisher:
             logger.info("MothPublisher 비활성화 또는 websockets 미설치")
             return
 
-        # Server에서 할당한 실제 Moth 서버 정보 추출
-        server_info = registration_response.get("server", {})
-        if server_info:
-            moth_host = server_info.get("host", "cobot.center")
-            moth_port = server_info.get("port", 8286)
-            # wss://host:port 형식으로 URL 구성
-            self.moth_url = f"wss://{moth_host}:{moth_port}"
-            logger.info(f"Moth 서버 URL 업데이트: {self.moth_url}")
+        configured_url = self.moth_config.get("server_url", self.moth_url)
+        self.moth_url = configured_url if configured_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
 
-        # Server에서 할당한 heartbeat topic 저장
-        self.heartbeat_topic = registration_response.get("heartbeat_topic")
+        self.heartbeat_topic = HEARTBEAT_CHANNEL
 
         # 각 track type별 telemetry topic 저장
         telemetry_topics_list = registration_response.get("telemetry_topics", [])
@@ -165,19 +163,48 @@ class MothPublisher:
         - status: "online" 또는 "offline"
         - battery_percent: 현재 배터리 상태
         """
-        if not self.heartbeat_topic or not self.is_connected or self.ws is None or self.ws.closed:
+        if not self.heartbeat_topic:
             return
 
         # Heartbeat payload 구성
-        payload = {
+        payload = self._heartbeat_payload()
+
+        if self.state.route_mode == "via_parent" and self.state.parent_endpoint:
+            self._send_heartbeat_to_parent(payload)
+            return
+
+        await self.publish_heartbeat_payload(payload)
+
+    def _heartbeat_payload(self) -> dict[str, Any]:
+        return {
             "device_id": self.state.registry_id,
             "agent_id": self.state.agent_id,
             "layer": self.state.layer,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "status": "online" if self.state.connected else "offline",
+            "timeout_seconds": 3,
+            "route_mode": self.state.route_mode,
+            "parent_id": self.state.parent_id,
+            "force_parent_routing": self.state.force_parent_routing,
             "battery_percent": self.state.last_telemetry.get("battery_percent", 100) if self.state.last_telemetry else 100,
         }
 
+    def _send_heartbeat_to_parent(self, payload: dict[str, Any]) -> None:
+        try:
+            req = urllib.request.Request(
+                f"{self.state.parent_endpoint.rstrip('/')}/children/heartbeat",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=0.5).close()
+            logger.debug(f"Heartbeat relayed to parent: {self.state.parent_id}")
+        except Exception as e:
+            logger.debug(f"Parent heartbeat relay failed: {e}")
+
+    async def publish_heartbeat_payload(self, payload: dict[str, Any]) -> None:
+        if not self.heartbeat_topic or not self.is_connected or self.ws is None or self.ws.closed:
+            return
         try:
             # Moth에 발행
             await self.ws.send(
@@ -299,7 +326,7 @@ class MothPublisher:
         - 정상 작동: heartbeat 계속 수신
         - Timeout (30초 이상 미수신): offline으로 표시 + 자동 재할당
         """
-        interval = self.config.get("registry", {}).get("heartbeat_interval_seconds", 10)
+        interval = self.config.get("registry", {}).get("heartbeat_interval_seconds", 1)
 
         logger.info(f"Heartbeat loop 시작: interval={interval}초")
 
