@@ -200,8 +200,8 @@
             <option value="ocean">해양 수심도</option>
         </select>
         <h4>표시 깊이 필터</h4>
-        <input type="range" id="depth-filter" min="-300" max="0" value="-300" step="10">
-        <span class="control-value" id="depth-value">-300m ~ 0m 표시</span>
+        <input type="range" id="depth-filter" min="-200" max="0" value="-200" step="5">
+        <span class="control-value" id="depth-value">-200m ~ 0m 표시</span>
         <div class="shortcuts">
             <strong>단축키</strong><br>
             <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> 이동<br>
@@ -318,7 +318,7 @@ function toScene(lat, lon, alt) {
 // ─── 앱 상태 ─────────────────────────────────────────────────
 const mapState = { map:null, markers:{}, lines:{}, currentTileLayer:null };
 const appState = {
-    time:0, cameraMode:'orbit', depthFilter:-300,
+    time:0, cameraMode:'orbit', depthFilter:-200,
     showLabels:true, showGrid:true, selectedId:null, hoveredId:null,
     objects:[], links:[], alerts:[], registryAlerts:[],
     registryDevices:[],
@@ -577,6 +577,7 @@ function initScene() {
     renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
     renderer.setSize(innerWidth, innerHeight);
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.localClippingEnabled = true;
     container.appendChild(renderer.domElement);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -589,7 +590,7 @@ function initScene() {
     controls.dampingFactor = 0.05;
     controls.maxPolarAngle = Math.PI;
 
-    [0, -50, -100, -150, -200, -300].forEach(d => {
+    [0, -50, -100, -150].forEach(d => {
         const grid = new THREE.GridHelper(10000, 1000, 0x475569, 0x1e293b);
         grid.position.y = d;
         grid.material.opacity = 0.2;
@@ -983,37 +984,8 @@ function initMap() {
         mapState.lines[lk.id] = line;
     });
 
-    // 미니맵 드래그 → 3D 씬 이동
+    // 미니맵 휠 → 미니맵 줌 전용 (마우스 이동/회전은 OrbitControls 기본 동작 사용)
     const panel = document.getElementById('minimap-panel');
-    let isDrag = false, isRot = false, lx = 0, ly = 0;
-    panel.addEventListener('mousedown', e => {
-        if (e.button===0) isDrag=true; if (e.button===2) isRot=true;
-        lx=e.clientX; ly=e.clientY;
-        if (appState.cameraMode!=='orbit') { appState.cameraMode='orbit'; document.getElementById('camera-mode').value='orbit'; }
-    });
-    window.addEventListener('mousemove', e => {
-        if (!isDrag && !isRot) return;
-        const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
-        if (isRot) {
-            const a=dx*0.01, x=camera.position.x-controls.target.x, z=camera.position.z-controls.target.z;
-            camera.position.x = controls.target.x + x*Math.cos(a) - z*Math.sin(a);
-            camera.position.z = controls.target.z + x*Math.sin(a) + z*Math.cos(a);
-            controls.update();
-        }
-        if (isDrag) {
-            const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).setY(0).normalize();
-            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).setY(0).normalize();
-            const plane = new THREE.Plane(new THREE.Vector3(0,1,0),0);
-            const tgt = new THREE.Vector3();
-            const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(0,0), camera);
-            rc.ray.intersectPlane(plane, tgt);
-            const dist = camera.position.distanceTo(tgt.length() ? tgt : controls.target);
-            const spd = dist*0.003;
-            const mv = new THREE.Vector3().addScaledVector(r,-dx*spd).addScaledVector(f,dy*spd);
-            controls.target.add(mv); camera.position.add(mv); controls.update();
-        }
-    });
-    window.addEventListener('mouseup', () => { isDrag=isRot=false; });
     panel.addEventListener('wheel', e => { e.preventDefault(); mapState.map.setZoom(mapState.map.getZoom()+(e.deltaY>0?-1:1)); });
 }
 
