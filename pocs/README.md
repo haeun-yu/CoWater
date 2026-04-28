@@ -83,6 +83,13 @@
 ```bash
 cd pocs/00-device-registration-server
 python3 device_registration_server.py --host 127.0.0.1 --port 9100
+
+# 또는
+
+cd /Users/teamgrit/Documents/CoWater
+source .venv/bin/activate
+cd pocs/00-device-registration-server
+python device_registration_server.py --port 9100
 ```
 
 ### 2️⃣ Lower Agent 시작

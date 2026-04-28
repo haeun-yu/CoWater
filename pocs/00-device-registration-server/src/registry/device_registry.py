@@ -120,7 +120,7 @@ class DeviceRegistry:
             stored_track = TrackRecord(
                 type=raw_track.type,
                 name=normalized_track_name,
-                endpoint=build_track_endpoint(token, normalized_track_name, raw_track.type),
+                endpoint=build_track_endpoint(device_id, normalized_track_name, raw_track.type),
             )
             if stored_track.name in seen_track_names:
                 raise ValueError("track names must be unique")

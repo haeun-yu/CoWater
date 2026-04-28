@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Optional, TYPE_CHECKING
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     import websockets
@@ -22,8 +23,22 @@ if TYPE_CHECKING:
     from src.registry.device_registry import DeviceRegistry
 
 logger = logging.getLogger(__name__)
-ALLOWED_MOTH_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
-DEFAULT_MOTH_URL = "wss://cobot.center:8287"
+ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
+MOTH_HEALTHCHECK_PATH = "/pang/ws/meb"
+MOTH_HEALTHCHECK_QUERY = "channel=instant&name=health_check&source=base&track=ping"
+DEFAULT_MOTH_URL = f"wss://cobot.center:8287{MOTH_HEALTHCHECK_PATH}?{MOTH_HEALTHCHECK_QUERY}"
+
+
+def _extract_base_url(raw_url: str) -> str:
+    parsed = urlsplit((raw_url or "").strip())
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _build_healthcheck_url(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    return urlunsplit((parsed.scheme, parsed.netloc, MOTH_HEALTHCHECK_PATH, MOTH_HEALTHCHECK_QUERY, ""))
 
 
 class MothHeartbeatSubscriber:
@@ -38,10 +53,12 @@ class MothHeartbeatSubscriber:
 
         Args:
             registry: DeviceRegistry (heartbeat_monitor 포함)
-            moth_server_url: Moth 서버 URL (wss://host:port)
+            moth_server_url: Moth 서버 URL (ws(s)://host:port 또는 전체 URL)
         """
         self.registry = registry
-        self.moth_server_url = moth_server_url if moth_server_url in ALLOWED_MOTH_URLS else DEFAULT_MOTH_URL
+        requested_base_url = _extract_base_url(moth_server_url)
+        selected_base_url = requested_base_url if requested_base_url in ALLOWED_MOTH_BASE_URLS else "wss://cobot.center:8287"
+        self.moth_server_url = _build_healthcheck_url(selected_base_url)
         self.ws: Optional[Any] = None
         self.is_connected = False
         self.is_running = False
@@ -65,7 +82,7 @@ class MothHeartbeatSubscriber:
             self.is_connected = True
             logger.info("Moth 연결 성공")
         except Exception as e:
-            logger.error(f"Moth 연결 실패: {e}")
+            logger.error(f"Moth 연결 실패 (url={self.moth_server_url}): {e}")
             self.is_connected = False
 
     async def subscribe_heartbeat_meb(self) -> None:
@@ -86,7 +103,7 @@ class MothHeartbeatSubscriber:
                 "channel_type": "meb",
             }
             await self.ws.send(json.dumps(subscribe_msg))
-            logger.info("Moth meb 채널 구독: device.heartbeat (모든 디바이스의 heartbeat 통합 수신)")
+            logger.info("Moth meb 채널 구독: instant/health_check/track=ping")
         except Exception as e:
             logger.error(f"meb 채널 구독 실패: {e}")
             self.is_connected = False

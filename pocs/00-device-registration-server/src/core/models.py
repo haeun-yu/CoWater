@@ -44,10 +44,10 @@ def normalize_track_name(name: str) -> str:
     return name.strip().lower()
 
 
-def build_track_endpoint(token: str, track_name: str, track_type: str) -> str:
+def build_track_endpoint(device_id: int, track_name: str, track_type: str) -> str:
     return (
-        "/pang/ws/meb"
-        f"?channel=instant&name={token}&source=base&track={normalize_track_name(track_name)}"
+        "/pang/ws/pub"
+        f"?channel=instant&name={device_id}&source=base&track={normalize_track_name(track_name)}"
     )
 
 

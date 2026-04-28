@@ -25,7 +25,7 @@ DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS = 500
 DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS = 1
 
 # ← NEW: Moth (WebSocket for position updates)
-DEFAULT_MOTH_SERVER_URL = "wss://cobot.center:8287"
+DEFAULT_MOTH_SERVER_URL = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=health_check&source=base&track=ping"
 DEFAULT_MOTH_HEARTBEAT_TOPIC_TEMPLATE = "device.heartbeat.{device_id}"
 DEFAULT_MOTH_TELEMETRY_TOPIC_TEMPLATE = "device.telemetry.{device_id}.{track_type}"
 

@@ -83,34 +83,45 @@ COWATER_DEVICE_CONFIG_PATH=./my-config.json python3 src/device_registration_serv
 ### 1.1 등록 요청 (Device Registration)
 
 #### 엔드포인트
+
 ```
 POST /devices
 ```
 
 #### 요청 본문
+
 ```json
 {
-  "secretKey": "string",
-  "name": "string",
-  "tracks": [
-    {
-      "type": "VIDEO|LIDAR|AUDIO|CONTROL|BATTERY|SPEAKER|TOPIC|MAP|ODOMETRY|GPS|TRAJECTORY",
-      "name": "string",
-      "endpoint": "string"
-    }
-  ],
-  "actions": {
-    "core": ["SLAM_NAVIGATION", "MAP_NAVIGATION", "GPS_NAVIGATION", "NAVIGATION_3D", "TTS", "PARKING"],
-    "custom": ["string"]
-  }
+  "secretKey": "string",
+  "name": "string",
+  "tracks": [
+    {
+      "type": "VIDEO|LIDAR|AUDIO|CONTROL|BATTERY|SPEAKER|TOPIC|MAP|ODOMETRY|GPS|TRAJECTORY",
+      "name": "string",
+      "endpoint": "string"
+    }
+  ],
+  "actions": {
+    "core": [
+      "SLAM_NAVIGATION",
+      "MAP_NAVIGATION",
+      "GPS_NAVIGATION",
+      "NAVIGATION_3D",
+      "TTS",
+      "PARKING"
+    ],
+    "custom": ["string"]
+  }
 }
 ```
 
 #### 보안 검증
+
 1. **Secret Key 검증**: 요청의 `secretKey`가 서버 설정의 `device.secretKey`와 일치해야 함
 2. **이름 중복 검사**: 같은 이름의 디바이스가 이미 존재하면 등록 실패
 
 #### 응답 (201 Created)
+
 ```json
 {
   "id": 1,
@@ -132,6 +143,7 @@ POST /devices
 ```
 
 #### 생성되는 것
+
 - 디바이스 고유 ID (Long)
 - 고유 토큰 (UUID 기반): 디바이스 인증 및 통신용
 - Agent 주소: 디바이스별 Agent 연결용 WebSocket 주소
@@ -144,11 +156,13 @@ POST /devices
 디바이스가 등록된 뒤, 각 디바이스별 Agent는 `PUT /devices/{deviceId}/agent`로 자기 연결 정보를 다시 서버에 등록합니다.
 
 #### 엔드포인트
+
 ```http
 PUT /devices/{deviceId}/agent
 ```
 
 #### 요청 본문
+
 ```json
 {
   "secretKey": "server-secret",
@@ -161,6 +175,7 @@ PUT /devices/{deviceId}/agent
 ```
 
 #### 의미
+
 - `endpoint`: Agent가 디바이스 스트림과 연결되는 WebSocket 주소
 - `commandEndpoint`: 원격 사용자가 Agent에 명령을 보낼 때 쓰는 HTTP 주소
 - `llm_enabled`: 이 Agent가 LLM 기반 hybrid 판단을 사용하는지 여부
@@ -178,6 +193,7 @@ PUT /devices/{deviceId}/agent
 03 서버는 디바이스 등록 원장 외에도 시스템 알림과 대응 기록의 canonical store 역할을 합니다.
 
 #### 엔드포인트
+
 ```http
 POST /alerts/ingest
 GET /alerts
@@ -189,6 +205,7 @@ GET /responses/{response_id}
 ```
 
 #### 의미
+
 - `alerts`: 시스템 이벤트 분석 결과로 생성된 알림
 - `responses`: 알림에 대한 자동/수동 대응 기록
 - `ack`: 사용자 승인/반려 상태 기록
@@ -205,15 +222,15 @@ Agent가 연결이 끊기면 `DELETE /devices/{deviceId}/agent?secretKey=...`로
 
 ```typescript
 type Device = {
-  id: number                           // 디바이스 고유 ID
-  name: string                         // 디바이스 이름
-  connected: boolean                   // 연결 상태
-  created_at: string                   // 생성 시간
-  main_video_track_name?: string      // 메인 비디오 트랙 (NULL 가능)
-  server: DeviceServerInformation     // 디바이스 서버 정보
-  tracks: DeviceModule[]              // 디바이스 모듈/트랙
-  actions?: DeviceAction              // 디바이스 지원 액션
-}
+  id: number; // 디바이스 고유 ID
+  name: string; // 디바이스 이름
+  connected: boolean; // 연결 상태
+  created_at: string; // 생성 시간
+  main_video_track_name?: string; // 메인 비디오 트랙 (NULL 가능)
+  server: DeviceServerInformation; // 디바이스 서버 정보
+  tracks: DeviceModule[]; // 디바이스 모듈/트랙
+  actions?: DeviceAction; // 디바이스 지원 액션
+};
 ```
 
 ### 2.2 디바이스 모듈 (Tracks)
@@ -222,28 +239,28 @@ type Device = {
 
 #### 지원 모듈 타입
 
-| 타입 | 설명 | 방향성 | 용도 |
-|------|------|--------|------|
-| **VIDEO** | 비디오 스트림 | 단방향 (디바이스→서버) | 실시간 영상 스트리밍 |
-| **LIDAR** | 라이다 센서 | 단방향 (디바이스→서버) | 3D 환경 스캔 |
-| **AUDIO** | 오디오 스트림 | 단방향 (디바이스→서버) | 음성 수신 |
-| **CONTROL** | 제어 신호 | 양방향 | 로봇 제어 명령 수신 |
-| **BATTERY** | 배터리 상태 | 단방향 (디바이스→서버) | 배터리 모니터링 |
-| **SPEAKER** | 스피커 제어 | 단방향 (서버→디바이스) | TTS 및 음성 출력 |
-| **TOPIC** | 토픽 데이터 | 양방향 | 일반 데이터 토픽 |
-| **MAP** | 지도 데이터 | 단방향 (디바이스→서버) | 작성된 지도 전달 |
-| **ODOMETRY** | 위치 정보 | 단방향 (디바이스→서버) | 로봇 위치/방향 |
-| **GPS** | GPS 위치 | 단방향 (디바이스→서버) | 글로벌 위치 정보 |
-| **TRAJECTORY** | 이동 궤적 | 단방향 (디바이스→서버) | 로봇 이동 경로 |
+| 타입           | 설명          | 방향성                 | 용도                 |
+| -------------- | ------------- | ---------------------- | -------------------- |
+| **VIDEO**      | 비디오 스트림 | 단방향 (디바이스→서버) | 실시간 영상 스트리밍 |
+| **LIDAR**      | 라이다 센서   | 단방향 (디바이스→서버) | 3D 환경 스캔         |
+| **AUDIO**      | 오디오 스트림 | 단방향 (디바이스→서버) | 음성 수신            |
+| **CONTROL**    | 제어 신호     | 양방향                 | 로봇 제어 명령 수신  |
+| **BATTERY**    | 배터리 상태   | 단방향 (디바이스→서버) | 배터리 모니터링      |
+| **SPEAKER**    | 스피커 제어   | 단방향 (서버→디바이스) | TTS 및 음성 출력     |
+| **TOPIC**      | 토픽 데이터   | 양방향                 | 일반 데이터 토픽     |
+| **MAP**        | 지도 데이터   | 단방향 (디바이스→서버) | 작성된 지도 전달     |
+| **ODOMETRY**   | 위치 정보     | 단방향 (디바이스→서버) | 로봇 위치/방향       |
+| **GPS**        | GPS 위치      | 단방향 (디바이스→서버) | 글로벌 위치 정보     |
+| **TRAJECTORY** | 이동 궤적     | 단방향 (디바이스→서버) | 로봇 이동 경로       |
 
 #### 모듈 구조
 
 ```typescript
 type DeviceModule = {
-  type: DeviceModuleType        // 모듈 타입
-  name: string                  // 모듈 이름 (고유)
-  endpoint: string              // WebSocket 엔드포인트 경로
-}
+  type: DeviceModuleType; // 모듈 타입
+  name: string; // 모듈 이름 (고유)
+  endpoint: string; // WebSocket 엔드포인트 경로
+};
 ```
 
 #### 엔드포인트 생성 규칙
@@ -251,16 +268,17 @@ type DeviceModule = {
 각 모듈의 WebSocket 엔드포인트는 다음 형식으로 생성됩니다:
 
 ```
-/pang/ws/meb?channel=instant&name={token}&source=base&track={track_name_lowercase}
+/pang/ws/meb?channel=instant&name=health_check&source=base&track=ping
 ```
 
 **예시:**
+
 ```
 # 비디오 스트림
-/pang/ws/meb?channel=instant&name=abc123def&source=base&track=video_main
+/pang/ws/pub?channel=instant&name=id&source=base&track=video_main
 
 # 제어 신호
-/pang/ws/meb?channel=instant&name=abc123def&source=base&track=control
+/pang/ws/pub?channel=instant&name=id&source=base&track=control
 ```
 
 ### 2.3 디바이스 액션 (Actions)
@@ -269,17 +287,17 @@ type DeviceModule = {
 
 ```typescript
 type DeviceAction = {
-  core: DeviceActionType[]      // 핵심 액션
-  custom: string[]              // 커스텀 액션
-}
+  core: DeviceActionType[]; // 핵심 액션
+  custom: string[]; // 커스텀 액션
+};
 
 type DeviceActionType =
-  | 'SLAM_NAVIGATION'           // SLAM 기반 자율 네비게이션
-  | 'MAP_NAVIGATION'            // 사전 작성 지도 기반 네비게이션
-  | 'GPS_NAVIGATION'            // GPS 기반 네비게이션
-  | 'NAVIGATION_3D'             // 3D 환경 네비게이션
-  | 'TTS'                       // 음성 합성 출력
-  | 'PARKING'                   // 주차/복귀 기능
+  | "SLAM_NAVIGATION" // SLAM 기반 자율 네비게이션
+  | "MAP_NAVIGATION" // 사전 작성 지도 기반 네비게이션
+  | "GPS_NAVIGATION" // GPS 기반 네비게이션
+  | "NAVIGATION_3D" // 3D 환경 네비게이션
+  | "TTS" // 음성 합성 출력
+  | "PARKING"; // 주차/복귀 기능
 ```
 
 ---
@@ -298,21 +316,23 @@ type DeviceActionType =
 
 #### 상태 전이 이벤트
 
-| 이벤트 | 발생 시기 | 처리 내용 |
-|--------|----------|---------|
-| `DeviceRegisteredEvent` | 디바이스 등록 완료 시 | 이벤트 발행 |
-| `DeviceConnectedEvent` | 디바이스 연결 시 | 상태 변경, 이벤트 발행 |
+| 이벤트                    | 발생 시기             | 처리 내용              |
+| ------------------------- | --------------------- | ---------------------- |
+| `DeviceRegisteredEvent`   | 디바이스 등록 완료 시 | 이벤트 발행            |
+| `DeviceConnectedEvent`    | 디바이스 연결 시      | 상태 변경, 이벤트 발행 |
 | `DeviceDisconnectedEvent` | 디바이스 연결 해제 시 | 상태 변경, 이벤트 발행 |
 
 ### 3.2 연결 상태 관리
 
 #### 서버 시작 시
+
 ```java
 // 서버 시작 시 모든 디바이스를 미연결 상태로 초기화
 updateAllDevicesAsDisconnected()
 ```
 
 #### 디바이스 연결/해제
+
 ```java
 // 디바이스 연결
 device.connect()      // → DeviceConnectedEvent 발행
@@ -328,21 +348,24 @@ device.disconnect()   // → DeviceDisconnectedEvent 발행
 ### 4.1 전체 디바이스 목록 조회
 
 #### 엔드포인트
+
 ```
 GET /devices
 ```
 
 #### 권한
+
 - ADMIN, USER
 
 #### 응답 (200 OK)
+
 ```json
 [
-  {
-    "id": 1,
-    "name": "robot-1",
-    "connected": true,
-    "created_at": "2024-01-15T10:30:00Z",
+  {
+    "id": 1,
+    "name": "robot-1",
+    "connected": true,
+    "created_at": "2024-01-15T10:30:00Z",
     "server": {
       "host": "192.168.1.100",
       "port": 9001,
@@ -351,40 +374,44 @@ GET /devices
     "tracks": [
       {
         "type": "VIDEO",
-        "name": "video_main",
-        "endpoint": "/pang/ws/meb?channel=instant&name=token&source=base&track=video_main"
-      },
-      {
-        "type": "LIDAR",
-        "name": "lidar_front",
-        "endpoint": "/pang/ws/meb?channel=instant&name=token&source=base&track=lidar_front"
-      }
-	],
-    "actions": {
-      "core": ["SLAM_NAVIGATION", "MAP_NAVIGATION"],
-      "custom": []
-    },
-    "main_video_track_name": "video_main"
-  }
+        "name": "video_main",
+        "endpoint": "/pang/ws/pub?channel=instant&name=id&source=base&track=video_main"
+      },
+      {
+        "type": "LIDAR",
+        "name": "lidar_front",
+        "endpoint": "/pang/ws/pub?channel=instant&name=id&source=base&track=lidar_front"
+      }
+    ],
+    "actions": {
+      "core": ["SLAM_NAVIGATION", "MAP_NAVIGATION"],
+      "custom": []
+    },
+    "main_video_track_name": "video_main"
+  }
 ]
 ```
 
 ### 4.2 특정 디바이스 조회
 
 #### 엔드포인트
+
 ```
 GET /devices/{deviceId}
 ```
 
 #### 권한
+
 - ADMIN, DEVICE, USER
 
 #### 응답 (200 OK)
+
 - 전체 디바이스 목록 조회의 응답과 동일
 
 ### 4.3 여러 디바이스 동시 조회
 
 #### 내부 API (Java)
+
 ```java
 List<DeviceResponse> findDevicesByIds(
   List<Long> deviceIds,
@@ -399,21 +426,25 @@ List<DeviceResponse> findDevicesByIds(
 ### 5.1 디바이스 이름 변경
 
 #### 엔드포인트
+
 ```
 PATCH /devices/{deviceId}
 ```
 
 #### 권한
+
 - ADMIN, USER
 
 #### 요청 본문
+
 ```json
 {
-  "name": "new-robot-name"
+  "name": "new-robot-name"
 }
 ```
 
 #### 검증
+
 - 새로운 이름이 중복되지 않아야 함
 
 #### 응답 (204 No Content)
@@ -421,27 +452,32 @@ PATCH /devices/{deviceId}
 ### 5.2 메인 비디오 트랙 변경
 
 #### 엔드포인트
+
 ```
 PATCH /devices/{deviceId}/main-video-track
 ```
 
 #### 권한
+
 - ADMIN, USER
 
 #### 요청 본문
+
 ```json
 {
-  "name": "video_secondary"
+  "name": "video_secondary"
 }
 ```
 
 #### 검증
+
 - 지정된 트랙이 존재해야 함
 - 트랙 타입이 VIDEO여야 함
 
 #### 응답 (204 No Content)
 
 #### 자동 폴백
+
 ```java
 // 메인 트랙이 삭제되거나 존재하지 않는 경우
 // 자동으로 VIDEO 타입의 첫 번째 트랙으로 변경
@@ -454,21 +490,22 @@ getMainVideoTrackName() {
 }
 ```
 
-
-
 ---
 
 ## 6. 디바이스 삭제
 
 #### 엔드포인트
+
 ```
 DELETE /devices/{deviceId}
 ```
 
 #### 권한
+
 - ADMIN, USER
 
 #### 처리 사항
+
 - 데이터베이스에서 디바이스 레코드 완전 삭제
 
 #### 응답 (204 No Content)
@@ -481,22 +518,23 @@ DELETE /devices/{deviceId}
 
 ```typescript
 type ServerInformation = {
-  host: string      // 서버 호스트 (예: 192.168.1.100)
-  port: number      // 서버 포트 (예: 9001)
-}
+  host: string; // 서버 호스트 (예: 192.168.1.100)
+  port: number; // 서버 포트 (예: 9001)
+};
 ```
 
 ### 7.2 DeviceServerInformation
 
 ```typescript
 type DeviceServerInformation = {
-  host: string              // 디바이스 서버 호스트
-  port: number              // 디바이스 서버 포트
-  ping_endpoint: string     // 헬스 체크 엔드포인트 (예: /pang/ping)
-}
+  host: string; // 디바이스 서버 호스트
+  port: number; // 디바이스 서버 포트
+  ping_endpoint: string; // 헬스 체크 엔드포인트 (예: /pang/ping)
+};
 ```
 
 #### 헬스 체크
+
 - 엔드포인트: `GET {host}:{port}{ping_endpoint}`
 - 목적: 디바이스 연결 상태 및 가용성 확인
 
@@ -531,24 +569,24 @@ CREATE TABLE devices (
 
 ### 9.1 등록 시 에러
 
-| 에러 | 상태코드 | 원인 | 해결방법 |
-|------|----------|------|---------|
-| Secret Key 불일치 | 401/403 | `secretKey` 값이 잘못됨 | 올바른 secret key 확인 |
-| 이름 중복 | 400 | 같은 이름의 디바이스 존재 | 다른 이름으로 변경 |
+| 에러              | 상태코드 | 원인                      | 해결방법               |
+| ----------------- | -------- | ------------------------- | ---------------------- |
+| Secret Key 불일치 | 401/403  | `secretKey` 값이 잘못됨   | 올바른 secret key 확인 |
+| 이름 중복         | 400      | 같은 이름의 디바이스 존재 | 다른 이름으로 변경     |
 
 ### 9.2 조회 시 에러
 
-| 에러 | 상태코드 | 원인 | 해결방법 |
-|------|----------|------|---------|
-| 디바이스 없음 | 404 | 존재하지 않는 ID | 유효한 ID 확인 |
-| 권한 없음 | 403 | 접근 권한 부족 | 관리자/사용자 권한 확인 |
+| 에러          | 상태코드 | 원인             | 해결방법                |
+| ------------- | -------- | ---------------- | ----------------------- |
+| 디바이스 없음 | 404      | 존재하지 않는 ID | 유효한 ID 확인          |
+| 권한 없음     | 403      | 접근 권한 부족   | 관리자/사용자 권한 확인 |
 
 ### 9.3 수정 시 에러
 
-| 에러 | 상태코드 | 원인 | 해결방법 |
-|------|----------|------|---------|
-| 메인 비디오 트랙 없음 | 400 | 지정된 트랙 미존재 | 유효한 트랙명 사용 |
-| 이름 중복 | 400 | 새 이름이 중복됨 | 다른 이름으로 변경 |
+| 에러                  | 상태코드 | 원인               | 해결방법           |
+| --------------------- | -------- | ------------------ | ------------------ |
+| 메인 비디오 트랙 없음 | 400      | 지정된 트랙 미존재 | 유효한 트랙명 사용 |
+| 이름 중복             | 400      | 새 이름이 중복됨   | 다른 이름으로 변경 |
 
 ---
 
@@ -557,12 +595,12 @@ CREATE TABLE devices (
 ### 10.1 디바이스 인증
 
 1. **등록 시**: Secret Key 기반 인증
-   - 서버 설정의 `device.secretKey`와 비교
-   - 네트워크 전송 시 TLS/HTTPS 권장
+      - 서버 설정의 `device.secretKey`와 비교
+      - 네트워크 전송 시 TLS/HTTPS 권장
 
 2. **통신 시**: 토큰 기반 인증
-   - 각 디바이스에 고유 UUID 토큰 발급
-   - WebSocket 연결 시 토큰 검증
+      - 각 디바이스에 고유 UUID 토큰 발급
+      - WebSocket 연결 시 토큰 검증
 
 ### 10.2 권한 관리
 
@@ -630,6 +668,7 @@ Device 타입 권한:
 ## 13. 관련 파일 목록
 
 ### 서버
+
 - `api/src/main/java/kr/teamgrit/cobiz/api/device/` - 전체 디바이스 모듈
   - `domain/device/Device.java` - 엔티티
   - `domain/device/DeviceRepository.java` - 데이터 접근
