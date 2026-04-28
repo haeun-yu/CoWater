@@ -261,11 +261,12 @@ class MothPublisher:
         route_mode = self._determine_route_mode()
         payload["route_mode"] = route_mode
 
+        # Heartbeat은 항상 Moth에 발행 (Device Registry에 반드시 도달해야 함)
+        await self.publish_heartbeat_payload(payload)
+
+        # 추가로 parent에도 전달 (존재하는 경우)
         if route_mode == "via_parent" and self.state.parent_endpoint:
             self._send_heartbeat_to_parent(payload)
-            return
-
-        await self.publish_heartbeat_payload(payload)
 
     def _determine_route_mode(self) -> str:
         """
