@@ -158,19 +158,23 @@ class MothPublisher:
 
         tracks = registration_response.get("tracks", [])
         track_endpoint = None
-        for track in tracks:
+        logger.debug(f"Device Registration에서 받은 tracks: {len(tracks)}개")
+        for i, track in enumerate(tracks):
             endpoint = track.get("endpoint") if isinstance(track, dict) else None
+            logger.debug(f"  Track[{i}]: type={track.get('type') if isinstance(track, dict) else '?'}, endpoint={endpoint}")
             if isinstance(endpoint, str) and endpoint.startswith("/pang/ws/meb"):
                 track_endpoint = endpoint
+                logger.debug(f"    → /pang/ws/meb 엔드포인트 발견: {endpoint}")
                 break
 
         if track_endpoint:
             self.moth_url = _join_base_and_endpoint(self.moth_base_url, track_endpoint)
+            logger.info(f"Moth URL (Device Registry 트랙 엔드포인트): {self.moth_url}")
         else:
-            self.moth_url = _join_base_and_endpoint(
-                self.moth_base_url,
-                _build_fallback_pub_endpoint(registration_response.get("id") or self.state.registry_id),
-            )
+            fallback_endpoint = _build_fallback_pub_endpoint(registration_response.get("id") or self.state.registry_id)
+            self.moth_url = _join_base_and_endpoint(self.moth_base_url, fallback_endpoint)
+            logger.info(f"Moth URL (Fallback 엔드포인트): {self.moth_url}")
+            logger.info(f"  Fallback endpoint: {fallback_endpoint}")
 
         self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
 
@@ -339,6 +343,7 @@ class MothPublisher:
                 {"type": "publish", "channel": "device.heartbeat", "payload": payload}
             )
             await self.ws.send(msg1)
+            logger.debug(f"Heartbeat 발행 (공통채널): Moth={self.moth_url}, channel=device.heartbeat, device_id={payload.get('device_id')}")
 
             # 2. device.heartbeat.{device_id} (device-specific 채널)
             if self.heartbeat_topic != "device.heartbeat":
@@ -346,6 +351,9 @@ class MothPublisher:
                     {"type": "publish", "channel": self.heartbeat_topic, "payload": payload}
                 )
                 await self.ws.send(msg2)
+                logger.debug(f"Heartbeat 발행 (전용채널): Moth={self.moth_url}, channel={self.heartbeat_topic}, device_id={payload.get('device_id')}")
+
+            logger.info(f"Heartbeat 발행 완료: device_id={payload.get('device_id')}, topics=[device.heartbeat, {self.heartbeat_topic}]")
         except Exception as e:
             logger.error(f"Heartbeat 발행 실패: {e}")
             self.is_connected = False
