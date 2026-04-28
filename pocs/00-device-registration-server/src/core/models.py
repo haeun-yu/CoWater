@@ -19,6 +19,8 @@ TRACK_TYPES = Literal[
     "ODOMETRY",
     "GPS",
     "TRAJECTORY",
+    "DEPTH",
+    "PRESSURE",
 ]
 
 CORE_ACTIONS = Literal[
@@ -237,6 +239,9 @@ class DeviceRecord:
     parent_id: Optional[int] = None
     last_location_update: Optional[str] = None
     last_error: Optional[str] = None
+    # ← NEW: Moth topics for telemetry & heartbeat
+    heartbeat_topic: Optional[str] = None
+    telemetry_topics: List[Dict[str, str]] = field(default_factory=list)
 
     def resolved_main_video_track_name(self) -> Optional[str]:
         if self.main_video_track_name:
@@ -266,6 +271,9 @@ class DeviceRecord:
             "longitude": self.longitude,
             "parent_id": self.parent_id,
             "last_location_update": self.last_location_update,
+            # ← NEW: Moth topics
+            "heartbeat_topic": self.heartbeat_topic,
+            "telemetry_topics": self.telemetry_topics,
         }
 
 

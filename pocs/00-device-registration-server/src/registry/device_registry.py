@@ -127,6 +127,17 @@ class DeviceRegistry:
             latitude = request.location.get("latitude")
             longitude = request.location.get("longitude")
 
+        # Moth topics 생성
+        heartbeat_topic = f"device.heartbeat.{device_id}"
+        telemetry_topics = [
+            {
+                "track_type": track.type,
+                "track_name": track.name,
+                "topic": f"device.telemetry.{device_id}.{track.name.lower()}"
+            }
+            for track in tracks
+        ]
+
         return DeviceRecord(
             id=device_id,
             token=token,
@@ -156,6 +167,8 @@ class DeviceRegistry:
             longitude=longitude,
             parent_id=request.parent_id,
             last_location_update=now if (latitude or longitude) else None,
+            heartbeat_topic=heartbeat_topic,
+            telemetry_topics=telemetry_topics,
         )
 
     def register(self, request: DeviceRegistrationRequest) -> DeviceRecord:

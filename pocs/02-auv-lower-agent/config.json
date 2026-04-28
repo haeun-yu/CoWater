@@ -1,7 +1,10 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9121 },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9121
+  },
   "registry": {
-    "url": "http://127.0.0.1:8003",
+    "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 10
@@ -22,7 +25,10 @@
       "enabled": true,
       "timeout_seconds": 30
     },
-    "rules": { "max_speed_mps": 2.0, "battery_warn_percent": 30 },
+    "rules": {
+      "max_speed_mps": 2.0,
+      "battery_warn_percent": 30
+    },
     "capabilities": {
       "skills": [
         "underwater_navigation",
@@ -49,15 +55,39 @@
         "abort_mission",
         "emergency_ascent"
       ],
-      "constraints": ["respect_depth_limits", "surface_for_recovery"],
+      "constraints": [
+        "respect_depth_limits",
+        "surface_for_recovery"
+      ],
       "tracks": [
-        { "type": "DEPTH", "name": "pressure", "frequency_hz": 10 },
-        { "type": "TOPIC", "name": "acoustic_modem", "frequency_hz": 0.1 },
-        { "type": "TOPIC", "name": "sonar", "frequency_hz": 2 },
-        { "type": "BATTERY", "name": "battery", "frequency_hz": 0.5 },
-        { "type": "ODOMETRY", "name": "inertial", "frequency_hz": 20 }
+        {
+          "type": "DEPTH",
+          "name": "pressure",
+          "frequency_hz": 10
+        },
+        {
+          "type": "TOPIC",
+          "name": "acoustic_modem",
+          "frequency_hz": 0.1
+        },
+        {
+          "type": "TOPIC",
+          "name": "sonar",
+          "frequency_hz": 2
+        },
+        {
+          "type": "BATTERY",
+          "name": "battery",
+          "frequency_hz": 0.5
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "inertial",
+          "frequency_hz": 20
+        }
       ]
-    }
+    },
+    "parent_id": 5
   },
   "moth": {
     "enabled": true,
@@ -65,14 +95,24 @@
     "reconnect_interval_seconds": 5
   },
   "simulation": {
-    "interval_seconds": 3,
+    "interval_seconds": 1,
     "start_position": {
       "latitude": 37.002,
       "longitude": 129.428,
       "altitude": -25.0
     },
-    "speed_range": [0.3, 2.0],
-    "altitude_range": [-80.0, -5.0]
+    "speed_range": [
+      0.3,
+      2.0
+    ],
+    "altitude_range": [
+      -80.0,
+      -5.0
+    ]
   },
-  "cors": { "allow_origins": ["*"] }
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
 }

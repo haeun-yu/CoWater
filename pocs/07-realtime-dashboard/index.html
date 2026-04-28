@@ -165,7 +165,7 @@
     </div>
     <div id="header-right">
         <span id="header-clock">--:--:--</span>
-        <span id="header-registry-badge" onclick="promptRegistryUrl()">03 서버: 확인 중</span>
+        <span id="header-registry-badge" onclick="promptRegistryUrl()">00 서버: 확인 중</span>
         <button id="header-alerts-page" onclick="location.href='alerts.html'" style="font-size:0.72rem;padding:3px 10px;border-radius:20px;border:1px solid #334155;color:#f8fafc;background:rgba(30,41,59,0.72);cursor:pointer;">경보 관리</button>
     </div>
 </header>
@@ -671,8 +671,8 @@ async function loadTerrain() {
         document.getElementById('stats-container').innerHTML =
             `<div style="color:#f87171;font-size:0.85rem;text-align:center;padding:10px;">
                 ${appState.registryStatus === 'offline'
-                    ? '⚠️ 03 서버에 연결할 수 없습니다.<br>서버 주소를 확인하세요.'
-                    : '⚠️ 등록된 디바이스가 없습니다.<br>03 서버에서 디바이스를 먼저 등록하세요.'}
+                    ? '⚠️ 00 서버에 연결할 수 없습니다.<br>서버 주소를 확인하세요.'
+                    : '⚠️ 등록된 디바이스가 없습니다.<br>00 서버에서 디바이스를 먼저 등록하세요.'}
             </div>`;
         document.getElementById('object-list-container').innerHTML =
             `<div style="color:#64748b;font-size:0.82rem;text-align:center;padding:20px;">표시할 디바이스 없음</div>`;
@@ -1087,7 +1087,7 @@ const uiManager = {
         const registered = appState.objects.filter(o => o.config.registry).length;
         document.getElementById('stats-container').innerHTML = `
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>총 디바이스:</span><strong>${appState.objects.length}개</strong></div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>03 서버 등록:</span><strong style="color:${registered>0?'#4ade80':'#f87171'}">${registered} / ${appState.objects.length}</strong></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>00 서버 등록:</span><strong style="color:${registered>0?'#4ade80':'#f87171'}">${registered} / ${appState.objects.length}</strong></div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>Moth 연결:</span><strong style="color:${conn>0?'#4ade80':'#f87171'}">${conn} / ${appState.objects.length}</strong></div>
             <div style="display:flex;justify-content:space-between;font-size:0.85rem;"><span>통신 링크:</span><strong>${appState.links.length}개</strong></div>
             <div style="margin-top:8px;color:${(appState.alerts.length + appState.registryAlerts.length)>0?'#f87171':'#4ade80'};font-size:0.85rem;">발생 경보: ${appState.alerts.length + appState.registryAlerts.length}건</div>`;
@@ -1150,8 +1150,8 @@ const uiManager = {
             }
 
             const trackHtml = reg?.tracks?.length
-                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">03 서버 트랙</div><div style="display:flex;flex-wrap:wrap;gap:4px;">${reg.tracks.map(t=>`<span class="badge">${t.name}:${t.type}</span>`).join('')}</div></div>`
-                : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">03 서버 등록 정보 없음</div>`;
+                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">00 서버 트랙</div><div style="display:flex;flex-wrap:wrap;gap:4px;">${reg.tracks.map(t=>`<span class="badge">${t.name}:${t.type}</span>`).join('')}</div></div>`
+                : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">00 서버 등록 정보 없음</div>`;
 
             const agentHtml = streamAgent
                 ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">Agent 주소</div><div class="badge" style="display:inline-block;max-width:100%;overflow-wrap:anywhere;">${streamAgent}</div><div style="margin-top:6px;"><span class="badge ${agent?.llm_enabled ? 'ok' : 'warn'}">LLM ${agent?.llm_enabled ? 'enabled' : 'disabled'}</span></div></div>`
@@ -1384,13 +1384,13 @@ function updateHeader() {
 
     const badge = document.getElementById('header-registry-badge');
     if (appState.registryStatus === 'ok') {
-        badge.textContent = `03 서버: ${DEVICE_CONFIG.length}개 등록`;
+        badge.textContent = `00 서버: ${DEVICE_CONFIG.length}개 등록`;
         badge.className = 'ok';
     } else if (appState.registryStatus === 'offline') {
-        badge.textContent = '03 서버: 오프라인';
+        badge.textContent = '00 서버: 오프라인';
         badge.className = 'offline';
     } else {
-        badge.textContent = '03 서버: 확인 중';
+        badge.textContent = '00 서버: 확인 중';
         badge.className = '';
     }
 }

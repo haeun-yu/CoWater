@@ -81,6 +81,14 @@ class MothPublisher:
             logger.info("MothPublisher 비활성화 또는 websockets 미설치")
             return
 
+        # Server에서 할당한 실제 Moth 서버 정보 추출
+        server_info = registration_response.get("server", {})
+        if server_info:
+            moth_host = server_info.get("host", "cobot.center")
+            moth_port = server_info.get("port", 8286)
+            self.moth_url = f"wss://{moth_host}:{moth_port}"
+            logger.info(f"Moth 서버 URL 업데이트: {self.moth_url}")
+
         # Server에서 할당한 heartbeat topic 저장
         self.heartbeat_topic = registration_response.get("heartbeat_topic")
 
@@ -92,7 +100,7 @@ class MothPublisher:
             if track_type and topic:
                 self.telemetry_topics[track_type] = topic
 
-        logger.info(f"MothPublisher 초기화 완료: {len(self.telemetry_topics)}개 telemetry topics")
+        logger.info(f"MothPublisher 초기화 완료: Moth={self.moth_url}, {len(self.telemetry_topics)}개 telemetry topics")
         logger.debug(f"Heartbeat topic: {self.heartbeat_topic}")
 
     async def connect(self) -> None:

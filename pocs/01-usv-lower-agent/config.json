@@ -1,7 +1,10 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9111 },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9111
+  },
   "registry": {
-    "url": "http://127.0.0.1:8003",
+    "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 10
@@ -22,7 +25,10 @@
       "enabled": true,
       "timeout_seconds": 30
     },
-    "rules": { "max_speed_mps": 2.5, "battery_warn_percent": 30 },
+    "rules": {
+      "max_speed_mps": 2.5,
+      "battery_warn_percent": 30
+    },
     "capabilities": {
       "skills": [
         "surface_navigation",
@@ -49,15 +55,39 @@
         "abort_mission",
         "emergency_stop"
       ],
-      "constraints": ["stay_on_surface", "respect_local_safety_limits"],
+      "constraints": [
+        "stay_on_surface",
+        "respect_local_safety_limits"
+      ],
       "tracks": [
-        { "type": "GPS", "name": "gps", "frequency_hz": 1 },
-        { "type": "ODOMETRY", "name": "imu", "frequency_hz": 10 },
-        { "type": "TOPIC", "name": "sonar", "frequency_hz": 2 },
-        { "type": "BATTERY", "name": "battery", "frequency_hz": 0.5 },
-        { "type": "TOPIC", "name": "telemetry", "frequency_hz": 1 }
+        {
+          "type": "GPS",
+          "name": "gps",
+          "frequency_hz": 1
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "imu",
+          "frequency_hz": 10
+        },
+        {
+          "type": "TOPIC",
+          "name": "sonar",
+          "frequency_hz": 2
+        },
+        {
+          "type": "BATTERY",
+          "name": "battery",
+          "frequency_hz": 0.5
+        },
+        {
+          "type": "TOPIC",
+          "name": "telemetry",
+          "frequency_hz": 1
+        }
       ]
-    }
+    },
+    "parent_id": 5
   },
   "moth": {
     "enabled": true,
@@ -65,14 +95,24 @@
     "reconnect_interval_seconds": 5
   },
   "simulation": {
-    "interval_seconds": 2,
+    "interval_seconds": 1,
     "start_position": {
       "latitude": 37.005,
       "longitude": 129.425,
       "altitude": 0.0
     },
-    "speed_range": [0.5, 3.0],
-    "altitude_range": [0.0, 0.8]
+    "speed_range": [
+      0.5,
+      3.0
+    ],
+    "altitude_range": [
+      0.0,
+      0.8
+    ]
   },
-  "cors": { "allow_origins": ["*"] }
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
 }

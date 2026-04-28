@@ -3,7 +3,7 @@
     "secret_key": "server-secret"
   },
   "server": {
-    "host": "cobot.center",
+    "host": "127.0.0.1",
     "port": 8286,
     "ping_endpoint": "/pang/ping"
   },
@@ -16,6 +16,8 @@
     "command_path_prefix": "/agents"
   },
   "cors": {
-    "allow_origins": ["*"]
+    "allow_origins": [
+      "*"
+    ]
   }
 }

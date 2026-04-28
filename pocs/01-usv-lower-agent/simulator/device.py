@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import random
-from typing import Any
+from typing import Any, Optional
 
 from agent.state import AgentState, utc_now
 
@@ -16,6 +17,9 @@ class DeviceSimulator:
             "speed": random.uniform(*simulation_config.get("speed_range", [0.2, 1.0])),
         }
         self.battery = random.uniform(65, 100)
+        # 작업 명령: {'type': 'move_to', 'target': [lat, lon], 'speed': 2.0} 등
+        self.current_task: Optional[dict[str, Any]] = None
+        self._speed_range = simulation_config.get("speed_range", [0.2, 1.0])
 
     def interval_seconds(self) -> float:
         return float(self.config.get("interval_seconds") or 2)

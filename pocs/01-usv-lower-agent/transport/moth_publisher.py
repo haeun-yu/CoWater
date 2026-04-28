@@ -66,20 +66,30 @@ class MothPublisher:
 
     async def initialize(self, registration_response: dict[str, Any]) -> None:
         """
-        Server 등록 응답에서 Topics 초기화
+        Server 등록 응답에서 Topics 초기화 + Moth URL 업데이트
 
         Device Registration Server에서 받은 응답에서:
         - heartbeat_topic: device.heartbeat.{device_id}
         - telemetry_topics: [GPS, BATTERY, ODOMETRY 등의 topic 목록]
+        - server: Moth 서버의 실제 주소 (host, port, ping_endpoint)
 
         이후 이 topics을 통해 Moth에 데이터를 발행합니다.
 
         Args:
-            registration_response: Device Registration 응답 (id, token, heartbeat_topic, telemetry_topics 포함)
+            registration_response: Device Registration 응답 (id, token, heartbeat_topic, telemetry_topics, server 포함)
         """
         if not self.enabled or websockets is None:
             logger.info("MothPublisher 비활성화 또는 websockets 미설치")
             return
+
+        # Server에서 할당한 실제 Moth 서버 정보 추출
+        server_info = registration_response.get("server", {})
+        if server_info:
+            moth_host = server_info.get("host", "cobot.center")
+            moth_port = server_info.get("port", 8286)
+            # wss://host:port 형식으로 URL 구성
+            self.moth_url = f"wss://{moth_host}:{moth_port}"
+            logger.info(f"Moth 서버 URL 업데이트: {self.moth_url}")
 
         # Server에서 할당한 heartbeat topic 저장
         self.heartbeat_topic = registration_response.get("heartbeat_topic")
@@ -92,7 +102,7 @@ class MothPublisher:
             if track_type and topic:
                 self.telemetry_topics[track_type] = topic
 
-        logger.info(f"MothPublisher 초기화 완료: {len(self.telemetry_topics)}개 telemetry topics")
+        logger.info(f"MothPublisher 초기화 완료: Moth={self.moth_url}, {len(self.telemetry_topics)}개 telemetry topics")
         logger.debug(f"Heartbeat topic: {self.heartbeat_topic}")
 
     async def connect(self) -> None:

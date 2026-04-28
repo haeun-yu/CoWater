@@ -1,7 +1,10 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9151 },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9151
+  },
   "registry": {
-    "url": "http://127.0.0.1:8003",
+    "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 10
@@ -23,7 +26,10 @@
       "enabled": true,
       "timeout_seconds": 30
     },
-    "rules": { "max_speed_mps": 8.0, "battery_warn_percent": 20 },
+    "rules": {
+      "max_speed_mps": 8.0,
+      "battery_warn_percent": 20
+    },
     "capabilities": {
       "skills": [
         "surface_navigation",
@@ -57,10 +63,26 @@
         "can_route_direct_to_system"
       ],
       "tracks": [
-        { "type": "GPS", "name": "gps", "frequency_hz": 1 },
-        { "type": "ODOMETRY", "name": "ship_motion", "frequency_hz": 1 },
-        { "type": "TOPIC", "name": "wired_link", "frequency_hz": 10 },
-        { "type": "VIDEO", "name": "rov_video", "frequency_hz": 30 }
+        {
+          "type": "GPS",
+          "name": "gps",
+          "frequency_hz": 1
+        },
+        {
+          "type": "ODOMETRY",
+          "name": "ship_motion",
+          "frequency_hz": 1
+        },
+        {
+          "type": "TOPIC",
+          "name": "wired_link",
+          "frequency_hz": 10
+        },
+        {
+          "type": "VIDEO",
+          "name": "rov_video",
+          "frequency_hz": 30
+        }
       ]
     }
   },
@@ -70,14 +92,24 @@
     "reconnect_interval_seconds": 5
   },
   "simulation": {
-    "interval_seconds": 5,
+    "interval_seconds": 1,
     "start_position": {
       "latitude": 37.005,
       "longitude": 129.418,
       "altitude": 3.0
     },
-    "speed_range": [0.0, 1.0],
-    "altitude_range": [3.0, 3.0]
+    "speed_range": [
+      0.0,
+      1.0
+    ],
+    "altitude_range": [
+      3.0,
+      3.0
+    ]
   },
-  "cors": { "allow_origins": ["*"] }
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
 }

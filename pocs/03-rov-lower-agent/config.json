@@ -1,7 +1,10 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9131 },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9131
+  },
   "registry": {
-    "url": "http://127.0.0.1:8003",
+    "url": "http://127.0.0.1:8286",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 10
@@ -22,7 +25,10 @@
       "enabled": true,
       "timeout_seconds": 30
     },
-    "rules": { "max_speed_mps": 1.0, "battery_warn_percent": 30 },
+    "rules": {
+      "max_speed_mps": 1.0,
+      "battery_warn_percent": 30
+    },
     "capabilities": {
       "skills": [
         "precise_manipulation",
@@ -52,12 +58,29 @@
         "keep_camera_view_stable"
       ],
       "tracks": [
-        { "type": "VIDEO", "name": "main_camera", "frequency_hz": 30 },
-        { "type": "TOPIC", "name": "tether_tension", "frequency_hz": 1 },
-        { "type": "PRESSURE", "name": "depth", "frequency_hz": 10 },
-        { "type": "BATTERY", "name": "power", "frequency_hz": 0.5 }
+        {
+          "type": "VIDEO",
+          "name": "main_camera",
+          "frequency_hz": 30
+        },
+        {
+          "type": "TOPIC",
+          "name": "tether_tension",
+          "frequency_hz": 1
+        },
+        {
+          "type": "PRESSURE",
+          "name": "depth",
+          "frequency_hz": 10
+        },
+        {
+          "type": "BATTERY",
+          "name": "power",
+          "frequency_hz": 0.5
+        }
       ]
-    }
+    },
+    "parent_id": 5
   },
   "moth": {
     "enabled": true,
@@ -71,8 +94,18 @@
       "longitude": 129.43,
       "altitude": -60.0
     },
-    "speed_range": [0.1, 1.5],
-    "altitude_range": [-200.0, -20.0]
+    "speed_range": [
+      0.1,
+      1.5
+    ],
+    "altitude_range": [
+      -200.0,
+      -20.0
+    ]
   },
-  "cors": { "allow_origins": ["*"] }
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
 }

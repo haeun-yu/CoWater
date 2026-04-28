@@ -78,6 +78,12 @@ class AgentRuntime:
             self.state.name,
             self.skills.list_tracks(),
             self.skills.list_actions(),
+            device_type=self.agent_config.get("device_type"),
+            layer=self.agent_config.get("layer"),
+            connectivity=self.agent_config.get("connectivity"),
+            location=self.config.get("simulation", {}).get("start_position"),
+            requires_parent=self.agent_config.get("requires_parent", False),
+            parent_id=self.agent_config.get("parent_id"),
         )
         self.state.registry_id = int(created["id"])
         self.state.token = str(created["token"])

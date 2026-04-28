@@ -51,11 +51,38 @@ class RegistryClient:
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
 
-    def register_device(self, name: str, tracks: list[dict[str, Any]], actions: list[str]) -> dict[str, Any]:
-        return post_json(
-            f"{self.url}/devices",
-            {"secretKey": self.secret_key, "name": name, "tracks": tracks, "actions": {"custom": actions}},
-        )
+    def register_device(
+        self,
+        name: str,
+        tracks: list[dict[str, Any]],
+        actions: list[str],
+        *,
+        device_type: str | None = None,
+        layer: str | None = None,
+        connectivity: str | None = None,
+        location: dict[str, float] | None = None,
+        requires_parent: bool = False,
+        parent_id: int | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "secretKey": self.secret_key,
+            "name": name,
+            "tracks": tracks,
+            "actions": {"custom": actions},
+        }
+        if device_type is not None:
+            body["device_type"] = device_type
+        if layer is not None:
+            body["layer"] = layer
+        if connectivity is not None:
+            body["connectivity"] = connectivity
+        if location is not None:
+            body["location"] = location
+        if requires_parent:
+            body["requires_parent"] = requires_parent
+        if parent_id is not None:
+            body["parent_id"] = parent_id
+        return post_json(f"{self.url}/devices", body)
 
     def upsert_agent(
         self,

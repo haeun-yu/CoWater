@@ -34,7 +34,7 @@ class HeartbeatMonitor:
 
     def __init__(
         self,
-        db_session: Any,
+        registry: Any,
         interval_seconds: int = 10,
         timeout_seconds: int = 30,
         distance_calculator: Optional[Callable] = None,
@@ -43,12 +43,12 @@ class HeartbeatMonitor:
         Heartbeat Monitor 초기화
 
         Args:
-            db_session: SQLAlchemy DB 세션
+            registry: DeviceRegistry (in-memory dictionary-based)
             interval_seconds: 모니터링 체크 주기 (초, 기본 10초)
             timeout_seconds: Offline 판정 timeout (초, 기본 30초)
             distance_calculator: 거리 계산 함수 (기본: Haversine)
         """
-        self.db_session = db_session
+        self.registry = registry
         self.interval_seconds = interval_seconds  # 모니터링 체크 주기
         self.timeout_seconds = timeout_seconds  # Offline timeout
         self.distance_calculator = distance_calculator or self._default_distance
@@ -100,35 +100,21 @@ class HeartbeatMonitor:
 
     async def _check_all_devices(self) -> None:
         """Check all devices for timeout"""
-        from sqlalchemy import and_
-
         try:
-            # Import here to avoid circular imports
-            from src.registry.device_registry import DeviceRegistry
-
             timeout_threshold = datetime.utcnow() - timedelta(seconds=self.timeout_seconds)
 
-            # Find offline devices (not seen recently)
-            offline_devices = (
-                self.db_session.query(DeviceRegistry)
-                .filter(
-                    and_(
-                        DeviceRegistry.last_seen_at < timeout_threshold,
-                        DeviceRegistry.connected == True,
-                    )
-                )
-                .all()
-            )
+            # Check all devices in registry
+            for device in list(self.registry.list_devices()):
+                if device.connected and device.agent.last_seen_at:
+                    last_seen = datetime.fromisoformat(device.agent.last_seen_at)
+                    if last_seen < timeout_threshold:
+                        logger.warning(f"Device {device.id} ({device.name}) marked as offline (no heartbeat)")
+                        device.connected = False
+                        device.last_error = f"Heartbeat timeout at {datetime.utcnow().isoformat()}"
 
-            for device in offline_devices:
-                logger.warning(f"Device {device.id} ({device.name}) marked as offline (no heartbeat)")
-                device.connected = False
-                device.last_error = f"Heartbeat timeout at {datetime.utcnow().isoformat()}"
-                self.db_session.commit()
-
-                # If middle layer agent goes offline, reassign its children
-                if device.layer == "middle":
-                    await self._reassign_children(device)
+                        # If middle layer agent goes offline, reassign its children
+                        if device.layer == "middle":
+                            await self._reassign_children(device)
 
         except Exception as e:
             logger.error(f"Error checking devices: {e}")
@@ -137,16 +123,14 @@ class HeartbeatMonitor:
         """
         When a middle layer agent goes offline, reassign its children to another parent
         """
-        from src.registry.device_registry import DeviceRegistry, HierarchyAssignment
-
         try:
             logger.info(f"Reassigning children of offline parent {offline_parent.id}")
 
-            children = (
-                self.db_session.query(DeviceRegistry)
-                .filter(DeviceRegistry.parent_id == offline_parent.id)
-                .all()
-            )
+            # Find children with this parent
+            children = [
+                d for d in self.registry.list_devices()
+                if d.parent_id == offline_parent.id
+            ]
 
             for child in children:
                 # Find new best parent
@@ -163,19 +147,8 @@ class HeartbeatMonitor:
                     child.parent_id = new_parent.id
                     child.updated_at = datetime.utcnow().isoformat()
 
-                    # Record hierarchy change
-                    assignment = HierarchyAssignment(
-                        child_id=child.id,
-                        parent_id=new_parent.id,
-                        assigned_at=datetime.utcnow().isoformat(),
-                        reason="parent_offline_reassignment",
-                    )
-                    self.db_session.add(assignment)
-
-            self.db_session.commit()
         except Exception as e:
             logger.error(f"Error reassigning children: {e}")
-            self.db_session.rollback()
 
     def _find_best_parent(
         self,
@@ -186,24 +159,15 @@ class HeartbeatMonitor:
         """
         Find the closest available middle layer agent
         """
-        from src.registry.device_registry import DeviceRegistry
-
         if latitude is None or longitude is None:
             return None
 
         try:
-            # Query all online middle layer agents
-            candidates = (
-                self.db_session.query(DeviceRegistry)
-                .filter(
-                    and_(
-                        DeviceRegistry.layer == "middle",
-                        DeviceRegistry.connected == True,
-                        DeviceRegistry.id != exclude_id,
-                    )
-                )
-                .all()
-            )
+            # Find all online middle layer agents
+            candidates = [
+                d for d in self.registry.list_devices()
+                if d.layer == "middle" and d.connected and d.id != exclude_id
+            ]
 
             if not candidates:
                 logger.warning("No available middle layer parents found")
@@ -240,14 +204,11 @@ class HeartbeatMonitor:
         Record that a device sent a heartbeat (update last_seen_at)
         Called when device sends heartbeat via HTTP or Moth
         """
-        from src.registry.device_registry import DeviceRegistry
-
         try:
-            device = self.db_session.query(DeviceRegistry).filter(DeviceRegistry.id == device_id).first()
+            device = self.registry.get_device(device_id)
             if device:
-                device.last_seen_at = datetime.utcnow().isoformat()
+                device.agent.last_seen_at = datetime.utcnow().isoformat()
                 device.connected = True
-                self.db_session.commit()
                 logger.debug(f"Heartbeat recorded for device {device_id}")
         except Exception as e:
             logger.error(f"Error recording heartbeat: {e}")
