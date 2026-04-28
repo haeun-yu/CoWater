@@ -211,17 +211,3 @@ class DecisionEngine:
 {json.dumps(rule_recs, indent=2, ensure_ascii=False)}
 
 간단히 분석해주세요: 이상 징후가 있나요? 추가로 권장할 사항이 있나요? 100자 이내로 답변해주세요."""
-
-Current Status:
-- Device: {state.agent_id}
-- Battery: {telemetry.get('battery_percent', 'unknown')}%
-- Layer: {state.layer}
-
-Telemetry Summary:
-- Speed: {(telemetry.get('motion') or {}).get('speed', 0)} m/s
-- Battery: {telemetry.get('battery_percent', 100)}%
-
-Rule-Based Recommendations:
-{json.dumps(rule_recs, indent=2)}
-
-Analyze briefly: Are there any anomalies? Any additional recommendations? Keep response under 100 words."""

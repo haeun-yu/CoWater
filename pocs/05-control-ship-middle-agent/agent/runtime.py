@@ -176,8 +176,8 @@ class AgentRuntime:
         self.state.registered_at = utc_now()
         self.state.connected = True
         self.state.last_seen_at = utc_now()
-        # ← NEW: Initialize Moth topics from registration response
-        asyncio.create_task(self.moth_publisher.initialize(created))
+        # Store registration response for Moth initialization in simulation_loop
+        self._registration_response = created
         self._upsert_agent()
         self.identity_store.write(
             {
@@ -225,7 +225,11 @@ class AgentRuntime:
             return
 
         # ===== Moth 연결 초기화 =====
-        # WebSocket 연결, 자동 재연결 loop, 주기적 heartbeat 시작
+        # 1. Registration response에서 topics 초기화
+        # 2. WebSocket 연결
+        # 3. 자동 재연결 loop, 주기적 heartbeat 시작
+        if hasattr(self, '_registration_response') and self._registration_response:
+            await self.moth_publisher.initialize(self._registration_response)
         await self.moth_publisher.connect()
         asyncio.create_task(self.moth_publisher._reconnect_loop())
         asyncio.create_task(self.moth_publisher.heartbeat_loop())

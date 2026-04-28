@@ -31,7 +31,8 @@ class OllamaClient(LLMClient):
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         if httpx:
-            self.client = httpx.AsyncClient(timeout=timeout if (timeout := 60) else 60)
+            # httpx.AsyncClient의 timeout 기본값 설정 (60초)
+            self.client = httpx.AsyncClient(timeout=60.0)
         else:
             self.client = None
         logger.info(f"OllamaClient initialized: {endpoint}, model={model}")

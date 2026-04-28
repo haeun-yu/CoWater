@@ -19,6 +19,8 @@ class AgentState:
     device_type: Optional[str] = None
     token: Optional[str] = None
     registry_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     connected: bool = False
     registered_at: Optional[str] = None
     last_seen_at: Optional[str] = None
