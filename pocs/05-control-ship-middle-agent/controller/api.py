@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -128,18 +132,148 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
     elif msg_type == "task.assign":
-        command = {
-            "action": str(data.get("action") or data.get("command") or "hold_position"),
-            "params": data.get("params") or {},
-            "reason": data.get("reason") or f"A2A task {request.taskId}",
-        }
-        result = runtime.apply_command(command)
+        action = str(data.get("action") or data.get("command") or "hold_position")
+        params = data.get("params") or {}
+        reason = data.get("reason") or f"A2A task {request.taskId}"
+
+        # For mine-clearing missions, route to lower agents
+        if action == "survey_depth" and params.get("mission_type") == "mine_clearance":
+            # Route survey_depth to AUV (target_device_id in params)
+            await _route_to_lower_agent(
+                runtime,
+                "survey_depth",
+                params,
+                f"Mine survey command: {reason}"
+            )
+            result = {"routed": True, "action": action, "target": "lower_agents"}
+        else:
+            command = {
+                "action": action,
+                "params": params,
+                "reason": reason,
+            }
+            result = runtime.apply_command(command)
     else:
         result = {"received": True, "message_type": msg_type}
     task = build_task(request.taskId, request.message, result)
     runtime.state.tasks[task["id"]] = task
     runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
     return task
+
+
+async def _route_to_lower_agent(runtime: AgentRuntime, action: str, params: dict[str, Any], reason: str) -> None:
+    """Route mission to lower agents (AUV, ROV) based on their capabilities"""
+    logger = logging.getLogger(__name__)
+
+    # Discover lower agents from registry
+    try:
+        registry_url = runtime.config.get("registry", {}).get("url", "http://127.0.0.1:9100").rstrip("/")
+        req = urllib.request.Request(f"{registry_url}/devices", headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            all_devices = json.loads(resp.read() or b"[]")
+    except Exception as e:
+        logger.warning(f"Failed to fetch device list for routing: {e}")
+        return
+
+    # Find suitable lower agents
+    auv_agent = None
+    rov_agent = None
+    for device in all_devices:
+        try:
+            if device.get("layer") == "lower" and device.get("connected"):
+                device_type = device.get("device_type", "").lower()
+                agent_info = device.get("agent")
+                if not isinstance(agent_info, dict):
+                    agent_info = {}
+                endpoint = agent_info.get("endpoint")
+
+                if "auv" in device_type and endpoint and not auv_agent:
+                    auv_agent = {"device_id": device["id"], "endpoint": endpoint, "name": device.get("name")}
+                elif "rov" in device_type and endpoint and not rov_agent:
+                    rov_agent = {"device_id": device["id"], "endpoint": endpoint, "name": device.get("name")}
+        except Exception as e:
+            logger.debug(f"Error processing device {device.get('id')}: {e}")
+            continue
+
+    # Send survey_depth to AUV
+    if auv_agent and action == "survey_depth":
+        try:
+            a2a_message = {
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": str(uuid4()),
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "type": "data",
+                                "data": {
+                                    "message_type": "task.assign",
+                                    "action": "survey_depth",
+                                    "params": params,
+                                    "reason": reason
+                                }
+                            }
+                        ]
+                    },
+                    "taskId": str(uuid4()),
+                    "metadata": {}
+                }
+            }
+
+            data = json.dumps(a2a_message).encode("utf-8")
+            req = urllib.request.Request(
+                auv_agent["endpoint"],
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read() or b"{}")
+                logger.info(f"Routed survey_depth to AUV {auv_agent['device_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to route to AUV: {e}")
+
+    # Send remove_mine to ROV
+    if rov_agent and action == "survey_depth":  # Both operations for mine clearing
+        try:
+            a2a_message = {
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": str(uuid4()),
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "type": "data",
+                                "data": {
+                                    "message_type": "task.assign",
+                                    "action": "remove_mine",
+                                    "params": params,
+                                    "reason": reason
+                                }
+                            }
+                        ]
+                    },
+                    "taskId": str(uuid4()),
+                    "metadata": {}
+                }
+            }
+
+            data = json.dumps(a2a_message).encode("utf-8")
+            req = urllib.request.Request(
+                rov_agent["endpoint"],
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read() or b"{}")
+                logger.info(f"Routed remove_mine to ROV {rov_agent['device_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to route to ROV: {e}")
 
 
 def run(default_config_path: Path) -> None:

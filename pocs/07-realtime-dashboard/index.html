@@ -3,1454 +3,1186 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CoWater 실시간 디바이스 시각화</title>
+    <title>3D 해양 무인 작전 체계 시각화 PoC</title>
     <style>
+        /* === 전역 스타일 === */
         body { margin: 0; overflow: hidden; background-color: #000; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
         #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
 
+        /* === UI 패널 공통 === */
         .panel {
-            position: absolute; background: rgba(15, 23, 42, 0.85); border: 1px solid #334155;
-            border-radius: 8px; padding: 15px; backdrop-filter: blur(8px); z-index: 10;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5); display: flex; flex-direction: column;
+            position: absolute;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            backdrop-filter: blur(8px);
+            z-index: 10;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
         }
         #left-panel { top: 20px; left: 20px; width: 260px; }
         #right-panel { top: 20px; right: 20px; width: 340px; }
 
-        .panel-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding-bottom: 10px; border-bottom: 1px solid #475569; margin-bottom: 10px; user-select: none; }
+        /* === 패널 토글(접기/펼치기) 애니메이션 요소 === */
+        .panel-header {
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+            padding-bottom: 10px; border-bottom: 1px solid #475569; margin-bottom: 10px; user-select: none;
+        }
         .panel.collapsed .panel-header { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
         .panel-header h3 { margin: 0 !important; border: none !important; padding: 0 !important; font-size: 1.1rem; color: #fff; }
         .toggle-icon { color: #94a3b8; font-size: 0.8rem; transition: transform 0.3s ease; }
         .panel.collapsed .toggle-icon { transform: rotate(-90deg); }
-        .panel-content { max-height: 80vh; overflow-y: auto; transition: max-height 0.3s ease, opacity 0.3s ease; opacity: 1; }
-        .panel.collapsed .panel-content { max-height: 0; opacity: 0; overflow: hidden; }
+
+        .panel-content {
+            max-height: 80vh; overflow-y: auto;
+            transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s; opacity: 1;
+        }
+        .panel.collapsed .panel-content { max-height: 0; opacity: 0; margin: 0; padding: 0; overflow: hidden; }
 
         h3 { margin: 0 0 15px 0; font-size: 1.2rem; color: #fff; border-bottom: 1px solid #475569; padding-bottom: 8px; }
         h4 { margin: 15px 0 5px 0; font-size: 0.9rem; color: #cbd5e1; }
         hr { border: none; border-top: 1px solid #334155; margin: 15px 0; }
 
-        select, input[type="range"] { width: 100%; padding: 6px; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; outline: none; margin-bottom: 5px; }
+        /* === 컨트롤 요소 === */
+        select, input[type="range"] {
+            width: 100%; padding: 6px; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px; outline: none; margin-bottom: 5px;
+        }
         .control-value { font-size: 0.8rem; color: #94a3b8; text-align: right; display: block; }
 
+        /* === 우측 탭 메뉴 === */
         .tabs { display: flex; margin-bottom: 10px; border-bottom: 1px solid #334155; }
-        .tab-btn { flex: 1; background: transparent; color: #94a3b8; border: none; padding: 8px 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s; border-bottom: 2px solid transparent; }
+        .tab-btn {
+            flex: 1; background: transparent; color: #94a3b8; border: none; padding: 8px 5px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; border-bottom: 2px solid transparent;
+        }
         .tab-btn:hover { color: #fff; }
         .tab-btn.active { color: #60a5fa; border-bottom: 2px solid #60a5fa; font-weight: bold; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        .list-item { background: rgba(30,41,59,0.6); margin-bottom: 8px; padding: 10px; border-radius: 6px; border-left: 4px solid #475569; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
-        .list-item:hover { background: rgba(51,65,85,0.8); }
-        .list-item.selected { border-left-color: #60a5fa; background: rgba(51,65,85,0.9); }
+        /* === 리스트 아이템 === */
+        .list-item {
+            background: rgba(30, 41, 59, 0.6); margin-bottom: 8px; padding: 10px; border-radius: 6px; border-left: 4px solid #475569; cursor: pointer; transition: all 0.2s; font-size: 0.85rem;
+        }
+        .list-item:hover { background: rgba(51, 65, 85, 0.8); }
+        .list-item.selected { border-left-color: #60a5fa; background: rgba(51, 65, 85, 0.9); }
         .list-item .title { font-weight: bold; margin-bottom: 4px; display: flex; justify-content: space-between; }
 
-        .data-packet { font-family: monospace; font-size: 0.78rem; color: #4ade80; background: rgba(0,0,0,0.5); padding: 4px; border-radius: 3px; margin-top: 4px; }
+        /* 데이터 패킷 스타일 */
+        .data-packet { font-family: monospace; font-size: 0.8rem; color: #4ade80; background: rgba(0,0,0,0.5); padding: 4px; border-radius: 3px; margin-top: 4px; }
         .data-packet::before { content: ">> "; color: #60a5fa; }
 
+        /* 상태별 라벨 색상 */
         .status-active { color: #4ade80; }
         .status-warning { color: #fbbf24; }
         .status-critical { color: #f87171; }
-        .status-waiting { color: #94a3b8; }
 
+        /* === 경보 아이템 특수 스타일 === */
         .alert-warning { border-left-color: #fbbf24; }
         .alert-critical { border-left-color: #f87171; animation: pulse-bg 2s infinite; }
-        @keyframes pulse-bg { 0%,100% { background: rgba(30,41,59,0.6); } 50% { background: rgba(248,113,113,0.15); } }
+        @keyframes pulse-bg { 0% { background: rgba(30, 41, 59, 0.6); } 50% { background: rgba(248, 113, 113, 0.2); } 100% { background: rgba(30, 41, 59, 0.6); } }
 
+        /* === 라벨 및 툴팁 === */
         #labels-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 5; overflow: hidden; }
-        .object-label { position: absolute; background: rgba(0,0,0,0.65); color: white; padding: 3px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; transform: translate(-50%,-100%); border: 1px solid #475569; white-space: nowrap; text-shadow: 1px 1px 2px black; }
+        .object-label {
+            position: absolute; background: rgba(0, 0, 0, 0.6); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; transform: translate(-50%, -100%); border: 1px solid #475569; white-space: nowrap; text-shadow: 1px 1px 2px black;
+        }
+        #tooltip {
+            position: absolute; background: rgba(0, 0, 0, 0.9); color: white; padding: 10px; border-radius: 6px; font-size: 0.85rem; pointer-events: none; display: none; z-index: 100; border: 1px solid #60a5fa; box-shadow: 0 4px 10px rgba(0,0,0,0.5); white-space: nowrap;
+        }
 
-        #tooltip { position: absolute; background: rgba(0,0,0,0.9); color: white; padding: 10px; border-radius: 6px; font-size: 0.85rem; pointer-events: none; display: none; z-index: 100; border: 1px solid #60a5fa; box-shadow: 0 4px 10px rgba(0,0,0,0.5); white-space: nowrap; }
-
+        /* === 단축키 안내 === */
         .shortcuts { font-size: 0.7rem; color: #64748b; line-height: 1.5; margin-top: 15px; }
         .shortcuts kbd { background: #334155; padding: 2px 5px; border-radius: 3px; color: #e2e8f0; }
 
+        /* 사용자 커스텀 스크롤바 */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
-        #minimap-panel { position: absolute; bottom: 20px; right: 20px; width: 260px; height: 260px; border: 3px solid #334155; border-radius: 50%; overflow: hidden; z-index: 10; box-shadow: 0 4px 15px rgba(0,0,0,0.6), inset 0 0 20px rgba(96,165,250,0.3); background: #0f172a; cursor: grab; }
-        #minimap-panel:active { cursor: grabbing; }
-        #minimap-container { position: absolute; top: -70px; left: -70px; width: 400px; height: 400px; transform-origin: center; }
-        #minimap { width: 100%; height: 100%; background: #0f172a; }
-        .radar-crosshair { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 12; background: linear-gradient(rgba(96,165,250,0.3) 1px, transparent 1px) center/100% 50% no-repeat, linear-gradient(90deg, rgba(96,165,250,0.3) 1px, transparent 1px) center/50% 100% no-repeat; }
-
-        #loading-overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15,23,42,0.95); z-index: 200; display: flex; align-items: center; justify-content: center; flex-direction: column; backdrop-filter: blur(4px); }
-        #loading-overlay.hidden { display: none; }
-        #loading-bar { width: 300px; height: 6px; background: #1e293b; border-radius: 3px; border: 1px solid #475569; overflow: hidden; margin-bottom: 15px; }
-        #loading-progress { height: 100%; background: linear-gradient(90deg, #60a5fa 0%, #3b82f6 50%, #60a5fa 100%); width: 0%; transition: width 0.3s ease; }
-        #loading-text { color: #cbd5e1; font-size: 0.9rem; text-align: center; font-family: 'Courier New', monospace; }
-
-        #conn-status { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(15,23,42,0.85); border: 1px solid #334155; border-radius: 6px; padding: 5px 14px; z-index: 10; font-size: 0.78rem; color: #94a3b8; display: flex; gap: 12px; align-items: center; }
-        .conn-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 3px; }
-        .conn-dot.on { background: #4ade80; }
-        .conn-dot.wait { background: #fbbf24; animation: blink 1s infinite; }
-        .conn-dot.off { background: #f87171; }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-        /* ── 상단 호버 헤더 ── */
-        #header-trigger {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 8px;
-            z-index: 50; pointer-events: all;
-        }
+        /* === 상단 호버 헤더 === */
+        #header-trigger { position: fixed; top: 0; left: 0; width: 100vw; height: 8px; z-index: 50; pointer-events: all; }
         #header {
             position: fixed; top: 0; left: 0; width: 100vw; z-index: 49;
             background: rgba(10, 17, 32, 0.92);
             border-bottom: 1px solid rgba(96, 165, 250, 0.25);
             backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-            transform: translateY(-100%);
-            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateY(-100%); transition: transform 0.3s ease;
+            padding: 10px 20px;
             display: flex; align-items: center; justify-content: space-between;
-            padding: 0 24px; height: 56px; pointer-events: none;
         }
-        #header.visible { transform: translateY(0); pointer-events: all; }
-
-        #header-logo { display: flex; align-items: center; gap: 10px; }
-        #header-logo .logo-icon { font-size: 1.4rem; line-height: 1; }
-        #header-logo .logo-text { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; letter-spacing: 0.03em; }
-        #header-logo .logo-sub { font-size: 0.72rem; color: #64748b; margin-top: 1px; }
-
-        #header-center { display: flex; align-items: center; gap: 20px; }
-        .header-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-        .header-stat .hs-val { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; font-variant-numeric: tabular-nums; }
-        .header-stat .hs-lbl { font-size: 0.65rem; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; }
-        .header-divider { width: 1px; height: 28px; background: #1e293b; }
-
-        #header-right { display: flex; align-items: center; gap: 14px; }
-        #header-clock { font-size: 0.82rem; color: #94a3b8; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; white-space: nowrap; }
-        #header-registry-badge {
-            font-size: 0.72rem; padding: 3px 10px; border-radius: 20px;
-            border: 1px solid #334155; color: #94a3b8; background: rgba(30,41,59,0.6);
-            cursor: pointer; transition: border-color 0.2s, color 0.2s;
+        #header.visible { transform: translateY(0); }
+        .header-nav { display: flex; gap: 8px; align-items: center; }
+        .header-btn {
+            background: rgba(30,41,59,0.7); color: #f8fafc; border: 1px solid #334155;
+            border-radius: 20px; padding: 4px 14px; font-size: 0.78rem; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
         }
-        #header-registry-badge:hover { border-color: #60a5fa; color: #60a5fa; }
-        #header-registry-badge.ok { border-color: rgba(74,222,128,0.4); color: #4ade80; }
-        #header-registry-badge.offline { border-color: rgba(248,113,113,0.4); color: #f87171; }
+        .header-btn:hover { background: rgba(51,65,85,0.9); border-color: #60a5fa; }
+        .header-btn.active { border-color: #60a5fa; color: #60a5fa; }
+
+        /* === 서버 오프라인 배너 === */
+        #offline-banner {
+            position: fixed; top: 0; left: 0; width: 100%; z-index: 100;
+            background: rgba(239,68,68,0.9); color: white; text-align: center; padding: 8px; font-size: 0.85rem;
+            display: none;
+        }
+
+        /* === 미니맵 패널 === */
+        #minimap-panel {
+            position: absolute; bottom: 20px; right: 20px; width: 260px; height: 260px; border: 3px solid #334155; border-radius: 50%; overflow: hidden; z-index: 10; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(96, 165, 250, 0.3); background: #0f172a; transform: translateZ(0); cursor: grab;
+        }
+        #minimap-panel:active { cursor: grabbing; }
+        #minimap-container { position: absolute; top: -70px; left: -70px; width: 400px; height: 400px; transform-origin: center; }
+        #minimap { width: 100%; height: 100%; background: #0f172a; }
+
+        /* 레이더 십자선 */
+        .radar-crosshair { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 12; background: linear-gradient(rgba(96, 165, 250, 0.3) 1px, transparent 1px) center/100% 50% no-repeat, linear-gradient(90deg, rgba(96, 165, 250, 0.3) 1px, transparent 1px) center/50% 100% no-repeat; }
+
+        /* === 로딩 UI === */
+        #loading-overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.95); z-index: 200; display: flex; align-items: center; justify-content: center; flex-direction: column; backdrop-filter: blur(4px); }
+        #loading-overlay.hidden { display: none; }
+        #loading-bar { width: 300px; height: 6px; background: #1e293b; border-radius: 3px; border: 1px solid #475569; overflow: hidden; margin-bottom: 15px; }
+        #loading-progress { height: 100%; background: linear-gradient(90deg, #60a5fa 0%, #3b82f6 50%, #60a5fa 100%); width: 0%; transition: width 0.3s ease; }
+        #loading-text { color: #cbd5e1; font-size: 0.9rem; text-align: center; font-family: 'Courier New', monospace; }
     </style>
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
-<div id="header-trigger"></div>
-<header id="header">
-    <div id="header-logo">
-        <span class="logo-icon">🌊</span>
-        <div>
-            <div class="logo-text">CoWater</div>
-            <div class="logo-sub">실시간 디바이스 시각화</div>
+    <div id="header-trigger"></div>
+    <div id="header">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:1rem; font-weight:bold; color:#60a5fa;">CoWater</span>
+            <span style="font-size:0.75rem; color:#64748b;">해양 무인 시스템 작전 플랫폼</span>
+        </div>
+        <div class="header-nav">
+            <button class="header-btn active">🌐 3D 작전뷰</button>
+            <button class="header-btn" onclick="location.href='alerts.html'" style="opacity:0.6; cursor:not-allowed;">⚠️ 경보 관리</button>
         </div>
     </div>
-    <div id="header-center">
-        <div class="header-stat">
-            <span class="hs-val" id="hdr-devices">0</span>
-            <span class="hs-lbl">디바이스</span>
-        </div>
-        <div class="header-divider"></div>
-        <div class="header-stat">
-            <span class="hs-val" id="hdr-connected">0</span>
-            <span class="hs-lbl">Moth 연결</span>
-        </div>
-        <div class="header-divider"></div>
-        <div class="header-stat">
-            <span class="hs-val" id="hdr-links">0</span>
-            <span class="hs-lbl">통신 링크</span>
-        </div>
-        <div class="header-divider"></div>
-        <div class="header-stat">
-            <span class="hs-val" id="hdr-alerts" style="color:#4ade80">0</span>
-            <span class="hs-lbl">활성 경보</span>
-        </div>
-    </div>
-    <div id="header-right">
-        <span id="header-clock">--:--:--</span>
-        <span id="header-registry-badge" onclick="promptRegistryUrl()">00 서버: 확인 중</span>
-        <button id="header-alerts-page" onclick="location.href='alerts.html'" style="font-size:0.72rem;padding:3px 10px;border-radius:20px;border:1px solid #334155;color:#f8fafc;background:rgba(30,41,59,0.72);cursor:pointer;">경보 관리</button>
-    </div>
-</header>
+    <div id="offline-banner">⚠️ 00 서버(Device Registry)에 연결할 수 없습니다. 서버 상태를 확인하세요.</div>
 
-<div id="canvas-container"></div>
-<div id="labels-container"></div>
-<div id="tooltip"></div>
+    <div id="canvas-container"></div>
+    <div id="labels-container"></div>
+    <div id="tooltip"></div>
 
-<div id="loading-overlay">
-    <div id="loading-bar"><div id="loading-progress"></div></div>
-    <div id="loading-text">지형 데이터 로딩 중...</div>
-</div>
+    <div id="loading-overlay">
+        <div id="loading-bar">
+            <div id="loading-progress"></div>
+        </div>
+        <div id="loading-text">지형 데이터 로딩 중...</div>
+    </div>
 
-<div id="left-panel" class="panel">
-    <div class="panel-header" onclick="uiManager.togglePanel('left')">
-        <h3>🌊 CoWater 제어판</h3>
-        <span class="toggle-icon">▼</span>
-    </div>
-    <div class="panel-content">
-        <div id="stats-container"><div style="color:#64748b;font-size:0.85rem;">연결 중...</div></div>
-        <hr>
-        <h4>카메라 모드</h4>
-        <select id="camera-mode">
-            <option value="orbit">자유 회전 (Orbit)</option>
-            <option value="follow">플랫폼 추적 (Follow)</option>
-            <option value="topdown">위에서 본 뷰 (Top-down)</option>
-        </select>
-        <h4>지도 스타일 (미니맵)</h4>
-        <select id="map-style">
-            <option value="satellite">위성 지도</option>
-            <option value="dark">전술 다크</option>
-            <option value="ocean">해양 수심도</option>
-        </select>
-        <h4>표시 깊이 필터</h4>
-        <input type="range" id="depth-filter" min="-200" max="0" value="-200" step="5">
-        <span class="control-value" id="depth-value">-200m ~ 0m 표시</span>
-        <div class="shortcuts">
-            <strong>단축키</strong><br>
-            <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> 이동<br>
-            <kbd>E</kbd> / <kbd>Q</kbd> 고도 올리기/내리기<br>
-            <kbd>1</kbd>/<kbd>2</kbd> 객체 선택 &nbsp;|&nbsp; <kbd>F</kbd> 포커싱<br>
-            <kbd>L</kbd> 라벨 ON/OFF &nbsp;|&nbsp; <kbd>G</kbd> 그리드 ON/OFF
+    <div id="left-panel" class="panel">
+        <div class="panel-header" onclick="uiManager.togglePanel('left')">
+            <h3>해양 작전 제어판</h3>
+            <span class="toggle-icon">▼</span>
         </div>
-    </div>
-</div>
+        <div class="panel-content">
+            <div id="stats-container"></div>
+            <hr>
+            <h4>카메라 모드</h4>
+            <select id="camera-mode">
+                <option value="orbit">자유 회전 (Orbit)</option>
+                <option value="follow">플랫폼 추적 (Follow)</option>
+                <option value="topdown">위에서 본 뷰 (Top-down)</option>
+            </select>
 
-<div id="right-panel" class="panel">
-    <div class="panel-header" onclick="uiManager.togglePanel('right')">
-        <h3>디바이스 / 연결 / 경보 현황</h3>
-        <span class="toggle-icon">▼</span>
-    </div>
-    <div class="panel-content">
-        <div id="selected-detail" style="margin-bottom:15px; display:none;"></div>
-        <div class="tabs">
-            <button class="tab-btn active" onclick="uiManager.switchTab('objects')">📡 디바이스 (<span id="obj-count">0</span>)</button>
-            <button class="tab-btn" onclick="uiManager.switchTab('links')">🔗 연결 (<span id="link-count">0</span>)</button>
-            <button class="tab-btn" onclick="uiManager.switchTab('alerts')">⚠️ 경보 (<span id="alert-count">0</span>)</button>
-        </div>
-        <div id="tab-objects" class="tab-content active">
-            <div id="object-list-container"></div>
-        </div>
-        <div id="tab-links" class="tab-content">
-            <div id="link-list-container">
-                <div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>
-            </div>
-        </div>
-        <div id="tab-alerts" class="tab-content">
-            <div id="alert-list-container">
-                <div style="text-align:center; color:#64748b; padding:20px;">발생한 경보가 없습니다.</div>
+            <h4>지도 스타일 (미니맵)</h4>
+            <select id="map-style">
+                <option value="satellite">위성 지도 (Satellite)</option>
+                <option value="dark">전술 다크 (지상/해면 구분)</option>
+                <option value="ocean">해양 수심도 (Ocean Base)</option>
+            </select>
+
+            <h4>표시 깊이 필터</h4>
+            <input type="range" id="depth-filter" min="-200" max="0" value="-200" step="5">
+            <span class="control-value" id="depth-value">-200m ~ 0m 표시</span>
+            <h4>시뮬레이션 배속</h4>
+            <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="1">
+            <span class="control-value" id="speed-value">1.0x</span>
+            <div class="shortcuts">
+                <strong>단축키</strong><br>
+                <kbd>1</kbd>/<kbd>2</kbd> 객체/통신선 선택<br>
+                <kbd>F</kbd> 선택 타겟 포커싱<br>
+                <kbd>L</kbd> 라벨 ON/OFF &nbsp;|&nbsp; <kbd>G</kbd> 그리드 ON/OFF<br>
             </div>
         </div>
     </div>
-</div>
 
-<div id="minimap-panel" oncontextmenu="return false;">
-    <div id="minimap-container"><div id="minimap"></div></div>
-    <div class="radar-crosshair"></div>
-</div>
-
-<div id="conn-status"></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script>
-
-// ─── 색상 ─────────────────────────────────────────────────────
-const COLORS = {
-    control_center:    0xff6b6b,
-    control_ship:      0x4ecdc4,
-    ocean_power_tower: 0xeab308,
-    usv:  0xffd93d,
-    auv:  0x95a5ff,
-    rov:  0x6bcf7f,
-    link_rf:       0x60a5fa,
-    link_acoustic: 0x2dd4bf,
-    link_satellite:0xc084fc,
-    alert_critical:0xf44336,
-    alert_warning: 0xff9800,
-};
-const ENV_COLORS = { sky: 0x87CEEB, deepWater: 0x001e36 };
-
-// ─── Moth ─────────────────────────────────────────────────────
-const MOTH_BASE    = "wss://cobot.center:8287";
-const MOTH_CHANNEL = "instant";
-const MOTH_NAME    = "cowater-sim-device-streams";
-const MOTH_SOURCE  = "base";
-const DEVICE_REGISTRY_URL = "http://localhost:9100";
-
-// ─── 디바이스 템플릿 (초기 위치·타입 기본값, 서버에 해당 이름이 등록된 경우에만 활성화) ─────
-const DEVICE_TEMPLATES = [
-    { id:"control-center-01",    type:"control_center",     name:"Control Center 01",   isStatic:true,  lat:37.0080, lon:129.3950, alt: 20 },
-    { id:"control-ship-01",      type:"control_ship",       name:"Control Ship 01",      isStatic:true,  lat:37.0050, lon:129.4180, alt:  3 },
-    { id:"ocean-power-tower-01", type:"ocean_power_tower",  name:"Ocean Power Tower 01", isStatic:true,  lat:36.9950, lon:129.4350, alt: 20 },
-    { id:"usv-01", type:"usv", name:"USV 01", isStatic:false, lat:37.0050, lon:129.4250, alt:  0 },
-    { id:"usv-02", type:"usv", name:"USV 02", isStatic:false, lat:37.0120, lon:129.4300, alt:  0 },
-    { id:"usv-03", type:"usv", name:"USV 03", isStatic:false, lat:36.9970, lon:129.4280, alt:  0 },
-    { id:"auv-01", type:"auv", name:"AUV 01", isStatic:false, lat:37.0020, lon:129.4280, alt:-25 },
-    { id:"auv-02", type:"auv", name:"AUV 02", isStatic:false, lat:36.9950, lon:129.4320, alt:-45 },
-    { id:"auv-03", type:"auv", name:"AUV 03", isStatic:false, lat:37.0100, lon:129.4220, alt:-15 },
-    { id:"rov-01", type:"rov", name:"ROV 01", isStatic:false, lat:37.0030, lon:129.4300, alt:-60 },
-    { id:"rov-02", type:"rov", name:"ROV 02", isStatic:false, lat:36.9930, lon:129.4350, alt:-100 },
-    { id:"rov-03", type:"rov", name:"ROV 03", isStatic:false, lat:37.0080, lon:129.4330, alt:-150 },
-];
-
-// 통신 링크 템플릿 (양쪽 디바이스가 모두 활성화된 경우에만 표시)
-const LINK_TEMPLATES = [
-    { id:"lnk-cc-cs",  src:"control-center-01", dst:"control-ship-01",      type:"link_satellite", name:"위성 통신 (지휘-함정)",    packets:["지휘 통제 C2","AIS 상황 공유"] },
-    { id:"lnk-cs-u1",  src:"control-ship-01",   dst:"usv-01",               type:"link_rf",        name:"RF 링크 (함정-USV01)",     packets:["웨이포인트 갱신"] },
-    { id:"lnk-cs-u2",  src:"control-ship-01",   dst:"usv-02",               type:"link_rf",        name:"RF 링크 (함정-USV02)",     packets:["소나 데이터"] },
-    { id:"lnk-cs-u3",  src:"control-ship-01",   dst:"usv-03",               type:"link_rf",        name:"RF 링크 (함정-USV03)",     packets:["군집 제어 명령"] },
-    { id:"lnk-u1-a1",  src:"usv-01",            dst:"auv-01",               type:"link_acoustic",  name:"음향 링크 (USV01-AUV01)", packets:["수중 목표 좌표"] },
-    { id:"lnk-u2-a2",  src:"usv-02",            dst:"auv-02",               type:"link_acoustic",  name:"음향 링크 (USV02-AUV02)", packets:["탐색 경로 업데이트"] },
-    { id:"lnk-u3-a3",  src:"usv-03",            dst:"auv-03",               type:"link_acoustic",  name:"음향 링크 (USV03-AUV03)", packets:["소나 핑 응답"] },
-    { id:"lnk-cs-r1",  src:"control-ship-01",   dst:"rov-01",               type:"link_acoustic",  name:"음향 링크 (함정-ROV01)",   packets:["ROV 조종 명령","카메라 스트림"] },
-    { id:"lnk-cs-pt",  src:"control-ship-01",   dst:"ocean-power-tower-01", type:"link_rf",        name:"RF 링크 (함정-전력타워)", packets:["전력 상태","모니터링 데이터"] },
-];
-
-// 실제 활성화된 목록 (syncDeviceRegistry 후 서버 등록 여부에 따라 결정)
-let DEVICE_CONFIG = [];
-let LINK_CONFIG = [];
-
-// ─── 좌표 변환 ────────────────────────────────────────────────
-const MAP_CENTER = { lat:37.003, lng:129.425 };
-const MAP_SCALE  = 0.00005;
-
-function toScene(lat, lon, alt) {
-    return { x:(lon - MAP_CENTER.lng)/MAP_SCALE, y:alt, z:-(lat - MAP_CENTER.lat)/MAP_SCALE };
-}
-
-// ─── 앱 상태 ─────────────────────────────────────────────────
-const mapState = { map:null, markers:{}, lines:{}, currentTileLayer:null };
-const appState = {
-    time:0, cameraMode:'orbit', depthFilter:-200,
-    showLabels:true, showGrid:true, selectedId:null, hoveredId:null,
-    objects:[], links:[], alerts:[], registryAlerts:[],
-    registryDevices:[],
-    registryStatus:'unknown',
-};
-const sockets   = {};
-const connState = {};
-const connCounts = {};
-
-let scene, camera, renderer, controls;
-let gridHelpers = [];
-const raycaster = new THREE.Raycaster();
-raycaster.params.Line.threshold = 5;
-const mouse = new THREE.Vector2();
-
-// ─── 로딩 ─────────────────────────────────────────────────────
-function setProgress(pct, text) {
-    document.getElementById('loading-progress').style.width = (pct * 100) + '%';
-    document.getElementById('loading-text').innerText = text;
-}
-function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
-
-function registryBaseUrl() {
-    return localStorage.getItem('cowater.dashboard.registryUrl') || DEVICE_REGISTRY_URL;
-}
-
-function normalizeRegistryAlert(alert) {
-    const createdAt = alert.created_at || alert.updated_at || null;
-    return {
-        source: '03',
-        alert_id: alert.alert_id,
-        message: alert.message,
-        summary: alert.message,
-        severity: alert.severity || 'info',
-        status: alert.status || 'waiting',
-        source_system: alert.source_system || 'system_center',
-        source_role: alert.source_role || null,
-        source_agent_id: alert.source_agent_id || null,
-        target_role: alert.target_role || null,
-        target_agent_id: alert.target_agent_id || null,
-        route_mode: alert.route_mode || 'direct',
-        recommended_action: alert.recommended_action || null,
-        requires_user_approval: !!alert.requires_user_approval,
-        auto_remediated: !!alert.auto_remediated,
-        created_at: createdAt,
-        updated_at: alert.updated_at || createdAt,
-        metadata: alert.metadata || {},
-        deviceId: alert.target_agent_id || alert.source_agent_id || alert.metadata?.device_id || null,
-    };
-}
-
-function renderAlertCard(alert, opts = {}) {
-    const source = opts.source || alert.source || 'local';
-    const kindClass = alert.severity === 'critical' ? 'alert-critical' : 'alert-warning';
-    const title = alert.message || alert.summary || alert.recommended_action || '알림';
-    const target = alert.target_agent_id || alert.deviceId || alert.source_agent_id || '-';
-    const status = alert.status || 'waiting';
-    const created = alert.created_at ? new Date(alert.created_at).toLocaleTimeString() : new Date().toLocaleTimeString();
-    const sourceLabel = source === '03' ? '03 원장' : '실시간';
-    const statusTone = status === 'approved' || status === 'done' ? 'status-active' : status === 'rejected' ? 'status-critical' : 'status-waiting';
-    const clickableTarget = alert.deviceId || target;
-    return `
-        <div class="list-item ${kindClass}" data-alert-source="${source}" data-alert-id="${alert.alert_id || ''}">
-            <div class="title">
-                <span>${title}</span>
-                <span class="${statusTone}">${alert.severity || 'info'}</span>
-            </div>
-            <div style="font-size:0.75rem;color:#94a3b8;">
-                ${sourceLabel} | ${created} | ${status}
-            </div>
-            <div style="font-size:0.74rem;color:#cbd5e1;margin-top:6px;">
-                출처: ${alert.source_role || alert.source_system || '-'} · 대상: ${clickableTarget || '-'}
-            </div>
-            ${alert.recommended_action ? `<div class="data-packet" style="margin-top:6px;">${alert.recommended_action}</div>` : ''}
-            ${alert.metadata ? `<pre style="margin-top:8px;max-height:140px;">${JSON.stringify(alert.metadata, null, 2)}</pre>` : ''}
+    <div id="right-panel" class="panel">
+        <div class="panel-header" onclick="uiManager.togglePanel('right')">
+            <h3>정보 & 경보 현황</h3>
+            <span class="toggle-icon">▼</span>
         </div>
-    `;
-}
+        <div class="panel-content">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="uiManager.switchTab('objects')">📡 디바이스 (<span id="obj-count">0</span>)</button>
+                <button class="tab-btn" onclick="uiManager.switchTab('links')">🔗 링크 (<span id="link-count">0</span>)</button>
+                <button class="tab-btn" onclick="uiManager.switchTab('alerts')">⚠️ 경보 (<span id="alert-count">0</span>)</button>
+            </div>
+            <div id="tab-objects" class="tab-content active">
+                <div id="selected-detail" style="margin-bottom: 15px; display: none;"></div>
+                <div id="object-list-container"></div>
+            </div>
+            <div id="tab-links" class="tab-content">
+                <div id="link-list-container"></div>
+            </div>
+            <div id="tab-alerts" class="tab-content">
+                <div id="alert-list-container">
+                    <div style="text-align: center; color: #64748b; padding: 20px;">발생한 경보가 없습니다.</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-function renderAlertList() {
-    const cont = document.getElementById('alert-list-container');
-    const localAlerts = (appState.alerts || []).map(a => ({ ...a, source: 'local' }));
-    const registryAlerts = (appState.registryAlerts || []).map(a => normalizeRegistryAlert(a));
-    const alerts = [...registryAlerts, ...localAlerts].sort((a, b) => {
-        const ta = new Date(a.created_at || 0).getTime();
-        const tb = new Date(b.created_at || 0).getTime();
-        return tb - ta;
-    });
-    document.getElementById('alert-count').innerText = alerts.length;
-    document.getElementById('hdr-alerts').textContent = alerts.length;
-    document.getElementById('hdr-alerts').style.color = alerts.length > 0 ? '#f87171' : '#4ade80';
-    if (!cont) return;
-    if (!alerts.length) {
-        cont.innerHTML = '<div style="text-align:center; color:#64748b; padding:20px;">발생한 경보가 없습니다.</div>';
-        return;
-    }
-    cont.innerHTML = alerts.map(alert => renderAlertCard(alert)).join('');
-    cont.querySelectorAll('[data-alert-source]').forEach(el => {
-        el.onclick = () => {
-            const source = el.getAttribute('data-alert-source');
-            const alertId = el.getAttribute('data-alert-id');
-            const local = appState.alerts.find(a => a.alert_id === alertId || a.deviceId === alertId);
-            const registry = appState.registryAlerts.find(a => a.alert_id === alertId);
-            const alert = source === '03' ? registry : local;
-            const deviceId = alert?.deviceId || alert?.target_agent_id || alert?.source_agent_id;
-            if (deviceId) {
-                uiManager.selectObject(deviceId);
-                const o = appState.objects.find(x => x.id === deviceId);
-                if (o) {
-                    controls.target.copy(o.mesh.position);
-                    camera.position.set(o.mesh.position.x, o.mesh.position.y + 40, o.mesh.position.z + 60);
-                }
-            }
+    <div id="minimap-panel" oncontextmenu="return false;">
+        <div id="minimap-container">
+            <div id="minimap"></div>
+        </div>
+        <div class="radar-crosshair"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        const REGISTRY_BASE = 'http://127.0.0.1:8280';
+        const MOTH_WS_BASE = 'wss://cobot.center:8287';
+
+        const COLORS = {
+            controlCenter: 0xff6b6b, ship: 0x4ecdc4, usv: 0xffd93d, drone: 0xffd93d,
+            rov: 0x6bcf7f, auv: 0x95a5ff, alert_warning: 0xff9800, alert_critical: 0xf44336,
+            link_rf: 0x60a5fa, link_tether: 0x94a3b8, link_acoustic: 0x2dd4bf, link_satellite: 0xc084fc,
+            commBuoy: 0xf97316, powerTower: 0xeab308, glider: 0xa855f7, submarine: 0x334155, sensorNode: 0x14b8a6
         };
-    });
-}
 
-async function syncRegistryAlerts() {
-    const url = registryBaseUrl();
-    try {
-        const resp = await fetch(`${url}/alerts`);
-        if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
-        }
-        const alerts = await resp.json();
-        appState.registryAlerts = Array.isArray(alerts) ? alerts : [];
-    } catch (error) {
-        appState.registryAlerts = [];
-        console.warn(`Registry alerts unavailable: ${error.message}`);
-    }
-    renderAlertList();
-}
+        const ENV_COLORS = { sky: 0x87CEEB, waterSurface: 0x1da2d8, deepWater: 0x001e36 };
 
-async function syncDeviceRegistry() {
-    const url = registryBaseUrl();
-    try {
-        const resp = await fetch(`${url}/devices`);
-        if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
-        }
-        const devices = await resp.json();
-        appState.registryDevices = Array.isArray(devices) ? devices : [];
-        appState.registryStatus = 'ok';
-
-        // 서버에 등록된 이름 기준으로 템플릿 매칭
-        const byName = new Map(appState.registryDevices.map(dev => [dev.name, dev]));
-        DEVICE_TEMPLATES.forEach(cfg => {
-            const reg = byName.get(cfg.name) || null;
-            cfg.registry = reg;
-            cfg.registryId = reg?.id ?? null;
-            cfg.registryToken = reg?.token ?? null;
-            cfg.registryAgent = reg?.agent || null;
-            cfg.registryTracks = reg?.tracks || [];
-            cfg.registryActions = reg?.actions || null;
-            cfg.registryMainVideoTrackName = reg?.main_video_track_name || null;
-            // POC 00 서버에서 제공하는 위치 정보 (있으면 템플릿 기본값 덮어쓰기)
-            if (reg?.latitude !== undefined && reg?.latitude !== null) cfg.lat = reg.latitude;
-            if (reg?.longitude !== undefined && reg?.longitude !== null) cfg.lon = reg.longitude;
-            if (reg?.device_type) cfg.type = reg.device_type;
-        });
-
-        // 서버에 등록된 디바이스만 활성화
-        DEVICE_CONFIG = DEVICE_TEMPLATES.filter(cfg => cfg.registry !== null);
-        const activeIds = new Set(DEVICE_CONFIG.map(c => c.id));
-        LINK_CONFIG = LINK_TEMPLATES.filter(lk => activeIds.has(lk.src) && activeIds.has(lk.dst));
-
-        console.log(`Registry sync: ${DEVICE_CONFIG.length}/${DEVICE_TEMPLATES.length} devices active, ${LINK_CONFIG.length} links active`);
-    } catch (error) {
-        appState.registryDevices = [];
-        appState.registryStatus = 'offline';
-        DEVICE_CONFIG = [];
-        LINK_CONFIG = [];
-        console.warn(`Device registry unavailable: ${error.message}`);
-    }
-    await syncRegistryAlerts();
-}
-
-// ─── 3D 모델 ─────────────────────────────────────────────────
-function buildModel(type, colorHex) {
-    const g = new THREE.Group();
-    const M  = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; return m; };
-    const main  = new THREE.MeshStandardMaterial({ color:colorHex, roughness:0.6, metalness:0.3 });
-    const dark  = new THREE.MeshStandardMaterial({ color:0x333333, roughness:0.8 });
-    const white = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.5 });
-    const glass = new THREE.MeshStandardMaterial({ color:0x112233, roughness:0.1, metalness:0.8 });
-    let offset = 0;
-
-    if (type === 'control_ship') {
-        offset = 2;
-        const hull   = M(new THREE.BoxGeometry(6,6,20), main);   hull.position.y = 1;
-        const bowG   = new THREE.CylinderGeometry(0,4.24,6,4);   bowG.rotateY(Math.PI/4); bowG.rotateX(Math.PI/2);
-        const bow    = M(bowG, main);                              bow.position.set(0,1,13);
-        const bridge = M(new THREE.BoxGeometry(5,6,6), white);    bridge.position.set(0,7,-3);
-        const mast   = M(new THREE.CylinderGeometry(0.2,0.2,8), dark); mast.position.set(0,14,-3);
-        g.add(hull, bow, bridge, mast);
-    } else if (type === 'usv') {
-        offset = 1;
-        g.add(M(new THREE.BoxGeometry(3,2,8), main));
-        const mast = M(new THREE.CylinderGeometry(0.1,0.1,3), dark); mast.position.set(0,2.5,-1); g.add(mast);
-    } else if (type === 'rov') {
-        offset = 0;
-        const frame = M(new THREE.BoxGeometry(4,4,5), main);
-        const lt = M(new THREE.CylinderGeometry(0.5,0.5,0.5), white); lt.rotateX(Math.PI/2); lt.position.set(0,0,2.5);
-        const t1 = M(new THREE.CylinderGeometry(0.6,0.6,2), dark);   t1.rotateX(Math.PI/2); t1.position.set(-2.5,0,-1);
-        const t2 = M(new THREE.CylinderGeometry(0.6,0.6,2), dark);   t2.rotateX(Math.PI/2); t2.position.set(2.5,0,-1);
-        const lamp = new THREE.PointLight(0xfff3b0, 0, 70, 2);
-        lamp.position.set(0, 0, 3);
-        lamp.castShadow = true;
-        const lampBall = M(new THREE.SphereGeometry(0.35, 12, 12), new THREE.MeshStandardMaterial({
-            color: 0xfff3b0,
-            emissive: 0xfff3b0,
-            emissiveIntensity: 0,
-            roughness: 0.2,
-            metalness: 0.1,
-        }));
-        lampBall.position.set(0, 0, 3);
-        lampBall.userData = { role: 'rov-light' };
-        g.add(frame, lt, t1, t2, lamp, lampBall);
-    } else if (type === 'auv') {
-        offset = 0;
-        const body = M(new THREE.CylinderGeometry(1.2,1.2,10,16), main); body.rotateX(Math.PI/2);
-        const nose = M(new THREE.SphereGeometry(1.2,16,16), main);       nose.position.set(0,0,5);
-        const tail = M(new THREE.ConeGeometry(1.2,3,16), main);          tail.rotateX(-Math.PI/2); tail.position.set(0,0,-6.5);
-        const f1   = M(new THREE.BoxGeometry(0.2,4,1.5), dark);          f1.position.set(0,0,-6);
-        const f2   = M(new THREE.BoxGeometry(4,0.2,1.5), dark);          f2.position.set(0,0,-6);
-        g.add(body, nose, tail, f1, f2);
-    } else if (type === 'ocean_power_tower') {
-        offset = 2;
-        const plat  = M(new THREE.BoxGeometry(10,4,10), main);
-        const pillar= M(new THREE.CylinderGeometry(1,1,15), white); pillar.position.y = 9.5;
-        g.add(plat, pillar);
-    } else if (type === 'control_center') {
-        offset = 10;
-        const b1 = M(new THREE.BoxGeometry(20,20,25), main);
-        const b2 = M(new THREE.BoxGeometry(12,35,12), white); b2.position.set(-6,7.5,-12);
-        const rd = M(new THREE.SphereGeometry(6,16,16), white); rd.position.set(-6,28,-12);
-        const w  = M(new THREE.BoxGeometry(15,6,26), glass);   w.position.set(-3,4,0);
-        g.add(b1, b2, rd, w);
-    } else {
-        g.add(M(new THREE.BoxGeometry(5,5,5), main));
-    }
-    g.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-    return { group:g, offset };
-}
-
-// ─── Scene 초기화 ─────────────────────────────────────────────
-function initScene() {
-    const container = document.getElementById('canvas-container');
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(ENV_COLORS.sky);
-    scene.fog = new THREE.FogExp2(ENV_COLORS.sky, 0.002);
-
-    camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 1, 30000);
-    camera.position.set(150, 100, 180);
-
-    renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
-    renderer.setSize(innerWidth, innerHeight);
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.localClippingEnabled = true;
-    container.appendChild(renderer.domElement);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-    dir.position.set(100, 200, 50);
-    scene.add(dir);
-
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI;
-
-    [0, -50, -100, -150].forEach(d => {
-        const grid = new THREE.GridHelper(10000, 1000, 0x475569, 0x1e293b);
-        grid.position.y = d;
-        grid.material.opacity = 0.2;
-        grid.material.transparent = true;
-        scene.add(grid);
-        gridHelpers.push(grid);
-    });
-
-    window.addEventListener('resize', () => {
-        camera.aspect = innerWidth/innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(innerWidth, innerHeight);
-    });
-    renderer.domElement.addEventListener('mousemove', onMouseMove);
-    renderer.domElement.addEventListener('click', onClick);
-
-    loadTerrain();
-}
-
-// ─── 위성 지형 로딩 ───────────────────────────────────────────
-async function loadTerrain() {
-    const zoom = 13, R = 2, SZ = 256, CSZ = (R*2+1)*SZ;
-    const cx = Math.floor((MAP_CENTER.lng+180)/360 * Math.pow(2,zoom));
-    const cy = Math.floor((1 - Math.log(Math.tan(MAP_CENTER.lat*Math.PI/180) + 1/Math.cos(MAP_CENTER.lat*Math.PI/180))/Math.PI)/2 * Math.pow(2,zoom));
-
-    const colCv = document.createElement('canvas'); colCv.width = colCv.height = CSZ;
-    const colCtx = colCv.getContext('2d');
-    const elvCv = document.createElement('canvas'); elvCv.width = elvCv.height = CSZ;
-    const elvCtx = elvCv.getContext('2d');
-
-    const tiles = [];
-    for (let x=-R; x<=R; x++) for (let y=-R; y<=R; y++) tiles.push({x,y});
-    let loaded = 0; const total = tiles.length * 2;
-
-    await Promise.all(tiles.map(({x,y}) => {
-        const dx = (x+R)*SZ, dy = (y+R)*SZ;
-        const p1 = new Promise(res => {
-            const img = new Image(); img.crossOrigin="Anonymous";
-            img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${cy+y}/${cx+x}`;
-            img.onload = () => { colCtx.drawImage(img,dx,dy); loaded++; setProgress(loaded/total*0.5, '위성 이미지 로딩...'); res(); };
-            img.onerror = () => { loaded++; res(); };
-        });
-        const p2 = new Promise(res => {
-            const img = new Image(); img.crossOrigin="Anonymous";
-            img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${cx+x}/${cy+y}.png`;
-            img.onload = () => { elvCtx.drawImage(img,dx,dy); loaded++; setProgress(0.5+loaded/total*0.5, '고도 데이터 로딩...'); res(); };
-            img.onerror = () => { loaded++; res(); };
-        });
-        return Promise.all([p1,p2]);
-    }));
-
-    setProgress(1, '지형 생성 중...');
-
-    const lonMin = (cx-R)/Math.pow(2,zoom)*360-180;
-    const lonMax = (cx+R+1)/Math.pow(2,zoom)*360-180;
-    const nMin   = Math.PI - 2*Math.PI*(cy-R)/Math.pow(2,zoom);
-    const latMax = 180/Math.PI*Math.atan(0.5*(Math.exp(nMin)-Math.exp(-nMin)));
-    const nMax   = Math.PI - 2*Math.PI*(cy+R+1)/Math.pow(2,zoom);
-    const latMin = 180/Math.PI*Math.atan(0.5*(Math.exp(nMax)-Math.exp(-nMax)));
-
-    const pW = (lonMax-lonMin)/MAP_SCALE;
-    const pH = (latMax-latMin)/MAP_SCALE;
-    const oX = ((lonMin+lonMax)/2 - MAP_CENTER.lng)/MAP_SCALE;
-    const oZ = (MAP_CENTER.lat - (latMin+latMax)/2)/MAP_SCALE;
-
-    const terrain = new THREE.Mesh(
-        new THREE.PlaneGeometry(pW, pH, 512, 512),
-        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(colCv), transparent:true, opacity:0.65, depthWrite:false })
-    );
-    terrain.rotation.x = -Math.PI/2;
-    terrain.position.set(oX, 0, oZ);
-    terrain.frustumCulled = false;
-    scene.add(terrain);
-
-    await syncDeviceRegistry();
-    hideLoading();
-
-    if (DEVICE_CONFIG.length === 0) {
-        document.getElementById('stats-container').innerHTML =
-            `<div style="color:#f87171;font-size:0.85rem;text-align:center;padding:10px;">
-                ${appState.registryStatus === 'offline'
-                    ? '⚠️ 00 서버에 연결할 수 없습니다.<br>서버 주소를 확인하세요.'
-                    : '⚠️ 등록된 디바이스가 없습니다.<br>00 서버에서 디바이스를 먼저 등록하세요.'}
-            </div>`;
-        document.getElementById('object-list-container').innerHTML =
-            `<div style="color:#64748b;font-size:0.82rem;text-align:center;padding:20px;">표시할 디바이스 없음</div>`;
-        updateConnStatus();
-        initMap();
-        return;
-    }
-
-    initObjects();
-    initLinks();
-    initMap();
-    connectMoth();
-}
-
-// ─── 디바이스 오브젝트 생성 ───────────────────────────────────
-function initObjects() {
-    DEVICE_CONFIG.forEach(cfg => {
-        const sp = toScene(cfg.lat, cfg.lon, cfg.alt);
-        const colorHex = COLORS[cfg.type] || 0xaaaaaa;
-        const { group, offset } = buildModel(cfg.type, colorHex);
-        group.position.set(sp.x, sp.y + offset, sp.z);
-        group.userData = { id:cfg.id, isObject:true };
-        group.traverse(c => { if (c.isMesh) c.userData = { id:cfg.id, isObject:true }; });
-        scene.add(group);
-
-        const labelEl = document.createElement('div');
-        labelEl.className = 'object-label';
-        labelEl.innerText = cfg.name;
-        document.getElementById('labels-container').appendChild(labelEl);
-
-        appState.objects.push({
-            id:cfg.id, config:cfg, mesh:group, offset, labelEl,
-            scenePos:{...sp}, heading:0, speed:0,
-            connStatus:'connecting', lastPayload:null, lastEnvelope:null, hasAlert:false,
-            lightOn:false,
-        });
-        connState[cfg.id] = 'connecting';
-    });
-    uiManager.renderObjectList();
-    document.getElementById('obj-count').innerText = appState.objects.length;
-}
-
-// ─── 통신 링크 생성 ───────────────────────────────────────────
-function initLinks() {
-    const pktGeo = new THREE.CylinderGeometry(0.2, 0.2, 6, 8);
-    pktGeo.rotateX(Math.PI/2);
-
-    LINK_CONFIG.forEach(lk => {
-        const colorHex = COLORS[lk.type] || 0x60a5fa;
-        const lineMat = new THREE.LineDashedMaterial({ color:colorHex, dashSize:10, gapSize:10, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending });
-        const lineMesh = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
-        lineMesh.userData = { id:lk.id, isLink:true };
-        scene.add(lineMesh);
-
-        const particles = [];
-        for (let i=0; i<4; i++) {
-            const pm = new THREE.Mesh(pktGeo, new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.8, blending:THREE.AdditiveBlending }));
-            scene.add(pm);
-            particles.push({ mesh:pm, progress: i*0.25 });
-        }
-        appState.links.push({ ...lk, mesh:lineMesh, particles });
-    });
-}
-
-// ─── Moth WebSocket ───────────────────────────────────────────
-function connectMoth() {
-    // 하트비트 토픽에 구독 (모든 디바이스의 상태를 한 번에 수신)
-    connectHeartbeatSubscription();
-}
-
-function connectHeartbeatSubscription() {
-    const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=health_check&source=base&track=base`;
-    const ws = new WebSocket(wsUrl);
-    sockets['heartbeat'] = ws;
-
-    ws.onopen = () => {
-        console.log('[Moth] 하트비트 구독 연결 성공:', wsUrl);
-        // device.heartbeat 채널 구독
-        const subMsg = {
-            "type": "subscribe",
-            "channel": "device.heartbeat",
-            "channel_type": "meb"
+        const mapState = {
+            map: null, markers: {}, lines: {}, currentTileLayer: null,
+            baseLat: 35.15, baseLng: 129.15, scale: 0.00005, isProgrammaticMove: false
         };
-        ws.send(JSON.stringify(subMsg));
-    };
 
-    ws.onmessage = (ev) => {
-        if (typeof ev.data === 'string') {
+        const state = {
+            time: 0, simSpeed: 1.0, cameraMode: 'orbit', depthFilter: -200,
+            showLabels: true, showGrid: true, selectedId: null, hoveredId: null,
+            objects: [], links: [], alerts: [], tethers: []
+        };
+
+        const initialScenarios = [
+            { id: "ship-001", name: "상선 #1", type: "ship", position: {x: 80, y: 0, z: -20}, heading: 45, speed: 12.5, status: "active", battery: 100 },
+            { id: "ship-002", name: "통제 함정", type: "ship", position: {x: -20, y: 0, z: -10}, heading: 90, speed: 5, status: "active", battery: 100 },
+            { id: "drone-001", name: "정찰 드론", type: "drone", position: {x: -20, y: 40, z: 10}, heading: 0, speed: 20, status: "active", battery: 85, hoverCenter: {x:-20, z:10} },
+            { id: "usv-001", name: "통제 USV", type: "usv", position: {x: -10, y: 0, z: -40}, heading: 180, speed: 15, status: "active", battery: 90, hoverCenter: {x:-10, z:-40} },
+            { id: "rov-001", name: "작업용 ROV", type: "rov", position: {x: -20, y: -60, z: -10}, heading: 0, speed: 2, status: "active", battery: 78, tetherTarget: "ship-002" },
+            { id: "auv-001", name: "정찰용 AUV", type: "auv", position: {x: 50, y: -90, z: 20}, heading: -45, speed: 6, status: "active", battery: 95 },
+            { id: "center-001", name: "육상 통제 센터", type: "controlCenter", position: {x: -200, y: 0, z: -400}, heading: 60, speed: 0, status: "active", battery: 100 },
+            { id: "buoy-001", name: "통신 릴레이 부표", type: "commBuoy", position: {x: -100, y: 0, z: -120}, heading: 0, speed: 0, status: "active", battery: 100 },
+            { id: "tower-001", name: "해양 전력 타워", type: "powerTower", position: {x: -180, y: 0, z: -180}, heading: 0, speed: 0, status: "active", battery: 100 },
+            { id: "usv-002", name: "요격용 USV", type: "usv", position: {x: 40, y: 0, z: -60}, heading: 135, speed: 18, status: "active", battery: 95, hoverCenter: {x:40, z:-60} },
+            { id: "glider-001", name: "수중 글라이더", type: "glider", position: {x: -120, y: -40, z: -60}, heading: 45, speed: 3, status: "active", battery: 98 },
+            { id: "sub-001", name: "무인 잠수정 (UUV)", type: "submarine", position: {x: 100, y: -50, z: -80}, heading: 120, speed: 8, status: "active", battery: 80 },
+            { id: "node-001", name: "해저 센서 그리드", type: "sensorNode", position: {x: -80, y: 0, z: 100}, heading: 0, speed: 0, status: "active", battery: 100 }
+        ];
+
+        const linkScenarios = [
+            { id: "link-1", source: "center-001", target: "buoy-001", type: "link_rf", name: "장거리 RF (육상-부표)", packets: ["기상 데이터 (4.2MB/s)", "암호화 작전 통제 신호"] },
+            { id: "link-2", source: "center-001", target: "ship-002", type: "link_satellite", name: "위성 통신망 (광대역)", packets: ["글로벌 AIS 추적", "지휘 통제 명령 C2"] },
+            { id: "link-3", source: "ship-002", target: "usv-001", type: "link_rf", name: "전술 RF 링크 (수상)", packets: ["USV 웨이포인트 업데이트"] },
+            { id: "link-4", source: "usv-001", target: "usv-002", type: "link_rf", name: "USV 군집 제어망", packets: ["상호 충돌 회피 알고리즘", "표적 요격 명령"] },
+            { id: "link-5", source: "ship-002", target: "drone-001", type: "link_rf", name: "지향성 RF 링크 (공중)", packets: ["드론 실시간 4K 영상 스트림", "IR(적외선) 열화상 데이터"] },
+            { id: "link-6", source: "buoy-001", target: "glider-001", type: "link_acoustic", name: "수중 음향 모뎀 (저전력)", packets: ["소나(Sonar) 핑", "해류 데이터 업로드"] },
+            { id: "link-7", source: "usv-001", target: "auv-001", type: "link_acoustic", name: "수중 음향 통신망", packets: ["정찰 목표 업데이트", "양자 센싱 표적 데이터"] },
+            { id: "link-8", source: "auv-001", target: "sub-001", type: "link_acoustic", name: "수중 전술망 (UUV-AUV)", packets: ["적 잠수함 스웜 탐지 데이터"] },
+            { id: "link-9", source: "node-001", target: "glider-001", type: "link_acoustic", name: "해저망-글라이더 중계", packets: ["해저 지진파 데이터"] },
+            { id: "link-10", source: "tower-001", target: "node-001", type: "link_tether", name: "해저 광전송 케이블", packets: ["상시 고전력 공급 (Power)", "대용량 RAW 데이터 스트림"] }
+        ];
+
+        const alertQueue = [
+            { triggerTime: 15, id: "alert-001", platformId: "ship-001", type: "collision_risk", severity: "critical", message: "상선 #1 충돌 위험 감지" },
+            { triggerTime: 30, id: "alert-002", platformId: "rov-001", type: "battery_low", severity: "warning", message: "ROV-1 배터리 부족 경고" }
+        ];
+
+        async function fetchDevicesFromRegistry() {
             try {
-                const msg = JSON.parse(ev.data);
-
-                // 구독 확인 메시지 무시
-                if (msg.type === 'subscribe' || msg.action === 'subscribe') return;
-
-                // 하트비트 메시지 처리 (type: publish 확인)
-                if (msg.type !== 'publish') return;
-
-                // 올바른 채널인지 확인
-                const channel = msg.channel || msg.topic;
-                if (channel !== 'device.heartbeat') return;
-
-                // 페이로드에서 디바이스 ID 추출
-                const payload = msg.payload || {};
-                const deviceId = payload.device_id;
-                if (!deviceId) return;
-
-                const dev = appState.objects.find(d => d.id === deviceId);
-                if (!dev) return;
-
-                // 디바이스 상태 업데이트
-                dev.connStatus = 'connected';
-                connState[deviceId] = 'connected';
-
-                // 위치 정보 업데이트 (있으면)
-                if (payload.latitude !== undefined && payload.longitude !== undefined) {
-                    dev.scenePos = toScene(payload.latitude, payload.longitude, payload.altitude || 0);
-                }
-
-                // 모션 정보 업데이트
-                if (payload.heading !== undefined) dev.heading = payload.heading;
-                if (payload.speed !== undefined) dev.speed = payload.speed;
-
-                // 배터리 정보 저장
-                if (payload.battery_percent !== undefined) {
-                    if (!dev.lastPayload) dev.lastPayload = {};
-                    dev.lastPayload.battery = payload.battery_percent;
-                }
-
-                // 타임스탬프 저장
-                dev.lastEnvelope = {
-                    timestamp: payload.timestamp || new Date().toISOString(),
-                    device_id: deviceId,
-                    agent_id: payload.agent_id
-                };
-
-                updateConnStatus();
-                if (appState.selectedId === deviceId) uiManager.renderSelectedDetail();
-            } catch(e) {
-                console.warn('[Moth] 메시지 파싱 실패:', e);
+                const resp = await fetch(`${REGISTRY_BASE}/devices`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const devices = await resp.json();
+                document.getElementById('offline-banner').style.display = 'none';
+                return Array.isArray(devices) ? devices : [];
+            } catch (e) {
+                console.warn('Registry unavailable:', e.message);
+                document.getElementById('offline-banner').style.display = 'block';
+                return [];
             }
         }
-    };
 
-    ws.onerror = () => {
-        console.error('[Moth] 하트비트 구독 에러');
-        updateConnStatus();
-    };
-
-    ws.onclose = () => {
-        console.warn('[Moth] 하트비트 구독 연결 종료, 5초 후 재연결...');
-        delete sockets['heartbeat'];
-        DEVICE_CONFIG.forEach(cfg => {
-            if (connState[cfg.id] === 'connected') {
-                connState[cfg.id] = 'disconnected';
-                const dev = appState.objects.find(d => d.id === cfg.id);
-                if (dev) dev.connStatus = 'disconnected';
-            }
-        });
-        updateConnStatus();
-        setTimeout(connectHeartbeatSubscription, 5000);
-    };
-}
-
-
-function updateConnStatus() {
-    const c = {connected:0, connecting:0, disconnected:0};
-    DEVICE_CONFIG.forEach(d => c[connState[d.id]||'connecting']++);
-    const regLabel = appState.registryStatus === 'offline'
-        ? `<span style="color:#f87171">서버 오프라인</span>`
-        : `<span style="color:#475569">${DEVICE_CONFIG.length}개 등록</span>`;
-    document.getElementById('conn-status').innerHTML = `
-        <span><span class="conn-dot on"></span>연결 ${c.connected}</span>
-        <span><span class="conn-dot wait"></span>대기 ${c.connecting}</span>
-        <span><span class="conn-dot off"></span>끊김 ${c.disconnected}</span>
-        <span style="color:#475569">| ${MOTH_NAME} |</span> ${regLabel}`;
-}
-
-// ─── 애니메이션 루프 ─────────────────────────────────────────
-function updateScene(delta) {
-    const time = appState.time;
-
-    // 디바이스 위치/상태 갱신
-    appState.objects.forEach(dev => {
-        const sp = dev.scenePos;
-        dev.mesh.position.set(sp.x, sp.y + dev.offset, sp.z);
-        dev.mesh.rotation.y = THREE.MathUtils.degToRad(-dev.heading);
-
-        const visible = sp.y >= appState.depthFilter;
-        dev.mesh.visible = visible;
-        dev.labelEl.style.display = (appState.showLabels && visible) ? 'block' : 'none';
-
-        const isSel = dev.id === appState.selectedId;
-        const isHov = dev.id === appState.hoveredId;
-        const emissive = dev.hasAlert ? COLORS.alert_critical : (isSel ? 0xffffff : (isHov ? 0x334155 : 0x000000));
-        const intensity = dev.hasAlert ? (Math.sin(time*8)*0.5+0.5) : (isSel ? 0.5 : (isHov ? 0.2 : 0));
-        const lightBoost = dev.lightOn ? 0xfff3b0 : 0x000000;
-        const lightIntensity = dev.lightOn ? 2.8 : 0;
-        dev.mesh.traverse(c => {
-            if (c.isMesh && c.material) { c.material.emissive = new THREE.Color(emissive); c.material.emissiveIntensity = intensity; }
-            if (c.userData && c.userData.role === 'rov-light' && c.material) {
-                c.material.color.setHex(dev.lightOn ? 0xfff3b0 : 0x7c7c7c);
-                c.material.emissive = new THREE.Color(lightBoost);
-                c.material.emissiveIntensity = dev.lightOn ? 2.8 : 0;
-            }
-            if (c.isPointLight) {
-                c.intensity = lightIntensity;
-                c.visible = dev.lightOn;
-                c.color.setHex(0xfff3b0);
-            }
-        });
-    });
-
-    // 그리드 카메라 추적
-    const snap = 10;
-    const cx = Math.round(camera.position.x/snap)*snap;
-    const cz = Math.round(camera.position.z/snap)*snap;
-    gridHelpers.forEach(g => { g.position.x = cx; g.position.z = cz; });
-
-    // 통신 링크 & 패킷
-    appState.links.forEach(lk => {
-        const sObj = appState.objects.find(o => o.id === lk.src);
-        const tObj = appState.objects.find(o => o.id === lk.dst);
-        if (!sObj || !tObj) return;
-
-        const vis = sObj.mesh.visible && tObj.mesh.visible;
-        lk.mesh.visible = vis;
-
-        const p1 = sObj.mesh.position.clone();
-        const p2 = tObj.mesh.position.clone();
-        if (sObj.config.type==='control_center') p1.y += 20;
-        if (tObj.config.type==='control_center') p2.y += 20;
-        if (sObj.config.type==='control_ship') p1.y += 10;
-        if (tObj.config.type==='control_ship') p2.y += 10;
-
-        const pa = lk.mesh.geometry.attributes.position;
-        pa.array[0]=p1.x; pa.array[1]=p1.y; pa.array[2]=p1.z;
-        pa.array[3]=p2.x; pa.array[4]=p2.y; pa.array[5]=p2.z;
-        pa.needsUpdate = true;
-        lk.mesh.computeLineDistances();
-
-        const isSel = lk.id === appState.selectedId || lk.id === appState.hoveredId;
-        lk.mesh.material.opacity = isSel ? 0.9 : 0.4;
-        lk.mesh.material.dashOffset -= delta * 15;
-
-        lk.particles.forEach(pk => {
-            pk.mesh.visible = vis;
-            pk.progress += delta * 0.15;
-            if (pk.progress > 1) pk.progress = 0;
-            pk.mesh.position.lerpVectors(p1, p2, pk.progress);
-            pk.mesh.lookAt(p2);
-            pk.mesh.material.color.setHex(isSel ? 0xffffff : COLORS[lk.type]);
-            const s = isSel ? 1.5 : 0.8;
-            pk.mesh.scale.set(s, s, s + Math.sin(time*10)*0.3);
-        });
-    });
-
-    // 라벨 투영
-    if (appState.showLabels) {
-        appState.objects.forEach(dev => {
-            if (!dev.mesh.visible) return;
-            const pos = dev.mesh.position.clone(); pos.y += 8;
-            pos.project(camera);
-            if (pos.z > 1) { dev.labelEl.style.display = 'none'; return; }
-            dev.labelEl.style.left = `${(pos.x*0.5+0.5)*innerWidth}px`;
-            dev.labelEl.style.top  = `${(pos.y*-0.5+0.5)*innerHeight}px`;
-        });
-    }
-
-    // 카메라 수심 배경
-    if (camera.position.y < 0) {
-        scene.background.setHex(ENV_COLORS.deepWater);
-        scene.fog.color.setHex(ENV_COLORS.deepWater);
-        scene.fog.density = 0.005;
-    } else {
-        scene.background.setHex(ENV_COLORS.sky);
-        scene.fog.color.setHex(ENV_COLORS.sky);
-        scene.fog.density = 0.002;
-    }
-
-    // 카메라 모드
-    if (appState.cameraMode === 'follow' && appState.selectedId) {
-        const t = appState.objects.find(o => o.id === appState.selectedId);
-        if (t) controls.target.lerp(t.mesh.position, 0.1);
-    } else if (appState.cameraMode === 'topdown' && appState.selectedId) {
-        const t = appState.objects.find(o => o.id === appState.selectedId);
-        if (t) { controls.target.lerp(t.mesh.position, 0.1); camera.position.lerp(t.mesh.position.clone().add(new THREE.Vector3(0,150,0)), 0.05); }
-    }
-    controls.update();
-}
-
-// ─── 미니맵 ──────────────────────────────────────────────────
-function initMap() {
-    mapState.map = L.map('minimap', {
-        zoomControl:false, attributionControl:false, dragging:false,
-        touchZoom:false, doubleClickZoom:false, scrollWheelZoom:false, boxZoom:false, keyboard:false
-    }).setView([MAP_CENTER.lat, MAP_CENTER.lng], 14);
-
-    mapState.currentTileLayer = L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        {maxZoom:18}
-    ).addTo(mapState.map);
-
-    appState.objects.forEach(dev => {
-        const hex = COLORS[dev.config.type] || 0xaaaaaa;
-        const cs  = '#' + hex.toString(16).padStart(6,'0');
-        const icon = L.divIcon({ className:'', html:`<div style="background:${cs};width:10px;height:10px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.8);"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
-        const marker = L.marker([dev.config.lat, dev.config.lon], {icon}).addTo(mapState.map);
-        marker.bindTooltip(dev.config.name, {direction:'top', offset:[0,-8]});
-
-        let lastMarkerClickTime = 0;
-        marker.on('click', () => {
-            const now = Date.now();
-            const isDoubleClick = (now - lastMarkerClickTime) < DOUBLE_CLICK_DELAY;
-            lastMarkerClickTime = now;
-
-            if (isDoubleClick) {
-                uiManager.selectObject(dev.id, true);
-            } else {
-                uiManager.selectObject(dev.id);
-            }
-        });
-        mapState.markers[dev.id] = marker;
-    });
-
-    LINK_CONFIG.forEach(lk => {
-        const cs = '#' + (COLORS[lk.type]||0x60a5fa).toString(16).padStart(6,'0');
-        const line = L.polyline([], {color:cs, weight:2, dashArray:'5,5'}).addTo(mapState.map);
-        mapState.lines[lk.id] = line;
-    });
-
-    // 미니맵 휠 → 미니맵 줌 전용 (마우스 이동/회전은 OrbitControls 기본 동작 사용)
-    const panel = document.getElementById('minimap-panel');
-    panel.addEventListener('wheel', e => { e.preventDefault(); mapState.map.setZoom(mapState.map.getZoom()+(e.deltaY>0?-1:1)); });
-}
-
-function updateMap() {
-    if (!mapState.map) return;
-    appState.objects.forEach(dev => {
-        const m = mapState.markers[dev.id]; if (!m) return;
-        const p = dev.lastPayload && dev.lastPayload.position;
-        if (p) m.setLatLng([p.latitude, p.longitude]);
-        if (appState.selectedId===dev.id) m.openTooltip(); else if (m.isTooltipOpen()) m.closeTooltip();
-    });
-    LINK_CONFIG.forEach(lk => {
-        const line = mapState.lines[lk.id];
-        const sO = appState.objects.find(o=>o.id===lk.src);
-        const tO = appState.objects.find(o=>o.id===lk.dst);
-        if (!line||!sO||!tO) return;
-        const sp = sO.lastPayload&&sO.lastPayload.position, tp = tO.lastPayload&&tO.lastPayload.position;
-        const sLat = sp?sp.latitude:sO.config.lat, sLng = sp?sp.longitude:sO.config.lon;
-        const tLat = tp?tp.latitude:tO.config.lat, tLng = tp?tp.longitude:tO.config.lon;
-        line.setLatLngs([[sLat,sLng],[tLat,tLng]]);
-        line.setStyle({weight: lk.id===appState.selectedId?4:2, opacity: lk.id===appState.selectedId?1:0.6});
-    });
-    mapState.map.setView([MAP_CENTER.lat-(controls.target.z*MAP_SCALE), MAP_CENTER.lng+(controls.target.x*MAP_SCALE)], mapState.map.getZoom(), {animate:false});
-    const cd = new THREE.Vector3(); camera.getWorldDirection(cd);
-    document.getElementById('minimap-container').style.transform = `rotate(${-Math.atan2(cd.x,-cd.z)*(180/Math.PI)}deg)`;
-}
-
-// ─── UI ──────────────────────────────────────────────────────
-const uiManager = {
-    togglePanel(side) { document.getElementById(`${side}-panel`)?.classList.toggle('collapsed'); },
-    switchTab(name) {
-        document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['objects','links','alerts'][i]===name));
-        document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
-        document.getElementById(`tab-${name}`)?.classList.add('active');
-    },
-    selectObject(id, openDetail = false) {
-        appState.selectedId = id;
-        document.querySelectorAll('.list-item').forEach(el=>el.classList.toggle('selected',el.dataset.id===id));
-        this.renderSelectedDetail();
-        const isLink = appState.links.some(l => l.id === id);
-        this.switchTab(isLink ? 'links' : 'objects');
-
-        // 더블클릭 또는 명시적 요청 시 상세보기 페이지로 이동
-        if (openDetail && !isLink) {
-            const dev = appState.objects.find(d => d.id === id);
-            if (dev) {
-                sessionStorage.setItem('cowater.device.id', dev.id);
-                sessionStorage.setItem('cowater.device.name', dev.config.name);
-                sessionStorage.setItem('cowater.device.type', dev.config.type);
-                sessionStorage.setItem('cowater.device.registryId', dev.config.registryId || '');
-                window.location.href = 'device-detail.html';
-            }
+        function mapRegistryToScenario(reg) {
+            const lat = reg.latitude || mapState.baseLat;
+            const lon = reg.longitude || mapState.baseLng;
+            const x = (lon - mapState.baseLng) / mapState.scale;
+            const z = (mapState.baseLat - lat) / mapState.scale;
+            const depth = -(reg.depth || 0);
+            const role = (reg.agent?.role || reg.device_type || 'usv').toLowerCase();
+            // device_type 매핑: usv, auv, rov, control_ship, ship
+            const typeMap = {
+                'usv': 'usv',
+                'auv': 'auv',
+                'rov': 'rov',
+                'control_ship': 'ship',
+                'ship': 'ship',
+                'drone': 'drone'
+            };
+            const deviceType = typeMap[role] || 'usv';
+            return {
+                id: reg.id || `dev-${reg.name}`,
+                name: reg.name,
+                type: deviceType,
+                position: { x, y: depth, z },
+                heading: reg.heading || 0,
+                speed: reg.speed || 0,
+                battery: reg.battery !== undefined ? reg.battery : 100,
+                status: 'active'
+            };
         }
-    },
-    renderObjectList() {
-        let html = '';
-        appState.objects.forEach(dev => {
-            const hex = COLORS[dev.config.type]||0xaaaaaa;
-            const cs  = '#'+hex.toString(16).padStart(6,'0');
-            const sc  = dev.connStatus==='connected'?'status-active':dev.connStatus==='connecting'?'status-waiting':'status-critical';
-            const sl  = dev.connStatus==='connected'?'●':dev.connStatus==='connecting'?'◌':'✕';
-            const reg = dev.config.registry;
-            const agent = reg?.agent;
-            const regBadge = reg
-                ? `<span style="color:#94a3b8">registry #${reg.id}</span>`
-                : `<span style="color:#64748b">unregistered</span>`;
-            const agentBadge = agent?.endpoint
-                ? `<span style="color:#94a3b8">${agent.llm_enabled ? 'LLM enabled' : 'LLM disabled'}</span>`
-                : `<span style="color:#64748b">agent none</span>`;
-            html += `<div class="list-item${dev.id===appState.selectedId?' selected':''}" data-id="${dev.id}" onclick="uiManager.selectObject('${dev.id}')" ondblclick="uiManager.selectObject('${dev.id}', true)">
-                <div class="title" style="border-left:3px solid ${cs}; padding-left:6px;">
-                    <span>${dev.config.name}</span><span class="${sc}">${sl}</span>
-                </div>
-                <div style="color:#94a3b8;font-size:0.78rem;display:flex;justify-content:space-between;margin-top:3px;">
-                    <span>${dev.config.type.replace(/_/g,' ')}</span>
-                    <span>${regBadge} | ${agentBadge}</span>
-                </div></div>`;
-        });
-        document.getElementById('object-list-container').innerHTML = html;
-        // 목록 렌더링 후 더블클릭 리스너 재추가
-        document.querySelectorAll('.list-item').forEach(el => {
-            el.addEventListener('dblclick', () => {
-                const id = el.dataset.id;
-                uiManager.selectObject(id, true);
+
+        function subscribeMothTelemetry() {
+            const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=telemetry&source=base&track=base`;
+            const ws = new WebSocket(wsUrl);
+            ws.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.device_id && msg.position) {
+                        const obj = state.objects.find(o => o.id === msg.device_id);
+                        if (obj) {
+                            obj.position.x = msg.position.x || obj.position.x;
+                            obj.position.y = msg.position.y || obj.position.y;
+                            obj.position.z = msg.position.z || obj.position.z;
+                            if (msg.battery !== undefined) obj.battery = msg.battery;
+                            if (msg.heading !== undefined) obj.heading = msg.heading;
+                            if (msg.speed !== undefined) obj.speed = msg.speed;
+                        }
+                    }
+                } catch (err) { console.error('Telemetry parse error:', err); }
+            };
+            ws.onerror = () => setTimeout(subscribeMothTelemetry, 5000);
+        }
+
+        let scene, camera, renderer, controls;
+        let seaMesh, gridHelpers = [];
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Line.threshold = 5;
+        const mouse = new THREE.Vector2();
+
+        function showLoadingProgress(percent, text) {
+            document.getElementById('loading-progress').style.width = (percent * 100) + '%';
+            document.getElementById('loading-text').innerText = text;
+        }
+
+        function hideLoadingOverlay() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+
+        function init3DEnvironment() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(ENV_COLORS.sky);
+            scene.fog = new THREE.FogExp2(ENV_COLORS.sky, 0.002);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 30000);
+            camera.position.set(150, 100, 180);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.localClippingEnabled = true;
+            container.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(100, 200, 50);
+            scene.add(dirLight);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI;
+
+            createEnvironment();
+            createRealWorldTerrain();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
             });
-        });
-        this.renderLinkList();
 
-        const conn = DEVICE_CONFIG.filter(c=>connState[c.id]==='connected').length;
-        const registered = appState.objects.filter(o => o.config.registry).length;
-        document.getElementById('stats-container').innerHTML = `
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>총 디바이스:</span><strong>${appState.objects.length}개</strong></div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>00 서버 등록:</span><strong style="color:${registered>0?'#4ade80':'#f87171'}">${registered} / ${appState.objects.length}</strong></div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem;"><span>Moth 연결:</span><strong style="color:${conn>0?'#4ade80':'#f87171'}">${conn} / ${appState.objects.length}</strong></div>
-            <div style="display:flex;justify-content:space-between;font-size:0.85rem;"><span>통신 링크:</span><strong>${appState.links.length}개</strong></div>
-            <div style="margin-top:8px;color:${(appState.alerts.length + appState.registryAlerts.length)>0?'#f87171':'#4ade80'};font-size:0.85rem;">발생 경보: ${appState.alerts.length + appState.registryAlerts.length}건</div>`;
-    },
-    renderLinkList() {
-        let html = '';
-        if (appState.links.length === 0) {
-            html = '<div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>';
-        } else {
-            const typeLabel = { link_rf:'RF', link_acoustic:'음향', link_satellite:'위성' };
-            appState.links.forEach(lk => {
-                const cs = '#'+(COLORS[lk.type]||0x60a5fa).toString(16).padStart(6,'0');
-                const sO = appState.objects.find(o=>o.id===lk.src);
-                const tO = appState.objects.find(o=>o.id===lk.dst);
-                const route = `${sO?.config.name||lk.src} ↔ ${tO?.config.name||lk.dst}`;
-                const tl = typeLabel[lk.type] || lk.type;
-                html += `<div class="list-item${lk.id===appState.selectedId?' selected':''}" data-id="${lk.id}" style="border-left-color:${cs}" onclick="uiManager.selectObject('${lk.id}')">
-                    <div class="title"><span>🔗 ${lk.name}</span><span style="font-size:0.72rem;color:#64748b;">${tl}</span></div>
-                    <div style="font-size:0.75rem;color:#94a3b8;margin-top:3px;">${route}</div>
-                </div>`;
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('click', onClick);
+        }
+
+        function createEnvironment() {
+            // 수면 제거 - 지도가 수면 역할을 함
+
+            [0, -50, -100, -150].forEach(d => {
+                const grid = new THREE.GridHelper(10000, 1000, 0x475569, 0x1e293b);
+                grid.position.y = d;
+                grid.material.opacity = 0.2;
+                grid.material.transparent = true;
+                scene.add(grid);
+                gridHelpers.push(grid);
             });
         }
-        document.getElementById('link-list-container').innerHTML = html;
-        document.getElementById('link-count').innerText = appState.links.length;
-    },
-    renderSelectedDetail() {
-        const el = document.getElementById('selected-detail');
-        const dev = appState.objects.find(o=>o.id===appState.selectedId);
-        const lk  = appState.links.find(l=>l.id===appState.selectedId);
-        if (!dev && !lk) { el.style.display='none'; return; }
-        el.style.display='block';
 
-        if (dev) {
-            const hex = COLORS[dev.config.type]||0xaaaaaa;
-            const cs = '#'+hex.toString(16).padStart(6,'0');
-            const pay = dev.lastPayload;
-            const pos = pay&&pay.position ? pay.position : {latitude:dev.config.lat,longitude:dev.config.lon,altitude:dev.config.alt};
-            const mot = pay&&pay.motion   ? pay.motion   : {heading:dev.heading,speed:dev.speed};
-            const ts  = dev.lastEnvelope  ? new Date(dev.lastEnvelope.timestamp).toLocaleTimeString() : '—';
-            const reg = dev.config.registry;
-            const agent = reg?.agent;
-            const streamAgent = dev.lastEnvelope?.agent_endpoint || agent?.endpoint;
+        async function createRealWorldTerrain() {
+            const zoom = 13;
+            const TILE_RADIUS = 2;
+            const TILE_SIZE = 256;
+            const CANVAS_SIZE = (TILE_RADIUS * 2 + 1) * TILE_SIZE;
 
-            let sensorHtml = '';
-            if (pay&&pay.sensors) {
-                sensorHtml = '<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">센서 데이터</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:0.74rem;">';
-                Object.entries(pay.sensors).forEach(([sid,sv]) => {
-                    let v='';
-                    if (sv.type==='gps') v=`${sv.latitude.toFixed(4)},${sv.longitude.toFixed(4)}`;
-                    else if (sv.type==='imu') v=`R${sv.roll.toFixed(0)} P${sv.pitch.toFixed(0)} Y${sv.yaw.toFixed(0)}`;
-                    else if (sv.type==='pressure') v=`${sv.depth_m.toFixed(1)}m`;
-                    else if (sv.type==='temperature') v=`${sv.temperature_c}°C`;
-                    else if (['sonar','side_scan_sonar','profiling_sonar'].includes(sv.type)) v=`${sv.range_m.toFixed(0)}m${sv.target_detected?' 🎯':''}`;
-                    else if (sv.type==='hd_camera') v=`${sv.resolution} ${sv.fps}fps`;
-                    else if (sv.type==='magnetometer') v=`${sv.heading.toFixed(0)}°`;
-                    else v=sv.status||'—';
-                    sensorHtml += `<div style="background:rgba(15,23,42,0.7);padding:3px 5px;border-radius:3px;border:1px solid #334155;">${v}<div style="color:#64748b;font-size:0.65rem;">${sv.type}</div></div>`;
+            const cx = Math.floor((mapState.baseLng + 180) / 360 * Math.pow(2, zoom));
+            const cy = Math.floor((1 - Math.log(Math.tan(mapState.baseLat * Math.PI / 180) + 1 / Math.cos(mapState.baseLat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+
+            const colorCanvas = document.createElement('canvas');
+            colorCanvas.width = colorCanvas.height = CANVAS_SIZE;
+            const colorCtx = colorCanvas.getContext('2d');
+
+            const elevCanvas = document.createElement('canvas');
+            elevCanvas.width = elevCanvas.height = CANVAS_SIZE;
+            const elevCtx = elevCanvas.getContext('2d');
+
+            const tiles = [];
+            for(let x = -TILE_RADIUS; x <= TILE_RADIUS; x++) {
+                for(let y = -TILE_RADIUS; y <= TILE_RADIUS; y++) {
+                    tiles.push({ x, y });
+                }
+            }
+
+            let loaded = 0;
+            const totalTiles = tiles.length * 2;
+
+            const tilePromises = tiles.map(({ x, y }) => {
+                const drawX = (x + TILE_RADIUS) * TILE_SIZE;
+                const drawY = (y + TILE_RADIUS) * TILE_SIZE;
+
+                const colorPromise = new Promise(resolve => {
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${cy+y}/${cx+x}`;
+                    img.onload = () => { colorCtx.drawImage(img, drawX, drawY); loaded++; showLoadingProgress(loaded/totalTiles*50, '위성 이미지 로딩...'); resolve(); };
+                    img.onerror = () => { loaded++; showLoadingProgress(loaded/totalTiles*50, '위성 이미지 로딩...'); resolve(); };
                 });
-                sensorHtml += '</div></div>';
+
+                const elevPromise = new Promise(resolve => {
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${cx+x}/${cy+y}.png`;
+                    img.onload = () => { elevCtx.drawImage(img, drawX, drawY); loaded++; showLoadingProgress(50 + loaded/totalTiles*50, '고도 데이터 로딩...'); resolve(); };
+                    img.onerror = () => { loaded++; showLoadingProgress(50 + loaded/totalTiles*50, '고도 데이터 로딩...'); resolve(); };
+                });
+
+                return Promise.all([colorPromise, elevPromise]);
+            });
+
+            await Promise.all(tilePromises);
+            showLoadingProgress(1, '지형 생성 중...');
+
+            const elevData = elevCtx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            const elevations = new Float32Array(CANVAS_SIZE * CANVAS_SIZE);
+            let minElev = Infinity, maxElev = -Infinity;
+
+            for (let i = 0; i < elevData.data.length; i += 4) {
+                const r = elevData.data[i];
+                const g = elevData.data[i+1];
+                const b = elevData.data[i+2];
+                const elev = (r * 256 + g + b / 256) - 32768;
+                elevations[i/4] = elev;
+                if (elev < minElev) minElev = elev;
+                if (elev > maxElev) maxElev = elev;
             }
 
-            const trackHtml = reg?.tracks?.length
-                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">00 서버 트랙</div><div style="display:flex;flex-wrap:wrap;gap:4px;">${reg.tracks.map(t=>`<span class="badge">${t.name}:${t.type}</span>`).join('')}</div></div>`
-                : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">00 서버 등록 정보 없음</div>`;
+            const dispCanvas = document.createElement('canvas');
+            dispCanvas.width = dispCanvas.height = CANVAS_SIZE;
+            const dispCtx = dispCanvas.getContext('2d');
+            const dispData = dispCtx.createImageData(CANVAS_SIZE, CANVAS_SIZE);
 
-            const agentHtml = streamAgent
-                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">Agent 주소</div><div class="badge" style="display:inline-block;max-width:100%;overflow-wrap:anywhere;">${streamAgent}</div><div style="margin-top:6px;"><span class="badge ${agent?.llm_enabled ? 'ok' : 'warn'}">LLM ${agent?.llm_enabled ? 'enabled' : 'disabled'}</span></div></div>`
-                : `<div style="margin-top:8px;color:#64748b;font-size:0.75rem;">Agent 주소 없음</div>`;
+            for (let i = 0; i < elevations.length; i++) {
+                const elev = elevations[i];
+                const normalizedElev = Math.max(0, Math.min(255, ((elev + 500) / 1500) * 255));
 
-            const actionHtml = reg?.actions
-                ? `<div style="margin-top:8px;"><div style="color:#94a3b8;font-size:0.77rem;margin-bottom:4px;">지원 액션</div><div style="display:flex;flex-wrap:wrap;gap:4px;">${(reg.actions.core||[]).map(a=>`<span class="badge">${a}</span>`).join('')}${(reg.actions.custom||[]).map(a=>`<span class="badge">${a}</span>`).join('')}</div></div>`
-                : '';
+                const px = i % CANVAS_SIZE;
+                const py = Math.floor(i / CANVAS_SIZE);
+                const fadeMargin = 200;
+                const distToEdgeX = Math.min(px, CANVAS_SIZE - 1 - px);
+                const distToEdgeY = Math.min(py, CANVAS_SIZE - 1 - py);
+                let fadeFactor = Math.min(distToEdgeX / fadeMargin, 1.0) * Math.min(distToEdgeY / fadeMargin, 1.0);
+                fadeFactor = fadeFactor * fadeFactor * (3 - 2 * fadeFactor);
 
-            el.innerHTML = `<div style="background:rgba(15,23,42,0.9);padding:12px;border-radius:6px;border:1px solid ${cs};">
-                <h4 style="margin-top:0;color:${cs};">${dev.config.name}</h4>
-                <div style="font-size:0.82rem;display:grid;grid-template-columns:85px 1fr;gap:3px;">
-                    <span style="color:#94a3b8">타입:</span><span>${dev.config.type.replace(/_/g,' ')}</span>
-                    <span style="color:#94a3b8">위도/경도:</span><span>${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}</span>
-                    <span style="color:#94a3b8">고도/수심:</span><span>${pos.altitude.toFixed(1)}m</span>
-                    <span style="color:#94a3b8">헤딩:</span><span>${mot.heading.toFixed(1)}°</span>
-                    <span style="color:#94a3b8">속도:</span><span>${mot.speed.toFixed(2)} m/s</span>
-                    <span style="color:#94a3b8">최근 수신:</span><span>${ts}</span>
-                    <span style="color:#94a3b8">03 ID:</span><span>${reg?.id ?? '—'}</span>
-                    <span style="color:#94a3b8">03 토큰:</span><span>${reg?.token ? `${reg.token.slice(0, 8)}…` : '—'}</span>
-                    <span style="color:#94a3b8">Agent:</span><span>${streamAgent || '—'}</span>
-                    <span style="color:#94a3b8">LLM:</span><span>${agent?.llm_enabled ? 'enabled' : 'disabled'}</span>
-                    <span style="color:#94a3b8">Light:</span><span>${dev.lightOn ? 'ON' : 'OFF'}</span>
-                </div>${sensorHtml}
-                ${trackHtml}
-                ${agentHtml}
-                ${actionHtml}
-            </div><hr>`;
-        } else if (lk) {
-            const cs = '#'+(COLORS[lk.type]||0x60a5fa).toString(16).padStart(6,'0');
-            const sO = appState.objects.find(o=>o.id===lk.src);
-            const tO = appState.objects.find(o=>o.id===lk.dst);
-            const pkts = lk.packets.map(p=>`<div class="data-packet">${p}</div>`).join('');
-            el.innerHTML = `<div style="background:rgba(15,23,42,0.9);padding:12px;border-radius:6px;border:1px solid ${cs};">
-                <h4 style="margin-top:0;color:${cs};">📡 ${lk.name}</h4>
-                <div style="font-size:0.85rem;margin-bottom:10px;"><span style="color:#94a3b8">연결: </span><strong>${sO?.config.name||lk.src}</strong> ↔ <strong>${tO?.config.name||lk.dst}</strong></div>
-                <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:5px;">전송 데이터:</div>
-                <div style="background:#000;padding:8px;border-radius:4px;border:1px solid #334155;">${pkts}
-                    <div class="data-packet" style="color:#64748b;animation:pulse-bg 1.5s infinite;">_실시간 수신 중...</div>
-                </div>
-            </div><hr>`;
+                const val = normalizedElev * fadeFactor;
+                dispData.data[i*4] = val;
+                dispData.data[i*4+1] = val;
+                dispData.data[i*4+2] = val;
+                dispData.data[i*4+3] = 255;
+            }
+            dispCtx.putImageData(dispData, 0, 0);
+
+            // 지도 전체 표시 (투명도 처리 없음)
+
+            const lonMin = (cx - TILE_RADIUS) / Math.pow(2, zoom) * 360 - 180;
+            const lonMax = (cx + TILE_RADIUS + 1) / Math.pow(2, zoom) * 360 - 180;
+            const nMin = Math.PI - 2 * Math.PI * (cy - TILE_RADIUS) / Math.pow(2, zoom);
+            const latMax = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMin) - Math.exp(-nMin)));
+            const nMax = Math.PI - 2 * Math.PI * (cy + TILE_RADIUS + 1) / Math.pow(2, zoom);
+            const latMin = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMax) - Math.exp(-nMax)));
+
+            const planeWidth = (lonMax - lonMin) / mapState.scale;
+            const planeHeight = (latMax - latMin) / mapState.scale;
+
+            const offsetX = ((lonMin + lonMax) / 2 - mapState.baseLng) / mapState.scale;
+            const offsetZ = (mapState.baseLat - (latMin + latMax) / 2) / mapState.scale;
+
+            const geo = new THREE.PlaneGeometry(planeWidth, planeHeight, 512, 512);
+            const terrain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                map: new THREE.CanvasTexture(colorCanvas),
+                transparent: true, opacity: 0.6, depthWrite: false, depthTest: true
+            }));
+
+            terrain.rotation.x = -Math.PI / 2;
+            terrain.position.set(offsetX, 0, offsetZ);  // 정확한 지도 위치에 배치
+            terrain.frustumCulled = false;
+            scene.add(terrain);
+
+            console.log('Terrain positioned at:', offsetX, offsetZ);
+
+            terrain.updateMatrixWorld(true);
+            ['controlCenter', 'sensorNode'].forEach(type => {
+                state.objects.filter(o => o.type === type).forEach(obj => {
+                    const u = (obj.position.x - offsetX) / planeWidth + 0.5;
+                    const v = (obj.position.z - offsetZ) / planeHeight + 0.5;
+                    if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+                        const elevIdx = Math.floor(v * (CANVAS_SIZE-1)) * CANVAS_SIZE + Math.floor(u * (CANVAS_SIZE-1));
+                        const elevValue = elevations[elevIdx] || 0;
+                        obj.position.y = elevValue + (obj.type === 'controlCenter' ? 10 : 0);
+                    } else {
+                        obj.position.y = obj.type === 'controlCenter' ? 10 : -190;
+                    }
+                });
+            });
+
+            hideLoadingOverlay();
         }
-    },
-    addAlert(data) {
-        appState.alerts.push({
-            ...data,
-            source: 'local',
-            alert_id: data.alert_id || `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-            created_at: data.created_at || new Date().toISOString(),
-            updated_at: data.updated_at || data.created_at || new Date().toISOString(),
-        });
-        const dev = appState.objects.find(o=>o.id===data.deviceId);
-        if (dev) dev.hasAlert = true;
-        renderAlertList();
-        this.renderObjectList();
-    },
-    init() {
-        document.getElementById('camera-mode').addEventListener('change', e=>{
-            appState.cameraMode=e.target.value; if(appState.cameraMode==='orbit') controls.target.set(0,0,0);
-        });
-        document.getElementById('map-style').addEventListener('change', e=>{
-            if(mapState.currentTileLayer) mapState.map.removeLayer(mapState.currentTileLayer);
-            const urls={satellite:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',dark:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',ocean:'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}'};
-            mapState.currentTileLayer=L.tileLayer(urls[e.target.value]||urls.satellite,{maxZoom:18}).addTo(mapState.map);
-        });
-        document.getElementById('depth-filter').addEventListener('input', e=>{
-            appState.depthFilter=parseInt(e.target.value);
-            document.getElementById('depth-value').innerText=`${appState.depthFilter}m ~ 0m 표시`;
-        });
-        setInterval(()=>{ this.renderObjectList(); this.renderLinkList(); }, 3000);
-    }
-};
 
-// ─── 마우스 인터랙션 ─────────────────────────────────────────
-function onMouseMove(ev) {
-    mouse.x=(ev.clientX/innerWidth)*2-1; mouse.y=-(ev.clientY/innerHeight)*2+1;
-    raycaster.setFromCamera(mouse, camera);
-    const meshes = [...appState.objects.map(o=>o.mesh), ...appState.links.map(l=>l.mesh)];
-    const hits = raycaster.intersectObjects(meshes, true);
-    const tip = document.getElementById('tooltip');
-    if (hits.length>0) {
-        document.body.style.cursor='pointer';
-        let h=hits[0].object; while(h&&!h.userData.id) h=h.parent;
-        if (h) {
-            appState.hoveredId=h.userData.id;
-            const dev=appState.objects.find(o=>o.id===appState.hoveredId);
-            const lk=appState.links.find(l=>l.id===appState.hoveredId);
-            tip.style.display='block'; tip.style.left=(ev.clientX+15)+'px'; tip.style.top=(ev.clientY+15)+'px';
-            if(dev) tip.innerHTML=`<strong>${dev.config.name}</strong><br>Type: ${dev.config.type}<br>Depth: ${dev.scenePos.y.toFixed(1)}m<br>Speed: ${dev.speed.toFixed(2)} m/s`;
-            else if(lk) tip.innerHTML=`<strong>🔗 ${lk.name}</strong><br>클릭하여 상세보기`;
+        function buildDeviceModel(type, mainColorHex) {
+            const group = new THREE.Group();
+            let meshOffset = 0;
+
+            const mainMat = new THREE.MeshStandardMaterial({ color: mainColorHex, roughness: 0.6, metalness: 0.3 });
+            const darkMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+            const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x112233, roughness: 0.1, metalness: 0.8 });
+
+            if (type === 'ship') {
+                meshOffset = 2;
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 20), mainMat); hull.position.y = 1;
+                const bowGeo = new THREE.CylinderGeometry(0, 4.24, 6, 4); bowGeo.rotateY(Math.PI/4); bowGeo.rotateX(Math.PI/2);
+                const bow = new THREE.Mesh(bowGeo, mainMat); bow.position.set(0, 1, 13);
+                const bridge = new THREE.Mesh(new THREE.BoxGeometry(5, 6, 6), whiteMat); bridge.position.set(0, 7, -3);
+                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 8), darkMat); mast.position.set(0, 14, -3);
+                group.add(hull, bow, bridge, mast);
+            }
+            else if (type === 'usv') {
+                meshOffset = 1;
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 8), mainMat);
+                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3), darkMat); mast.position.set(0, 2.5, -1);
+                group.add(hull, mast);
+            }
+            else if (type === 'drone') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 1, 8), mainMat);
+                const arm1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 8), darkMat);
+                const arm2 = new THREE.Mesh(new THREE.BoxGeometry(8, 0.4, 0.4), darkMat);
+                const rGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.1, 16); const rMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5 });
+                const r1 = new THREE.Mesh(rGeo, rMat); r1.position.set(0, 0.3, 4); const r2 = new THREE.Mesh(rGeo, rMat); r2.position.set(0, 0.3, -4);
+                const r3 = new THREE.Mesh(rGeo, rMat); r3.position.set(4, 0.3, 0); const r4 = new THREE.Mesh(rGeo, rMat); r4.position.set(-4, 0.3, 0);
+                group.add(body, arm1, arm2, r1, r2, r3, r4);
+            }
+            else if (type === 'rov') {
+                meshOffset = 0;
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 5), mainMat);
+                const light = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.5), whiteMat); light.rotateX(Math.PI/2); light.position.set(0, 0, 2.5);
+                const t1 = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 2), darkMat); t1.rotateX(Math.PI/2); t1.position.set(-2.5, 0, -1);
+                const t2 = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 2), darkMat); t2.rotateX(Math.PI/2); t2.position.set(2.5, 0, -1);
+                group.add(frame, light, t1, t2);
+            }
+            else if (type === 'auv') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 10, 16), mainMat); body.rotateX(Math.PI/2);
+                const nose = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), mainMat); nose.position.set(0, 0, 5);
+                const tail = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3, 16), mainMat); tail.rotateX(-Math.PI/2); tail.position.set(0, 0, -6.5);
+                const f1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4, 1.5), darkMat); f1.position.set(0, 0, -6);
+                const f2 = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 1.5), darkMat); f2.position.set(0, 0, -6);
+                group.add(body, nose, tail, f1, f2);
+            }
+            else if (type === 'glider') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 8, 16), mainMat); body.rotateX(Math.PI/2);
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 2), darkMat);
+                group.add(body, wing);
+            }
+            else if (type === 'submarine') {
+                meshOffset = 0;
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 25, 16), darkMat); body.rotateX(Math.PI/2);
+                const sail = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 4), mainMat); sail.position.set(0, 3.5, 5);
+                group.add(body, sail);
+            }
+            else if (type === 'commBuoy') {
+                meshOffset = 1;
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 2, 16), mainMat);
+                const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 5), darkMat); antenna.position.y = 3.5;
+                group.add(base, antenna);
+            }
+            else if (type === 'powerTower') {
+                meshOffset = 2;
+                const platform = new THREE.Mesh(new THREE.BoxGeometry(10, 4, 10), mainMat);
+                const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 15), whiteMat); pillar.position.y = 9.5;
+                group.add(platform, pillar);
+            }
+            else if (type === 'sensorNode') {
+                meshOffset = -0.5;
+                const base = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 5), darkMat);
+                const dome = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16, 0, Math.PI * 2, 0, Math.PI/2), mainMat); dome.position.y = 0.5;
+                group.add(base, dome);
+            }
+            else if (type === 'controlCenter') {
+                meshOffset = 10;
+                const b1 = new THREE.Mesh(new THREE.BoxGeometry(20, 20, 25), mainMat);
+                const b2 = new THREE.Mesh(new THREE.BoxGeometry(12, 35, 12), whiteMat); b2.position.set(-6, 7.5, -12);
+                const rd = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 16), whiteMat); rd.position.set(-6, 28, -12);
+                const w = new THREE.Mesh(new THREE.BoxGeometry(15, 6, 26), glassMat); w.position.set(-3, 4, 0);
+                group.add(b1, b2, rd, w);
+            }
+            else { const defaultMesh = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), mainMat); group.add(defaultMesh); }
+
+            group.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
+            return { group, meshOffset };
         }
-    } else { document.body.style.cursor='default'; appState.hoveredId=null; tip.style.display='none'; }
-}
 
-let lastClickTime = 0;
-const DOUBLE_CLICK_DELAY = 300;
+        function initObjects() {
+            state.objects.forEach(data => {
+                const { group, meshOffset } = buildDeviceModel(data.type, COLORS[data.type] || 0xaaaaaa);
+                group.position.set(data.position.x, data.position.y + meshOffset, data.position.z);
+                group.rotation.y = THREE.MathUtils.degToRad(-data.heading);
+                group.userData = { id: data.id, isObject: true };
+                scene.add(group);
 
-function onClick() {
-    if (!appState.hoveredId) return;
-    const now = Date.now();
-    const isDoubleClick = (now - lastClickTime) < DOUBLE_CLICK_DELAY;
-    lastClickTime = now;
+                group.traverse(child => { if (child.isMesh) child.userData = { id: data.id, isObject: true }; });
 
-    if (isDoubleClick) {
-        uiManager.selectObject(appState.hoveredId, true);
-    } else {
-        uiManager.selectObject(appState.hoveredId);
-    }
-}
+                const labelEl = document.createElement('div');
+                labelEl.className = 'object-label';
+                labelEl.innerText = data.name;
+                document.getElementById('labels-container').appendChild(labelEl);
 
-// ─── 키보드 이동 상태 ────────────────────────────────────────
-const keyState = {};
+                Object.assign(data, { mesh: group, meshOffset: meshOffset, labelEl: labelEl, hasAlert: false });
+            });
 
-window.addEventListener('keydown', e => {
-    if (document.activeElement.tagName === 'INPUT') return;
-    keyState[e.key] = true;
+            state.objects.forEach(obj => {
+                if (obj.tetherTarget) {
+                    const lineMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 8, gapSize: 6, transparent: true, opacity: 0.8 });
+                    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
+                    scene.add(line);
+                    state.tethers.push({ source: obj.id, target: obj.tetherTarget, line: line });
+                }
+            });
 
-    // 이동 키 스크롤 방지
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+            linkScenarios.forEach(link => {
+                const lineMat = new THREE.LineDashedMaterial({ color: COLORS[link.type], dashSize: 10, gapSize: 10, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+                const lineMesh = new THREE.Line(lineGeo, lineMat);
+                lineMesh.userData = { id: link.id, isLink: true };
+                scene.add(lineMesh);
 
-    // 단발성 단축키
-    const list = [...appState.objects, ...appState.links];
-    const idx  = list.findIndex(o => o.id === appState.selectedId);
-    switch (e.key) {
-        case '1': uiManager.selectObject(list[(idx-1+list.length)%list.length].id); break;
-        case '2': uiManager.selectObject(list[(idx+1)%list.length].id); break;
-        case 'f': case 'F': {
-            const t = appState.objects.find(o => o.id === appState.selectedId);
-            if (t) { camera.position.copy(t.mesh.position).add(new THREE.Vector3(0,30,50)); controls.target.copy(t.mesh.position); }
-            break;
+                const packetGeo = new THREE.CylinderGeometry(0.2, 0.2, 6, 8);
+                packetGeo.rotateX(Math.PI / 2);
+
+                const particles = [];
+                const numPackets = 4;
+                for(let i=0; i<numPackets; i++) {
+                    const packetMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
+                    const pMesh = new THREE.Mesh(packetGeo, packetMat);
+                    scene.add(pMesh);
+                    particles.push({ mesh: pMesh, progress: i * (1.0 / numPackets) });
+                }
+
+                state.links.push({ ...link, mesh: lineMesh, particles: particles });
+            });
         }
-        case 'l': case 'L':
-            appState.showLabels = !appState.showLabels;
-            if (!appState.showLabels) appState.objects.forEach(o => o.labelEl.style.display = 'none');
-            break;
-        case 'g': case 'G':
-            appState.showGrid = !appState.showGrid;
-            gridHelpers.forEach(g => g.visible = appState.showGrid);
-            break;
-    }
-});
 
-window.addEventListener('keyup', e => { keyState[e.key] = false; });
+        function updateSimulation(delta) {
+            const time = state.time;
+            const simDelta = delta * state.simSpeed;
 
-// ─── 키보드 카메라 이동 (애니메이션 루프에서 매 프레임 호출) ──
-const _fwd   = new THREE.Vector3();
-const _right = new THREE.Vector3();
-const _move  = new THREE.Vector3();
-const _up    = new THREE.Vector3(0, 1, 0);
+            state.objects.forEach(obj => {
+                if (['controlCenter', 'sensorNode'].includes(obj.type)) {
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                }
+                else if (['powerTower', 'commBuoy'].includes(obj.type)) {
+                    obj.mesh.position.set(obj.position.x, 0 + obj.meshOffset, obj.position.z);
+                }
+                else if (['ship', 'auv', 'submarine', 'glider'].includes(obj.type)) {
+                    const rad = THREE.MathUtils.degToRad(-obj.heading);
+                    const moveSpd = obj.speed * simDelta * 0.1;
+                    obj.position.x += Math.sin(rad) * moveSpd;
+                    obj.position.z += Math.cos(rad) * moveSpd;
 
-function moveCameraByKeys(delta) {
-    if (document.activeElement.tagName === 'INPUT') return;
+                    if (Math.abs(obj.position.x) > 300 || Math.abs(obj.position.z) > 300) {
+                        obj.heading = (obj.heading + 180) % 360;
+                        obj.mesh.rotation.y = THREE.MathUtils.degToRad(-obj.heading);
+                    }
+                    let yOffset = 0;
+                    if(['submarine', 'glider'].includes(obj.type)) yOffset = Math.sin(time + obj.position.x) * 2;
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset + yOffset, obj.position.z);
+                }
+                else if (['drone', 'usv'].includes(obj.type)) {
+                    if (obj.hoverCenter) {
+                        const radius = 50;
+                        obj.position.x = obj.hoverCenter.x + Math.sin(time * 0.2) * radius;
+                        obj.position.z = obj.hoverCenter.z + Math.cos(time * 0.2) * radius;
+                        const dx = Math.sin(time * 0.2 + 0.1) * radius - Math.sin(time * 0.2) * radius;
+                        const dz = Math.cos(time * 0.2 + 0.1) * radius - Math.cos(time * 0.2) * radius;
+                        obj.heading = THREE.MathUtils.radToDeg(Math.atan2(-dx, -dz));
+                        obj.mesh.rotation.y = THREE.MathUtils.degToRad(-obj.heading);
+                    }
+                    if (obj.type === 'drone') obj.position.y = 40 + Math.sin(time * 3) * 2;
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                }
+                else {
+                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                }
 
-    const moveForward  = keyState['w'] || keyState['W'] || keyState['ArrowUp'];
-    const moveBackward = keyState['s'] || keyState['S'] || keyState['ArrowDown'];
-    const moveLeft     = keyState['a'] || keyState['A'] || keyState['ArrowLeft'];
-    const moveRight    = keyState['d'] || keyState['D'] || keyState['ArrowRight'];
-    const moveUp       = keyState['e'] || keyState['E'] || keyState['PageUp'];
-    const moveDown     = keyState['q'] || keyState['Q'] || keyState['PageDown'];
+                if (obj.battery !== undefined && state.simSpeed > 0) obj.battery = Math.max(0, obj.battery - (0.05 * simDelta));
 
-    if (!moveForward && !moveBackward && !moveLeft && !moveRight && !moveUp && !moveDown) return;
+                obj.mesh.visible = obj.position.y >= state.depthFilter;
+                obj.labelEl.style.display = (state.showLabels && obj.mesh.visible) ? 'block' : 'none';
 
-    // 이동 속도: 카메라~타겟 거리에 비례해서 줌 레벨에 무관하게 자연스럽게 이동
-    const dist  = camera.position.distanceTo(controls.target);
-    const speed = Math.max(dist * 0.9, 20) * delta;
+                const isSelected = obj.id === state.selectedId;
+                let targetEmissive = 0x000000;
+                let targetIntensity = 0;
 
-    // 수평 전진 방향 (카메라가 바라보는 방향을 XZ 평면에 투영)
-    camera.getWorldDirection(_fwd);
-    _fwd.y = 0;
-    _fwd.normalize();
+                if (obj.hasAlert) {
+                    targetEmissive = COLORS.alert_critical;
+                    targetIntensity = Math.sin(time * 8) * 0.5 + 0.5;
+                } else if (isSelected || obj.id === state.hoveredId) {
+                    targetEmissive = 0xffffff;
+                    targetIntensity = isSelected ? 0.5 : 0.2;
+                }
 
-    // 오른쪽 방향
-    _right.crossVectors(_fwd, _up).normalize();
+                obj.mesh.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.emissive.setHex(targetEmissive);
+                        child.material.emissiveIntensity = targetIntensity;
+                    }
+                });
+            });
 
-    _move.set(0, 0, 0);
-    if (moveForward)  _move.addScaledVector(_fwd,    speed);
-    if (moveBackward) _move.addScaledVector(_fwd,   -speed);
-    if (moveLeft)     _move.addScaledVector(_right, -speed);
-    if (moveRight)    _move.addScaledVector(_right,  speed);
-    if (moveUp)       _move.y +=  speed;
-    if (moveDown)     _move.y -= speed;
+            // 카메라 위치에 따라 그리드 이동
+            const snap = 10;
+            const camX = Math.round(camera.position.x / snap) * snap;
+            const camZ = Math.round(camera.position.z / snap) * snap;
+            gridHelpers.forEach(g => { g.position.x = camX; g.position.z = camZ; });
 
-    camera.position.add(_move);
-    controls.target.add(_move);
-    controls.update();
+            state.tethers.forEach(t => {
+                const s = state.objects.find(o => o.id === t.source), tgt = state.objects.find(o => o.id === t.target);
+                if (s && tgt) {
+                    const pos = t.line.geometry.attributes.position.array;
+                    pos[0]=s.mesh.position.x; pos[1]=s.mesh.position.y; pos[2]=s.mesh.position.z;
+                    pos[3]=tgt.mesh.position.x; pos[4]=tgt.mesh.position.y; pos[5]=tgt.mesh.position.z;
+                    t.line.geometry.attributes.position.needsUpdate = true;
+                    t.line.computeLineDistances();
+                    t.line.visible = s.mesh.visible && tgt.mesh.visible;
+                }
+            });
 
-    // 키보드 이동 중에는 추적/탑뷰 모드 해제
-    if (appState.cameraMode !== 'orbit') {
-        appState.cameraMode = 'orbit';
-        document.getElementById('camera-mode').value = 'orbit';
-    }
-}
+            state.links.forEach(link => {
+                const sObj = state.objects.find(o => o.id === link.source);
+                const tObj = state.objects.find(o => o.id === link.target);
 
-// ─── 메인 루프 ───────────────────────────────────────────────
-const clock = new THREE.Clock();
-function animate() {
-    requestAnimationFrame(animate);
-    const delta = clock.getDelta();
-    appState.time += delta;
-    moveCameraByKeys(delta);
-    if (appState.objects.length>0) updateScene(delta);
-    if (Math.floor(appState.time*5)%5===0 && appState.selectedId) uiManager.renderSelectedDetail();
-    updateMap();
-    renderer.render(scene, camera);
-}
+                if (sObj && tObj) {
+                    const isVisible = sObj.mesh.visible && tObj.mesh.visible;
+                    link.mesh.visible = isVisible;
 
-// ─── 헤더 호버 ──────────────────────────────────────────────
-(function() {
-    const trigger = document.getElementById('header-trigger');
-    const header  = document.getElementById('header');
-    let hideTimer = null;
+                    const p1 = sObj.mesh.position.clone();
+                    const p2 = tObj.mesh.position.clone();
 
-    function showHeader() {
-        clearTimeout(hideTimer);
-        header.classList.add('visible');
-    }
-    function scheduleHide() {
-        hideTimer = setTimeout(() => header.classList.remove('visible'), 300);
-    }
+                    if(sObj.type==='controlCenter') p1.y += 20; if(tObj.type==='controlCenter') p2.y += 20;
+                    if(sObj.type==='ship') p1.y += 10; if(tObj.type==='ship') p2.y += 10;
 
-    trigger.addEventListener('mouseenter', showHeader);
-    header.addEventListener('mouseenter',  showHeader);
-    trigger.addEventListener('mouseleave', scheduleHide);
-    header.addEventListener('mouseleave',  scheduleHide);
-})();
+                    const posAttr = link.mesh.geometry.attributes.position;
+                    posAttr.array[0] = p1.x; posAttr.array[1] = p1.y; posAttr.array[2] = p1.z;
+                    posAttr.array[3] = p2.x; posAttr.array[4] = p2.y; posAttr.array[5] = p2.z;
+                    posAttr.needsUpdate = true;
 
-// ─── 헤더 시계 & 통계 갱신 ──────────────────────────────────
-function updateHeader() {
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2,'0');
-    const mm = String(now.getMinutes()).padStart(2,'0');
-    const ss = String(now.getSeconds()).padStart(2,'0');
-    document.getElementById('header-clock').textContent =
-        `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}  ${hh}:${mm}:${ss}`;
+                    link.mesh.computeLineDistances();
 
-    document.getElementById('hdr-devices').textContent   = appState.objects.length;
-    document.getElementById('hdr-links').textContent     = appState.links.length;
-    const conn = DEVICE_CONFIG.filter(c => connState[c.id] === 'connected').length;
-    document.getElementById('hdr-connected').textContent = conn;
-    const totalAlerts = appState.alerts.length + appState.registryAlerts.length;
-    const alertEl = document.getElementById('hdr-alerts');
-    alertEl.textContent = totalAlerts;
-    alertEl.style.color = totalAlerts > 0 ? '#f87171' : '#4ade80';
+                    const isSelected = link.id === state.selectedId || link.id === state.hoveredId;
+                    link.mesh.material.opacity = isSelected ? 0.9 : 0.4;
 
-    const badge = document.getElementById('header-registry-badge');
-    if (appState.registryStatus === 'ok') {
-        badge.textContent = `00 서버: ${DEVICE_CONFIG.length}개 등록`;
-        badge.className = 'ok';
-    } else if (appState.registryStatus === 'offline') {
-        badge.textContent = '00 서버: 오프라인';
-        badge.className = 'offline';
-    } else {
-        badge.textContent = '00 서버: 확인 중';
-        badge.className = '';
-    }
-}
+                    link.mesh.material.dashOffset -= simDelta * 15;
 
-function promptRegistryUrl() {
-    const current = registryBaseUrl();
-    const input = prompt('03 레지스트리 서버 주소:', current);
-    if (input && input.trim()) {
-        localStorage.setItem('cowater.dashboard.registryUrl', input.trim());
-        location.reload();
-    }
-}
+                    link.particles.forEach(p => {
+                        p.mesh.visible = isVisible;
+                        p.progress += simDelta * 0.15;
+                        if(p.progress > 1.0) p.progress = 0;
 
-setInterval(syncRegistryAlerts, 15000);
+                        p.mesh.position.lerpVectors(p1, p2, p.progress);
+                        p.mesh.lookAt(p2);
 
-window.onload = async () => {
-    initScene();
-    setProgress(0.3, 'Device Registry 동기화 중...');
-    await syncDeviceRegistry();
-    setProgress(0.5, '3D 객체 생성 중...');
-    initObjects();
-    setProgress(0.7, '통신 링크 초기화 중...');
-    initLinks();
-    setProgress(0.8, '미니맵 초기화 중...');
-    initMap();
-    setProgress(0.9, 'Moth 연결 중...');
-    connectMoth();
-    setProgress(1.0, '로드 완료');
-    hideLoading();
-    uiManager.init();
-    updateConnStatus();
-    animate();
-    setInterval(updateHeader, 1000);
-    updateHeader();
-};
-</script>
+                        p.mesh.material.color.setHex(isSelected ? 0xffffff : COLORS[link.type]);
+
+                        const scaleBase = isSelected ? 1.5 : 0.8;
+                        p.mesh.scale.set(scaleBase, scaleBase, scaleBase + (Math.sin(time * 10) * 0.3));
+                    });
+                }
+            });
+
+            alertQueue.forEach(a => { if (!a.triggered && time >= a.triggerTime) { a.triggered = true; triggerAlert(a); } });
+
+            if (state.showLabels) {
+                state.objects.forEach(obj => {
+                    if(!obj.mesh.visible) return;
+                    const pos = obj.mesh.position.clone();
+                    pos.y += (obj.type==='drone'? 5 : 8);
+                    pos.project(camera);
+                    if (pos.z > 1) { obj.labelEl.style.display = 'none'; return; }
+                    obj.labelEl.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
+                    obj.labelEl.style.top = `${(pos.y * -0.5 + 0.5) * window.innerHeight}px`;
+                });
+            }
+
+            if (camera.position.y < 0) {
+                scene.background.setHex(ENV_COLORS.deepWater); scene.fog.color.setHex(ENV_COLORS.deepWater); scene.fog.density = 0.005;
+            } else {
+                scene.background.setHex(ENV_COLORS.sky); scene.fog.color.setHex(ENV_COLORS.sky); scene.fog.density = 0.002;
+            }
+
+            if (state.cameraMode === 'follow' && state.selectedId) {
+                const target = state.objects.find(o => o.id === state.selectedId) || state.links.find(l => l.id === state.selectedId);
+                if (target) {
+                    let tPos = target.mesh ? target.mesh.position : target.position;
+                    if(target.source) {
+                        const sObj = state.objects.find(o => o.id === target.source), tObj = state.objects.find(o => o.id === target.target);
+                        if(sObj && tObj) tPos = sObj.mesh.position.clone().lerp(tObj.mesh.position, 0.5);
+                    }
+                    controls.target.lerp(tPos, 0.1);
+                }
+            } else if (state.cameraMode === 'topdown' && state.selectedId) {
+                const target = state.objects.find(o => o.id === state.selectedId);
+                if (target) {
+                    controls.target.lerp(target.mesh.position, 0.1);
+                    camera.position.lerp(target.mesh.position.clone().add(new THREE.Vector3(0,150,0)), 0.05);
+                }
+            }
+            controls.update();
+        }
+
+        function initMap() {
+            mapState.map = L.map('minimap', { zoomControl: false, attributionControl: false, dragging: false, touchZoom: false, doubleClickZoom: false, scrollWheelZoom: false, boxZoom: false, keyboard: false }).setView([mapState.baseLat, mapState.baseLng], 14);
+
+            mapState.currentTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18 }).addTo(mapState.map);
+
+            const createIcon = (c) => L.divIcon({ className: 'custom-div-icon', html: `<div style="background-color:#${c.toString(16).padStart(6,'0')}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.8);"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+
+            state.objects.forEach(obj => {
+                const marker = L.marker([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)], { icon: createIcon(COLORS[obj.type] || 0xffffff) }).addTo(mapState.map);
+                marker.bindTooltip(obj.name, { direction: 'top', offset: [0, -10] });
+                marker.on('click', () => {
+                    uiManager.selectObject(obj.id);
+                    const t = state.objects.find(o => o.id === obj.id);
+                    if(t) { camera.position.copy(t.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(t.mesh.position); }
+                });
+                mapState.markers[obj.id] = marker;
+            });
+
+            state.links.forEach(link => {
+                const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
+                const polyline = L.polyline([], { color: colorStr, weight: 2, dashArray: '5, 5' }).addTo(mapState.map);
+                mapState.lines[link.id] = polyline;
+            });
+
+            const panel = document.getElementById('minimap-panel');
+            let isDragging = false, isRotating = false, lastX = 0, lastY = 0;
+
+            panel.addEventListener('mousedown', (e) => {
+                if (e.button === 0) isDragging = true; if (e.button === 2) isRotating = true;
+                lastX = e.clientX; lastY = e.clientY;
+                if (state.cameraMode !== 'orbit') { state.cameraMode = 'orbit'; document.getElementById('camera-mode').value = 'orbit'; }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging && !isRotating) return;
+                const dx = e.clientX - lastX, dy = e.clientY - lastY;
+                lastX = e.clientX; lastY = e.clientY;
+
+                if (isRotating) {
+                    const angle = dx * 0.01, x = camera.position.x - controls.target.x, z = camera.position.z - controls.target.z;
+                    camera.position.x = controls.target.x + x * Math.cos(angle) - z * Math.sin(angle);
+                    camera.position.z = controls.target.z + x * Math.sin(angle) + z * Math.cos(angle);
+                    controls.update();
+                }
+                if (isDragging) {
+                    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).normalize();
+                    const r = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+
+                    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                    const target = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(plane, target);
+                    const dist = camera.position.distanceTo(target || controls.target);
+
+                    const panSpeed = dist * 0.003;
+                    const move = new THREE.Vector3().addScaledVector(r, -dx * panSpeed).addScaledVector(f, dy * panSpeed);
+                    controls.target.add(move); camera.position.add(move); controls.update();
+                }
+            });
+            window.addEventListener('mouseup', () => { isDragging = isRotating = false; });
+            panel.addEventListener('wheel', (e) => { e.preventDefault(); mapState.map.setZoom(mapState.map.getZoom() + (e.deltaY > 0 ? -1 : 1)); });
+        }
+
+        function updateMap() {
+            if (!mapState.map) return;
+            state.objects.forEach(obj => {
+                const marker = mapState.markers[obj.id];
+                if (marker) {
+                    marker.setLatLng([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)]);
+                    if (state.selectedId === obj.id) marker.openTooltip(); else if (marker.isTooltipOpen()) marker.closeTooltip();
+                }
+            });
+
+            state.links.forEach(link => {
+                const polyline = mapState.lines[link.id];
+                const sObj = state.objects.find(o => o.id === link.source);
+                const tObj = state.objects.find(o => o.id === link.target);
+                if (polyline && sObj && tObj) {
+                    const sLat = mapState.baseLat - (sObj.position.z * mapState.scale);
+                    const sLng = mapState.baseLng + (sObj.position.x * mapState.scale);
+                    const tLat = mapState.baseLat - (tObj.position.z * mapState.scale);
+                    const tLng = mapState.baseLng + (tObj.position.x * mapState.scale);
+                    polyline.setLatLngs([[sLat, sLng], [tLat, tLng]]);
+
+                    if (link.id === state.selectedId) polyline.setStyle({ weight: 4, opacity: 1 });
+                    else polyline.setStyle({ weight: 2, opacity: 0.6 });
+                }
+            });
+
+            mapState.map.setView([mapState.baseLat - (controls.target.z * mapState.scale), mapState.baseLng + (controls.target.x * mapState.scale)], mapState.map.getZoom(), { animate: false });
+            const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
+            document.getElementById('minimap-container').style.transform = `rotate(${-Math.atan2(camDir.x, -camDir.z) * (180 / Math.PI)}deg)`;
+        }
+
+        const uiManager = {
+            init: function() {
+                // 헤더 호버 로직
+                const header = document.getElementById('header');
+                const trigger = document.getElementById('header-trigger');
+                let hideTimer;
+                trigger.addEventListener('mouseenter', () => {
+                    clearTimeout(hideTimer);
+                    header.classList.add('visible');
+                });
+                header.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+                header.addEventListener('mouseleave', () => {
+                    hideTimer = setTimeout(() => header.classList.remove('visible'), 300);
+                });
+
+                document.getElementById('camera-mode').addEventListener('change', (e) => { state.cameraMode = e.target.value; if(state.cameraMode === 'orbit') controls.target.set(0,0,0); });
+
+                document.getElementById('map-style').addEventListener('change', (e) => {
+                    if(mapState.currentTileLayer) mapState.map.removeLayer(mapState.currentTileLayer);
+                    let url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+                    if (e.target.value === 'dark') url = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+                    if (e.target.value === 'ocean') url = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}';
+                    mapState.currentTileLayer = L.tileLayer(url, { maxZoom: 18 }).addTo(mapState.map);
+                });
+
+                document.getElementById('depth-filter').addEventListener('input', (e) => { state.depthFilter = parseInt(e.target.value); document.getElementById('depth-value').innerText = `${state.depthFilter}m ~ 0m 표시`; });
+                document.getElementById('sim-speed').addEventListener('input', (e) => { state.simSpeed = parseFloat(e.target.value); document.getElementById('speed-value').innerText = `${state.simSpeed.toFixed(1)}x`; });
+                this.renderStats(); this.renderObjectList();
+            },
+            togglePanel: function(side) {
+                const panel = document.getElementById(`${side}-panel`);
+                if(panel) panel.classList.toggle('collapsed');
+            },
+            switchTab: function(tabName) {
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                const idx = ['objects', 'links', 'alerts'].indexOf(tabName);
+                if (idx >= 0) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+                document.getElementById(`tab-${tabName}`)?.classList.add('active');
+                if (tabName === 'links') this.renderLinkList();
+            },
+            selectObject: function(id) { state.selectedId = id; this.renderObjectList(); this.renderSelectedDetail(); this.switchTab('objects'); },
+            renderStats: function() {
+                const types = { ship: 0, rov: 0, auv: 0, drone: 0, usv: 0, control_ship: 0 };
+                state.objects.forEach(o => { if (types[o.type] !== undefined) types[o.type]++; });
+                document.getElementById('stats-container').innerHTML = `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 디바이스:</span> <strong>${state.objects.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>통신 링크:</span> <strong>${state.links.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? '#f87171' : '#4ade80'}">발생 경보: ${state.alerts.length}건</div>`;
+            },
+            renderObjectList: function() {
+                let html = '';
+                state.objects.forEach(obj => {
+                    const batteryText = obj.battery !== undefined ? Math.round(obj.battery) + '%' : 'N/A';
+                    html += `<div class="list-item ${obj.id === state.selectedId ? 'selected' : ''}" onclick="uiManager.selectObject('${obj.id}')"><div class="title"><span>${obj.name}</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">●</span></div><div style="display:flex; justify-content:space-between; color:#94a3b8;"><span>Depth: ${Math.round(obj.position.y)}m</span><span>Bat: ${batteryText}</span></div></div>`;
+                });
+                document.getElementById('object-list-container').innerHTML = html;
+                document.getElementById('obj-count').innerText = state.objects.length;
+            },
+            renderLinkList: function() {
+                let html = '';
+                state.links.forEach(link => {
+                    const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
+                    html += `<div class="list-item ${link.id === state.selectedId ? 'selected' : ''}" style="border-left-color: ${colorStr}" onclick="uiManager.selectObject('${link.id}')"><div class="title"><span>🔗 ${link.name}</span></div><div style="font-size:0.75rem; color:#94a3b8;">Data Stream Active</div></div>`;
+                });
+                document.getElementById('link-list-container').innerHTML = html || '<div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>';
+                document.getElementById('link-count').innerText = state.links.length;
+            },
+            renderSelectedDetail: function() {
+                const d = document.getElementById('selected-detail');
+                const obj = state.objects.find(o => o.id === state.selectedId);
+                const link = state.links.find(l => l.id === state.selectedId);
+
+                if (!obj && !link) { d.style.display = 'none'; return; }
+                d.style.display = 'block';
+
+                if (obj) {
+                    const batteryText = obj.battery !== undefined ? obj.battery.toFixed(1) + '%' : 'N/A';
+                    d.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid #60a5fa;"><h4 style="margin-top:0; color:#60a5fa;">${obj.name}</h4><div style="font-size:0.85rem; display:grid; grid-template-columns: 100px 1fr; gap: 4px;"><span style="color:#94a3b8">타입:</span><span>${obj.type.toUpperCase()}</span><span style="color:#94a3b8">좌표:</span><span>(${obj.position.x.toFixed(1)}, ${obj.position.y.toFixed(1)}, ${obj.position.z.toFixed(1)})</span><span style="color:#94a3b8">속력:</span><span>${obj.speed} knots</span><span style="color:#94a3b8">헤딩:</span><span>${Math.round(obj.heading)}°</span><span style="color:#94a3b8">배터리:</span><span>${batteryText}</span><span style="color:#94a3b8">상태:</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">${obj.hasAlert ? '위험 감지' : '정상 작동'}</span></div></div><hr>`;
+                }
+                else if (link) {
+                    const sObj = state.objects.find(o => o.id === link.source);
+                    const tObj = state.objects.find(o => o.id === link.target);
+                    const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
+
+                    let packetHtml = link.packets.map(p => `<div class="data-packet">${p}</div>`).join('');
+
+                    d.innerHTML = `
+                        <div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid ${colorStr};">
+                            <h4 style="margin-top:0; color:${colorStr};">📡 ${link.name}</h4>
+                            <div style="font-size:0.85rem; margin-bottom: 10px;">
+                                <span style="color:#94a3b8">연결: </span> <strong style="color:white">${sObj ? sObj.name : 'Unknown'}</strong> ↔ <strong style="color:white">${tObj ? tObj.name : 'Unknown'}</strong>
+                            </div>
+                            <div style="color:#94a3b8; font-size: 0.8rem; margin-bottom: 5px;">실시간 전송 데이터:</div>
+                            <div style="background: #000; padding: 8px; border-radius: 4px; border: 1px solid #334155; max-height: 100px; overflow-y: auto;">
+                                ${packetHtml}
+                                <div class="data-packet" style="color:#64748b; animation: pulse-bg 1.5s infinite;">_수신 대기중...</div>
+                            </div>
+                        </div><hr>
+                    `;
+                }
+            },
+            addAlert: function(alertData) {
+                state.alerts.push(alertData); document.getElementById('alert-count').innerText = state.alerts.length;
+                const container = document.getElementById('alert-list-container');
+                if (state.alerts.length === 1) container.innerHTML = '';
+                const el = document.createElement('div');
+                el.className = `list-item ${alertData.severity === 'critical' ? 'alert-critical' : 'alert-warning'}`;
+                el.innerHTML = `<div class="title"><span>${alertData.message}</span></div><div style="font-size:0.75rem; color:#94a3b8;">Time: ${new Date().toLocaleTimeString()} | Target: ${alertData.platformId}</div>`;
+                el.onclick = () => { this.selectObject(alertData.platformId); const obj = state.objects.find(o => o.id === alertData.platformId); if(obj) { controls.target.copy(obj.mesh.position); camera.position.set(obj.mesh.position.x, obj.mesh.position.y + 40, obj.mesh.position.z + 60); } };
+                container.insertBefore(el, container.firstChild);
+                this.renderStats(); if(state.selectedId === alertData.platformId) this.renderSelectedDetail();
+            }
+        };
+
+        function triggerAlert(alertData) { const obj = state.objects.find(o => o.id === alertData.platformId); if (obj) { obj.hasAlert = true; obj.status = alertData.severity; uiManager.addAlert(alertData); } }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1; mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const allIntersectables = [...state.objects.map(o => o.mesh), ...state.links.map(l => l.mesh)];
+            const intersects = raycaster.intersectObjects(allIntersectables, true);
+
+            const tooltip = document.getElementById('tooltip');
+            if (intersects.length > 0) {
+                document.body.style.cursor = 'pointer';
+                let hitObj = intersects[0].object;
+                while (hitObj && !hitObj.userData.id) hitObj = hitObj.parent;
+
+                if (hitObj) {
+                    state.hoveredId = hitObj.userData.id;
+                    const obj = state.objects.find(o => o.id === state.hoveredId);
+                    const link = state.links.find(l => l.id === state.hoveredId);
+
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (event.clientX + 15) + 'px';
+                    tooltip.style.top = (event.clientY + 15) + 'px';
+
+                    if(obj) {
+                        tooltip.innerHTML = `<strong>${obj.name}</strong><br>Type: ${obj.type}<br>Depth: ${Math.round(obj.position.y)}m`;
+                    } else if (link) {
+                        tooltip.innerHTML = `<strong>🔗 ${link.name}</strong><br>데이터 스트림 확인하기 (Click)`;
+                    }
+                }
+            } else { document.body.style.cursor = 'default'; state.hoveredId = null; tooltip.style.display = 'none'; }
+        }
+
+        function onClick() { uiManager.selectObject(state.hoveredId || null); }
+
+        window.addEventListener('keydown', (e) => {
+            if(document.activeElement.tagName === 'INPUT') return;
+            const targetList = [...state.objects, ...state.links];
+            const idx = targetList.findIndex(o => o.id === state.selectedId);
+            switch(e.key.toLowerCase()) {
+                case '1': if(targetList.length > 0) uiManager.selectObject(targetList[(idx - 1 + targetList.length) % targetList.length].id); break;
+                case '2': if(targetList.length > 0) uiManager.selectObject(targetList[(idx + 1) % targetList.length].id); break;
+                case 'f': if(state.selectedId) {
+                    const obj = state.objects.find(o => o.id === state.selectedId);
+                    if(obj) { camera.position.copy(obj.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(obj.mesh.position); }
+                } break;
+                case 'l': state.showLabels = !state.showLabels; if(!state.showLabels) state.objects.forEach(o => o.labelEl.style.display = 'none'); break;
+                case 'g': state.showGrid = !state.showGrid; gridHelpers.forEach(g => g.visible = state.showGrid); break;
+                case 'z': document.getElementById('depth-filter').value = -200; document.getElementById('depth-filter').dispatchEvent(new Event('input')); break;
+                case '+': case '=': document.getElementById('sim-speed').value = Math.min(3, state.simSpeed + 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
+                case '-': case '_': document.getElementById('sim-speed').value = Math.max(0.1, state.simSpeed - 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
+            }
+        });
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            state.time += delta * state.simSpeed;
+            updateSimulation(delta);
+            if (Math.floor(state.time * 10) % 10 === 0 && state.selectedId) uiManager.renderSelectedDetail();
+            updateMap();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = async () => {
+            init3DEnvironment();
+
+            // Registry에서 디바이스 가져오기
+            const registryDevices = await fetchDevicesFromRegistry();
+            if (registryDevices.length > 0) {
+                state.objects = registryDevices.map(mapRegistryToScenario);
+            } else {
+                state.objects = initialScenarios;
+            }
+
+            // linkScenarios는 window.onload에서 할당하지 말고 initObjects()에서 처리
+
+            initObjects();
+            uiManager.init();
+            initMap();
+
+            // Moth telemetry 구독
+            subscribeMothTelemetry();
+
+            animate();
+        };
+    </script>
 </body>
 </html>

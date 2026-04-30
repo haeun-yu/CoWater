@@ -12,6 +12,59 @@ class DecisionEngine:
         self.skills = skills
 
     def decide(self, state: AgentState, telemetry: dict[str, Any]) -> dict[str, Any]:
+        # Handle both telemetry (for lower agents) and alerts (for system supervisor)
+        if telemetry.get("alert_type"):
+            return self._decide_on_alert(state, telemetry)
+        return self._decide_on_telemetry(state, telemetry)
+
+    def _decide_on_alert(self, state: AgentState, alert: dict[str, Any]) -> dict[str, Any]:
+        """Decision engine for system supervisor processing alerts"""
+        recommendations: list[dict[str, Any]] = []
+        actions = set(self.skills.list_actions())
+        alert_type = alert.get("alert_type", "unknown")
+        severity = alert.get("severity", "info")
+        metadata = alert.get("metadata", {})
+
+        # Mine detection handling
+        if alert_type == "mine_detection":
+            if "mission.assign" in actions:
+                recommendations.append({
+                    "action": "mission.assign",
+                    "priority": "critical" if severity == "critical" else "high",
+                    "mission_type": "mine_survey_and_removal",
+                    "params": {"location": metadata.get("location", {})}
+                })
+
+        # Default to recommended action
+        if not recommendations and alert.get("recommended_action"):
+            recommended = alert.get("recommended_action", "").lower()
+            if "survey" in recommended:
+                recommendations.append({
+                    "action": "task.assign",
+                    "priority": severity,
+                    "task_type": "survey_depth",
+                    "params": {"location": metadata.get("location", {})}
+                })
+            elif "remove" in recommended:
+                recommendations.append({
+                    "action": "task.assign",
+                    "priority": severity,
+                    "task_type": "remove_mine",
+                    "params": {"location": metadata.get("location", {})}
+                })
+
+        decision = {
+            "at": utc_now(),
+            "mode": "rule",
+            "llm": self.agent_config.get("llm", {}),
+            "recommendations": recommendations,
+            "alert_type": alert_type,
+            "severity": severity,
+        }
+        state.last_decision = decision
+        return decision
+
+    def _decide_on_telemetry(self, state: AgentState, telemetry: dict[str, Any]) -> dict[str, Any]:
         actions = set(self.skills.list_actions())
         rules = self.agent_config.get("rules", {})
         battery_warn = float(rules.get("battery_warn_percent", 30))

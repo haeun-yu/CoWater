@@ -130,3 +130,21 @@ class RegistryClient:
 
     def get_device(self, registry_id: int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}")
+
+    def list_devices(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/devices")
+
+    def list_alerts(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/alerts")
+
+    def get_alert(self, alert_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/alerts/{alert_id}")
+
+    def acknowledge_alert(self, alert_id: str, approved: bool = True, notes: str | None = None) -> dict[str, Any]:
+        body = {"approved": approved}
+        if notes is not None:
+            body["notes"] = notes
+        return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
+
+    def ingest_response(self, response: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/responses/ingest", response)

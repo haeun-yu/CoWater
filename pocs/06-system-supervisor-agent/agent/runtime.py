@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -130,7 +133,11 @@ class AgentRuntime:
 
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
-            return
+            await self._alert_processing_loop()
+        else:
+            await self._telemetry_processing_loop()
+
+    async def _telemetry_processing_loop(self) -> None:
         while True:
             await asyncio.sleep(self.simulator.interval_seconds())
             telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
@@ -138,6 +145,215 @@ class AgentRuntime:
             self.state.last_telemetry = telemetry
             decision = self.decision_engine.decide(self.state, telemetry)
             self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
+
+    async def _alert_processing_loop(self) -> None:
+        """System-layer agent alert processing loop"""
+        logger = logging.getLogger(__name__)
+        processed_alerts = set()
+        poll_interval = 2  # Poll every 2 seconds
+        middle_layer_agents = {}  # Cache of middle-layer agents
+
+        while True:
+            try:
+                await asyncio.sleep(poll_interval)
+                self.state.last_seen_at = utc_now()
+
+                # Periodically refresh middle-layer agent cache
+                try:
+                    all_devices = self.registry_client.list_devices()
+                    middle_layer_agents = {
+                        d["id"]: d for d in all_devices
+                        if d.get("layer") == "middle" and d.get("connected")
+                    }
+                except Exception as e:
+                    logger.debug(f"Failed to fetch device list: {e}")
+
+                # Fetch all alerts from registry
+                try:
+                    alerts = self.registry_client.list_alerts()
+                except Exception as e:
+                    logger.debug(f"Failed to fetch alerts: {e}")
+                    continue
+
+                # Process unprocessed waiting alerts
+                for alert in alerts:
+                    alert_id = alert.get("alert_id")
+                    status = alert.get("status")
+
+                    # Only process waiting alerts that haven't been processed yet
+                    if status != "waiting" or alert_id in processed_alerts:
+                        continue
+
+                    logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
+                    processed_alerts.add(alert_id)
+
+                    # Run alert through decision engine
+                    decision = self.decision_engine.decide(self.state, alert)
+                    self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
+                    logger.info(f"Alert {alert_id} decision: {decision}")
+
+                    # Create response with mission assignments
+                    response = {
+                        "response_id": str(uuid4()),
+                        "alert_id": alert_id,
+                        "action": "mission.assign",
+                        "target_agent_id": None,
+                        "status": "planned",
+                        "reason": f"System supervisor response to {alert.get('alert_type')}",
+                        "dispatch_result": {}
+                    }
+
+                    # Determine target agent and mission
+                    alert_type = alert.get("alert_type")
+                    metadata = alert.get("metadata", {})
+
+                    # For mine detection, find Control Ship to assign mission
+                    if alert_type == "mine_detection":
+                        # Find Control Ship from middle-layer agents
+                        control_ship = None
+                        for device_id, device in middle_layer_agents.items():
+                            if "control" in device.get("name", "").lower():
+                                control_ship = device
+                                break
+
+                        if control_ship:
+                            try:
+                                agent_info = control_ship.get("agent", {})
+                                target_agent_id = agent_info.get("agent_id") or str(control_ship["id"])
+                            except Exception:
+                                target_agent_id = str(control_ship["id"])
+
+                            response["target_agent_id"] = target_agent_id
+                            response["action"] = "task.assign"
+                            response["params"] = {
+                                "action": "survey_depth",
+                                "location": metadata.get("location", {}),
+                                "mission_type": "mine_clearance",
+                                "target_device_id": control_ship["id"]
+                            }
+                            logger.info(f"Routing mine detection to Control Ship {control_ship['id']}")
+
+                    # If no specific target, route based on alert recommendation
+                    if not response.get("target_agent_id"):
+                        recommended_action = alert.get("recommended_action", "")
+                        if "survey" in recommended_action.lower() and middle_layer_agents:
+                            # Pick first available middle-layer agent
+                            target = next(iter(middle_layer_agents.values()))
+                            response["action"] = "task.assign"
+                            response["params"] = {
+                                "action": "survey_depth",
+                                "location": metadata.get("location", {}),
+                                "mission_type": "mine_survey",
+                                "target_device_id": target["id"]
+                            }
+
+                    # Acknowledge the alert in registry
+                    try:
+                        self.registry_client.acknowledge_alert(alert_id, approved=True, notes="System supervisor approved")
+                        logger.info(f"Alert {alert_id} acknowledged")
+                    except Exception as e:
+                        logger.warning(f"Failed to acknowledge alert {alert_id}: {e}")
+
+                    # Ingest the response in registry
+                    try:
+                        self.registry_client.ingest_response(response)
+                        logger.info(f"Response {response['response_id']} ingested for alert {alert_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to ingest response: {e}")
+
+                    # Send A2A message to target agent if specified
+                    if response.get("target_agent_id"):
+                        await self._send_a2a_task(
+                            response["target_agent_id"],
+                            middle_layer_agents,
+                            response,
+                            logger
+                        )
+
+            except Exception as e:
+                logger.error(f"Alert processing loop error: {e}")
+                await asyncio.sleep(1)
+
+    async def _send_a2a_task(self, target_agent_id: str, agents_cache: dict[int, dict[str, Any]], response: dict[str, Any], logger: Any) -> None:
+        """Send A2A message to target agent to execute the task"""
+        # Find target agent in cache
+        target_agent = None
+        for agent in agents_cache.values():
+            try:
+                agent_info = agent.get("agent") or {}
+                if not isinstance(agent_info, dict):
+                    agent_info = {}
+                agent_id_from_info = agent_info.get("agent_id") or ""
+                device_id = str(agent.get("id") or "")
+
+                if str(agent_id_from_info) == str(target_agent_id) or device_id == str(target_agent_id):
+                    target_agent = agent
+                    break
+            except Exception as e:
+                logger.debug(f"Error checking agent {agent.get('id')}: {e}")
+                continue
+
+        if not target_agent:
+            logger.debug(f"Target agent {target_agent_id} not found in cache, skipping A2A")
+            return
+
+        # Build A2A message with task details
+        try:
+            agent_info = target_agent.get("agent") or {}
+            if not isinstance(agent_info, dict):
+                agent_info = {}
+            endpoint = agent_info.get("endpoint")
+        except Exception:
+            endpoint = None
+
+        if not endpoint:
+            logger.warning(f"Target agent {target_agent_id} has no endpoint")
+            return
+
+        try:
+            a2a_message = {
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "id": str(uuid4()),
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "type": "data",
+                                "data": {
+                                    "message_type": "task.assign",
+                                    "action": response.get("params", {}).get("action", "survey_depth"),
+                                    "params": response.get("params", {}),
+                                    "reason": response.get("reason", "System supervisor assignment"),
+                                    "alert_id": response.get("alert_id"),
+                                    "response_id": response.get("response_id")
+                                }
+                            }
+                        ]
+                    },
+                    "taskId": response.get("response_id"),
+                    "metadata": {}
+                }
+            }
+
+            # Send POST request to target agent
+            data = json.dumps(a2a_message).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read() or b"{}")
+                logger.info(f"A2A task sent to {target_agent_id}: {result.get('result', {}).get('status', 'unknown')}")
+        except urllib.error.HTTPError as e:
+            logger.warning(f"HTTP error sending A2A to {target_agent_id}: {e.code}")
+        except urllib.error.URLError as e:
+            logger.warning(f"Network error sending A2A to {target_agent_id}: {e.reason}")
+        except Exception as e:
+            logger.warning(f"Failed to send A2A task to {target_agent_id}: {e}")
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
