@@ -1,6 +1,11 @@
 # CoWater 시스템 아키텍처 원칙 및 규칙
 
-**작성일**: 2026-04-29  
+**버전**: 1.1  
+**최초 작성**: 2026-04-29  
+**최종 수정**: 2026-04-30  
+**변경 이력**:
+- v1.1 (2026-04-30): Heartbeat 이중 채널 구조 명확화, A2A 전송 방식 정정 (Moth → HTTP), DEVICE_TYPES enum 추가, Safety-Critical 예외 규칙 추가, 하위→상위 이벤트 발행 케이스 추가, 표준 HTTP 클라이언트(`urllib.request`) 명시  
+
 **목적**: 시스템의 핵심 목적, 설계 원칙, 구현 규칙을 정의하여 팀원과 AI Agent가 일관된 방식으로 개발할 수 있도록 함
 
 ---
@@ -95,6 +100,23 @@
 - 모든 공유 정보는 Registry 또는 Moth pub-sub을 통해서만 접근
 - "필요한 정보를 얻기 위해 A 에이전트가 B 에이전트를 기다려야 하는" 상황 금지
 
+**예외 — 하위 에이전트가 상위에 이벤트를 발행해야 하는 경우**:
+
+하위 에이전트가 자체 센서로 중요 이벤트를 감지했을 때는 상위로 이벤트를 올려야 한다. 이 경우 직접 상위를 호출하는 것이 아니라 **Registry에 Alert를 등록**하고, System Supervisor가 주기적으로 조회하는 방식을 따른다.
+
+```
+AUV가 지뢰 감지
+    ↓ (직접 상위 호출 ❌)
+    ↓ POST http://registry:8280/alerts  ✅
+        { alert_type: "mine_detection", severity: "critical", ... }
+    ↓
+System Supervisor가 2초 주기로 alerts 조회 → 감지 → 의사결정
+```
+
+**허용되는 상위 참조**:
+- Registry에서 자신의 `parent_id`나 부모 에이전트의 엔드포인트 조회 → ✅ (공개 정보)
+- 부모 에이전트의 `/state` 직접 조회 → ❌
+
 ### 3️⃣ 명확한 책임 경계 (Single Responsibility)
 
 **원칙**: 각 에이전트는 하나의 명확한 책임을 가짐
@@ -134,6 +156,27 @@
 ---
 
 ## 아키텍처 규칙
+
+### 디바이스 타입 Enum (공식 정의)
+
+실제 Registry 서버(`src/core/models.py`)에 정의된 공식 값. 에이전트 등록, heartbeat, A2A 메시지 모두 이 값을 사용한다.
+
+```python
+DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
+LAYERS      = Literal["lower", "middle", "system"]
+```
+
+| DEVICE_TYPE | 계층 | 설명 |
+|---|---|---|
+| `USV` | lower | 무인 수상 로봇 |
+| `AUV` | lower | 자율 수중 로봇 |
+| `ROV` | lower | 원격 수중 로봇 |
+| `CONTROL_SHIP` | middle | 지휘함 (하위 디바이스 조율) |
+| `SYSTEM` | system | System Supervisor |
+
+> ⚠️ 소문자 사용 금지. Registry API는 대문자만 허용하며, 소문자로 보내면 유효성 검사 오류 발생.
+
+---
 
 ### 포트 할당 규칙
 
@@ -219,10 +262,22 @@ GET http://localhost:8280/devices        # 디바이스 목록 조회
 3. 하위 에이전트들의 상태 모니터링
 4. System Supervisor에게 상태 보고 (heartbeat 또는 직접 호출)
 
-**할 수 없는 것**:
+**일반적으로 할 수 없는 것**:
 
 - ❌ 독립적인 의사결정 (시스템 명령이 없이 자체 판단으로 명령 발송)
 - ❌ System Supervisor를 건너뛰고 직접 Registry 알림 생성
+
+**Safety-Critical 예외** (즉각 조치가 필요한 경우):
+
+상위 에이전트의 지시를 기다릴 수 없는 상황에서는 Middle Layer도 독립 판단이 허용된다.
+
+| 상황 | 허용 조치 | 이유 |
+|---|---|---|
+| 자식 디바이스 배터리 < 10% | 즉시 귀환 명령 | 손실 방지 |
+| 자식 디바이스와 통신 두절 (30초) | 마지막 알려진 위치로 복구 명령 | 장애 격리 |
+| 충돌 위험 감지 | 즉시 비상정지 | 물리적 안전 |
+
+조치 이후에는 반드시 Registry에 Alert를 등록하여 System Supervisor가 인지하도록 한다.
 
 **주요 인터페이스**:
 
@@ -242,10 +297,20 @@ POST http://localhost:8280/devices/X/    # 자신의 정보 업데이트
 3. 센서 데이터를 telemetry로 발행
 4. 작업 결과를 상위에 보고
 
-**할 수 없는 것**:
+**일반적으로 할 수 없는 것**:
 
 - ❌ 상위 계층의 지시 없이 독립적으로 행동
 - ❌ 다른 lower agent와 직접 통신
+
+**Safety-Critical 예외**:
+
+| 상황 | 허용 조치 |
+|---|---|
+| 자신의 배터리 < 5% | 자체 판단으로 귀환 시작 |
+| 장애물 충돌 임박 | 자체 판단으로 비상정지 |
+| 중요 이벤트(지뢰 감지 등) 감지 | Registry에 Alert 즉시 등록 |
+
+> 단, 이러한 자율 판단 이후에는 반드시 heartbeat 또는 Registry Alert를 통해 상위에 상황을 알려야 한다.
 
 **주요 인터페이스**:
 
@@ -264,8 +329,18 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 **목적**: 주기적으로 "나는 살아있고 정상 작동 중"을 알림
 
 **발행 주기**: 10초  
-**채널**: `device.heartbeat`  
 **타임아웃**: 30초 (3회 heartbeat 미수신)
+
+#### 이중 채널 구조 (실제 구현 기준)
+
+각 디바이스는 heartbeat을 **두 채널에 동시에 발행**한다:
+
+| 채널 | 예시 | 목적 |
+|---|---|---|
+| `device.heartbeat` | `device.heartbeat` | **공통 채널** — Registry(POC 00)가 구독하여 전체 디바이스 상태 추적 |
+| `device.heartbeat.{device_id}` | `device.heartbeat.160` | **전용 채널** — 특정 디바이스만 구독하고 싶은 컨슈머(예: 대시보드, 상위 에이전트) 전용 |
+
+> **`device.heartbeat.160`이 왜 보이나?** — ID가 160인 디바이스가 자신의 전용 채널로 발행한 것. Registry는 공통 채널(`device.heartbeat`)만 구독하므로 전용 채널 메시지는 Registry가 처리하지 않아 "Ignored" 로그가 찍힌다.
 
 **메시지 형식**:
 
@@ -283,17 +358,31 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 }
 ```
 
+**GPS가 heartbeat에서 빠졌을 때 사이드 이펙트**:
+
+Registry는 heartbeat을 수신할 때 `latitude`/`longitude`가 있으면 디바이스 위치를 업데이트한다. GPS 필드가 없으면:
+1. Registry의 위치 정보가 이전 값 그대로 유지 (stale)
+2. 대시보드/다른 에이전트가 Registry 조회 시 **오래된 위치** 반환
+3. 지뢰 탐지 등 위치 기반 의사결정 시 **잘못된 좌표로 미션 할당** 가능
+4. GPS와 별도로 `device.telemetry.{id}.gps` 채널로 위치를 발행하더라도 Registry 업데이트는 발생하지 않음 (telemetry는 Registry가 구독하지 않음)
+
 **규칙**:
 
 - 모든 에이전트는 10초마다 heartbeat 발행 의무
 - heartbeat 미수신 시 Registry가 자동으로 오프라인 처리
-- heartbeat에는 최신 위치 정보 포함
+- GPS 데이터가 있을 경우 반드시 heartbeat에 포함 (위치 정확성 유지)
 
 ### A2A (Agent-to-Agent) 메시지
 
-**목적**: 상위 에이전트가 하위 에이전트에 명령 전달
+**목적**: 에이전트 간 명령/이벤트 전달
 
-**채널**: `system.a2a`
+**전송 방식**: Moth 채널이 아닌 **HTTP POST 직접 호출** (실제 구현 기준)
+
+```
+POST http://{target_endpoint}/message:send
+```
+
+> Moth의 `system.a2a` 채널은 대시보드 시각화용 발행에만 사용될 수 있으며, 실제 명령 전달은 각 에이전트의 HTTP 엔드포인트를 직접 호출한다. target_endpoint는 Registry의 `agent.endpoint` 필드에서 획득.
 
 **메시지 형식**:
 
@@ -496,7 +585,22 @@ logger.warning("[AUV] Battery low: 15%")
 logger.error("[ROV] Failed to connect to parent: connection timeout")
 ```
 
-#### 4. 설정 vs 코드
+#### 4. HTTP 클라이언트 표준
+
+```python
+# ✅ 표준: urllib.request (표준 라이브러리, 외부 의존성 없음)
+import urllib.request
+import json
+
+req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
+with urllib.request.urlopen(req, timeout=5) as resp:
+    result = json.loads(resp.read().decode())
+
+# ⚠️ 예외: LLM 클라이언트 호출 시에만 httpx 허용 (비동기 필요)
+import httpx  # llm_client.py 내부에서만 사용
+```
+
+#### 5. 설정 vs 코드
 
 ```python
 # ❌ 나쁜 예: 포트가 코드에 하드코딩
@@ -508,6 +612,35 @@ config = load_config("config.json")
 app = create_app(config)
 app.run(host=config["server"]["host"], port=config["server"]["port"])
 ```
+
+### 동작 검증 규칙
+
+> 여기서 테스트는 unit test가 아닌 **실제 동작(end-to-end) 테스트**를 의미한다. 각 에이전트는 실제 서버로 띄웠을 때 다음을 보장해야 한다.
+
+**필수 검증 항목**:
+
+- `GET /health` → 200 OK 응답
+- Moth 연결 없어도 단독 실행 가능 (graceful degradation)
+- Registry 연결 없어도 기본 동작 유지 (연결 실패 시 재시도, 서비스 중단 금지)
+- 10초 주기 heartbeat가 실제로 발행되는지 확인 (`tail -f logs/device.log | grep Heartbeat`)
+
+**동작 테스트 방법**:
+
+```bash
+# 1. 에이전트 실행
+python device_agent.py
+
+# 2. 헬스체크
+curl http://localhost:{port}/health | jq .
+
+# 3. 상태 확인
+curl http://localhost:{port}/state | jq .
+
+# 4. Moth 메시지 실시간 확인
+tail -f logs/device.log | grep "Heartbeat\|A2A\|Telemetry"
+```
+
+---
 
 ### 버전 관리 규칙
 
@@ -703,11 +836,14 @@ class ControlShip(Agent):
     def get_child_endpoint(self, child_id):
         """Registry에서 공개 정보 조회"""
         try:
-            response = requests.get(
-                f"http://localhost:8280/devices",
-                timeout=5
+            # 표준: urllib.request 사용 (외부 라이브러리 불필요)
+            req = urllib.request.Request(
+                "http://localhost:8280/devices",
+                headers={"Accept": "application/json"},
+                method="GET"
             )
-            devices = response.json()
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                devices = json.loads(resp.read().decode())
             for device in devices:
                 if device.get("id") == child_id:
                     return device.get("agent", {}).get("endpoint")
