@@ -4,7 +4,7 @@
 **최초 작성**: 2026-04-29  
 **최종 수정**: 2026-04-30  
 **변경 이력**:
-- v1.1 (2026-04-30): Heartbeat 이중 채널 구조 명확화, A2A 전송 방식 정정 (Moth → HTTP), DEVICE_TYPES enum 추가, Safety-Critical 예외 규칙 추가, 하위→상위 이벤트 발행 케이스 추가, 표준 HTTP 클라이언트(`urllib.request`) 명시  
+- v1.1 (2026-04-30): Heartbeat 단일 공통 스트림으로 정리, A2A 전송 방식 정정 (Moth → HTTP), DEVICE_TYPES enum 추가, Safety-Critical 예외 규칙 추가, 하위→상위 이벤트 발행 케이스 추가, 표준 HTTP 클라이언트(`urllib.request`) 명시  
 
 **목적**: 시스템의 핵심 목적, 설계 원칙, 구현 규칙을 정의하여 팀원과 AI Agent가 일관된 방식으로 개발할 수 있도록 함
 
@@ -217,7 +217,7 @@ Control Ship (9015)
 
 **Moth pub-sub 채널**:
 
-- `device.heartbeat`: 모든 디바이스의 주기적 상태
+- `device.heartbeat`: 모든 디바이스와 시스템의 주기적 상태 스냅샷(생존, 위치, 배터리)
 - `system.a2a`: 에이전트 간 A2A 메시지
 - `device.telemetry`: 센서 데이터
 
@@ -331,16 +331,15 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 **발행 주기**: 10초  
 **타임아웃**: 30초 (3회 heartbeat 미수신)
 
-#### 이중 채널 구조 (실제 구현 기준)
+#### 단일 공통 스트림 (실제 구현 기준)
 
-각 디바이스는 heartbeat을 **두 채널에 동시에 발행**한다:
+각 디바이스와 시스템은 heartbeat를 **하나의 공통 스트림**에 발행한다:
 
 | 채널 | 예시 | 목적 |
 |---|---|---|
-| `device.heartbeat` | `device.heartbeat` | **공통 채널** — Registry(POC 00)가 구독하여 전체 디바이스 상태 추적 |
-| `device.heartbeat.{device_id}` | `device.heartbeat.160` | **전용 채널** — 특정 디바이스만 구독하고 싶은 컨슈머(예: 대시보드, 상위 에이전트) 전용 |
+| `device.heartbeat` | `device.heartbeat` | **공통 채널** — Registry(POC 00)가 구독하여 전체 디바이스 상태 추적 및 위치/배터리 갱신 |
 
-> **`device.heartbeat.160`이 왜 보이나?** — ID가 160인 디바이스가 자신의 전용 채널로 발행한 것. Registry는 공통 채널(`device.heartbeat`)만 구독하므로 전용 채널 메시지는 Registry가 처리하지 않아 "Ignored" 로그가 찍힌다.
+> 공통 스트림에는 `device_id`, `status`, `latitude`/`longitude`, `battery_percent` 같은 최소 상태가 함께 포함된다. Registry는 이 하나의 스트림만 보고 생존 여부와 최신 위치를 갱신한다.
 
 **메시지 형식**:
 
@@ -358,13 +357,14 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 }
 ```
 
-**GPS가 heartbeat에서 빠졌을 때 사이드 이펙트**:
+**위치/배터리가 heartbeat에서 빠졌을 때 사이드 이펙트**:
 
-Registry는 heartbeat을 수신할 때 `latitude`/`longitude`가 있으면 디바이스 위치를 업데이트한다. GPS 필드가 없으면:
+Registry는 heartbeat을 수신할 때 `latitude`/`longitude`와 `battery_percent`가 있으면 디바이스 상태를 업데이트한다. 이 값들이 없으면:
 1. Registry의 위치 정보가 이전 값 그대로 유지 (stale)
 2. 대시보드/다른 에이전트가 Registry 조회 시 **오래된 위치** 반환
 3. 지뢰 탐지 등 위치 기반 의사결정 시 **잘못된 좌표로 미션 할당** 가능
 4. GPS와 별도로 `device.telemetry.{id}.gps` 채널로 위치를 발행하더라도 Registry 업데이트는 발생하지 않음 (telemetry는 Registry가 구독하지 않음)
+5. 배터리 값이 누락되면 배터리 기반 안전 판단이 stale 상태를 그대로 사용할 수 있음
 
 **규칙**:
 

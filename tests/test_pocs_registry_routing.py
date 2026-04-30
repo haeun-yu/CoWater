@@ -106,6 +106,15 @@ class RegistryRoutingTest(unittest.TestCase):
         self.assertEqual(assignment["route_mode"], "via_parent")
         self.assertIsNone(updated.agent.connected_at)
 
+    def test_heartbeat_topic_is_shared_across_devices(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = make_registry(tmp)
+            usv = registry.register(request(name="usv", device_type="USV", layer="lower"))
+            system = registry.register(request(name="system", device_type="SYSTEM", layer="system", tracks=[]))
+
+        self.assertEqual(usv.heartbeat_topic, "device.heartbeat")
+        self.assertEqual(system.heartbeat_topic, "device.heartbeat")
+
 
 if __name__ == "__main__":
     unittest.main()

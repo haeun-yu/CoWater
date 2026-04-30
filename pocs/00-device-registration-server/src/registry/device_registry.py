@@ -45,7 +45,7 @@ class DeviceRegistry:
         agent_command_path_prefix: str,
         heartbeat_interval_seconds: int = 1,
         heartbeat_timeout_seconds: int = 3,
-        heartbeat_topic_template: str = "device.heartbeat.{device_id}",
+        heartbeat_topic_template: str = "device.heartbeat",
         telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
         db_path: Optional[Path] = None,
     ) -> None:
@@ -85,6 +85,12 @@ class DeviceRegistry:
                 # 재시작 후 연결 상태는 offline으로 초기화
                 device.connected = False
                 device.agent.connected = False
+                normalized_heartbeat_topic = "device.heartbeat"
+                normalized_heartbeat_endpoint = build_heartbeat_endpoint(device.id)
+                if device.heartbeat_topic != normalized_heartbeat_topic or device.heartbeat_endpoint != normalized_heartbeat_endpoint:
+                    device.heartbeat_topic = normalized_heartbeat_topic
+                    device.heartbeat_endpoint = normalized_heartbeat_endpoint
+                    self._persist_device(device)
                 self._devices[device_id] = device
             except Exception as e:
                 logger.warning(f"디바이스 {device_id} 복원 실패: {e}")

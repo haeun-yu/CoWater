@@ -5,7 +5,7 @@ Device들로부터 정기적으로 수신되는 heartbeat를 추적하여:
 1. Offline Device 감지: 30초 이상 heartbeat 없으면 offline 표시
 2. 자동 재할당: Middle Agent offline 시, 자식 devices를 다른 parent로 자동 재할당
 
-Moth WebSocket을 통해 device.heartbeat.{device_id} topic을 수신합니다.
+Moth WebSocket을 통해 device.heartbeat topic을 수신합니다.
 """
 
 from __future__ import annotations
@@ -272,9 +272,16 @@ class HeartbeatMonitor:
             logger.error(f"Error finding best parent: {e}")
             return None
 
-    def record_heartbeat(self, device_id: int, status: str = "online", latitude: Optional[float] = None, longitude: Optional[float] = None) -> None:
+    def record_heartbeat(
+        self,
+        device_id: int,
+        status: str = "online",
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        battery_percent: Optional[float] = None,
+    ) -> None:
         """
-        Record that a device sent a heartbeat (update last_seen_at and location if available)
+        Record that a device sent a heartbeat (update last_seen_at, location, battery if available)
         상태 변경 시에만 DB에 반영 (online ↔ offline)
 
         Args:
@@ -282,31 +289,41 @@ class HeartbeatMonitor:
             status: "online" or "offline"
             latitude: Device latitude (optional)
             longitude: Device longitude (optional)
+            battery_percent: Device battery percent (optional)
         """
         try:
             device = self.registry.get_device(device_id)
             if device:
                 current_status = "online" if device.connected else "offline"
                 new_status = "online" if status == "online" else "offline"
+                battery_changed = False
+                location_changed = False
 
                 # Update last_seen_at (always)
                 device.agent.last_seen_at = datetime.now(timezone.utc).isoformat()
 
                 # Update location if provided
                 if latitude is not None and longitude is not None:
-                    device.latitude = latitude
-                    device.longitude = longitude
-                    device.last_location_update = datetime.now(timezone.utc).isoformat()
+                    if device.latitude != latitude or device.longitude != longitude:
+                        device.latitude = latitude
+                        device.longitude = longitude
+                        device.last_location_update = datetime.now(timezone.utc).isoformat()
+                        location_changed = True
+
+                # Update battery if provided
+                if battery_percent is not None and device.last_battery_percent != battery_percent:
+                    device.last_battery_percent = battery_percent
+                    device.last_battery_update = datetime.now(timezone.utc).isoformat()
+                    battery_changed = True
 
                 # Update connected flag only if status changed
-                if current_status != new_status:
+                if current_status != new_status or location_changed or battery_changed:
                     device.connected = (new_status == "online")
                     device.agent.connected = device.connected
                     device.updated_at = datetime.now(timezone.utc).isoformat()
                     self.registry._persist_device(device)
-                    logger.info(f"Device {device_id} status changed: {current_status} → {new_status}")
-                elif latitude is not None and longitude is not None:
-                    self.registry._persist_device(device)
+                    if current_status != new_status:
+                        logger.info(f"Device {device_id} status changed: {current_status} → {new_status}")
                 else:
                     # Just update last_seen_at, don't change updated_at
                     logger.debug(f"Heartbeat recorded for device {device_id} (status unchanged)")

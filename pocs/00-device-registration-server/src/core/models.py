@@ -250,6 +250,8 @@ class DeviceRecord:
     connectivity: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    last_battery_percent: Optional[float] = None
+    last_battery_update: Optional[str] = None
     parent_id: Optional[int] = None
     last_location_update: Optional[str] = None
     last_error: Optional[str] = None
@@ -289,6 +291,8 @@ class DeviceRecord:
             "connectivity": self.connectivity,
             "latitude": self.latitude,
             "longitude": self.longitude,
+            "last_battery_percent": self.last_battery_percent,
+            "last_battery_update": self.last_battery_update,
             "parent_id": self.parent_id,
             "last_location_update": self.last_location_update,
             # ← NEW: Moth topics
@@ -441,6 +445,8 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         connectivity=data.get("connectivity"),
         latitude=data.get("latitude"),
         longitude=data.get("longitude"),
+        last_battery_percent=data.get("last_battery_percent"),
+        last_battery_update=data.get("last_battery_update"),
         parent_id=data.get("parent_id"),
         last_location_update=data.get("last_location_update"),
         heartbeat_topic=data.get("heartbeat_topic"),

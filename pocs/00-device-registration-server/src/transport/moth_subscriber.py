@@ -2,7 +2,7 @@
 Moth Heartbeat Subscriber: Device Registration Server 측 heartbeat 수신
 
 Moth meb (broadcast) 채널을 통해 모든 디바이스의 heartbeat를 수신합니다:
-- device.heartbeat.{device_id}: 모든 디바이스의 하트비트를 통합 수신
+- device.heartbeat: 모든 디바이스의 하트비트를 통합 수신
 - Server는 heartbeat_monitor를 통해 device 상태 추적 (online/offline)
 """
 
@@ -179,7 +179,7 @@ class MothHeartbeatSubscriber:
         메시지 형식:
         {
             "type": "publish",
-            "channel": "device.heartbeat.{device_id}",
+            "channel": "device.heartbeat",
             "payload": {
                 "device_id": int,
                 "agent_id": str,
@@ -212,14 +212,28 @@ class MothHeartbeatSubscriber:
             status = payload.get("status", "online")
             latitude = payload.get("latitude")
             longitude = payload.get("longitude")
+            battery_percent = payload.get("battery_percent")
 
             if device_id is None:
                 logger.warning(f"Invalid heartbeat: device_id 없음 - {payload}")
                 return
 
             # HeartbeatMonitor에 기록 (위치 정보 포함)
-            self.registry.heartbeat_monitor.record_heartbeat(device_id, status, latitude, longitude)
-            logger.debug(f"Heartbeat 기록: device_id={device_id}, status={status}, location=({latitude}, {longitude})")
+            self.registry.heartbeat_monitor.record_heartbeat(
+                device_id,
+                status,
+                latitude,
+                longitude,
+                battery_percent,
+            )
+            logger.debug(
+                "Heartbeat 기록: device_id=%s, status=%s, location=(%s, %s), battery=%s",
+                device_id,
+                status,
+                latitude,
+                longitude,
+                battery_percent,
+            )
 
         except json.JSONDecodeError:
             logger.debug(f"JSON 파싱 실패: {msg}")

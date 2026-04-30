@@ -75,7 +75,7 @@ class MothPublisher:
     Moth 서버(wss://cobot.center:8287)에 데이터를 발행합니다.
 
     Topic 구조:
-    - device.heartbeat.{device_id}: 주기적 하트비트 (10초)
+    - device.heartbeat: 모든 디바이스/시스템의 주기적 상태 스냅샷 (생존, 위치, 배터리)
     - device.telemetry.{device_id}.gps: GPS 위치
     - device.telemetry.{device_id}.battery: 배터리 상태
     - device.telemetry.{device_id}.imu: IMU/Odometry
@@ -139,7 +139,7 @@ class MothPublisher:
         Server 등록 응답에서 Topics 초기화 + Moth URL 업데이트
 
         Device Registration Server에서 받은 응답에서:
-        - heartbeat_topic: device.heartbeat.{device_id}
+        - heartbeat_topic: device.heartbeat
         - telemetry_topics: [GPS, BATTERY, ODOMETRY 등의 topic 목록]
         - server: Moth 서버의 실제 주소 (host, port, ping_endpoint)
 
@@ -179,16 +179,13 @@ class MothPublisher:
             logger.info(f"Moth URL (Fallback 엔드포인트): {self.moth_url}")
             logger.info(f"  Fallback endpoint: {fallback_endpoint}")
 
-        self.heartbeat_topic = registration_response.get("heartbeat_topic") or HEARTBEAT_CHANNEL
-
-        # heartbeat_endpoint 설정 (별도의 heartbeat 연결용)
-        heartbeat_endpoint = registration_response.get("heartbeat_endpoint")
-        if heartbeat_endpoint:
-            self.heartbeat_url = _join_base_and_endpoint(self.moth_base_url, heartbeat_endpoint)
-            logger.info(f"Heartbeat URL (dedicated endpoint): {self.heartbeat_url}")
-        else:
-            self.heartbeat_url = self.moth_url
-            logger.debug("Heartbeat URL은 telemetry URL과 동일합니다 (별도 endpoint 미제공)")
+        self.heartbeat_topic = HEARTBEAT_CHANNEL
+        self.heartbeat_url = self.moth_url
+        if registration_response.get("heartbeat_topic") not in (None, HEARTBEAT_CHANNEL):
+            logger.info(
+                "Registry heartbeat_topic가 공유 스트림과 달라서 무시합니다: "
+                f"{registration_response.get('heartbeat_topic')} -> {HEARTBEAT_CHANNEL}"
+            )
 
         # 각 track type별 telemetry topic 저장
         telemetry_topics_list = registration_response.get("telemetry_topics", [])
@@ -398,24 +395,16 @@ class MothPublisher:
             hb_ws = self.ws
 
         try:
-            # Moth에 발행 (두 채널에 발행: 공통 채널 + device-specific 채널)
-            # 1. device.heartbeat (POC 00의 meb 구독이 받는 공통 채널)
-            msg1 = json.dumps(
-                {"type": "publish", "channel": "device.heartbeat", "payload": payload}
-            )
-            await hb_ws.send(msg1)
+            # Moth에 공통 heartbeat 스트림만 발행
             heartbeat_url = self.heartbeat_url if self.heartbeat_connected else self.moth_url
-            logger.debug(f"Heartbeat 발행 (공통채널): Moth={heartbeat_url}, channel=device.heartbeat, device_id={payload.get('device_id')}")
-
-            # 2. device.heartbeat.{device_id} (device-specific 채널)
-            if self.heartbeat_topic != "device.heartbeat":
-                msg2 = json.dumps(
-                    {"type": "publish", "channel": self.heartbeat_topic, "payload": payload}
-                )
-                await hb_ws.send(msg2)
-                logger.debug(f"Heartbeat 발행 (전용채널): Moth={heartbeat_url}, channel={self.heartbeat_topic}, device_id={payload.get('device_id')}")
-
-            logger.info(f"Heartbeat 발행 완료: device_id={payload.get('device_id')}, topics=[device.heartbeat, {self.heartbeat_topic}]")
+            msg = json.dumps(
+                {"type": "publish", "channel": self.heartbeat_topic, "payload": payload}
+            )
+            await hb_ws.send(msg)
+            logger.info(
+                f"Heartbeat 발행 완료: device_id={payload.get('device_id')}, "
+                f"topic={self.heartbeat_topic}, url={heartbeat_url}"
+            )
         except Exception as e:
             logger.error(f"Heartbeat 발행 실패: {e}")
             if self.heartbeat_connected:
