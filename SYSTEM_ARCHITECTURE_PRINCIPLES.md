@@ -1,10 +1,11 @@
 # CoWater 시스템 아키텍처 원칙 및 규칙
 
-**버전**: 1.1  
+**버전**: 1.2  
 **최초 작성**: 2026-04-29  
-**최종 수정**: 2026-04-30  
+**최종 수정**: 2026-05-03  
 **변경 이력**:
 - v1.1 (2026-04-30): Heartbeat 단일 공통 스트림으로 정리, A2A 전송 방식 정정 (Moth → HTTP), DEVICE_TYPES enum 추가, Safety-Critical 예외 규칙 추가, 하위→상위 이벤트 발행 케이스 추가, 표준 HTTP 클라이언트(`urllib.request`) 명시  
+- v1.2 (2026-05-03): 계층 통신 규칙 개선(중간계층 없을 때 직접 통신 허용, 같은 계층 A2A 허용), 알림 전달 방식 polling→push(A2A) 변경, Heartbeat 주기 1초/3초 타임아웃으로 변경, Alert/Event 도메인 분리, System Layer 책임 확장(사용자 지시 의사결정·완료 알림·보고서·상태관리), Middle Layer 하위 에이전트 상태 인지 추가, 기뢰 탐지 시나리오 의사결정 플로우 개선  
 
 **목적**: 시스템의 핵심 목적, 설계 원칙, 구현 규칙을 정의하여 팀원과 AI Agent가 일관된 방식으로 개발할 수 있도록 함
 
@@ -43,15 +44,17 @@
 ### 🎯 사용 사례 (예시: 기뢰 탐지 및 제거)
 
 ```
-1. 센서 (외부 시스템) → 기뢰 탐지 알림 → Registry
-2. Registry → System Supervisor: 알림 저장
-3. System Supervisor → Decision: 어떤 Control Ship에 할당할지 판단
-4. System Supervisor → Control Ship (A2A): "survey_depth 임무 할당"
-5. Control Ship → Decision: 어떤 AUV/ROV에 명령할지 판단
-6. Control Ship → AUV (A2A): "survey_depth 실행"
-7. Control Ship → ROV (A2A): "remove_mine 실행"
-8. AUV, ROV → 임무 실행 → 결과 보고
-9. System Supervisor → Registry: 완료 기록
+1. 센서 (외부 시스템) → 기뢰 탐지 Event 발행 → System Supervisor (A2A)
+2. System Supervisor → Event 저장 및 탐지 위치 기록
+3. System Supervisor → 위치 기반 근접 디바이스 분석 및 작업 디바이스 선정
+   ├─ AUV: 정확한 위치 확인 임무 할당
+   └─ ROV: 기뢰 제거 임무 할당
+4. System Supervisor → 중간 계층(Control Ship) 존재 여부 판단
+   ├─ If Yes → Control Ship (A2A): 작업 목록 전달
+   │           └─ Control Ship → AUV/ROV (A2A): 개별 임무 지시
+   └─ If No  → AUV/ROV 에 직접 A2A 전달
+5. AUV, ROV → 임무 실행 → 결과를 A2A로 상위에 보고
+6. System Supervisor → 모든 임무 완료 확인 → Alert(완료) 발행 + 보고서 생성/저장
 ```
 
 ---
@@ -88,6 +91,7 @@
 
 - 하위 계층이 상위 계층으로 직접 메시지 보내면 안 됨 (항상 중간 계층을 거쳐야 함)
 - 상위 계층이 하위 계층을 건너뛰어 직접 명령하면 안 됨
+- **예외**: 중간 계층이 존재하지 않을 경우, 상위↔하위 간 직접 A2A 통신 허용
 - 각 계층은 자신의 책임만 담당
 
 ### 2️⃣ 자율성과 의존성 최소화
@@ -100,18 +104,20 @@
 - 모든 공유 정보는 Registry 또는 Moth pub-sub을 통해서만 접근
 - "필요한 정보를 얻기 위해 A 에이전트가 B 에이전트를 기다려야 하는" 상황 금지
 
-**예외 — 하위 에이전트가 상위에 이벤트를 발행해야 하는 경우**:
+**예외 — 하위 에이전트가 상위에 이벤트를 전달해야 하는 경우**:
 
-하위 에이전트가 자체 센서로 중요 이벤트를 감지했을 때는 상위로 이벤트를 올려야 한다. 이 경우 직접 상위를 호출하는 것이 아니라 **Registry에 Alert를 등록**하고, System Supervisor가 주기적으로 조회하는 방식을 따른다.
+하위 에이전트가 자체 센서로 중요 이벤트를 감지했을 때는 상위로 이벤트를 올려야 한다. 이 경우 **A2A 메시지**를 통해 상위(또는 중간 계층)에 직접 전달한다. Registry에 poll 방식으로 올리는 것이 아니라, System Agent가 이벤트를 먼저 수신(push)받는 구조를 따른다.
 
 ```
-AUV가 지뢰 감지
-    ↓ (직접 상위 호출 ❌)
-    ↓ POST http://registry:8280/alerts  ✅
-        { alert_type: "mine_detection", severity: "critical", ... }
-    ↓
-System Supervisor가 2초 주기로 alerts 조회 → 감지 → 의사결정
+AUV가 기뢰 감지
+    ↓ (Registry polling 방식 ❌)
+    ↓ A2A → Middle Agent (중간 계층 있을 경우)  ✅
+              └─ A2A → System Supervisor
+    ↓ A2A → System Supervisor (중간 계층 없을 경우)  ✅
+        { message_type: "event.report", event_type: "mine_detection", severity: "critical", location: {...} }
 ```
+
+> Registry가 하위 서버에 직접 접근하는 구조는 허용되지 않는다. Registry는 수동적 저장소 역할만 담당한다.
 
 **허용되는 상위 참조**:
 - Registry에서 자신의 `parent_id`나 부모 에이전트의 엔드포인트 조회 → ✅ (공개 정보)
@@ -123,9 +129,9 @@ System Supervisor가 2초 주기로 alerts 조회 → 감지 → 의사결정
 
 | 에이전트                   | 책임                                        |
 | -------------------------- | ------------------------------------------- |
-| Registry (POC 00)          | 디바이스 등록, 위치 관리, 하트비트 모니터링 |
-| System Supervisor (POC 06) | 알림 감지, 최고 수준 의사결정, 미션 할당    |
-| Control Ship (POC 05)      | 하위 디바이스 조율, A2A 라우팅              |
+| Registry (POC 00)          | 디바이스 등록, 위치 관리, 하트비트 수신 처리 |
+| System Supervisor (POC 06) | 이벤트/알림 수신, 최고 수준 의사결정, 미션 할당, 디바이스·Agent 상태관리 |
+| Control Ship (POC 05)      | 하위 디바이스 조율, A2A 라우팅, 하위 에이전트 상태 인지 |
 | AUV/ROV/USV (POC 01-03)    | 할당받은 임무 실행                          |
 
 **규칙**:
@@ -209,17 +215,21 @@ Control Ship (9015)
 
 **규칙**:
 
-- 상위 → 하위: A2A 메시지 사용
-- 하위 → 상위: Heartbeat + Registry 조회
-- 같은 계층: 직접 메시지 금지 (상위 계층을 거쳐야 함)
+- 상위 → 하위: A2A 메시지 사용 (중간 계층 경유, 없으면 직접)
+- 하위 → 상위: A2A 메시지 사용 (중간 계층 경유, 없으면 직접)
+- 같은 계층: 필요 시 A2A로 직접 통신 가능 (상위가 양측에 A2A 주소를 전달한 경우 등)
 
 ### 데이터 흐름 규칙
 
 **Moth pub-sub 채널**:
 
 - `device.heartbeat`: 모든 디바이스와 시스템의 주기적 상태 스냅샷(생존, 위치, 배터리)
-- `system.a2a`: 에이전트 간 A2A 메시지
-- `device.telemetry`: 센서 데이터
+- `system.a2a`: 에이전트 간 A2A 메시지 (대시보드 시각화용)
+- `device.telemetry`: 센서 데이터 스트림
+- `system.event`: 발생한 이벤트 스트림 (기뢰 감지 등 실제 문제 도메인)
+- `system.alert`: 이벤트에 의해 생성된 알림 스트림
+
+> 모든 **에이전트 간 이벤트 통신은 A2A**, 모든 **데이터 스트림(센서·상태·로그)은 Moth**를 사용한다.
 
 **Registry**:
 
@@ -234,23 +244,27 @@ Control Ship (9015)
 
 **책임**:
 
-1. Registry에서 알림 주기적 조회 (2초 주기)
-2. 각 알림에 대한 의사결정 (DecisionEngine)
-3. 적절한 middle-layer 에이전트에 A2A 메시지 전송
-4. 의사결정 이력 저장
+1. 하위 에이전트 또는 외부 시스템으로부터 A2A로 **이벤트/알림 수신** (push 방식)
+2. 각 이벤트·알림에 대한 **의사결정** (DecisionEngine)
+3. **사용자의 자연어 지시에 대한 의사결정** — 현재 자원이나 상황으로 불가능한 작업은 사용자에게 명확히 알림, 진행 중인 작업도 사용자에게 알릴 수 있어야 함
+4. 적절한 middle-layer 에이전트(또는 중간 계층이 없으면 lower-layer)에 A2A 메시지 전송
+5. 모든 작업이 완료되면 **완료 알림(Alert) 발행** + **보고서 생성 및 저장**
+6. 의사결정 이력 저장
+7. **디바이스 및 Agent 상태관리** — Registry heartbeat 데이터 수신, offline 감지, 비정상 상태 감지, 재할당 판단
 
 **할 수 없는 것**:
 
-- ❌ 직접 lower agent에 명령
+- ❌ 중간 계층이 존재함에도 하위 에이전트에 직접 명령 (중간 계층 있는 경우)
 - ❌ Registry에 저장된 다른 디바이스의 정보 수정
 - ❌ 다른 System Supervisor와 통신 (구조상 1개만 존재)
 
 **주요 인터페이스**:
 
 ```
-GET http://localhost:8280/alerts         # 알림 조회
-POST http://target:9015/message:send     # Control Ship에 A2A 전송
-GET http://localhost:8280/devices        # 디바이스 목록 조회
+POST http://localhost:9116/message:send    # 외부로부터 A2A 이벤트/알림 수신
+POST http://target:9015/message:send       # Control Ship에 A2A 전송
+POST http://target:9010/message:send       # 중간 계층 없을 때 lower에 직접 A2A 전송
+GET  http://localhost:8280/devices         # 디바이스 목록 및 상태 조회
 ```
 
 ### Middle Layer (POC 04, 05)
@@ -259,8 +273,8 @@ GET http://localhost:8280/devices        # 디바이스 목록 조회
 
 1. System Supervisor로부터 받은 A2A 메시지 처리
 2. 받은 명령을 하위 에이전트들에게 분배
-3. 하위 에이전트들의 상태 모니터링
-4. System Supervisor에게 상태 보고 (heartbeat 또는 직접 호출)
+3. **하위 에이전트들의 상태 인지** — heartbeat 수신 또는 Registry 조회를 통해 하위 에이전트의 생존 여부·위치·배터리·임무 상태를 파악
+4. A2A를 통해 작업 결과 및 이벤트를 System Supervisor에게 보고
 
 **일반적으로 할 수 없는 것**:
 
@@ -277,15 +291,15 @@ GET http://localhost:8280/devices        # 디바이스 목록 조회
 | 자식 디바이스와 통신 두절 (30초) | 마지막 알려진 위치로 복구 명령 | 장애 격리 |
 | 충돌 위험 감지 | 즉시 비상정지 | 물리적 안전 |
 
-조치 이후에는 반드시 Registry에 Alert를 등록하여 System Supervisor가 인지하도록 한다.
+조치 이후에는 반드시 **A2A로 System Supervisor에게 이벤트를 보고**하여 상위가 인지하도록 한다.
 
 **주요 인터페이스**:
 
 ```
-GET http://localhost:9015/state          # 자신의 상태 조회
-GET http://localhost:9015/children       # 자식 디바이스 목록
-POST http://target:9010/message:send     # Lower agent에 A2A 전송
-POST http://localhost:8280/devices/X/    # 자신의 정보 업데이트
+POST http://localhost:9015/message:send    # 외부(System/Lower)로부터 A2A 수신
+POST http://target:9010/message:send       # Lower agent에 A2A 전송
+POST http://localhost:9116/message:send    # System Supervisor에 A2A 보고
+GET  http://localhost:8280/devices         # 하위 디바이스 상태 조회
 ```
 
 ### Lower Layer (POC 01, 02, 03)
@@ -308,16 +322,17 @@ POST http://localhost:8280/devices/X/    # 자신의 정보 업데이트
 |---|---|
 | 자신의 배터리 < 5% | 자체 판단으로 귀환 시작 |
 | 장애물 충돌 임박 | 자체 판단으로 비상정지 |
-| 중요 이벤트(지뢰 감지 등) 감지 | Registry에 Alert 즉시 등록 |
+| 중요 이벤트(기뢰 감지 등) 감지 | A2A로 중간 계층(또는 System Supervisor)에 즉시 보고 |
 
-> 단, 이러한 자율 판단 이후에는 반드시 heartbeat 또는 Registry Alert를 통해 상위에 상황을 알려야 한다.
+> 단, 이러한 자율 판단 이후에는 반드시 A2A 또는 heartbeat를 통해 상위에 상황을 알려야 한다.
 
 **주요 인터페이스**:
 
 ```
-GET http://localhost:9010/state          # 자신의 상태 조회
-GET http://localhost:8280/devices        # Registry에서 정보 조회
-Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
+POST http://localhost:9010/message:send    # A2A 수신 (상위 또는 같은 계층으로부터)
+POST http://localhost:9015/message:send    # A2A로 중간 계층에 이벤트 보고
+POST http://localhost:9116/message:send    # A2A로 System Supervisor에 직접 보고 (중간 계층 없을 때)
+Moth: device.heartbeat 채널에 발행         # 1초 주기 상태 발행
 ```
 
 ---
@@ -328,8 +343,9 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 
 **목적**: 주기적으로 "나는 살아있고 정상 작동 중"을 알림
 
-**발행 주기**: 10초  
-**타임아웃**: 30초 (3회 heartbeat 미수신)
+**발행 주기**: 1초  
+**타임아웃**: 3초 (3회 heartbeat 미수신 시 offline 판단)  
+**복구**: heartbeat가 다시 수신되면 즉시 online으로 전환
 
 #### 단일 공통 스트림 (실제 구현 기준)
 
@@ -362,14 +378,15 @@ Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
 Registry는 heartbeat을 수신할 때 `latitude`/`longitude`와 `battery_percent`가 있으면 디바이스 상태를 업데이트한다. 이 값들이 없으면:
 1. Registry의 위치 정보가 이전 값 그대로 유지 (stale)
 2. 대시보드/다른 에이전트가 Registry 조회 시 **오래된 위치** 반환
-3. 지뢰 탐지 등 위치 기반 의사결정 시 **잘못된 좌표로 미션 할당** 가능
+3. 기뢰 탐지 등 위치 기반 의사결정 시 **잘못된 좌표로 미션 할당** 가능
 4. GPS와 별도로 `device.telemetry.{id}.gps` 채널로 위치를 발행하더라도 Registry 업데이트는 발생하지 않음 (telemetry는 Registry가 구독하지 않음)
 5. 배터리 값이 누락되면 배터리 기반 안전 판단이 stale 상태를 그대로 사용할 수 있음
 
 **규칙**:
 
-- 모든 에이전트는 10초마다 heartbeat 발행 의무
-- heartbeat 미수신 시 Registry가 자동으로 오프라인 처리
+- 모든 에이전트는 **1초마다** heartbeat 발행 의무
+- 3초 이상 heartbeat 미수신 시 Registry가 자동으로 오프라인 처리
+- heartbeat가 다시 수신되면 즉시 online 상태로 복구
 - GPS 데이터가 있을 경우 반드시 heartbeat에 포함 (위치 정확성 유지)
 
 ### A2A (Agent-to-Agent) 메시지
@@ -450,6 +467,32 @@ POST http://{target_endpoint}/message:send
 - 센서별로 다른 데이터 구조 가능
 - 민감한 정보 제거 (보안)
 
+### Alert / Event 도메인 분리
+
+**원칙**: Alert와 Event는 별개의 도메인으로 분리하여 관리한다.
+
+| 도메인  | 설명                                               | 예시                                             |
+| ------- | -------------------------------------------------- | ------------------------------------------------ |
+| `Event` | 실제로 발생한 문제 또는 상황에 대한 도메인         | 기뢰 감지, 배터리 부족, 통신 두절                |
+| `Alert` | Event에 의해 생성된 알림 — 의사결정을 위한 신호     | "기뢰 탐지 알림", "배터리 부족 알림"             |
+
+- Event는 실제 발생 사실(fact)을 기록하고 상위로 A2A 전달
+- Alert는 Event를 기반으로 System Supervisor가 생성하는 의사결정 트리거
+- Alert 없이도 Event는 독립적으로 저장/이력화 가능
+
+**이벤트 메시지 예시**:
+
+```json
+{
+  "message_type": "event.report",
+  "event_type": "mine_detection",
+  "severity": "critical",
+  "location": { "lat": 37.003, "lon": 129.425 },
+  "detected_by": "auv-001",
+  "timestamp": "2026-05-03T10:30:00Z"
+}
+```
+
 ---
 
 ## 상태 관리 원칙
@@ -461,9 +504,10 @@ POST http://{target_endpoint}/message:send
 | 정보                  | 진실의 출처                               |
 | --------------------- | ----------------------------------------- |
 | 디바이스 위치         | Registry (heartbeat로 업데이트)           |
-| 디바이스 연결 상태    | Registry (heartbeat timeout)              |
+| 디바이스 연결 상태    | Registry (heartbeat timeout — 3초)        |
 | 현재 활성화된 임무    | 해당 에이전트의 state                     |
-| 알림                  | Registry                                  |
+| 이벤트 (발생한 사실)  | System Supervisor (A2A 수신 후 저장)      |
+| 알림 (Alert)          | System Supervisor (이벤트 기반으로 생성)  |
 | 에이전트 간 통신 이력 | Moth pub-sub + 각 에이전트의 inbox/outbox |
 
 **규칙**:
@@ -488,7 +532,7 @@ POST http://{target_endpoint}/message:send
 
 | 장애 유형             | 원인                    | 대응                                      |
 | --------------------- | ----------------------- | ----------------------------------------- |
-| **Heartbeat Timeout** | 에이전트 다운           | 자동으로 오프라인 처리, 자식 재할당       |
+| **Heartbeat Timeout** | 에이전트 다운           | 3초 미수신 시 자동 오프라인 처리, 자식 재할당 |
 | **Network Error**     | Moth/Registry 연결 끊김 | 자동 재연결 (5초 주기)                    |
 | **Message Loss**      | 전송 중 에러            | 재전송 (발신자가 책임)                    |
 | **Deadlock**          | 순환 대기               | 타임아웃 설정 (A→B 메시지 응답 30초 대기) |
@@ -622,7 +666,7 @@ app.run(host=config["server"]["host"], port=config["server"]["port"])
 - `GET /health` → 200 OK 응답
 - Moth 연결 없어도 단독 실행 가능 (graceful degradation)
 - Registry 연결 없어도 기본 동작 유지 (연결 실패 시 재시도, 서비스 중단 금지)
-- 10초 주기 heartbeat가 실제로 발행되는지 확인 (`tail -f logs/device.log | grep Heartbeat`)
+- 1초 주기 heartbeat가 실제로 발행되는지 확인 (`tail -f logs/device.log | grep Heartbeat`)
 
 **동작 테스트 방법**:
 
@@ -678,29 +722,32 @@ tail -f logs/device.log | grep "Heartbeat\|A2A\|Telemetry"
 ### 기뢰 탐지 시나리오 의사결정
 
 ```
-입력: Registry에 mine_detection 알림 저장
-      └─ alert_type: "mine_detection"
+입력: A2A로 mine_detection 이벤트 수신 (System Supervisor)
+      └─ event_type: "mine_detection"
       └─ severity: "critical"
-      └─ metadata: {location: {lat, lon}}
+      └─ location: {lat, lon}  ← 탐지 위치 저장
 
-↓ System Supervisor의 alert processing loop
+↓ System Supervisor의 event 처리
 
-의사결정 1: 누구에게 할당할 것인가?
-├─ Rule: Control Ship이 있는가?
-├─ If Yes → Control Ship 선택
-└─ If No → 다른 middle-layer 에이전트 선택
+사전 작업: 위치 기반 디바이스 분석
+├─ 탐지 위치 저장
+├─ 위치에 가까운 디바이스 목록 조회 (Registry)
+├─ 각 디바이스의 상태/가용성 확인
+└─ 작업 할당 디바이스 선정
+   ├─ AUV: 정확한 위치 확인 임무
+   └─ ROV: 기뢰 제거 임무
 
-의사결정 2: 어떤 명령을 내릴 것인가?
-├─ Rule: alert_type이 mine_detection?
-├─ If Yes → action: "survey_depth", target: AUV/ROV
-└─ If No → 다른 action 결정
+의사결정 1: 중간 계층(Control Ship)이 존재하는가?
+├─ If Yes → Control Ship에 작업 목록 A2A 전달
+│           └─ Control Ship → 각 디바이스에 A2A 전달
+└─ If No  → 각 디바이스에 직접 A2A 전달
 
-의사결정 3: 확인 후 진행 또는 거절?
-├─ Rule: Control Ship이 응답 가능 상태?
+의사결정 2: 해당 디바이스가 응답 가능 상태인가?
 ├─ If Yes → A2A 메시지 전송
-└─ If No → 다시 대기 (다음 주기에서)
+└─ If No  → 대안 디바이스 탐색 또는 사용자에게 불가 알림
 
 결과: A2A 메시지 발송 및 로깅
+완료: 모든 임무 완료 시 → Alert(완료) 발행 + 보고서 생성 저장
 ```
 
 ### 의사결정 권한 매트릭스
