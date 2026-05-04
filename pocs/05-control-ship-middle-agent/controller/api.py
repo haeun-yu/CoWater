@@ -370,6 +370,15 @@ async def _report_mission_result_to_system(
         )
     except Exception as e:
         logger.warning(f"Failed to report mission.result to system: {e}")
+        runtime.state.remember(
+            {
+                "kind": "mission_result_report_failed",
+                "at": utc_now(),
+                "response_id": response_id,
+                "alert_id": alert_id,
+                "error": str(e),
+            }
+        )
 
 
 def run(default_config_path: Path) -> None:
