@@ -1,21 +1,21 @@
 {
   "server": { "host": "127.0.0.1", "port": 9116 },
   "registry": {
-    "url": "http://127.0.0.1:9100",
+    "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": false,
     "heartbeat_interval_seconds": 1
   },
   "agent": {
-    "id": "system-supervisor-agent",
-    "name": "System Supervisor Agent",
-    "role": "system_supervisor",
+    "id": "system-agent",
+    "name": "System Agent",
+    "role": "system_agent",
     "layer": "system",
     "device_type": "SYSTEM",
     "connectivity": "none",
     "requires_parent": false,
     "children_required": false,
-    "description": "Upper-layer supervisor agent for mission planning, approval, priority, and response strategy.",
+    "description": "Upper-layer system agent for mission planning, approval, priority, and response strategy.",
     "llm": {
       "provider": "ollama",
       "endpoint": "http://localhost:11434",
@@ -61,6 +61,32 @@
   "moth": {
     "enabled": false,
     "server_url": "wss://cobot.center:8287"
+  },
+  "event_rules": {
+    "mine_detection": {
+      "severity": "CRITICAL",
+      "recommended_action": "survey_depth"
+    },
+    "collision_risk": {
+      "severity": "CRITICAL",
+      "recommended_action": "escalate_alert"
+    },
+    "distress": {
+      "severity": "CRITICAL",
+      "recommended_action": "escalate_alert"
+    },
+    "battery_low": {
+      "severity": "WARNING",
+      "recommended_action": "return_to_base"
+    },
+    "communication_loss": {
+      "severity": "WARNING",
+      "recommended_action": "escalate_alert"
+    },
+    "tether_warning": {
+      "severity": "WARNING",
+      "recommended_action": "escalate_alert"
+    }
   },
   "simulation": {},
   "cors": { "allow_origins": ["*"] }

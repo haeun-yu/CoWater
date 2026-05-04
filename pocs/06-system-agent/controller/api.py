@@ -115,6 +115,10 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     elif msg_type == "layer.assignment":
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
+    elif msg_type == "event.report":
+        result = runtime.handle_event_report(data)
+    elif msg_type == "mission.result":
+        result = runtime.handle_mission_result(data)
     elif msg_type == "task.assign":
         command = {
             "action": str(data.get("action") or data.get("command") or "hold_position"),

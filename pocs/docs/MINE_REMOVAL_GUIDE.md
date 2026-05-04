@@ -1,414 +1,125 @@
-# CoWater 기뢰 제거 시나리오 완전 가이드
+# 기뢰 제거 시나리오 가이드
 
-**최종 구현 상태**: 핵심 라우팅/등록/시나리오 스모크 검증 완료 ✅
-**작성일**: 2026-04-29
+이 문서는 현재 구현 기준의 `기뢰 탐지 -> Event 기록 -> Alert 생성 -> 대응 배정` 흐름을 정리한다.
 
----
+## 시나리오 참여 구성
 
-## 📋 목차
+| POC | 역할 |
+| --- | --- |
+| `00` | Registry Server |
+| `02` | AUV Lower Agent |
+| `03` | ROV Lower Agent |
+| `05` | Control Ship Middle Agent |
+| `06` | System Agent |
 
-1. [시스템 개요](#시스템-개요)
-2. [핵심 기능](#핵심-기능)
-3. [아키텍처](#아키텍처)
-4. [ROV 유연한 설정](#rov-유연한-설정)
-5. [기뢰 제거 시나리오](#기뢰-제거-시나리오)
-6. [배포 및 테스트](#배포-및-테스트)
+필요에 따라 `04` USV Middle Agent도 중간 라우팅에 참여할 수 있다.
 
----
-
-## 시스템 개요
-
-CoWater POC 시스템은 기뢰 제거 작업을 위한 완전한 아키텍처를 구현합니다:
-
-| 구성요소           | 기능                                           | 상태    |
-| ------------------ | ---------------------------------------------- | ------- |
-| **Moth Heartbeat** | 실시간 장치 모니터링                           | ✅ 완성 |
-| **ROV 유선 연결**  | 케이블을 통한 강제 유선 통신                   | ✅ 완성 |
-| **AUV 음향통신**   | 수중/수면 조건부 연결                          | ✅ 완성 |
-| **A2A 통신**       | 계층적 명령 전달 (Supervisor → Middle → Lower) | ✅ 완성 |
-
----
-
-## 핵심 기능
-
-### 1. Moth Heartbeat 실시간 모니터링
-
-**기능**: 모든 POC 장치의 건강 상태를 1초 주기로 추적하고, 3초 이상 heartbeat이 없으면 오프라인으로 표시.
-
-**구현**:
-
-- `MothHeartbeatSubscriber`: Moth meb 채널에서 모든 heartbeat 수신
-- `HeartbeatMonitor`: 3초 timeout으로 online/offline 상태 감지
-- **중요**: 상태 변경 시에만 DB에 반영 (매번이 아님)
-
-**Heartbeat 페이로드**:
-
-```json
-{
-  "device_id": 1,
-  "agent_id": "01-usv-lower-agent",
-  "layer": "lower",
-  "timestamp": "2026-04-28T14:30:00Z",
-  "status": "online",
-  "battery_percent": 85.5
-}
-```
-
----
-
-### 2. ROV 유선 연결 강제 (임의 Middle Layer)
-
-**특징**: ROV는 항상 케이블로 연결되므로 **어떤 middle layer 에이전트든** 통해서만 통신 가능.
-
-**Middle Layer 옵션**:
-| Parent | POC | 역할 |
-|--------|-----|------|
-| **USV Middle Layer** | POC 04 | 수표 기반 제어 |
-| **Control Ship** | POC 05 | 선박 기반 제어 |
-
-**API - Control Ship 설정**:
-
-```bash
-PATCH /devices/3/connectivity-state
-{
-  "parent_id": 3,           # Control Ship (POC 05)
-  "force_parent_routing": true
-}
-
-응답:
-{
-  "id": 3,
-  "device_type": "ROV",
-  "parent_id": 3,
-  "force_parent_routing": true,  # 유선 강제
-  "connected": true
-}
-```
-
-**API - USV로 재할당**:
-
-```bash
-PATCH /devices/3/connectivity-state
-{
-  "parent_id": 2,           # USV Middle Layer (POC 04)
-  "force_parent_routing": true
-}
-```
-
-**동적 변경**: 작업 중에도 parent를 재할당할 수 있음.
-
----
-
-### 3. AUV 수중음향통신 (조건부 연결)
-
-**특징**: AUV는 **수중일 때만** middle layer와 음향통신, **수면일 때는** 직접 연결.
-
-**상태 변환 시나리오**:
-
-#### 수면 → 잠수
-
-```bash
-# 1단계: AUV 잠수
-PATCH /devices/2/auv-submersion
-{
-  "is_submerged": true
-}
-
-# 2단계: 음향통신 연결
-PATCH /devices/2/connectivity-state
-{
-  "parent_id": 1,           # Middle layer와 음향 연결
-  "force_parent_routing": false
-}
-
-응답:
-{
-  "is_submerged": true,
-  "parent_id": 1,           # 중간 계층과 연결
-  "connectivity": "acoustic"
-}
-```
-
-#### 잠수 → 수면
-
-```bash
-PATCH /devices/2/auv-submersion
-{
-  "is_submerged": false
-}
-
-응답:
-{
-  "is_submerged": false,
-  "parent_id": null,        # 자동으로 직접 연결
-  "surfaced_at": "2026-04-28T14:40:00Z"
-}
-```
-
----
-
-### 4. A2A (Agent-to-Agent) 통신
-
-**모든 POC 통합**: POC 01-06 모두 `pocs/shared/a2a.py` 및 `pocs/shared/command.py` 사용.
-
-**메시지 구조**:
-
-```python
-A2AMessage(
-  role="user",
-  parts=[
-    A2APart(
-      type="data",
-      data={
-        "message_type": "task.assign",
-        "action": "deploy_rov",
-        "params": {...}
-      }
-    )
-  ]
-)
-```
-
-**계층적 흐름**:
-
-```
-Supervisor (POC 06)
-    ↓ A2A /message:send
-Middle Layer (POC 04-05)
-    ↓ Moth 메시지 발행
-Lower Agents (POC 01-03)
-    ↓ 작업 수행
-```
-
----
-
-## 아키텍처
-
-### 계층 구조
-
-```
-POC 06 - System Supervisor
-    ↓ A2A 명령 (JSON-RPC)
-POC 04-05 - Middle Layer (USV, Control Ship)
-    ├─ Moth 제어 ↓
-    │
-    ├─ POC 01 - USV Lower (Direct WiFi)
-    ├─ POC 02 - AUV (Acoustic when submerged)
-    └─ POC 03 - ROV (Wired - always through parent)
-
-POC 00 - Device Registry Server (Heartbeat 모니터링)
-```
-
-### Heartbeat 모니터링 흐름
-
-```
-POC 01-03 (1초마다)
-    ↓ heartbeat 발행
-device.heartbeat meb (Moth broadcast)
-    ↓
-MothHeartbeatSubscriber (POC 00)
-    ↓ heartbeat_monitor.record_heartbeat()
-HeartbeatMonitor (3초 timeout)
-    ↓ 상태 변경 시만 반영
-DeviceRegistry
-```
-
----
-
-## ROV 유연한 설정
-
-### 상황별 Parent 선택
-
-**시나리오 1: 해안 근처 (얕은 수심)**
-
-```bash
-# USV에서 직접 ROV 제어
-PATCH /devices/3/connectivity-state
-{
-  "parent_id": 2,  # USV Middle Layer
-  "force_parent_routing": true
-}
-
-명령 흐름:
-Supervisor → USV → ROV (기뢰 제거)
-```
-
-**시나리오 2: 원해 (깊은 수심)**
-
-```bash
-# Control Ship에서 원거리 ROV 제어
-PATCH /devices/3/connectivity-state
-{
-  "parent_id": 3,  # Control Ship
-  "force_parent_routing": true
-}
-
-명령 흐름:
-Supervisor → Control Ship → ROV (기뢰 제거)
-```
-
-**시나리오 3: 작업 중 전환**
-
-```bash
-# 초기: USV 제어
-PATCH /devices/3/connectivity-state { "parent_id": 2 }
-
-# 중간: 선박 접근 후 Control Ship으로 전환
-PATCH /devices/3/connectivity-state { "parent_id": 3 }
-
-# 최종: 회수 시 다시 USV로
-PATCH /devices/3/connectivity-state { "parent_id": 2 }
-```
-
----
-
-## 기뢰 제거 시나리오
-
-### 전체 작업 흐름
-
-**Step 1: Supervisor가 기뢰 제거 임무 발령**
-
-```bash
-POST /message:send
-{
-  "message": {
-    "role": "user",
-    "parts": [{
-      "type": "data",
-      "data": {
-        "message_type": "task.assign",
-        "action": "execute_mine_removal",
-        "mine_id": "MINE-001",
-        "location": {"lat": 37.21, "lon": 126.97, "depth_m": 50},
-        "sequence": [
-          {"step": 1, "device": "USV-01", "action": "deploy"},
-          {"step": 2, "device": "AUV-01", "action": "survey_depth"},
-          {"step": 3, "device": "ROV-01", "action": "remove_mine"}
-        ]
-      }
-    }]
-  },
-  "taskId": "MINE-REMOVAL-001"
-}
-```
-
-**Step 2: Control Ship이 명령 분해**
-
-```python
-# Step 1: USV 배치
-→ Moth: control.instruction.usv
-
-# Step 2: AUV 잠수 및 측량
-→ PATCH /devices/2/auv-submersion { "is_submerged": true }
-→ PATCH /devices/2/connectivity-state { "parent_id": 1 }
-→ Moth: acoustic.control.auv
-
-# Step 3: ROV 배치 및 제거
-→ PATCH /devices/3/connectivity-state { "parent_id": 3 }
-→ Moth: cable.control.rov
-```
-
-**Step 3: 장치 오프라인 감지 시**
-
-```
-기뢰 제거 중 ROV heartbeat 끊김 감지
-    ↓ 3초 이상 no heartbeat
-Device Registry: ROV offline으로 표시
-    ↓
-Control Ship에 긴급 알림
-    ↓
-Supervisor에 보고
-    ↓
-모든 작업 중단 (Emergency Stop)
-```
-
----
-
-## 배포 및 테스트
-
-### 필수 구성요소
-
-```bash
-# 1. Device Registration Server 시작
-cd pocs/00-device-registration-server
-python device_registration_server.py --port 9100
-
-# 2. Lower Agents 시작
-python pocs/01-usv-lower-agent/device_agent.py --port 9111
-python pocs/02-auv-lower-agent/device_agent.py --port 9112
-python pocs/03-rov-lower-agent/device_agent.py --port 9113
-
-# 3. Middle Layer 시작
-python pocs/04-usv-middle-agent/device_agent.py --port 9114
-python pocs/05-control-ship-middle-agent/device_agent.py --port 9115
-
-# 4. Supervisor 시작
-python pocs/06-system-supervisor-agent/system_agent.py --port 9116
-```
-
-### 시나리오 스모크 테스트
-
-외부 Moth/Ollama 서버 없이 레지스트리 라우팅과 기뢰제거 절차를 검증하려면:
-
-```bash
-python pocs/docs/run_mine_removal_scenario.py --format timeline
-```
-
-성공 시 다음 조건이 모두 `OK`로 출력됩니다:
+## 기본 흐름
 
 ```text
-OK auv_submerged_via_parent
-OK rov_wired_force_parent
-OK unique_track_endpoints
+1. Lower Agent가 mine_detection Event를 상위로 보고
+2. System Agent가 event.report를 수신
+3. System Agent가 Event를 Registry Server에 저장
+4. System Agent가 severity를 판단해 Alert를 생성
+5. System Agent가 target agent를 선택하고 task.assign 전송
+6. 현장 수행 결과를 다시 상위로 보고
+7. Response를 Registry Server에 저장
 ```
 
-### 테스트 체크리스트
+## Event / Alert / Response 기준
 
-- [ ] **Heartbeat 모니터링**: POC 하나를 중단했을 때 3초 후 offline으로 표시되는지 확인
-- [ ] **ROV 유선 설정**: `PATCH /devices/3/connectivity-state`로 parent 변경 가능한지 확인
-- [ ] **AUV 잠수**: `PATCH /devices/2/auv-submersion`로 수중/수면 전환 가능한지 확인
-- [ ] **A2A 통신**: Supervisor에서 Lower Agent로 명령이 전달되는지 확인
-- [ ] **기뢰 제거 시나리오**: 전체 작업 흐름이 정상 작동하는지 확인
+- Event는 발생 사실이다.
+- Alert는 대응이 필요한 상태다.
+- Response는 계획되거나 실행된 대응 기록이다.
+- 세 도메인의 canonical owner는 모두 Registry Server다.
 
-### 테스트 예시
+severity enum:
+
+- `CRITICAL`
+- `WARNING`
+- `INFORMATION`
+
+## event_type 기본 매핑
+
+`pocs/06-system-agent/config.json > event_rules` 기준:
+
+| event_type | severity | recommended_action |
+| --- | --- | --- |
+| `mine_detection` | `CRITICAL` | `survey_depth` |
+| `collision_risk` | `CRITICAL` | `escalate_alert` |
+| `distress` | `CRITICAL` | `escalate_alert` |
+| `battery_low` | `WARNING` | `return_to_base` |
+| `communication_loss` | `WARNING` | `escalate_alert` |
+| `tether_warning` | `WARNING` | `escalate_alert` |
+
+## 실행 준비
 
 ```bash
-# Heartbeat 모니터링 테스트
-curl http://localhost:9100/devices
-# → 모든 디바이스가 connected=true인지 확인
-
-# ROV parent 변경 테스트
-curl -X PATCH http://localhost:9100/devices/3/connectivity-state \
-  -H "Content-Type: application/json" \
-  -d '{"parent_id": 2, "force_parent_routing": true}'
-
-# AUV 잠수 테스트
-curl -X PATCH http://localhost:9100/devices/2/auv-submersion \
-  -H "Content-Type: application/json" \
-  -d '{"is_submerged": true}'
+python3 pocs/00-device-registration-server/device_registration_server.py
+python3 pocs/06-system-agent/system_agent.py
+python3 pocs/05-control-ship-middle-agent/device_agent.py
+python3 pocs/02-auv-lower-agent/device_agent.py
+python3 pocs/03-rov-lower-agent/device_agent.py
 ```
 
----
+기본 Registry 주소는 `http://127.0.0.1:8280`이다.
 
-## 핵심 요약
+## 확인 절차
 
-✅ **검증된 기능**:
+### 1. Registry 등록 상태
 
-- Moth heartbeat 실시간 모니터링 (3초 timeout)
-- ROV 유선 연결 강제 (임의 middle layer 선택 가능)
-- AUV 수중음향 조건부 연결
-- A2A 계층적 통신 (POC 01-06)
-- 기뢰 제거 시나리오 아키텍처
+```bash
+curl http://127.0.0.1:8280/devices | jq '.[] | {id, name, layer, device_type, parent_id, connected}'
+```
 
-✅ **구현 파일**:
+### 2. Event 기록 확인
 
-- `pocs/00-device-registration-server/src/transport/moth_subscriber.py`
-- `pocs/00-device-registration-server/src/registry/device_registry.py`
-- `pocs/shared/a2a.py`, `pocs/shared/command.py`
-- POC 01-06의 모든 controller/api.py
+```bash
+curl -X POST http://127.0.0.1:8280/events/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_type": "mine_detection",
+    "severity": "CRITICAL",
+    "message": "기뢰 탐지",
+    "source_system": "scenario_test",
+    "source_agent_id": "auv-001",
+    "source_role": "auv"
+  }'
+```
 
-✅ **배포 준비 상태**: 로컬 스모크 테스트 가능. 실제 Moth/Ollama/장시간 WebSocket 운영 검증은 별도 필요.
+```bash
+curl http://127.0.0.1:8280/events | jq .
+```
 
----
+### 3. Alert 기록 확인
 
-**마지막 업데이트**: 2026-04-29
+```bash
+curl http://127.0.0.1:8280/alerts | jq .
+```
+
+### 4. Response 기록 확인
+
+```bash
+curl http://127.0.0.1:8280/responses | jq .
+```
+
+### 5. A2A 전달 확인
+
+```bash
+curl http://127.0.0.1:9116/state | jq '.outbox'
+curl http://127.0.0.1:9115/state | jq '.inbox'
+```
+
+## 성공 기준
+
+- Event가 Registry Server에 기록된다.
+- System Agent가 Alert를 생성한다.
+- Alert severity가 대문자 enum으로 기록된다.
+- Response가 Alert와 연결되어 저장된다.
+- middle agent 또는 lower agent로 `task.assign`가 전달된다.
+
+## 현재 구현 메모
+
+- System Agent는 `event.report`를 직접 수신해 Event 저장과 Alert 발행을 수행한다.
+- assignment 계산은 Registry Server가 맡고, 임무 판단은 System Agent가 맡는다.
+- heartbeat 위치와 배터리 값은 가능한 경우 `latitude`, `longitude`, `battery_percent`로 발행한다.

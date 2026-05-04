@@ -2,7 +2,7 @@
 Agent-to-Agent (A2A) 통신 모듈
 
 모든 Agent (POC 01-05)가 A2A를 통해 상호 통신:
-- Supervisor → Middle/Lower agents: 명령 전달
+- System Agent → Middle/Lower agents: 명령 전달
 - Middle agents → Lower agents: 분해된 작업 할당
 - Lower agents → Upper agents: 상태/결과 보고
 """

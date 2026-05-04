@@ -3,7 +3,7 @@ const STORAGE_KEYS = {
   secretKey: "cowater.deviceRegistration.secretKey",
 };
 
-const DEFAULT_API_BASE = "http://127.0.0.1:9100";
+const DEFAULT_API_BASE = "http://127.0.0.1:8280";
 let selectedAlertId = null;
 
 function getApiBase() {
@@ -349,13 +349,14 @@ async function initDevicesPage() {
 }
 
 function renderAlertBadge(alert) {
+  const severity = String(alert.severity || "").toUpperCase();
   const severityClass =
-    alert.severity === "critical" || alert.severity === "high"
+    severity === "CRITICAL" || severity === "HIGH"
       ? "danger"
-      : alert.severity === "warning"
+      : severity === "WARNING"
         ? "warn"
         : "ok";
-  return `<span class="badge ${severityClass}">${escapeHtml(alert.severity)}</span>`;
+  return `<span class="badge ${severityClass}">${escapeHtml(severity)}</span>`;
 }
 
 function renderAlertDetail(alert) {

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import urllib.request
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -128,18 +131,107 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
     elif msg_type == "task.assign":
+        response_id = str(data.get("response_id") or request.taskId or str(uuid4()))
+        alert_id = str(data.get("alert_id") or "")
         command = {
             "action": str(data.get("action") or data.get("command") or "hold_position"),
             "params": data.get("params") or {},
             "reason": data.get("reason") or f"A2A task {request.taskId}",
         }
         result = runtime.apply_command(command)
+        runtime.state.remember(
+            {
+                "kind": "incident_decision",
+                "at": utc_now(),
+                "source": runtime.state.agent_id,
+                "response_id": response_id,
+                "alert_id": alert_id,
+                "action": command["action"],
+                "reason": command["reason"],
+            }
+        )
+        await _report_mission_result_upstream(
+            runtime,
+            response_id=response_id,
+            alert_id=alert_id,
+            execution_status="completed",
+            execution_log={"executor": runtime.state.agent_id, "result": result},
+        )
     else:
         result = {"received": True, "message_type": msg_type}
     task = build_task(request.taskId, request.message, result)
     runtime.state.tasks[task["id"]] = task
     runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
     return task
+
+
+async def _report_mission_result_upstream(
+    runtime: AgentRuntime,
+    *,
+    response_id: str,
+    alert_id: str,
+    execution_status: str,
+    execution_log: dict[str, Any],
+) -> None:
+    if not runtime.state.parent_endpoint and not (execution_log.get("result", {}).get("command", {}).get("params", {}).get("report_to_endpoint")):
+        return
+
+    report_to = execution_log.get("result", {}).get("command", {}).get("params", {}).get("report_to_endpoint")
+    endpoint = str(report_to or runtime.state.parent_endpoint or "").rstrip("/")
+    if not endpoint:
+        return
+    message = {
+        "jsonrpc": "2.0",
+        "method": "message/send",
+        "id": str(uuid4()),
+        "params": {
+            "message": {
+                "role": "user",
+                "parts": [
+                    {
+                        "type": "data",
+                        "data": {
+                            "message_type": "mission.result",
+                            "response_id": response_id,
+                            "alert_id": alert_id,
+                            "execution_status": execution_status,
+                            "source_agent_id": runtime.state.agent_id,
+                            "execution_log": execution_log,
+                        },
+                    }
+                ],
+            },
+            "taskId": response_id,
+            "metadata": {},
+        },
+    }
+    try:
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(message).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5).close()
+        runtime.state.remember(
+            {
+                "kind": "mission_result_reported",
+                "at": utc_now(),
+                "response_id": response_id,
+                "alert_id": alert_id,
+                "status": execution_status,
+                "target": endpoint,
+            }
+        )
+    except Exception as exc:
+        runtime.state.remember(
+            {
+                "kind": "mission_result_report_failed",
+                "at": utc_now(),
+                "response_id": response_id,
+                "error": str(exc),
+            }
+        )
 
 
 def run(default_config_path: Path) -> None:

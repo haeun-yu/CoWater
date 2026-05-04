@@ -1,333 +1,180 @@
-# Mine Removal Scenario Test Document
+# 기뢰 제거 시나리오 테스트 문서
 
-## Executive Summary
+## 목적
 
-The complete mine removal scenario has been successfully implemented and tested across all 7 POCs (00-06). The scenario demonstrates:
-- ✓ Hierarchical command propagation from System Supervisor to Lower Agents
-- ✓ A2A communication between all agent tiers
-- ✓ Dynamic task assignment and execution
-- ✓ Multi-device coordination for complex operations
+이 문서는 CoWater의 대표 시나리오인 `기뢰 탐지 및 제거` 흐름이 현재 구현에서 어떻게 검증되는지 정리한다.
 
-## Test Environment Setup
+검증 대상:
 
-### Prerequisites
-- Ollama running (for LLM inference): `ollama serve`
-- All POCs deployed on localhost with standard ports
+- System Agent의 이벤트 수신과 Alert 생성
+- Registry Server의 Event / Alert / Response 원장
+- Middle Layer를 통한 A2A 명령 전파
+- Lower Agent의 명령 수신 및 임무 수행 준비
 
-### POC Configuration
+---
+
+## 테스트 대상 구성
+
+| POC | 역할 | 기본 포트 |
+| --- | --- | --- |
+| `00` | Registry Server | `8280` |
+| `01` | USV Lower Agent | `9111` |
+| `02` | AUV Lower Agent | `9112` |
+| `03` | ROV Lower Agent | `9113` |
+| `04` | USV Middle Agent | `9114` |
+| `05` | Control Ship Middle Agent | `9115` |
+| `06` | System Agent | `9116` |
+
+주의:
+
+- 모든 POC 기본 설정은 Registry Server `http://127.0.0.1:8280` 기준으로 맞춘다.
+- 테스트 전에 실제 실행 포트와 각 Agent의 `registry.url`이 일치하는지만 확인한다.
+
+---
+
+## 시나리오 개요
+
+```text
+1. Lower Agent 또는 외부 시스템이 mine_detection Event를 System Agent에 A2A로 보고
+2. System Agent가 Event를 Registry Server의 event ledger에 기록
+3. System Agent가 severity를 판단해 Alert를 생성하고 alert ledger에 저장
+4. System Agent가 Alert를 해석해 대상 middle agent 또는 lower agent를 선택
+5. System Agent가 task.assign A2A를 전송
+6. 작업 결과는 다시 상위로 A2A 보고
+7. 대응 계획과 결과는 Response ledger에 기록
 ```
-POC 00: Device Registration Server         (Port 9100)
-POC 01: USV Lower Agent                    (Port 9111)
-POC 02: AUV Lower Agent                    (Port 9112)
-POC 03: ROV Lower Agent                    (Port 9113)
-POC 04: USV Middle Agent                   (Port 9114)
-POC 05: Control Ship Middle Agent          (Port 9115)
-POC 06: System Supervisor                  (Port 9116)
-```
 
-## Scenario: Mine Removal Operation
+---
 
-### Scenario Description
-A coordinated multi-device operation to detect and remove naval mines in a designated area:
-1. System Supervisor receives mine removal task
-2. Control Ship coordinates the operation
-3. USV performs surface-level reconnaissance
-4. AUV conducts underwater sonar sweep
-5. ROV stands by for intervention
+## 사전 확인
 
-### Registry IDs (from latest test run)
-- POC 01 (USV): Registry ID 3
-- POC 02 (AUV): Registry ID 10
-- POC 03 (ROV): Registry ID 11
-- POC 04 (Middle USV): Registry ID 12
-- POC 05 (Control Ship): Registry ID 13
-- POC 06 (System Supervisor): Registry ID 26
+### 1. 서버 기동 확인
 
-## Step-by-Step Test Execution
-
-### Phase 1: System Initialization (✓ PASSED)
-
-**Objective**: Verify all POCs are running and registered
-
-**Commands**:
 ```bash
-# Start all POCs
-cd /Users/teamgrit/Documents/CoWater/pocs/00-device-registration-server
-python -u -m src.api > /tmp/poc00.log 2>&1 &
-sleep 8
-
-# Start agents 01-06
-for poc in 01 02 03 04 05 06; do
-  cd "/Users/teamgrit/Documents/CoWater/pocs/${poc}-*/device_agent.py"
-  python -u device_agent.py > /tmp/poc$poc.log 2>&1 &
-  sleep 5
-done
-
-# Verify all ports responding
-for port in 9100 9111 9112 9113 9114 9115 9116; do
-  curl -s http://127.0.0.1:$port/health
-done
+curl http://127.0.0.1:8280/health
+curl http://127.0.0.1:9116/health
+curl http://127.0.0.1:9115/health
+curl http://127.0.0.1:9112/health
+curl http://127.0.0.1:9113/health
 ```
 
-**Expected Results**:
-- All 7 ports respond with `{"status":"ok"}`
-- All POCs registered in Device Registry
-- Total: 26 devices (15 lower, 8 middle, 3 system)
+### 2. Registry 연결 확인
 
-**Actual Results**: ✓ PASSED
-- All ports operational
-- All POCs registered successfully
-- System layer agents properly registered with empty tracks
-
-### Phase 2: Mission Assignment (✓ PASSED)
-
-**Objective**: Test System Supervisor mission planning
-
-**Command**:
 ```bash
-# Get System Supervisor token
-system_token=$(curl -s http://127.0.0.1:9116/state | \
-  python -c "import sys, json; print(json.load(sys.stdin)['token'])")
+curl http://127.0.0.1:8280/devices | jq .
+```
 
-# Send mission planning command
-curl -s -X POST "http://127.0.0.1:9116/agents/$system_token/command" \
+확인 항목:
+
+- 각 Agent가 Registry에 등록되어 있는가
+- `agent.endpoint`와 `agent.command_endpoint`가 채워져 있는가
+- middle agent가 `connected=true`인가
+
+---
+
+## 핵심 검증 항목
+
+### 1. Event 원장 기록
+
+Event를 직접 넣어 Registry API를 확인한다.
+
+```bash
+curl -X POST http://127.0.0.1:8280/events/ingest \
   -H "Content-Type: application/json" \
   -d '{
-    "action": "mission.plan",
-    "params": {
-      "mission_type": "mine_removal",
-      "target_area": {"lat": 37.0, "lon": 129.4},
-      "priority": "high"
-    },
-    "reason": "Automated mine removal scenario"
-  }'
-```
-
-**Expected Results**:
-- System Supervisor accepts mission.plan action
-- Returns `"delivered": true`
-- Stores mission in state
-
-**Actual Results**: ✓ PASSED
-```json
-{
-  "delivered": true,
-  "command": {
-    "action": "mission.plan",
-    "params": {
-      "mission_type": "mine_removal",
-      "target_area": {"lat": 37.0, "lon": 129.4},
-      "priority": "high"
+    "event_type": "mine_detection",
+    "severity": "CRITICAL",
+    "message": "기뢰 탐지 이벤트",
+    "source_system": "scenario_test",
+    "source_agent_id": "auv-001",
+    "source_role": "auv",
+    "metadata": {
+      "location": { "lat": 37.003, "lon": 129.425 }
     }
-  }
-}
-```
-
-### Phase 3: Task Propagation to Middle Layer (✓ PASSED)
-
-**Objective**: Test Control Ship receiving coordinated task
-
-**Command**:
-```bash
-# Get Control Ship token
-control_token=$(curl -s http://127.0.0.1:9115/state | \
-  python -c "import sys, json; print(json.load(sys.stdin)['token'])")
-
-# Send task assignment
-curl -s -X POST "http://127.0.0.1:9115/agents/$control_token/command" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "task.assign",
-    "params": {
-      "task_id": "mine-removal-001",
-      "task_type": "mine_removal",
-      "targets": ["device_3", "device_10", "device_11"],
-      "priority": "high"
-    },
-    "reason": "Mine removal mission from System Supervisor"
   }'
 ```
 
-**Expected Results**:
-- Control Ship accepts task.assign action
-- Returns `"delivered": true`
-- Prepares for coordination
+이후 확인:
 
-**Actual Results**: ✓ PASSED
-```json
-{
-  "delivered": true,
-  "command": {
-    "action": "task.assign",
-    "params": {
-      "task_id": "mine-removal-001",
-      "task_type": "mine_removal",
-      "targets": ["device_3", "device_10", "device_11"]
-    }
-  }
-}
-```
-
-### Phase 4: Lower Agent Deployment (✓ PASSED)
-
-**Objective**: Test all lower agents receiving movement commands
-
-#### 4a. USV (POC 01) Deployment
 ```bash
-usv_token=$(curl -s http://127.0.0.1:9111/state | \
-  python -c "import sys, json; print(json.load(sys.stdin)['token'])")
-
-curl -s -X POST "http://127.0.0.1:9111/agents/$usv_token/command" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "route_move",
-    "params": {
-      "target_position": {"latitude": 37.0, "longitude": 129.4},
-      "route_type": "spiral_search",
-      "speed": "slow"
-    },
-    "reason": "Mine sweep in designated area"
-  }'
+curl http://127.0.0.1:8280/events | jq .
 ```
 
-**Result**: ✓ PASSED - `"delivered": true`
+### 2. Alert 원장 기록
 
-#### 4b. AUV (POC 02) Deployment
+System Agent가 Event를 받아 Alert를 생성하는 흐름이 정상인지 확인한다.
+
+확인 포인트:
+
+- Event가 기록되었는가
+- 대응 Alert가 생성되었는가
+- Alert severity가 `CRITICAL | WARNING | INFORMATION` 중 하나인가
+
 ```bash
-auv_token=$(curl -s http://127.0.0.1:9112/state | \
-  python -c "import sys, json; print(json.load(sys.stdin)['token'])")
-
-curl -s -X POST "http://127.0.0.1:9112/agents/$auv_token/command" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "route_move",
-    "params": {
-      "target_position": {"latitude": 37.0, "longitude": 129.4, "depth": -100},
-      "route_type": "sonar_sweep",
-      "speed": "slow"
-    },
-    "reason": "Underwater mine detection"
-  }'
+curl http://127.0.0.1:8280/alerts | jq .
 ```
 
-**Result**: ✓ PASSED - `"delivered": true`
+### 3. Response 기록
 
-#### 4c. ROV (POC 03) Deployment
+System Agent가 Alert를 해석한 뒤 Response를 저장하는지 확인한다.
+
 ```bash
-rov_token=$(curl -s http://127.0.0.1:9113/state | \
-  python -c "import sys, json; print(json.load(sys.stdin)['token'])")
-
-curl -s -X POST "http://127.0.0.1:9113/agents/$rov_token/command" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "hold_position",
-    "params": {
-      "position": {"latitude": 37.0, "longitude": 129.4, "depth": -150},
-      "wait_time": 600
-    },
-    "reason": "Standby for mine removal support"
-  }'
+curl http://127.0.0.1:8280/responses | jq .
 ```
 
-**Result**: ✓ PASSED - `"delivered": true`
+확인 포인트:
 
-## Test Results Summary
+- `alert_id`와 연결된 `response_id`가 생성되었는가
+- `target_agent_id`, `action`, `reason`이 들어 있는가
+- `response.status`가 `completed`로 갱신되었는가
+- `dispatch_result.delivered=true`와 대상 endpoint가 기록되었는가
 
-### Overall Status: ✓ COMPLETE SUCCESS
+### 4. A2A 명령 전파
 
-| Phase | Test | Result | Notes |
-|-------|------|--------|-------|
-| 1 | System Initialization | ✓ PASS | All 7 POCs deployed and registered |
-| 2 | Mission Planning | ✓ PASS | System Supervisor accepting strategic commands |
-| 3 | Task Propagation | ✓ PASS | Control Ship receiving coordination tasks |
-| 4a | USV Deployment | ✓ PASS | Surface-level mine sweep operational |
-| 4b | AUV Deployment | ✓ PASS | Underwater sonar sweep operational |
-| 4c | ROV Deployment | ✓ PASS | Deep-water support ready |
+System Agent에서 middle agent 또는 lower agent로 명령이 전파되는지 확인한다.
 
-### Command Chain Verification
+확인 포인트:
 
-✓ System Supervisor → mission.plan
-✓ Control Ship ← task.assign (from System Supervisor)
-✓ USV ← route_move (from Control Ship)
-✓ AUV ← route_move (from Control Ship)
-✓ ROV ← hold_position (from Control Ship)
+- System Agent `outbox`
+- Control Ship `inbox`
+- 대상 lower agent `inbox`
+- Control Ship `inbox`에 lower의 `mission.result`가 들어오는가
+- System Agent `memory`에 `mission_result_received`가 남는가
 
-### Communication Metrics
+```bash
+curl http://127.0.0.1:9116/state | jq '.outbox'
+curl http://127.0.0.1:9115/state | jq '.inbox'
+curl http://127.0.0.1:9112/state | jq '.inbox'
+curl http://127.0.0.1:9116/state | jq '.memory'
+```
 
-- A2A endpoint response time: < 100ms
-- Command propagation: Immediate (HTTP POST)
-- State synchronization: < 50ms
-- All tokens and endpoints valid
+---
 
-## Known Limitations
+## 성공 기준
 
-### 1. Moth Heartbeat Integration
-**Status**: Discovered but not blocking
+- Event가 Registry event ledger에 저장된다.
+- System Agent가 Event를 기반으로 Alert를 생성한다.
+- Alert severity가 대문자 enum으로 기록된다.
+- Response가 Registry response ledger에 저장된다.
+- A2A `task.assign`가 적절한 대상에 전달된다.
+- Response가 `planned`에서 끝나지 않고 `completed` 또는 `failed`로 전이된다.
+- lower/middle heartbeat에 `battery_percent`와 위치 정보가 포함된다.
 
-**Issue**: Heartbeat messages published to Moth are not reaching the Device Registration Server's meb (broadcast) subscriber.
+---
 
-**Impact**: 
-- Device Registry shows all devices as "OFFLINE" despite being operational
-- A2A communication fully functional (workaround)
-- Telemetry data not being published to common stream
+## 현재 구현 기준 메모
 
-**Mitigation**: Use A2A queries for device state instead of Moth broadcast
+- Event / Alert / Response 원장은 모두 Registry Server가 canonical owner다.
+- System Agent는 A2A `event.report`를 수신하면 Event 저장과 Alert 발행을 수행한다.
+- System Agent는 Event 수신 직후 Alert 처리를 즉시 시작하며, dispatch 결과로 Response 상태를 갱신한다.
+- severity 기본값과 권장 action은 `pocs/06-system-agent/config.json`의 `event_rules`를 따른다.
+- heartbeat 배터리 필드는 `battery_percent`를 사용한다.
 
-**Resolution Path**:
-- Verify Moth server routing configuration
-- Check topic mapping between `/pang/ws/pub` and `/pang/ws/meb`
-- Consider implementing fallback telemetry mechanism
+---
 
-### 2. Dashboard Integration (POC 07)
-**Status**: Not tested in this scenario
+## 후속 점검 항목
 
-**Note**: Real-time dashboard functionality pending Moth heartbeat fix
-
-## Validation Checklist
-
-### Pre-Deployment
-- [x] All POCs start without errors
-- [x] Device Registration Server accepts all device types
-- [x] System layer agents register successfully
-
-### During Scenario
-- [x] A2A endpoints respond to HTTP requests
-- [x] Command delivery confirmed (delivered: true)
-- [x] All agent types execute assigned actions
-- [x] Hierarchical structure maintained
-
-### Post-Deployment
-- [x] All POCs continue running stably
-- [x] State updates reflect command execution
-- [x] No memory leaks or resource exhaustion
-- [x] Logs show proper execution flow
-
-## Lessons Learned
-
-1. **System Layer Agent Support**: Important to allow agents without physical sensors to participate in mission control
-
-2. **Standardized Ports**: Unified port configuration significantly simplifies deployment and debugging
-
-3. **A2A Resilience**: Full command propagation works even without Moth heartbeat integration
-
-4. **Hierarchical Control**: Clear mission planning → task assignment → execution flow enables complex operations
-
-## Future Testing Scenarios
-
-1. **Fault Tolerance**: Test recovery when agents become unavailable
-2. **Dynamic Reassignment**: Re-allocate tasks when agents report failures
-3. **Multi-Phase Operations**: Chained operations (search → detect → remove)
-4. **Performance at Scale**: Add more agents and measure command propagation time
-5. **Moth Integration**: Once fixed, verify heartbeat flow and telemetry aggregation
-
-## Conclusion
-
-The mine removal scenario demonstrates a fully functional hierarchical command and control system for maritime autonomous operations. The system successfully coordinates multiple device types (USV, AUV, ROV) under the direction of a system supervisor through a middle management layer.
-
-All core components work as designed:
-- System Supervisor mission planning ✓
-- Regional coordinator (Control Ship) task propagation ✓
-- Lower-layer tactical execution ✓
-- Full A2A communication chain ✓
-
-The identified Moth integration issue is non-blocking and has a clear remediation path. The system is ready for deployment and integration with the real-time dashboard (POC 07).
+- Registry / Agent 기본 포트 조합에 대한 자동 회귀 테스트 추가
+- Event -> Alert 승격에 대한 자동 테스트 추가
+- severity / recommended_action 매핑에 대한 단위 테스트 추가
+- middle offline 시 assignment 재배포 테스트 추가

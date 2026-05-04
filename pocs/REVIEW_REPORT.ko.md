@@ -10,7 +10,7 @@
 - `pocs/03-rov-lower-agent`
 - `pocs/04-usv-middle-agent`
 - `pocs/05-control-ship-middle-agent`
-- `pocs/06-system-supervisor-agent`
+- `pocs/06-system-agent`
 - `pocs/shared`, `pocs/docs`
 
 ## 주요 발견 및 수정
@@ -138,7 +138,7 @@ python3 -m compileall -q pocs tests
 /tmp/cowater-pocs-v2-venv/bin/python pocs/docs/run_mine_removal_scenario.py --format timeline
 ```
 
-API smoke test:
+API 기본 검증:
 
 - POC 00: `/health`, `/meta`, `/devices`, `/alerts`, `/responses` 모두 200
 - POC 01-06: `/health`, `/meta`, `/state`, `/manifest`, `/.well-known/agent-card.json`, `/tasks` 모두 200
@@ -147,4 +147,4 @@ API smoke test:
 
 - 시스템 Python에는 `pytest`가 설치되어 있지 않아 `python3 -m pytest -q`는 실행하지 못했습니다.
 - 실제 Moth 서버, Ollama LLM, 장시간 WebSocket 연결, 실제 다중 프로세스 운영은 이번 검증 범위 밖입니다.
-- 기뢰 제거 시나리오는 외부 서버 없는 로컬 smoke test로 검증했습니다.
+- 기뢰 제거 시나리오는 외부 서버 없는 로컬 기본 검증으로 확인했습니다.

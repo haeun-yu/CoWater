@@ -197,17 +197,13 @@ class MothHeartbeatSubscriber:
 
             data = json.loads(msg)
 
-            if data.get("type") != "publish":
-                logger.debug(f"Non-publish message type: {data.get('type')}")
-                return
+            payload, channel, msg_type = self._extract_payload(data)
+            if msg_type and msg_type != "publish":
+                logger.debug(f"Non-publish message type: {msg_type}")
 
-            channel = data.get("channel") or data.get("topic") or ""
-            if channel != "device.heartbeat":
-                logger.debug(f"Ignored non-heartbeat channel: {channel}")
+            if not isinstance(payload, dict) or not payload:
+                logger.debug(f"Ignored message without heartbeat payload: channel={channel}")
                 return
-
-            logger.debug(f"Processing heartbeat from channel: {channel}")
-            payload = data.get("payload", {})
             device_id = payload.get("device_id")
             status = payload.get("status", "online")
             latitude = payload.get("latitude")
@@ -227,18 +223,43 @@ class MothHeartbeatSubscriber:
                 battery_percent,
             )
             logger.debug(
-                "Heartbeat 기록: device_id=%s, status=%s, location=(%s, %s), battery=%s",
+                "Heartbeat 기록: device_id=%s, status=%s, location=(%s, %s), battery=%s, channel=%s",
                 device_id,
                 status,
                 latitude,
                 longitude,
                 battery_percent,
+                channel,
             )
 
         except json.JSONDecodeError:
             logger.debug(f"JSON 파싱 실패: {msg}")
         except Exception as e:
             logger.error(f"메시지 처리 오류: {e}")
+
+    def _extract_payload(self, data: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        """Moth 구현 차이에 따른 래핑(data/payload)을 흡수해 heartbeat payload를 추출한다."""
+        channel = str(data.get("channel") or data.get("topic") or "")
+        msg_type = str(data.get("type") or "")
+        payload = data.get("payload")
+
+        if isinstance(payload, dict):
+            return payload, channel, msg_type
+
+        nested = data.get("data")
+        if isinstance(nested, dict):
+            nested_channel = str(nested.get("channel") or nested.get("topic") or channel)
+            nested_type = str(nested.get("type") or msg_type)
+            nested_payload = nested.get("payload")
+            if isinstance(nested_payload, dict):
+                return nested_payload, nested_channel, nested_type
+            if nested.get("device_id") is not None:
+                return nested, nested_channel, nested_type
+
+        if data.get("device_id") is not None:
+            return data, channel, msg_type
+
+        return {}, channel, msg_type
 
     async def _reconnect_loop(self) -> None:
         """자동 재연결 루프"""

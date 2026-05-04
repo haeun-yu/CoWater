@@ -96,6 +96,7 @@ class AgentRuntime:
         # 동적 Tool 로드: tools/ 디렉토리에서 센서/제어 클래스 자동 로드
         self.tools: dict[str, Any] = {}
         self._load_tools()
+        self._last_assignment_signature: dict[str, Any] | None = None
 
     def _load_tools(self) -> None:
         """
@@ -213,12 +214,21 @@ class AgentRuntime:
         )
 
     def apply_assignment(self, assignment: dict[str, Any]) -> None:
+        signature = {
+            "parent_id": assignment.get("parent_id"),
+            "parent_endpoint": assignment.get("parent_endpoint"),
+            "parent_command_endpoint": assignment.get("parent_command_endpoint"),
+            "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
+            "force_parent_routing": bool(assignment.get("force_parent_routing", False)),
+        }
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
-        self.state.route_mode = str(assignment.get("route_mode") or "direct_to_system")
-        self.state.force_parent_routing = bool(assignment.get("force_parent_routing", False))
-        self.state.remember({"kind": "layer_assignment", "at": utc_now(), "assignment": assignment})
+        self.state.route_mode = str(signature["route_mode"])
+        self.state.force_parent_routing = bool(signature["force_parent_routing"])
+        if self._last_assignment_signature != signature:
+            self.state.remember({"kind": "layer_assignment", "at": utc_now(), "assignment": assignment})
+            self._last_assignment_signature = signature
 
     def _refresh_assignment(self) -> None:
         if self.state.registry_id is None:

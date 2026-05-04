@@ -4,7 +4,7 @@
     "port": 9111
   },
   "registry": {
-    "url": "http://127.0.0.1:9100",
+    "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": true,
     "heartbeat_interval_seconds": 1

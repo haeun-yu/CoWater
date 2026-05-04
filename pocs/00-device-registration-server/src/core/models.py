@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 TRACK_TYPES = Literal[
     "VIDEO",
@@ -26,6 +26,8 @@ TRACK_TYPES = Literal[
 
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
 LAYERS = Literal["lower", "middle", "system"]
+ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
+EVENT_SEVERITIES = ALERT_SEVERITIES
 
 CORE_ACTIONS = Literal[
     "SLAM_NAVIGATION",
@@ -148,14 +150,14 @@ class AlertRecord:
     source_agent_id: Optional[str]
     source_role: Optional[str]
     alert_type: str
-    severity: str
+    severity: ALERT_SEVERITIES
     message: str
     status: str = "waiting"
     recommended_action: Optional[str] = None
     target_agent_id: Optional[str] = None
     requires_user_approval: bool = False
     auto_remediated: bool = False
-    route_mode: str = "direct"
+    route_mode: str = "direct_to_system"
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -170,13 +172,33 @@ class AlertRecord:
 
 
 @dataclass
+class EventRecord:
+    event_id: str
+    source_system: str
+    source_agent_id: Optional[str]
+    source_role: Optional[str]
+    event_type: str
+    severity: EVENT_SEVERITIES
+    message: str
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def touch(self) -> None:
+        self.updated_at = utc_now_iso()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class ResponseRecord:
     response_id: str
     alert_id: str
     action: str
     target_agent_id: Optional[str] = None
     target_endpoint: Optional[str] = None
-    route_mode: str = "direct"
+    route_mode: str = "direct_to_system"
     status: str = "planned"
     reason: str = ""
     task_id: Optional[str] = None
@@ -194,6 +216,38 @@ class ResponseRecord:
         return asdict(self)
 
 
+def normalize_severity_value(value: Any) -> str:
+    if value is None:
+        return "INFORMATION"
+    normalized = str(value).strip().upper()
+    aliases = {
+        "INFO": "INFORMATION",
+        "INFORMATION": "INFORMATION",
+        "WARNING": "WARNING",
+        "WARN": "WARNING",
+        "CRITICAL": "CRITICAL",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    raise ValueError("severity must be one of CRITICAL, WARNING, INFORMATION")
+
+
+class EventIngestRequest(BaseModel):
+    event_id: Optional[str] = None
+    source_system: str = "control_center"
+    source_agent_id: Optional[str] = None
+    source_role: Optional[str] = None
+    event_type: str
+    severity: EVENT_SEVERITIES = "INFORMATION"
+    message: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def normalize_severity(cls, value: Any) -> str:
+        return normalize_severity_value(value)
+
+
 class AlertIngestRequest(BaseModel):
     alert_id: Optional[str] = None
     source_system: str = "control_center"
@@ -201,15 +255,20 @@ class AlertIngestRequest(BaseModel):
     source_agent_id: Optional[str] = None
     source_role: Optional[str] = None
     alert_type: str
-    severity: str = "info"
+    severity: ALERT_SEVERITIES = "INFORMATION"
     message: str
     status: str = "waiting"
     recommended_action: Optional[str] = None
     target_agent_id: Optional[str] = None
     requires_user_approval: bool = False
     auto_remediated: bool = False
-    route_mode: str = "direct"
+    route_mode: str = "direct_to_system"
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def normalize_severity(cls, value: Any) -> str:
+        return normalize_severity_value(value)
 
 
 class AlertAckRequest(BaseModel):
@@ -223,7 +282,7 @@ class ResponseIngestRequest(BaseModel):
     action: str
     target_agent_id: Optional[str] = None
     target_endpoint: Optional[str] = None
-    route_mode: str = "direct"
+    route_mode: str = "direct_to_system"
     status: str = "planned"
     reason: str = ""
     task_id: Optional[str] = None

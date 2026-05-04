@@ -305,8 +305,8 @@
         ];
 
         const alertQueue = [
-            { triggerTime: 15, id: "alert-001", platformId: "ship-001", type: "collision_risk", severity: "critical", message: "상선 #1 충돌 위험 감지" },
-            { triggerTime: 30, id: "alert-002", platformId: "rov-001", type: "battery_low", severity: "warning", message: "ROV-1 배터리 부족 경고" }
+            { triggerTime: 15, id: "alert-001", platformId: "ship-001", type: "collision_risk", severity: "CRITICAL", message: "상선 #1 충돌 위험 감지" },
+            { triggerTime: 30, id: "alert-002", platformId: "rov-001", type: "battery_low", severity: "WARNING", message: "ROV-1 배터리 부족 경고" }
         ];
 
         async function fetchDevicesFromRegistry() {

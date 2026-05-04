@@ -97,7 +97,7 @@ def run_scenario() -> dict[str, Any]:
         registry.update_device_connectivity_state(rov.id, parent_id=control_ship.id, force_parent_routing=True)
 
         steps = [
-            {"step": 1, "actor": "system_supervisor", "action": "assign_mission", "target": control_ship.name},
+            {"step": 1, "actor": "system_agent", "action": "assign_mission", "target": control_ship.name},
             {"step": 2, "actor": control_ship.name, "action": "deploy", "target": "AUV-01"},
             {"step": 3, "actor": "AUV-01", "action": "survey_depth", "target": "MINE-001"},
             {"step": 4, "actor": control_ship.name, "action": "deploy", "target": "ROV-01"},

@@ -13,6 +13,7 @@ from src.core.config import APP_SETTINGS
 from src.core.models import (
     AlertAckRequest,
     AlertIngestRequest,
+    ALERT_SEVERITIES,
     AUVSubmersionRequest,
     CORE_ACTIONS,
     DEVICE_TYPES,
@@ -20,6 +21,7 @@ from src.core.models import (
     DeviceConnectivityStateRequest,
     DeviceRegistrationRequest,
     DeviceRenameRequest,
+    EventIngestRequest,
     LocationUpdate,
     MainVideoTrackRequest,
     ResponseIngestRequest,
@@ -27,7 +29,11 @@ from src.core.models import (
 )
 from src.registry.alert_registry import AlertRegistry
 from src.registry.device_registry import DeviceRegistry
+from src.registry.event_registry import EventRegistry
 from src.transport.moth_subscriber import MothHeartbeatSubscriber
+
+
+logger = logging.getLogger(__name__)
 
 
 registry = DeviceRegistry(
@@ -47,6 +53,7 @@ registry = DeviceRegistry(
     telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
 )
 alert_registry = AlertRegistry()
+event_registry = EventRegistry()
 
 moth_subscriber = MothHeartbeatSubscriber(
     registry=registry,
@@ -65,7 +72,10 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event() -> None:
     """서버 시작 시 Moth 구독 시작"""
-    await moth_subscriber.start()
+    try:
+        await moth_subscriber.start()
+    except Exception as exc:
+        logger.warning("Moth 구독 시작 실패 - heartbeat monitor만으로 계속 기동합니다: %s", exc)
     asyncio.create_task(registry.heartbeat_monitor.start())
 
 
@@ -89,11 +99,17 @@ def meta() -> dict[str, Any]:
         "track_types": list(TRACK_TYPES.__args__),
         "device_types": list(DEVICE_TYPES.__args__),
         "core_actions": list(CORE_ACTIONS.__args__),
+        "alert_severities": list(ALERT_SEVERITIES.__args__),
         "alerts": {
             "ingest": "/alerts/ingest",
             "list": "/alerts",
             "ack": "/alerts/{alert_id}/ack",
             "responses": "/responses",
+        },
+        "events": {
+            "ingest": "/events/ingest",
+            "list": "/events",
+            "detail": "/events/{event_id}",
         },
         "config_path": APP_SETTINGS["config_path"],
         "cors": APP_SETTINGS["cors"],
@@ -191,6 +207,25 @@ def detach_device_agent(device_id: int, secretKey: str) -> dict[str, Any]:
 def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
     alert = alert_registry.ingest_alert(request)
     return alert.to_dict()
+
+
+@app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
+def ingest_event(request: EventIngestRequest) -> dict[str, Any]:
+    event = event_registry.ingest_event(request)
+    return event.to_dict()
+
+
+@app.get("/events")
+def list_events() -> list[dict[str, Any]]:
+    return [event.to_dict() for event in event_registry.list_events()]
+
+
+@app.get("/events/{event_id}")
+def get_event(event_id: str) -> dict[str, Any]:
+    try:
+        return event_registry.get_event(event_id).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="event not found") from exc
 
 
 @app.get("/alerts")

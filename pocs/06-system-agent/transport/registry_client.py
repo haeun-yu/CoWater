@@ -134,6 +134,18 @@ class RegistryClient:
     def list_devices(self) -> list[dict[str, Any]]:
         return get_json(f"{self.url}/devices")
 
+    def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/events/ingest", event)
+
+    def list_events(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/events")
+
+    def get_event(self, event_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/events/{event_id}")
+
+    def ingest_alert(self, alert: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/alerts/ingest", alert)
+
     def list_alerts(self) -> list[dict[str, Any]]:
         return get_json(f"{self.url}/alerts")
 
@@ -148,3 +160,6 @@ class RegistryClient:
 
     def ingest_response(self, response: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/responses/ingest", response)
+
+    def get_response(self, response_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/responses/{response_id}")

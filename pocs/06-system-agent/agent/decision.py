@@ -12,17 +12,17 @@ class DecisionEngine:
         self.skills = skills
 
     def decide(self, state: AgentState, telemetry: dict[str, Any]) -> dict[str, Any]:
-        # Handle both telemetry (for lower agents) and alerts (for system supervisor)
+        # Handle both telemetry (for lower agents) and alerts (for system agent)
         if telemetry.get("alert_type"):
             return self._decide_on_alert(state, telemetry)
         return self._decide_on_telemetry(state, telemetry)
 
     def _decide_on_alert(self, state: AgentState, alert: dict[str, Any]) -> dict[str, Any]:
-        """Decision engine for system supervisor processing alerts"""
+        """Decision engine for system agent processing alerts"""
         recommendations: list[dict[str, Any]] = []
         actions = set(self.skills.list_actions())
         alert_type = alert.get("alert_type", "unknown")
-        severity = alert.get("severity", "info")
+        severity = str(alert.get("severity") or "INFORMATION").upper()
         metadata = alert.get("metadata", {})
 
         # Mine detection handling
@@ -30,7 +30,7 @@ class DecisionEngine:
             if "mission.assign" in actions:
                 recommendations.append({
                     "action": "mission.assign",
-                    "priority": "critical" if severity == "critical" else "high",
+                    "priority": "critical" if severity == "CRITICAL" else "high",
                     "mission_type": "mine_survey_and_removal",
                     "params": {"location": metadata.get("location", {})}
                 })
@@ -94,4 +94,3 @@ class DecisionEngine:
         }
         state.last_decision = decision
         return decision
-

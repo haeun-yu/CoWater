@@ -32,7 +32,7 @@
 - ✅ Moth track endpoint 충돌 방지 확인
 - ✅ 기뢰 제거 작업 순서 출력
 
-**대상**: 빠른 회귀 검증과 데모 전 sanity check
+**대상**: 빠른 회귀 검증과 데모 전 기본 점검
 
 ---
 
@@ -42,7 +42,7 @@
 
 → [MINE_REMOVAL_GUIDE.md](MINE_REMOVAL_GUIDE.md) 읽기
 
-### 2단계: 시나리오 스모크 테스트
+### 2단계: 시나리오 기본 검증
 
 ```bash
 python pocs/docs/run_mine_removal_scenario.py --format timeline
@@ -68,9 +68,9 @@ python pocs/docs/run_mine_removal_scenario.py --format timeline
 | 목표                 | 문서                                           |
 | -------------------- | ---------------------------------------------- |
 | POC 시스템 기능 이해 | [MINE_REMOVAL_GUIDE.md](MINE_REMOVAL_GUIDE.md) |
-| 기뢰 제거 smoke test | [run_mine_removal_scenario.py](run_mine_removal_scenario.py) |
+| 기뢰 제거 기본 검증 | [run_mine_removal_scenario.py](run_mine_removal_scenario.py) |
 
 ---
 
 **마지막 업데이트**: 2026-04-29
-**상태**: 기뢰 제거 핵심 경로 smoke test 가능 ✅
+**상태**: 기뢰 제거 핵심 경로 기본 검증 가능 ✅
