@@ -7,7 +7,7 @@
     "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 1
+    "healthcheck_interval_seconds": 1
   },
   "agent": {
     "id": "auv-local-agent",
@@ -26,8 +26,10 @@
       "timeout_seconds": 30
     },
     "rules": {
-      "max_speed_mps": 2.0,
-      "battery_warn_percent": 30
+      "critical": {
+        "battery_emergency_percent": 5,
+        "max_depth_m": 80
+      }
     },
     "capabilities": {
       "skills": [
@@ -43,8 +45,7 @@
         "acoustic_modem",
         "sonar_scanner",
         "battery_monitor",
-        "thruster_control",
-        "safety_validator"
+        "thruster_control"
       ],
       "actions": [
         "dive_to_depth",

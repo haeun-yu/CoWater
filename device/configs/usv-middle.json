@@ -7,7 +7,7 @@
     "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 1
+    "healthcheck_interval_seconds": 1
   },
   "agent": {
     "id": "relay-usv-middle-agent",
@@ -27,8 +27,10 @@
       "timeout_seconds": 30
     },
     "rules": {
-      "max_speed_mps": 2.5,
-      "battery_warn_percent": 30
+      "critical": {
+        "battery_emergency_percent": 5,
+        "obstacle_emergency_m": 5
+      }
     },
     "capabilities": {
       "skills": [
@@ -47,8 +49,7 @@
         "acoustic_relay",
         "a2a_router",
         "route_planner",
-        "command_executor",
-        "safety_validator"
+        "command_executor"
       ],
       "actions": [
         "route_move",

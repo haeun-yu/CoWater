@@ -7,7 +7,7 @@
     "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": true,
-    "heartbeat_interval_seconds": 1
+    "healthcheck_interval_seconds": 1
   },
   "agent": {
     "id": "control-ship-middle-agent",
@@ -27,8 +27,9 @@
       "timeout_seconds": 30
     },
     "rules": {
-      "max_speed_mps": 8.0,
-      "battery_warn_percent": 20
+      "critical": {
+        "battery_emergency_percent": 5
+      }
     },
     "capabilities": {
       "skills": [
@@ -45,8 +46,7 @@
         "child_registry",
         "a2a_router",
         "command_executor",
-        "video_processor",
-        "safety_validator"
+        "video_processor"
       ],
       "actions": [
         "route_move",

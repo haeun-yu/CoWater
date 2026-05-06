@@ -151,3 +151,10 @@ class RegistryClient:
 
     def rename_device(self, registry_id: int, name: str) -> dict[str, Any]:
         return patch_json(f"{self.url}/devices/{registry_id}", {"name": name})
+
+    def ingest_alert(self, alert: dict[str, Any]) -> None:
+        """Critical rule 발동 시 서버 alert registry에 등록"""
+        try:
+            post_json(f"{self.url}/alerts/ingest", alert, timeout=3)
+        except Exception as e:
+            logger.debug(f"Alert 전송 실패 (non-critical): {e}")
