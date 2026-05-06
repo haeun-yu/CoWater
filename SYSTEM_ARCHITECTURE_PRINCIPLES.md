@@ -23,10 +23,13 @@
 ### 계층 구조
 
 ```text
-System Layer  : POC 06  System Agent
-Middle Layer  : POC 04  USV Middle, POC 05 Control Ship
-Lower Layer   : POC 01  USV, POC 02 AUV, POC 03 ROV
-Shared Server : POC 00  Registry Server
+System Layer  : server/system-agent    System Agent
+Middle Layer  : device/  --type usv --layer middle    USV Middle
+                device/  --type ship --layer middle   Control Ship
+Lower Layer   : device/  --type usv --layer lower     USV
+                device/  --type auv --layer lower     AUV
+                device/  --type rov --layer lower     ROV
+Shared Server : server/registration                   Registry Server
 ```
 
 ### 핵심 목표
@@ -42,10 +45,10 @@ Shared Server : POC 00  Registry Server
 
 | 용어 | 의미 |
 | --- | --- |
-| `Registry Server` | POC 00. 디바이스 등록, 상태 저장, heartbeat 반영, assignment 계산, alert/response 원장 제공 |
-| `System Agent` | POC 06. system-layer 최고 의사결정 에이전트 |
-| `Middle Agent` | POC 04, 05. 상위 명령을 하위 디바이스에 분배·중계하는 에이전트 |
-| `Lower Agent` | POC 01, 02, 03. 실제 임무를 수행하는 에이전트 |
+| `Registry Server` | `server/registration`. 디바이스 등록, 상태 저장, heartbeat 반영, assignment 계산, alert/response 원장 제공 |
+| `System Agent` | `server/system-agent`. system-layer 최고 의사결정 에이전트 |
+| `Middle Agent` | `device/ --layer middle`. 상위 명령을 하위 디바이스에 분배·중계하는 에이전트 |
+| `Lower Agent` | `device/ --layer lower`. 실제 임무를 수행하는 에이전트 |
 | `Event` | 실제로 발생한 사실. 예: 기뢰 감지, 통신 두절, 배터리 부족 |
 | `Alert` | 대응 결정을 유도하기 위한 알림 레코드 |
 | `Response` | Alert에 대해 계획되거나 실행된 대응 레코드 |
@@ -72,19 +75,19 @@ ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
 - `SYSTEM`은 `System Agent`를 의미한다.
 - Alert severity는 대문자 enum `CRITICAL`, `WARNING`, `INFORMATION`만 사용한다.
 
-### 포트
+### 포트 (기본값)
 
-| 포트 | 컴포넌트 |
-| --- | --- |
-| `8280` | Registry Server (POC 00) |
-| `9111` | USV Lower Agent (POC 01) |
-| `9112` | AUV Lower Agent (POC 02) |
-| `9113` | ROV Lower Agent (POC 03) |
-| `9114` | USV Middle Agent (POC 04) |
-| `9115` | Control Ship Middle Agent (POC 05) |
-| `9116` | System Agent (POC 06) |
+| 포트 | 컴포넌트 | 실행 명령 |
+| --- | --- | --- |
+| `8280` | Registry Server | `server/registration/` |
+| `9111` | USV Lower Agent | `--type usv --layer lower` |
+| `9112` | AUV Lower Agent | `--type auv --layer lower` |
+| `9113` | ROV Lower Agent | `--type rov --layer lower` |
+| `9114` | USV Middle Agent | `--type usv --layer middle` |
+| `9115` | Control Ship Middle Agent | `--type ship --layer middle` |
+| `9116` | System Agent | `server/system-agent/` |
 
-포트 충돌 시 `config.json`에서 조정한다.
+동일 타입을 여러 터미널에서 실행할 때는 `--port` 옵션으로 포트를 구분한다.
 
 ---
 
