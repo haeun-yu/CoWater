@@ -224,6 +224,11 @@ class DecisionEngine:
 ## 디바이스 선정 기준
 {self._SELECTION_GUIDE}
 
+## Action 선택 규칙
+- mine_detection → 반드시 "mission.assign" (탐색 + 제거 복합 임무)
+- 단일 작업 배정 → "task.assign"
+- 자동 대응 불가 → "escalate_alert"
+
 위 기준으로 최적의 action과 투입 디바이스를 결정하세요.
 JSON 형식으로만 응답하세요. 설명 없이 JSON만:
 {{
