@@ -318,19 +318,13 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         middles = [d for d in devices if str(d.get("layer") or "") == "middle"]
         lowers  = [d for d in devices if str(d.get("layer") or "") == "lower"]
 
-        # parent_id(int) → 해당 middle agent 매핑
-        # devices는 내부 id 오름차순 정렬이므로, 등장 순서로 middle agent를 인덱싱
-        # children의 parent_id 집합을 정렬하면 middle 등록 순서와 대응됨
-        used_parent_ids = sorted({
-            d.get("parent_id") for d in lowers
-            if d.get("parent_id") is not None
-        })
-        middles_sorted = sorted(middles, key=lambda d: d.get("created_at") or "")
-        pid_to_middle: dict[int, dict[str, Any]] = {
-            pid: middles_sorted[i]
-            for i, pid in enumerate(used_parent_ids)
-            if i < len(middles_sorted)
+        # middle 디바이스를 id로 직접 조회
+        id_to_middle: dict[int, dict[str, Any]] = {
+            int(d.get("id") or d.get("registry_id") or 0): d
+            for d in middles
+            if d.get("id") or d.get("registry_id")
         }
+        middles_sorted = sorted(middles, key=lambda d: d.get("created_at") or "")
 
         # children 그룹화
         children_of: dict[str, list[dict[str, Any]]] = {}  # middle id → children
@@ -342,9 +336,9 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             if pid is None:
                 direct.append(d)
             else:
-                parent = pid_to_middle.get(int(pid))
+                parent = id_to_middle.get(int(pid))
                 if parent:
-                    mid = str(parent.get("id", ""))
+                    mid = str(parent.get("id") or parent.get("registry_id") or "")
                     children_of.setdefault(mid, []).append(d)
                 else:
                     unmatched.append(d)
@@ -356,7 +350,8 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             parts.append("─── 중계 계층 (middle) ───")
             for m in middles_sorted:
                 parts.append(self._fmt_device(m))
-                kids = children_of.get(str(m.get("id", "")), [])
+                mid_id = str(m.get("id") or m.get("registry_id") or "")
+                kids = children_of.get(mid_id, [])
                 for i, child in enumerate(kids):
                     prefix = "  └─" if i == len(kids) - 1 else "  ├─"
                     parts.append(self._fmt_device(child, indent=prefix + " "))

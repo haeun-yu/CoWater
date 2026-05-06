@@ -99,10 +99,21 @@
       "longitude": 129.4182,
       "altitude": -60.0
     },
-    "speed_range": [0.1, 1.5],
-    "altitude_range": [-200.0, -20.0]
+    "speed_range": [
+      0.1,
+      1.5
+    ],
+    "altitude_range": [
+      -200.0,
+      -20.0
+    ]
   },
   "cors": {
-    "allow_origins": ["*"]
+    "allow_origins": [
+      "*"
+    ]
+  },
+  "system_agent": {
+    "url": "http://127.0.0.1:9116"
   }
 }

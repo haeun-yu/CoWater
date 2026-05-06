@@ -121,6 +121,10 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     data = extract_message_data(request.message)
     runtime.state.inbox.append({"task_id": request.taskId, "at": utc_now(), "data": data})
     msg_type = str(data.get("message_type") or data.get("type") or "task.assign")
+
+    # Valid message types for device agents
+    VALID_MESSAGE_TYPES = {"child.register", "layer.assignment", "task.assign", "event.report", "mission.result"}
+
     if msg_type == "child.register":
         child = data.get("child") or data
         child_id = str(child.get("agent_id"))
@@ -136,23 +140,41 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             "reason": data.get("reason") or f"A2A task {request.taskId}",
         }
         result = runtime.apply_command(command)
-        
+
         # If task execution failed, report to System Agent asynchronously
         if isinstance(result, dict) and result.get('status') == 'failed':
+            # config에서 system agent URL 조회
+            system_agent_url = (
+                runtime.config.get("system_agent", {}).get("url")
+                or "http://127.0.0.1:9116"
+            )
             asyncio.create_task(
                 _report_task_failure_to_system_agent(
                     runtime=runtime,
                     task_id=request.taskId,
                     command=command,
                     error=result.get('error'),
-                    execution_result=result
+                    execution_result=result,
+                    system_agent_url=f"{system_agent_url.rstrip('/')}/message:send",
                 )
             )
     else:
+        if msg_type not in VALID_MESSAGE_TYPES:
+            logger.warning(f"Unknown A2A message_type: {msg_type}, task_id: {request.taskId}, data: {data}")
         result = {"received": True, "message_type": msg_type}
+
     task = build_task(request.taskId, request.message, result)
     runtime.state.tasks[task["id"]] = task
     runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
+
+    # Log A2A event for monitoring
+    runtime.state.remember({
+        "kind": "a2a_received",
+        "at": utc_now(),
+        "message_type": msg_type,
+        "task_id": request.taskId,
+        "result_status": result.get("status") if isinstance(result, dict) else "ok"
+    })
 
     # A2A 이벤트를 수신 디바이스의 TOPIC 트랙에 발행 (system agent 개입 없음)
     publisher = getattr(runtime, "moth_publisher", None)
@@ -180,11 +202,11 @@ async def _report_task_failure_to_system_agent(
     task_id: str | None,
     command: dict[str, Any],
     error: str | None,
-    execution_result: dict[str, Any]
+    execution_result: dict[str, Any],
+    system_agent_url: str = "http://127.0.0.1:9116/message:send",
 ) -> None:
     """Report task execution failure to System Agent."""
     try:
-        system_agent_url = "http://127.0.0.1:9116/message:send"
         
         # Build task.result A2A message
         result_message = A2AMessage(
@@ -196,7 +218,7 @@ async def _report_task_failure_to_system_agent(
                         "message_type": "task.result",
                         "task_id": task_id,
                         "status": "failed",
-                        "device_id": runtime.state.device_id,
+                        "device_id": runtime.state.registry_id,
                         "agent_id": runtime.state.agent_id,
                         "command": command,
                         "error": error,
@@ -206,11 +228,11 @@ async def _report_task_failure_to_system_agent(
                 )
             ]
         )
-        
+
         result_request = A2ASendRequest(
             message=result_message,
             taskId=task_id,
-            metadata={"sender_id": runtime.state.agent_id, "sender_device_id": runtime.state.device_id}
+            metadata={"sender_id": runtime.state.agent_id, "sender_device_id": str(runtime.state.registry_id or "")}
         )
         
         # POST to System Agent

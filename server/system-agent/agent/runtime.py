@@ -77,6 +77,8 @@ class AgentRuntime:
                 self._refresh_assignment()
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
+                if self.state.layer == "system":
+                    self._restore_device_allocations()
                 return
             except Exception:
                 self.state.remember({"kind": "identity_reconnect_failed", "at": utc_now()})
@@ -106,6 +108,56 @@ class AgentRuntime:
                 "registered_at": self.state.registered_at,
             }
         )
+        if self.state.layer == "system":
+            self._restore_device_allocations()
+
+    def _restore_device_allocations(self) -> None:
+        """재시작 후 Registry의 active responses에서 device 예약 상태를 복원한다."""
+        logger = logging.getLogger(__name__)
+        try:
+            responses = self.registry_client.list_responses()
+        except Exception as exc:
+            logger.warning(f"_restore_device_allocations: failed to list responses: {exc}")
+            return
+
+        restored = 0
+        for response in responses:
+            if not isinstance(response, dict):
+                continue
+            if str(response.get("status") or "") not in {"planned", "dispatched"}:
+                continue
+            response_id = str(response.get("response_id") or "")
+            dispatch_result = response.get("dispatch_result") or {}
+            if not isinstance(dispatch_result, dict):
+                continue
+            for step_state in dispatch_result.get("steps") or []:
+                if not isinstance(step_state, dict):
+                    continue
+                if str(step_state.get("status") or "") in {"completed", "failed"}:
+                    continue
+                for task_state in step_state.get("tasks") or []:
+                    if not isinstance(task_state, dict):
+                        continue
+                    if str(task_state.get("execution_status") or "") in {"completed", "failed"}:
+                        continue
+                    try:
+                        device_id = int(task_state.get("target_device_id") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if device_id and device_id not in self._device_allocations:
+                        self._device_allocations[device_id] = {
+                            "device_id": device_id,
+                            "response_id": response_id,
+                            "step_id": str(step_state.get("step_id") or ""),
+                            "task_id": str(task_state.get("task_id") or ""),
+                            "reason": "restored_on_restart",
+                            "reserved_at": str(response.get("updated_at") or utc_now()),
+                        }
+                        restored += 1
+
+        if restored:
+            logger.info(f"Restored {restored} device allocation(s) from active responses")
+            self.state.remember({"kind": "device_allocations_restored", "at": utc_now(), "count": restored})
 
     def apply_assignment(self, assignment: dict[str, Any]) -> None:
         signature = {
@@ -151,9 +203,35 @@ class AgentRuntime:
             await asyncio.gather(
                 self._alert_processing_loop(),
                 self._registry_keepalive_loop(),
+                self._state_cleanup_loop(),
             )
         else:
             await self._telemetry_processing_loop()
+
+    async def _state_cleanup_loop(self) -> None:
+        """state.tasks, inbox, outbox의 오래된 항목을 주기적으로 정리한다."""
+        max_tasks = 500
+        max_inbox_outbox = 200
+        cleanup_interval = 300  # 5분마다
+        while True:
+            await asyncio.sleep(cleanup_interval)
+            try:
+                # tasks: 완료/실패 상태인 오래된 것부터 제거
+                if len(self.state.tasks) > max_tasks:
+                    # 완료/실패 상태인 task만 제거 대상
+                    removable = [
+                        k for k, v in self.state.tasks.items()
+                        if isinstance(v, dict) and str(v.get("status") or "").lower() in {"completed", "failed"}
+                    ]
+                    for k in removable[:len(self.state.tasks) - max_tasks]:
+                        self.state.tasks.pop(k, None)
+                # inbox/outbox: 크기 제한
+                if len(self.state.inbox) > max_inbox_outbox:
+                    self.state.inbox = self.state.inbox[-max_inbox_outbox:]
+                if len(self.state.outbox) > max_inbox_outbox:
+                    self.state.outbox = self.state.outbox[-max_inbox_outbox:]
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"State cleanup error: {e}")
 
     async def _registry_keepalive_loop(self) -> None:
         """System Agent는 Registry keepalive로 last_seen_at을 갱신한다."""
@@ -210,7 +288,8 @@ class AgentRuntime:
                 waiting_alerts = [
                     alert for alert in alerts
                     if alert.get("status") == "waiting"
-                    and alert.get("alert_id") not in processed_alerts
+                    and str(alert.get("alert_id")) not in processed_alerts
+                    and not alert.get("approved_at")  # 이미 승인된 것 제외
                     and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
                 ]
                 waiting_alerts.sort(
@@ -225,7 +304,7 @@ class AgentRuntime:
                     alert_id = alert.get("alert_id")
 
                     logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
-                    processed_alerts.add(alert_id)
+                    processed_alerts.add(str(alert_id))
                     await self._process_alert(alert, all_devices, logger)
 
                 await self._process_waiting_queue(all_devices, logger)
@@ -263,14 +342,14 @@ class AgentRuntime:
                 pass
             return critical
 
+        # LLM 분석을 Lock 외부에서 먼저 수행 (최대 120초 블로킹이 Lock 밖에서 일어남)
+        decision = self.decision_engine.decide(self.state, alert)
+        llm_hint = await self.decision_engine.analyze_alert(alert, devices, self.state)
+        if llm_hint:
+            decision["llm_analysis"] = llm_hint
+
         async with self._mission_lock:
             alert_id = alert.get("alert_id")
-            decision = self.decision_engine.decide(self.state, alert)
-
-            # LLM으로 fleet 컨텍스트 기반 분석 (critical이 아닌 모든 alert)
-            llm_hint = await self.decision_engine.analyze_alert(alert, devices, self.state)
-            if llm_hint:
-                decision["llm_analysis"] = llm_hint
 
             self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
             logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={bool(llm_hint)}")
@@ -964,10 +1043,10 @@ class AgentRuntime:
 
     def _distance_to_location(self, device: dict[str, Any], location: dict[str, Any]) -> float:
         try:
-            lat = float(location.get("lat"))
-            lon = float(location.get("lon"))
-            device_lat = float(device.get("latitude"))
-            device_lon = float(device.get("longitude"))
+            lat = float(location.get("lat") if location.get("lat") is not None else location.get("latitude"))
+            lon = float(location.get("lon") if location.get("lon") is not None else location.get("longitude"))
+            device_lat = float(device.get("latitude") if device.get("latitude") is not None else device.get("lat"))
+            device_lon = float(device.get("longitude") if device.get("longitude") is not None else device.get("lon"))
         except (TypeError, ValueError):
             return float("inf")
         lat_delta = device_lat - lat
@@ -1429,21 +1508,19 @@ class AgentRuntime:
                 logger.warning(f"Target agent {target_agent_id} has no endpoint")
                 return {"delivered": False, "error": "target_endpoint_missing"}
             
-            req = urllib.request.Request(
-                rpc_endpoint,
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read() or b"{}")
-                logger.info(f"A2A task sent to {target_agent_id}: {result.get('result', {}).get('status', 'unknown')}")
-                return {
-                    "delivered": True,
-                    "endpoint": endpoint,
-                    "task_id": response.get("response_id"),
-                    "a2a_result": result,
-                }
+            def _do_urlopen(url: str, body: bytes, timeout: int) -> dict:
+                req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read() or b"{}")
+
+            result = await asyncio.to_thread(_do_urlopen, rpc_endpoint, data, 15)
+            logger.info(f"A2A task sent to {target_agent_id}: {result.get('result', {}).get('status', 'unknown')}")
+            return {
+                "delivered": True,
+                "endpoint": endpoint,
+                "task_id": response.get("response_id"),
+                "a2a_result": result,
+            }
         except urllib.error.HTTPError as e:
             logger.warning(f"HTTP error sending A2A to {target_agent_id}: {e.code}")
             return {"delivered": False, "error": f"http_{e.code}", "endpoint": endpoint}

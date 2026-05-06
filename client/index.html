@@ -665,6 +665,75 @@
 
       const trackStreamSockets = {};
       const trackStreamRetryTimers = {};
+
+      // Resource management infrastructure
+      const activeWebSockets = new Map();
+      const activeTimers = new Map();
+      const attachedListeners = new Map();
+
+      function attachListener(element, eventType, handler) {
+        const key = `${element?.id || 'window'}.${eventType}`;
+        if (!attachedListeners.has(key)) {
+          attachedListeners.set(key, { element, eventType, handler });
+          element.addEventListener(eventType, handler);
+        }
+      }
+
+      function closeWebSocket(key) {
+        const ws = activeWebSockets.get(key);
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          try { ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
+        }
+        activeWebSockets.delete(key);
+      }
+
+      function scheduleTimer(key, fn, delay) {
+        clearTimer(key);
+        activeTimers.set(key, setTimeout(fn, delay));
+      }
+
+      function clearTimer(key) {
+        const timer = activeTimers.get(key);
+        if (timer) clearTimeout(timer);
+        activeTimers.delete(key);
+      }
+
+      function cleanupAllResources() {
+        // Close all WebSockets
+        for (const key of activeWebSockets.keys()) {
+          closeWebSocket(key);
+        }
+        // Clear all timers
+        const timerKeys = Array.from(activeTimers.keys());
+        for (const key of timerKeys) {
+          clearTimer(key);
+        }
+        // Clear old-style WebSocket sockets
+        for (const key in trackStreamSockets) {
+          const ws = trackStreamSockets[key];
+          if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            try { ws.close(); } catch (e) {}
+          }
+        }
+        // Clear old-style timers
+        for (const key in trackStreamRetryTimers) {
+          clearTimeout(trackStreamRetryTimers[key]);
+        }
+        // Remove event listeners
+        for (const { element, eventType, handler } of attachedListeners.values()) {
+          try { element.removeEventListener(eventType, handler); } catch (e) {}
+        }
+        attachedListeners.clear();
+        // Cleanup Three.js
+        if (typeof cleanupScene === 'function') {
+          try { cleanupScene(); } catch (e) { console.debug('Scene cleanup error:', e); }
+        }
+        // Remove this handler
+        window.removeEventListener('beforeunload', cleanupAllResources);
+      }
+
+      window.addEventListener('beforeunload', cleanupAllResources);
+
       const LINK_ACTIVE_WINDOW_MS = 7000;
       const LINK_DEGRADED_WINDOW_MS = 20000;
       const LINK_RECENT_EVENTS_MAX = 6;
@@ -860,8 +929,26 @@
         return totalUnits * metersPerWorldUnit();
       }
 
+      function disposeTrail(obj) {
+        if (!obj || !obj.trailLine) return;
+        try {
+          if (obj.trailGeometry) obj.trailGeometry.dispose();
+          if (obj.trailMaterial) obj.trailMaterial.dispose();
+          if (scene) scene.remove(obj.trailLine);
+        } catch (e) {
+          console.debug('Trail disposal error:', e);
+        }
+        obj.trailLine = null;
+        obj.trailGeometry = null;
+        obj.trailMaterial = null;
+      }
+
       function ensureObjectTrail(obj) {
-        if (!obj || obj.trailLine) return;
+        if (!obj) return;
+        // Clean up existing trail if updating
+        if (obj.trailLine) {
+          disposeTrail(obj);
+        }
 
         const positions = new Float32Array(TRAIL_MAX_POINTS * 3);
         const geometry = new THREE.BufferGeometry();
@@ -884,6 +971,8 @@
 
         obj.trailLine = line;
         obj.trailPositions = positions;
+        obj.trailGeometry = geometry;
+        obj.trailMaterial = material;
       }
 
       function updateObjectTrail(obj) {
@@ -972,17 +1061,39 @@
         );
       }
 
+      function validateDevice(device) {
+        if (!device || typeof device !== 'object') {
+          console.warn('Invalid device:', device);
+          return null;
+        }
+        return {
+          id: device.id,
+          registry_id: device.registry_id || device.id,
+          name: String(device.name || 'Unknown'),
+          device_type: String(device.device_type || 'unknown').toUpperCase(),
+          connected: device.connected !== false,
+          latitude: parseFloat(device.latitude),
+          longitude: parseFloat(device.longitude),
+          altitude: parseFloat(device.altitude) || 0,
+          depth: parseFloat(device.depth),
+          heading: parseFloat(device.heading) || 0,
+          speed: parseFloat(device.speed) || 0,
+          battery: parseFloat(device.last_battery_percent ?? device.battery),
+          agent: device.agent || {},
+          tracks: Array.isArray(device.tracks) ? device.tracks : [],
+          connectivity: String(device.connectivity || ''),
+        };
+      }
+
       async function fetchDevicesFromRegistry() {
         try {
           const resp = await fetch(`${REGISTRY_BASE}/devices`);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const devices = await resp.json();
-          const visibleDevices = Array.isArray(devices)
-            ? devices.filter(
-                (device) =>
-                  String(device?.device_type || "").toUpperCase() !== "SYSTEM",
-              )
-            : [];
+          const data = await resp.json();
+          const devices = Array.isArray(data) ? data : [];
+          const visibleDevices = devices
+            .map(validateDevice)
+            .filter(device => device !== null && String(device?.device_type || "").toUpperCase() !== "SYSTEM");
           document.getElementById("offline-banner").style.display = "none";
           persistRegistryDevices(visibleDevices);
           return visibleDevices;
@@ -1385,9 +1496,13 @@
       }
 
       function subscribeMothTelemetry() {
+        // Close existing connection if any
+        closeWebSocket('moth-healthcheck');
+
         // healthcheck MEB 채널 구독 — 위치/배터리 실시간 업데이트
         const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base`;
         const ws = new WebSocket(wsUrl);
+        activeWebSockets.set('moth-healthcheck', ws);
 
         ws.onopen = () => {
           ws.send(
@@ -1425,7 +1540,7 @@
         };
 
         ws.onerror = () => console.warn("[Moth] healthcheck MEB 연결 오류");
-        ws.onclose = () => setTimeout(subscribeMothTelemetry, 5000);
+        ws.onclose = () => scheduleTimer('moth-healthcheck-retry', subscribeMothTelemetry, 5000);
       }
 
       function subscribeDeviceTrackStreams(devices) {
@@ -1440,10 +1555,11 @@
             if (!trackType || !endpoint) return;
 
             const deviceId = device.id;
-            const socketKey = `${deviceId}:${trackType}:${trackName}`;
+            const socketKey = `track:${deviceId}:${trackType}:${trackName}`;
+            const retryKey = `track-retry:${deviceId}:${trackType}:${trackName}`;
 
             // 이미 연결 시도 중/연결된 소켓은 중복 생성하지 않음
-            const prevSocket = trackStreamSockets[socketKey];
+            const prevSocket = trackStreamSockets[socketKey] || activeWebSockets.get(socketKey);
             if (
               prevSocket &&
               (prevSocket.readyState === WebSocket.OPEN ||
@@ -1460,6 +1576,7 @@
 
             const ws = new WebSocket(wsUrl);
             trackStreamSockets[socketKey] = ws;
+            activeWebSockets.set(socketKey, ws);
 
             ws.onopen = () => {
               console.log(
@@ -1503,10 +1620,9 @@
             ws.onclose = () => {
               console.warn(`[Moth] Track ${trackType} 연결 종료`);
               delete trackStreamSockets[socketKey];
-              if (trackStreamRetryTimers[socketKey]) {
-                clearTimeout(trackStreamRetryTimers[socketKey]);
-              }
-              trackStreamRetryTimers[socketKey] = setTimeout(() => {
+              activeWebSockets.delete(socketKey);
+              clearTimer(retryKey);
+              scheduleTimer(retryKey, () => {
                 subscribeDeviceTrackStreams([device]);
               }, 5000);
             };

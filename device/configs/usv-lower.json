@@ -56,7 +56,10 @@
         "abort_mission",
         "emergency_stop"
       ],
-      "constraints": ["stay_on_surface", "respect_local_safety_limits"],
+      "constraints": [
+        "stay_on_surface",
+        "respect_local_safety_limits"
+      ],
       "tracks": [
         {
           "type": "GPS",
@@ -103,10 +106,21 @@
       "longitude": 129.4184,
       "altitude": 0.0
     },
-    "speed_range": [0.5, 3.0],
-    "altitude_range": [0.0, 0.8]
+    "speed_range": [
+      0.5,
+      3.0
+    ],
+    "altitude_range": [
+      0.0,
+      0.8
+    ]
   },
   "cors": {
-    "allow_origins": ["*"]
+    "allow_origins": [
+      "*"
+    ]
+  },
+  "system_agent": {
+    "url": "http://127.0.0.1:9116"
   }
 }
