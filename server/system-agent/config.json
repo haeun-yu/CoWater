@@ -1,5 +1,8 @@
 {
-  "server": { "host": "127.0.0.1", "port": 9116 },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9116
+  },
   "registry": {
     "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
@@ -21,7 +24,7 @@
       "endpoint": "http://localhost:11434",
       "model": "gemma4:e2b",
       "enabled": true,
-      "timeout_seconds": 30
+      "timeout_seconds": 120
     },
     "capabilities": {
       "skills": [
@@ -95,5 +98,9 @@
     }
   },
   "simulation": {},
-  "cors": { "allow_origins": ["*"] }
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
 }

@@ -24,7 +24,7 @@
       "endpoint": "http://localhost:11434",
       "model": "gemma4:e2b",
       "enabled": true,
-      "timeout_seconds": 30
+      "timeout_seconds": 120
     },
     "rules": {
       "critical": {
@@ -103,10 +103,18 @@
       "longitude": 129.418,
       "altitude": 3.0
     },
-    "speed_range": [0.0, 1.0],
-    "altitude_range": [3.0, 3.0]
+    "speed_range": [
+      0.0,
+      1.0
+    ],
+    "altitude_range": [
+      3.0,
+      3.0
+    ]
   },
   "cors": {
-    "allow_origins": ["*"]
+    "allow_origins": [
+      "*"
+    ]
   }
 }

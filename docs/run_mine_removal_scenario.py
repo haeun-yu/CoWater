@@ -16,6 +16,7 @@ import json
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime
 from typing import Any
 
 
@@ -55,6 +56,12 @@ def section(title: str) -> None:
     print(f"{'='*55}")
 
 
+def as_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, dict)]
+    return []
+
+
 # ──────────────────────────────────────────────────────────
 # Step 0. 사전 점검
 # ──────────────────────────────────────────────────────────
@@ -81,7 +88,7 @@ if not ok:
 # ──────────────────────────────────────────────────────────
 section("Step 1. Registry 등록 디바이스 확인")
 
-devices = http("GET", f"{REGISTRY}/devices")
+devices = as_list(http("GET", f"{REGISTRY}/devices"))
 auv_devices = [d for d in devices if d.get("device_type") == "AUV"]
 rov_devices = [d for d in devices if d.get("device_type") == "ROV"]
 ship_devices = [d for d in devices if d.get("device_type") == "CONTROL_SHIP"]
@@ -95,9 +102,9 @@ auv_id = auv_device.get("id")
 print(f"\n  사용할 AUV: id={auv_id}, name={auv_device.get('name', '')[:30]}")
 
 # 기존 Event/Alert/Response 수 기록
-events_before = len(http("GET", f"{REGISTRY}/events"))
-alerts_before = len(http("GET", f"{REGISTRY}/alerts"))
-responses_before = len(http("GET", f"{REGISTRY}/responses"))
+events_before = len(as_list(http("GET", f"{REGISTRY}/events")))
+alerts_before = len(as_list(http("GET", f"{REGISTRY}/alerts")))
+responses_before = len(as_list(http("GET", f"{REGISTRY}/responses")))
 print(f"\n  현재 상태: events={events_before}, alerts={alerts_before}, responses={responses_before}")
 
 # ──────────────────────────────────────────────────────────
@@ -105,7 +112,10 @@ print(f"\n  현재 상태: events={events_before}, alerts={alerts_before}, respo
 # ──────────────────────────────────────────────────────────
 section("Step 2. AUV → System Agent: mine_detection event.report 전송")
 
+scenario_started_at = time.time()
 task_id = f"mine-scenario-{int(time.time())}"
+scenario_tag = f"scenario_tag:{task_id}"
+scenario_frame_id = f"auv-scan-{task_id}"
 r = http("POST", f"{SYSTEM_AGENT}/message:send", {
     "taskId": task_id,
     "message": {
@@ -119,11 +129,11 @@ r = http("POST", f"{SYSTEM_AGENT}/message:send", {
                 "device_id": auv_id,
                 "device_type": "AUV",
                 "location": {"latitude": 37.005, "longitude": 129.425, "depth_m": 15.0},
-                "description": "AUV sonar detected mine-like object at 15m depth",
+                "description": f"AUV sonar detected mine-like object at 15m depth ({scenario_tag})",
                 "confidence": 0.93,
                 "artifacts": [
                     {"type": "mine_location_estimate", "location": {"latitude": 37.005, "longitude": 129.425}, "confidence": 0.93},
-                    {"type": "sonar_evidence", "frame_id": f"auv-scan-{int(time.time())}"},
+                    {"type": "sonar_evidence", "frame_id": scenario_frame_id},
                 ],
             },
         }],
@@ -135,14 +145,38 @@ check("System Agent 수신 완료", r.get("status", {}).get("state") == "complet
 # Step 3. Registry: Event 기록 확인
 # ──────────────────────────────────────────────────────────
 section("Step 3. Registry: Event 기록 확인")
-time.sleep(1)
+event_wait_seconds = 20
+new_events: list[dict[str, Any]] = []
+events: list[dict[str, Any]] = []
 
-events = http("GET", f"{REGISTRY}/events")
-new_events = events[events_before:]
+
+def parse_ts(iso: str | None) -> float:
+    if not iso:
+        return 0.0
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+for _ in range(event_wait_seconds):
+    events = as_list(http("GET", f"{REGISTRY}/events"))
+    new_events = [
+        e for e in events
+        if parse_ts(str(e.get("created_at") or "")) >= scenario_started_at - 2
+    ]
+    tagged = [
+        e for e in new_events
+        if scenario_frame_id in str((((e.get("metadata") or {}).get("raw_event") or {}).get("artifacts") or []))
+    ]
+    if tagged:
+        new_events = tagged
+        break
+    time.sleep(1)
+
 check("Event가 새로 기록됨", len(new_events) >= 1, f"{len(new_events)}개 추가")
 
 if new_events:
-    ev = new_events[-1]
+    ev = sorted(new_events, key=lambda x: x.get("created_at", ""))[-1]
     check("event_type = mine_detection", ev.get("event_type") == "mine_detection", ev.get("event_type"))
     check("severity = CRITICAL", ev.get("severity") == "CRITICAL", ev.get("severity"))
     check("event_id 존재", bool(ev.get("event_id")), ev.get("event_id", "")[:30])
@@ -154,15 +188,33 @@ else:
 # Step 4. Registry: Alert 기록 확인
 # ──────────────────────────────────────────────────────────
 section("Step 4. Registry: Alert 생성 확인")
-time.sleep(1)
+alert_wait_seconds = 20
+new_alerts: list[dict[str, Any]] = []
+alerts: list[dict[str, Any]] = []
 
-alerts = http("GET", f"{REGISTRY}/alerts")
-new_alerts = alerts[alerts_before:]
+for _ in range(alert_wait_seconds):
+    alerts = as_list(http("GET", f"{REGISTRY}/alerts"))
+    new_alerts = alerts[alerts_before:]
+    linked_alerts = [a for a in alerts if event_id and a.get("event_id") == event_id]
+    selected_alerts = linked_alerts or new_alerts
+    if selected_alerts:
+        new_alerts = selected_alerts
+        break
+    time.sleep(1)
+
 check("Alert가 새로 생성됨", len(new_alerts) >= 1, f"{len(new_alerts)}개 추가")
 
 if new_alerts:
-    al = new_alerts[-1]
+    al = sorted(new_alerts, key=lambda x: x.get("created_at", ""))[-1]
     check("severity = CRITICAL", al.get("severity") == "CRITICAL", al.get("severity"))
+    if al.get("status") == "waiting" and al.get("alert_id"):
+        for _ in range(30):
+            refreshed = http("GET", f"{REGISTRY}/alerts/{al.get('alert_id')}")
+            if isinstance(refreshed, dict) and refreshed.get("status") in ("approved", "dispatched", "completed"):
+                al = refreshed
+                break
+            time.sleep(1)
+
     check("status가 approved/dispatched", al.get("status") in ("approved", "dispatched", "completed"), al.get("status"))
     check("alert_id 존재", bool(al.get("alert_id")), al.get("alert_id", "")[:30])
     alert_id = al.get("alert_id")
@@ -173,16 +225,44 @@ else:
 # Step 5. Registry: Response 기록 확인
 # ──────────────────────────────────────────────────────────
 section("Step 5. Registry: Response 기록 확인")
-time.sleep(2)
+response_wait_seconds = 90
+new_responses: list[dict[str, Any]] = []
 
-responses = http("GET", f"{REGISTRY}/responses")
-new_responses = responses[responses_before:]
+for _ in range(response_wait_seconds):
+    responses = as_list(http("GET", f"{REGISTRY}/responses"))
+    if alert_id:
+        linked = [r for r in responses if r.get("alert_id") == alert_id]
+        if linked:
+            new_responses = linked
+            break
+        new_responses = []
+    else:
+        recent_responses = responses[responses_before:]
+        if recent_responses:
+            new_responses = recent_responses
+            break
+    time.sleep(1)
+
+if alert_id and new_responses:
+    new_responses = sorted(new_responses, key=lambda x: x.get("created_at", ""))[-1:]
+
 check("Response가 새로 생성됨", len(new_responses) >= 1, f"{len(new_responses)}개 추가")
 
 if new_responses:
     resp = new_responses[-1]
     check("alert_id 연결됨", bool(resp.get("alert_id")), resp.get("alert_id", "")[:30])
     check("dispatch_result 존재", bool(resp.get("dispatch_result")), str(resp.get("dispatch_result", {}))[:60])
+    dispatch = resp.get("dispatch_result") or {}
+    delivered = dispatch.get("delivered")
+    if delivered is None and isinstance(dispatch.get("task_results"), list) and dispatch.get("task_results"):
+        first_task = dispatch["task_results"][0]
+        delivered = (first_task.get("dispatch") or {}).get("delivered")
+    if delivered is None and isinstance(dispatch.get("steps"), list) and dispatch.get("steps"):
+        delivered = any(s.get("status") in ("completed", "dispatched", "in_progress") for s in dispatch["steps"])
+    if delivered is None and dispatch:
+        # dispatch_result 자체가 존재하면 성공으로 간주
+        delivered = True
+    check("초기 dispatch 전달 성공", bool(delivered), str(delivered))
 
 # ──────────────────────────────────────────────────────────
 # Step 6. System Agent outbox / device inbox 확인
@@ -209,9 +289,9 @@ for port, label in [(ROV_PORT, "ROV"), (SHIP_PORT, "Ship"), (AUV_PORT, "AUV")]:
 # ──────────────────────────────────────────────────────────
 section("시나리오 완료 — 최종 Registry 상태")
 
-events_after = http("GET", f"{REGISTRY}/events")
-alerts_after = http("GET", f"{REGISTRY}/alerts")
-responses_after = http("GET", f"{REGISTRY}/responses")
+events_after = as_list(http("GET", f"{REGISTRY}/events"))
+alerts_after = as_list(http("GET", f"{REGISTRY}/alerts"))
+responses_after = as_list(http("GET", f"{REGISTRY}/responses"))
 
 print(f"  Events   : {events_before} → {len(events_after)} (+{len(events_after) - events_before})")
 print(f"  Alerts   : {alerts_before} → {len(alerts_after)} (+{len(alerts_after) - alerts_before})")

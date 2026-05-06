@@ -56,8 +56,14 @@ class OllamaClient(LLMClient):
             data = response.json()
             return data.get("response", "")
         except Exception as e:
-            logger.error(f"Ollama generation failed: {e}")
-            return f"LLM error: {str(e)}"
+            # ReadTimeout 등 일부 예외는 str(e)가 비어 있을 수 있어 repr/타입을 함께 남긴다.
+            logger.error(
+                "Ollama generation failed (%s): %r",
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
+            return f"LLM error: {type(e).__name__}: {repr(e)}"
 
 
 class FallbackClient(LLMClient):

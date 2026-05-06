@@ -355,6 +355,7 @@ class DeviceRecord:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.public_id,
+            "registry_id": self.id,
             "token": self.token,
             "name": self.name,
             "connected": self.connected,

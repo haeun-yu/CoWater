@@ -90,7 +90,7 @@ class AgentRuntime:
             connectivity=self.agent_config.get("connectivity"),
             location=self.config.get("simulation", {}).get("start_position"),
         )
-        self.state.registry_id = int(created["id"])
+        self.state.registry_id = int(created.get("registry_id") or created["id"])
         self.state.token = str(created["token"])
         self.state.registered_at = utc_now()
         self.state.connected = True
@@ -205,13 +205,24 @@ class AgentRuntime:
                     continue
 
                 # Process unprocessed waiting alerts
-                for alert in alerts:
+                now_ts = time.time()
+                stale_cutoff = now_ts - 30 * 60  # 30분 이상 된 alerts는 건너뜀
+                waiting_alerts = [
+                    alert for alert in alerts
+                    if alert.get("status") == "waiting"
+                    and alert.get("alert_id") not in processed_alerts
+                    and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
+                ]
+                waiting_alerts.sort(
+                    key=lambda alert: (
+                        self._severity_rank(str(alert.get("severity") or "INFORMATION")),
+                        -self._parse_iso_ts(str(alert.get("created_at") or "")),
+                    ),
+                    reverse=False,
+                )
+                # 루프당 최대 3개 처리 (백로그가 많아도 신규 alert가 빠르게 처리되도록)
+                for alert in waiting_alerts[:3]:
                     alert_id = alert.get("alert_id")
-                    status = alert.get("status")
-
-                    # Only process waiting alerts that haven't been processed yet
-                    if status != "waiting" or alert_id in processed_alerts:
-                        continue
 
                     logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
                     processed_alerts.add(alert_id)
@@ -685,7 +696,7 @@ class AgentRuntime:
             "action": action,
             "location": location,
             "mission_type": "mine_clearance",
-            "target_device_id": int(target_device["id"]),
+            "target_device_id": self._device_id(target_device),
         }
         if isinstance(extra_params, dict):
             merged_params.update(extra_params)
@@ -693,12 +704,12 @@ class AgentRuntime:
             "task_id": task_id,
             "logical_task_id": task_id,
             "attempt": 0,
-            "attempted_device_ids": [int(target_device["id"])],
+            "attempted_device_ids": [self._device_id(target_device)],
             "action": action,
-            "target_device_id": int(target_device["id"]),
+            "target_device_id": self._device_id(target_device),
             "target_device_name": target_device.get("name"),
             "target_device_type": target_device.get("device_type"),
-            "route_agent_id": int(route_hop["id"]),
+            "route_agent_id": self._device_id(route_hop),
             "route_agent_name": route_hop.get("name"),
             "route_endpoint": self._device_endpoint(route_hop),
             "params": merged_params,
@@ -715,6 +726,14 @@ class AgentRuntime:
             "INFORMATION": 2,
         }
         return order.get(normalized, 2)
+
+    def _parse_iso_ts(self, value: str | None) -> float:
+        if not value:
+            return 0.0
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
 
     def _queue_ttl_seconds(self, alert: dict[str, Any]) -> int:
         severity = str(alert.get("severity") or "INFORMATION").upper()
@@ -753,7 +772,7 @@ class AgentRuntime:
                 continue
             if str(device.get("layer") or "") != "lower":
                 continue
-            device_id = int(device.get("id") or 0)
+            device_id = self._device_id(device)
             if not include_reserved and self._is_device_reserved(device_id):
                 continue
             if self._device_can_execute(device, action):
@@ -853,8 +872,8 @@ class AgentRuntime:
             if self._device_is_connected(device)
             and str(device.get("layer") or "") == "lower"
             and self._device_can_execute(device, action)
-            and int(device.get("id") or 0) not in excluded
-            and not self._is_device_reserved(int(device.get("id") or 0))
+            and self._device_id(device) not in excluded
+            and not self._is_device_reserved(self._device_id(device))
         ]
         if not candidates:
             return None
@@ -871,7 +890,7 @@ class AgentRuntime:
         def rank(device: dict[str, Any]) -> tuple[float, int]:
             return (
                 self._distance_to_location(device, location),
-                int(device.get("id") or 0),
+                self._device_id(device),
             )
 
         return min(candidates, key=rank)
@@ -914,6 +933,16 @@ class AgentRuntime:
         if action == "remove_mine":
             return device_type == "ROV" or any(keyword in actions for keyword in {"grab_object", "precise_manipulation"})
         return bool(actions)
+
+    def _device_id(self, device: dict[str, Any]) -> int:
+        """registry_id(내부 numeric id) 우선, 없으면 id 변환 시도."""
+        rid = device.get("registry_id")
+        if rid is not None:
+            return int(rid)
+        try:
+            return int(device.get("id", 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _distance_to_location(self, device: dict[str, Any], location: dict[str, Any]) -> float:
         try:
@@ -1129,7 +1158,7 @@ class AgentRuntime:
                     replacement,
                     dict(task_def.get("params") or {}).get("location") or {},
                 )
-                attempted_device_ids = [*list(task_state.get("attempted_device_ids") or []), int(replacement["id"])]
+                attempted_device_ids = [*list(task_state.get("attempted_device_ids") or []), self._device_id(replacement)]
             else:
                 rebuilt = dict(task_def)
                 rebuilt["task_id"] = f"{logical_task_id}-retry-{next_attempt}"
@@ -1312,8 +1341,13 @@ class AgentRuntime:
                     agent_info = {}
                 agent_id_from_info = agent_info.get("agent_id") or ""
                 device_id = str(agent.get("id") or "")
+                registry_id = str(agent.get("registry_id") or "")
 
-                if str(agent_id_from_info) == str(target_agent_id) or device_id == str(target_agent_id):
+                if (
+                    str(agent_id_from_info) == str(target_agent_id)
+                    or device_id == str(target_agent_id)
+                    or registry_id == str(target_agent_id)
+                ):
                     target_agent = agent
                     break
             except Exception as e:
