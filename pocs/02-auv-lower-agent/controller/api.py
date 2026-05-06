@@ -134,6 +134,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         response_id = str(data.get("response_id") or request.taskId or str(uuid4()))
         alert_id = str(data.get("alert_id") or "")
         step_id = str(data.get("step_id") or "default")
+        task_id = str(data.get("task_id") or "default")
         command = {
             "action": str(data.get("action") or data.get("command") or "hold_position"),
             "params": data.get("params") or {},
@@ -148,6 +149,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 "response_id": response_id,
                 "alert_id": alert_id,
                 "step_id": step_id,
+                "task_id": task_id,
                 "action": command["action"],
                 "reason": command["reason"],
             }
@@ -157,7 +159,8 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             response_id=response_id,
             alert_id=alert_id,
             step_id=step_id,
-            execution_status="completed",
+            task_id=task_id,
+            execution_status="completed" if str(result.get("status") or "completed") == "completed" else "failed",
             execution_log={"executor": runtime.state.agent_id, "result": result},
         )
     else:
@@ -174,6 +177,7 @@ async def _report_mission_result_upstream(
     response_id: str,
     alert_id: str,
     step_id: str,
+    task_id: str,
     execution_status: str,
     execution_log: dict[str, Any],
 ) -> None:
@@ -199,6 +203,7 @@ async def _report_mission_result_upstream(
                             "response_id": response_id,
                             "alert_id": alert_id,
                             "step_id": step_id,
+                            "task_id": task_id,
                             "execution_status": execution_status,
                             "source_agent_id": runtime.state.agent_id,
                             "execution_log": execution_log,
@@ -206,7 +211,7 @@ async def _report_mission_result_upstream(
                     }
                 ],
             },
-            "taskId": f"{response_id}:{step_id}",
+            "taskId": f"{response_id}:{step_id}:{task_id}",
             "metadata": {},
         },
     }
@@ -225,6 +230,7 @@ async def _report_mission_result_upstream(
                 "response_id": response_id,
                 "alert_id": alert_id,
                 "step_id": step_id,
+                "task_id": task_id,
                 "status": execution_status,
                 "target": endpoint,
             }
@@ -236,6 +242,7 @@ async def _report_mission_result_upstream(
                 "at": utc_now(),
                 "response_id": response_id,
                 "step_id": step_id,
+                "task_id": task_id,
                 "error": str(exc),
             }
         )

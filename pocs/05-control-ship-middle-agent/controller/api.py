@@ -138,6 +138,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         response_id = str(data.get("response_id") or request.taskId or str(uuid4()))
         alert_id = str(data.get("alert_id") or "")
         step_id = str(data.get("step_id") or "default")
+        task_id = str(data.get("task_id") or "default")
 
         runtime.state.remember(
             {
@@ -147,6 +148,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 "response_id": response_id,
                 "alert_id": alert_id,
                 "step_id": step_id,
+                "task_id": task_id,
                 "action": action,
                 "reason": reason,
                 "params": params,
@@ -162,6 +164,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 response_id=response_id,
                 alert_id=alert_id,
                 step_id=step_id,
+                task_id=task_id,
             )
             result = {"routed": True, "action": action, "target": "target_device", "route_result": route_result}
             if route_result.get("overall_status") == "failed":
@@ -170,6 +173,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                     response_id=response_id,
                     alert_id=alert_id,
                     step_id=step_id,
+                    task_id=task_id,
                     execution_status="failed",
                     execution_log={
                         "executor": runtime.state.agent_id,
@@ -189,6 +193,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 response_id=response_id,
                 alert_id=alert_id,
                 step_id=step_id,
+                task_id=task_id,
                 execution_status="completed",
                 execution_log={"executor": runtime.state.agent_id, "result": result},
             )
@@ -199,11 +204,13 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             response_id=str(data.get("response_id") or request.taskId or str(uuid4())),
             alert_id=str(data.get("alert_id") or ""),
             step_id=str(data.get("step_id") or "default"),
+            task_id=str(data.get("task_id") or "default"),
             execution_status=str(data.get("execution_status") or "completed"),
             execution_log={
                 "forwarded_by": runtime.state.agent_id,
                 "source_agent_id": data.get("source_agent_id"),
                 "step_id": data.get("step_id"),
+                "task_id": data.get("task_id"),
                 "payload": data,
             },
         )
@@ -224,6 +231,7 @@ async def _route_to_lower_agent(
     response_id: str,
     alert_id: str,
     step_id: str,
+    task_id: str,
 ) -> dict[str, Any]:
     """Route mission to the explicitly selected lower agent."""
     logger = logging.getLogger(__name__)
@@ -270,8 +278,9 @@ async def _route_to_lower_agent(
                 "alert_id": alert_id,
                 "response_id": response_id,
                 "step_id": step_id,
+                "task_id": task_id,
             },
-            task_id=f"{response_id}:{step_id}",
+            task_id=f"{response_id}:{step_id}:{task_id}",
         )
         logger.info(f"Routed {action} to lower {target_agent['device_id']}")
         return {
@@ -309,6 +318,7 @@ async def _report_mission_result_to_system(
     response_id: str,
     alert_id: str,
     step_id: str,
+    task_id: str,
     execution_status: str,
     execution_log: dict[str, Any],
 ) -> None:
@@ -337,12 +347,13 @@ async def _report_mission_result_to_system(
         "response_id": response_id,
         "alert_id": alert_id,
         "step_id": step_id,
+        "task_id": task_id,
         "execution_status": execution_status,
         "source_agent_id": runtime.state.agent_id,
         "execution_log": execution_log,
     }
     try:
-        await _send_a2a_task(system_endpoint, payload, f"{response_id}:{step_id}")
+        await _send_a2a_task(system_endpoint, payload, f"{response_id}:{step_id}:{task_id}")
         runtime.state.remember(
             {
                 "kind": "mission_result_reported",
@@ -350,6 +361,7 @@ async def _report_mission_result_to_system(
                 "response_id": response_id,
                 "alert_id": alert_id,
                 "step_id": step_id,
+                "task_id": task_id,
                 "status": execution_status,
                 "system_endpoint": system_endpoint,
             }

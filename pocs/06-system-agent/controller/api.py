@@ -100,6 +100,18 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     def tasks() -> dict[str, Any]:
         return {"tasks": list(runtime.state.tasks.values()), "nextPageToken": ""}
 
+    @app.get("/manual-interventions")
+    def manual_interventions() -> dict[str, Any]:
+        items = runtime.list_manual_interventions()
+        return {"items": items, "count": len(items)}
+
+    @app.get("/manual-interventions/{response_id}")
+    def manual_intervention(response_id: str) -> dict[str, Any]:
+        for item in runtime.list_manual_interventions():
+            if str(item.get("response_id") or "") == response_id:
+                return item
+        raise HTTPException(status_code=404, detail="manual intervention not found")
+
     return app
 
 

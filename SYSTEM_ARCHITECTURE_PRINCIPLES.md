@@ -152,7 +152,7 @@ ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
 - 모든 A2A 메시지는 로깅한다.
 - 대응 명령(`task.assign`)을 받은 에이전트는 `incident_decision` 로그를 남겨야 한다.
 - 대응 수행 후에는 `mission.result`를 상위(또는 지정된 report endpoint)로 보고해야 한다.
-- System Agent는 `mission.result`를 `response_id + step_id + 실제 실행 주체(source_agent_id)` 기준으로 중복 제거한다.
+- System Agent는 `mission.result`를 `response_id + step_id + task_id + 실제 실행 주체(source_agent_id)` 기준으로 중복 제거한다.
 
 예시:
 
@@ -201,15 +201,35 @@ POST http://{target_endpoint}/message:send
 - A2A `event.report`에 severity가 명시되면 그 값을 우선 사용한다.
 - severity가 없으면 `event_rules`의 기본값을 사용한다.
 - 매핑이 없으면 severity는 `INFORMATION`으로 본다.
-- Response 상태는 최소 `planned -> completed/failed` 전이를 가져야 한다.
+- Response 상태는 최소 `planned`, `completed`, `failed`, `manual_intervention_required`를 표현할 수 있어야 한다.
 - `dispatch_result`에는 A2A 전송 결과(성공 여부, 대상 endpoint, 응답 본문 또는 오류)를 기록한다.
 - `mission.result`가 수신되면 System Agent는 해당 response를 현장 실행 결과 기준으로 다시 갱신한다.
 - System Agent는 먼저 이벤트 위치 기준으로 `가장 가까우면서 해당 대응을 수행할 수 있는 디바이스`를 고른다.
 - 선택된 대상 디바이스에 middle parent가 있으면 그 middle을 경유하고, 없으면 해당 디바이스에 직접 전달한다.
-- 하나의 incident가 여러 step으로 구성될 수 있으며, 이전 step의 결과는 다음 step 입력으로 전달할 수 있다.
+- 원래 가장 가까운 디바이스가 reservation 중이어도, 같은 task를 수행할 수 있는 다른 available 디바이스가 있으면 queue에 넣지 않고 그 대체 디바이스에 즉시 할당한다.
+- 동시 incident가 여러 개 있을 때 System Agent는 `device reservation`으로 이미 배정 중인 lower device를 새 incident 후보에서 제외해야 한다.
+- 현재 구현은 최소 reservation만 지원하며, mission 간 `preemption`이나 복잡한 전역 스케줄 최적화는 아직 지원하지 않는다.
+- reservation 때문에 즉시 실행할 수 없는 대응은 `queued` 상태로 둘 수 있다.
+- `queued` 대응은 나중에 다시 시도할 때 원래 계획을 그대로 쓰지 않고, 당시 시점의 alert 유효성과 현재 사용 가능한 디바이스를 기준으로 재검토해야 한다.
+- queue 재검토 시 원래 디바이스가 아니어도 같은 task를 수행할 수 있는 대체 디바이스가 있으면 그 디바이스로 다시 계획할 수 있다.
+- 하나의 incident는 `steps[].tasks[]` 구조로 구성한다. `step`은 순서 단위이고 `task`는 개별 디바이스 실행 단위다.
+- 같은 step 안의 모든 task가 `completed`이면 그 step의 `execution status`는 `completed`다. 하나라도 `failed`이면 그 step의 `execution status`는 `failed`다.
+- 앞 step의 task 결과들은 다음 step 입력으로 전달할 수 있다.
+- `step`의 실행 상태와 다음 행동 판단은 분리한다. 즉 `step execution status`가 `failed`여도, 평가 결과가 충분하다고 판단되면 다음 step으로 진행할 수 있다.
+- System Agent는 step 종료 시 `step evaluation`을 기록해야 하며, 최소 `policy`, `sufficient`, `decision`, `reason`을 남긴다.
+- `step evaluation decision`은 최소 `proceed_next_step`, `retry_same_step`, `reassign_failed_tasks`, `manual_intervention_required`, `abort_mission`을 지원할 수 있어야 한다.
+- `manual_intervention_required`가 발생하면 Response 상태도 `manual_intervention_required`로 저장하고, `dispatch_result.manual_intervention`에 개입이 필요한 step, 이유, 최신 step 결과를 구조적으로 남겨야 한다.
+- 수동 개입이 필요한 대응은 조회 가능한 API 또는 동등한 조회 경로를 제공해야 하며, 최소 개입 대상 `response_id`, 해당 step, 이유, 최신 step 결과, 권장 운영자 조치를 확인할 수 있어야 한다.
+- 부분 성공 허용 여부는 `evaluation_policy`가 결정한다. 정책은 step type별로 다를 수 있다.
+- 재계획 또는 중단 판단이 발생하면 `replan_history`에 그 근거를 남긴다.
+- lower task 실행 결과는 가능하면 `status`, `usable_output`, `failure_reason`, `confidence`, `artifacts`를 포함해야 한다.
+- 테스트/시뮬레이션을 위해 lower task 입력 `params`에 `simulate_outcome` 또는 `simulate_failure=true`를 넣어 결과를 강제할 수 있다.
+- reservation 가능한 장비가 전혀 없으면 현재 구현은 해당 대응을 즉시 실패(`no_capable_target_or_available_device`)로 기록한다.
+- 다만 capability는 있으나 장비가 모두 reservation 중이면 현재 구현은 `queued`로 기록하고, 이후 queue 재검토에서 재할당을 시도한다.
 - 여러 하위 에이전트가 같은 `response_id`로 결과를 보고할 수 있으므로 `dispatch_result.execution_results`에 실행 주체별 결과를 누적한다.
-- 동일 실행 주체가 같은 `response_id + step_id`로 다시 보고한 `mission.result`는 중복으로 보고 원장을 덮어쓰지 않는다.
-- 집계 상태는 실행 결과 중 하나라도 `failed`면 `failed`, 모두 성공 보고이면 `completed`로 본다.
+- 동일 실행 주체가 같은 `response_id + step_id + task_id`로 다시 보고한 `mission.result`는 중복으로 보고 원장을 덮어쓰지 않는다.
+- 단순 실행 결과 집계(`dispatch_result.execution_aggregate_status`)는 실행 결과 중 하나라도 `failed`면 `failed`, 모두 성공 보고이면 `completed`로 본다.
+- 다만 최종 Response 상태는 step evaluation 결과를 반영하므로 `manual_intervention_required`로 저장될 수 있다.
 
 ---
 

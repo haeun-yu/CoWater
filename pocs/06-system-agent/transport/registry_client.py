@@ -161,5 +161,8 @@ class RegistryClient:
     def ingest_response(self, response: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/responses/ingest", response)
 
+    def list_responses(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/responses")
+
     def get_response(self, response_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/responses/{response_id}")
