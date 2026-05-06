@@ -7,7 +7,7 @@
 Registry Server는 다음을 담당한다.
 
 - 디바이스 등록과 조회
-- heartbeat 기반 연결 상태 갱신
+- healthcheck 기반 연결 상태 갱신
 - 위치 정보와 assignment 정보 보관
 - `parent_id`, `route_mode`, `force_parent_routing` 계산
 - Event / Alert / Response 원장 제공
@@ -106,10 +106,10 @@ severity는 `CRITICAL`, `WARNING`, `INFORMATION`만 사용한다.
 - `GET /responses`
 - `GET /responses/{response_id}`
 
-## heartbeat와 assignment
+## healthcheck와 assignment
 
-- Registry는 `device.heartbeat`를 구독해 연결 상태를 갱신한다.
-- 기본 heartbeat 기준은 `1초 주기`, `3초 timeout`이다.
+- Registry는 `device.healthcheck`를 구독해 연결 상태를 갱신한다.
+- 기본 healthcheck 기준은 `1초 주기`, `3초 timeout`이다.
 - middle agent가 offline이면 Registry가 자식 재할당 또는 직접 라우팅 전환을 계산한다.
 
 ## 점검 포인트

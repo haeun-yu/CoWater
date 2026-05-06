@@ -4,7 +4,7 @@
     "url": "http://127.0.0.1:8280",
     "secret_key": "server-secret",
     "required": false,
-    "heartbeat_interval_seconds": 1
+    "healthcheck_interval_seconds": 1
   },
   "agent": {
     "id": "system-agent",

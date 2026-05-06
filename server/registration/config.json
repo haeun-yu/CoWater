@@ -18,11 +18,11 @@
   "cors": {
     "allow_origins": ["*"]
   },
-  "heartbeat": {
+  "healthcheck": {
     "interval_seconds": 1,
     "timeout_seconds": 3
   },
   "moth": {
-    "server_url": "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base"
+    "server_url": "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base"
   }
 }

@@ -2,13 +2,13 @@
 
 ## 개요
 
-Registry Server는 CoWater의 공용 서버 컴포넌트다. 디바이스 등록, heartbeat 반영, assignment 계산, Event / Alert / Response 원장을 담당한다.
+Registry Server는 CoWater의 공용 서버 컴포넌트다. 디바이스 등록, healthcheck 반영, assignment 계산, Event / Alert / Response 원장을 담당한다.
 
 ## 기본 정보
 
 - 포트: `8280`
 - 설정 파일: `config.json`
-- heartbeat 기준: `1초 주기`, `3초 timeout`
+- healthcheck 기준: `1초 주기`, `3초 timeout`
 
 ## 실행
 

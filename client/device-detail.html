@@ -478,6 +478,7 @@ let registryDevice = null;
 let wsConnections = {};
 let reconnectTimers = {};
 let sensorData = {};
+let trackStates = {};
 let batteryHistory = [];
 
 function resolveWsUrl(endpoint) {
@@ -495,10 +496,11 @@ async function fetchDeviceSnapshot() {
 }
 
 async function loadDeviceInfo() {
-    deviceId = sessionStorage.getItem('cowater.device.id');
-    deviceName = sessionStorage.getItem('cowater.device.name');
-    deviceType = sessionStorage.getItem('cowater.device.type');
-    registryId = sessionStorage.getItem('cowater.device.registryId');
+    const params = new URLSearchParams(window.location.search);
+    deviceId = params.get('id') || sessionStorage.getItem('cowater.device.id');
+    deviceName = params.get('name') || sessionStorage.getItem('cowater.device.name');
+    deviceType = params.get('type') || sessionStorage.getItem('cowater.device.type');
+    registryId = params.get('registryId') || sessionStorage.getItem('cowater.device.registryId');
 
     if (!deviceId || !deviceName) {
         document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#f87171;font-size:1.2rem;">디바이스 정보를 찾을 수 없습니다.<br><a href="index.html" style="color:#60a5fa;text-decoration:underline;margin-top:20px;display:block;">대시보드로 돌아가기</a></div>';
@@ -543,6 +545,21 @@ function connectToSensorStream() {
         return;
     }
 
+    // API 응답 트랙 기준으로 상태 슬롯 초기화
+    trackStates = {};
+    tracks.forEach((track) => {
+        const trackType = String(track?.type || '').toUpperCase();
+        const trackName = String(track?.name || '').trim();
+        const socketKey = `${trackType}:${trackName}`;
+        trackStates[socketKey] = {
+            track,
+            connected: false,
+            lastPayload: null,
+            lastTimestamp: null,
+        };
+    });
+    renderSensorData();
+
     tracks.forEach((track) => {
         const trackType = String(track?.type || '').toUpperCase();
         const trackName = String(track?.name || '').trim();
@@ -562,6 +579,8 @@ function connectToSensorStream() {
 
         ws.onopen = () => {
             console.log(`[Moth] ${trackType}/${trackName || '-'} 스트림 연결 성공`);
+            if (trackStates[socketKey]) trackStates[socketKey].connected = true;
+            renderSensorData();
             showConnectionStatus(true, `${trackType} 스트림 연결됨`);
         };
 
@@ -569,8 +588,11 @@ function connectToSensorStream() {
             try {
                 const rawText = typeof ev.data === 'string' ? ev.data : await ev.data.text();
                 if (!rawText || rawText.trim() === 'ping') return;
-                const payload = JSON.parse(rawText);
-                handleTelemetryPayload(payload);
+                const parsed = JSON.parse(rawText);
+                const payload = (parsed && typeof parsed === 'object' && parsed.payload && typeof parsed.payload === 'object')
+                    ? parsed.payload
+                    : parsed;
+                handleTrackPayload(track, socketKey, payload);
             } catch (e) {
                 console.warn(`[Moth] ${trackType} 메시지 파싱 실패:`, e);
             }
@@ -582,16 +604,23 @@ function connectToSensorStream() {
 
         ws.onclose = () => {
             console.warn(`[Moth] ${trackType} 스트림 연결 종료, 5초 후 재연결...`);
+            if (trackStates[socketKey]) trackStates[socketKey].connected = false;
+            renderSensorData();
             showConnectionStatus(false, `${trackType} 스트림 연결 종료`);
             reconnectTimers[socketKey] = setTimeout(() => connectToSensorStream(), 5000);
         };
     });
 }
 
-function handleTelemetryPayload(payload) {
+function handleTrackPayload(track, socketKey, payload) {
     // pub 엔드포인트에서 오는 통합 텔레메트리 페이로드:
     // { device_id, agent_id, timestamp, latitude, longitude, battery_percent, motion, depth_m, position }
     if (!payload || typeof payload !== 'object') return;
+
+    if (trackStates[socketKey]) {
+        trackStates[socketKey].lastPayload = payload;
+        trackStates[socketKey].lastTimestamp = Date.now();
+    }
 
     const timestamp = new Date().toLocaleTimeString();
     document.getElementById('info-timestamp').textContent = timestamp;
@@ -655,95 +684,29 @@ function renderSensorData() {
     const container = document.getElementById('sensors-container');
     let html = '';
 
-    // GPS 센서
-    if (sensorData.gps) {
-        const gps = sensorData.gps;
-        html += `
-            <div class="sensor-card">
-                <div class="sensor-header">
-                    <span class="sensor-name">📍 GPS</span>
-                    <span class="sensor-type">gps</span>
-                </div>
-                <div class="sensor-value">
-                    ${gps.latitude?.toFixed(5) || '—'}, ${gps.longitude?.toFixed(5) || '—'}
-                </div>
-                <div class="sensor-timestamp">고도: ${gps.altitude?.toFixed(1) || '—'} m</div>
-                <div class="sensor-timestamp">수신: ${gps.timestamp || '—'}</div>
-            </div>
-        `;
-    }
+    // Registry API의 tracks 목록을 기준으로 렌더링
+    const tracks = Array.isArray(registryDevice?.tracks) ? registryDevice.tracks : [];
+    tracks.forEach((track) => {
+        const trackType = String(track?.type || '').toUpperCase();
+        const trackName = String(track?.name || '').trim();
+        const socketKey = `${trackType}:${trackName}`;
+        const stateItem = trackStates[socketKey] || {};
+        const payload = stateItem.lastPayload;
+        const pretty = payload ? JSON.stringify(payload, null, 2) : '수신 대기 중';
+        const status = stateItem.connected ? '연결됨' : '연결중/끊김';
+        const ts = stateItem.lastTimestamp ? new Date(stateItem.lastTimestamp).toLocaleTimeString() : '—';
 
-    // IMU 센서
-    if (sensorData.imu) {
-        const imu = sensorData.imu;
         html += `
             <div class="sensor-card">
                 <div class="sensor-header">
-                    <span class="sensor-name">🧭 IMU</span>
-                    <span class="sensor-type">imu</span>
+                    <span class="sensor-name">${trackName || trackType}</span>
+                    <span class="sensor-type">${trackType}</span>
                 </div>
-                <div style="font-size:0.8rem;color:#cbd5e1;">
-                    Roll: ${imu.roll?.toFixed(1) || '—'}° |
-                    Pitch: ${imu.pitch?.toFixed(1) || '—'}° |
-                    Yaw: ${imu.yaw?.toFixed(1) || '—'}°
-                </div>
-                <div class="sensor-timestamp">수신: ${imu.timestamp || '—'}</div>
+                <div style="font-size:0.78rem;color:${stateItem.connected ? '#4ade80' : '#f59e0b'};margin-bottom:6px;">상태: ${status} · 최근수신: ${ts}</div>
+                <pre style="background:#0f172a;padding:8px;border-radius:4px;font-size:0.72rem;overflow-x:auto;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;max-height:140px;">${pretty}</pre>
             </div>
         `;
-    }
-
-    // 기압/수심 센서
-    if (sensorData.pressure) {
-        const pressure = sensorData.pressure;
-        html += `
-            <div class="sensor-card">
-                <div class="sensor-header">
-                    <span class="sensor-name">📏 깊이</span>
-                    <span class="sensor-type">pressure</span>
-                </div>
-                <div class="sensor-value">
-                    ${pressure.depth_m?.toFixed(1) || '—'} m
-                </div>
-                <div class="sensor-timestamp">압력: ${pressure.pressure_pa?.toFixed(0) || '—'} Pa</div>
-                <div class="sensor-timestamp">수신: ${pressure.timestamp || '—'}</div>
-            </div>
-        `;
-    }
-
-    // 온도 센서
-    if (sensorData.temperature) {
-        const temp = sensorData.temperature;
-        html += `
-            <div class="sensor-card">
-                <div class="sensor-header">
-                    <span class="sensor-name">🌡️ 온도</span>
-                    <span class="sensor-type">temperature</span>
-                </div>
-                <div class="sensor-value">
-                    ${temp.temperature_c?.toFixed(1) || '—'} °C
-                </div>
-                <div class="sensor-timestamp">수신: ${temp.timestamp || '—'}</div>
-            </div>
-        `;
-    }
-
-    // 배터리 센서
-    if (sensorData.battery) {
-        const battery = sensorData.battery;
-        const percent = battery.percent !== undefined ? battery.percent : battery.level;
-        html += `
-            <div class="sensor-card">
-                <div class="sensor-header">
-                    <span class="sensor-name">🔋 배터리</span>
-                    <span class="sensor-type">battery</span>
-                </div>
-                <div class="sensor-value">
-                    ${percent?.toFixed(0) || '—'}%
-                </div>
-                <div class="sensor-timestamp">수신: ${battery.timestamp || '—'}</div>
-            </div>
-        `;
-    }
+    });
 
     if (!html) {
         html = '<div class="empty-state"><p>센서 데이터를 기다리는 중...</p></div>';
@@ -841,6 +804,7 @@ function showConnectionStatus(connected, text) {
 function refreshSensorData() {
     console.log('[Refresh] 센서 스트림 재연결');
     sensorData = {};
+    trackStates = {};
     renderSensorData();
     Object.keys(reconnectTimers).forEach((track) => {
         clearTimeout(reconnectTimers[track]);
