@@ -233,7 +233,11 @@ class HealthcheckMonitor:
         battery_percent: Optional[float] = None,
     ) -> None:
         try:
-            device = self.registry.get_device(device_id)
+            try:
+                device = self.registry.get_device(device_id)
+            except KeyError:
+                logger.debug("Ignoring healthcheck for unknown device %s", device_id)
+                return
             if device:
                 current_status = "online" if device.connected else "offline"
                 new_status = "online" if status == "online" else "offline"

@@ -17,6 +17,10 @@ VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python"
 LOG_DIR="$PROJECT_ROOT/.logs"
 PID_FILE="$PROJECT_ROOT/.cowater_pids"
 
+# Local demos should not wake Ollama unless explicitly requested:
+#   COWATER_LLM_ENABLED=true ./cowaterctl.sh start
+export COWATER_LLM_ENABLED="${COWATER_LLM_ENABLED:-false}"
+
 mkdir -p "$LOG_DIR"
 touch "$PID_FILE"
 

@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import urllib.request
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -33,6 +35,13 @@ DEFAULT_MOTH_BASE_URL = "wss://cobot.center:8287"
 
 HEALTHCHECK_MEB_PATH = "/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base"
 HEALTHCHECK_CHANNEL  = "device.healthcheck"
+
+
+def _env_bool(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _extract_base_url(raw_url: str) -> str:
@@ -91,7 +100,8 @@ class MothPublisher:
         self.config = config
         self.state = state
         self.moth_config = config.get("moth", {})
-        self.enabled = self.moth_config.get("enabled", True)
+        env_enabled = _env_bool("COWATER_MOTH_ENABLED")
+        self.enabled = env_enabled if env_enabled is not None else bool(self.moth_config.get("enabled", True))
 
         configured = self.moth_config.get("server_url", DEFAULT_MOTH_BASE_URL)
         base = _extract_base_url(configured)
@@ -108,6 +118,14 @@ class MothPublisher:
         self.track_ws_dict: dict[str, Optional[Any]] = {}  # {track_type: ws}
         self.track_urls: dict[str, str] = {}  # {track_type: url}
         self.track_connected: dict[str, bool] = {}  # {track_type: is_connected}
+        self._closed = False
+        self._last_log_at: dict[str, float] = {}
+
+    def _log_throttled(self, key: str, level: int, message: str, *args: Any, interval: float = 30.0) -> None:
+        now = monotonic()
+        if now - self._last_log_at.get(key, 0.0) >= interval:
+            logger.log(level, message, *args)
+            self._last_log_at[key] = now
 
     # ── 초기화 ────────────────────────────────────────────────────────────────
 
@@ -157,6 +175,8 @@ class MothPublisher:
 
     async def connect(self) -> None:
         """healthcheck + track별 WebSocket 연결"""
+        if self._closed:
+            return
         await self._connect_healthcheck()
         await self._connect_tracks()
 
@@ -168,12 +188,20 @@ class MothPublisher:
         try:
             logger.info(f"Healthcheck Moth 연결 시작: {self.healthcheck_url}")
             self.healthcheck_ws = await websockets.connect(
-                self.healthcheck_url, ping_interval=30, ping_timeout=10
+                self.healthcheck_url,
+                ping_interval=30,
+                ping_timeout=10,
+                open_timeout=3,
             )
             self.healthcheck_connected = True
             logger.info(f"Healthcheck Moth 연결 성공: {self.healthcheck_url}")
         except Exception as e:
-            logger.error(f"Healthcheck Moth 연결 실패: {e}")
+            self._log_throttled(
+                "healthcheck_connect_failed",
+                logging.WARNING,
+                "Healthcheck Moth 연결 실패, degraded 모드 유지: %s",
+                e,
+            )
             self.healthcheck_connected = False
             self.healthcheck_ws = None
 
@@ -186,18 +214,29 @@ class MothPublisher:
             if self._is_closed(self.track_ws_dict.get(track_type)):
                 try:
                     logger.info(f"Track {track_type} Moth 연결 시작: {track_url}")
-                    ws = await websockets.connect(track_url, ping_interval=30, ping_timeout=10)
+                    ws = await websockets.connect(
+                        track_url,
+                        ping_interval=30,
+                        ping_timeout=10,
+                        open_timeout=3,
+                    )
                     self.track_ws_dict[track_type] = ws
                     self.track_connected[track_type] = True
                     logger.info(f"Track {track_type} Moth 연결 성공")
                 except Exception as e:
-                    logger.error(f"Track {track_type} Moth 연결 실패: {e}")
+                    self._log_throttled(
+                        f"track_connect_failed:{track_type}",
+                        logging.WARNING,
+                        "Track %s Moth 연결 실패, 해당 telemetry는 일시 중단: %s",
+                        track_type,
+                        e,
+                    )
                     self.track_connected[track_type] = False
                     self.track_ws_dict[track_type] = None
 
     async def _reconnect_loop(self) -> None:
         interval = self.moth_config.get("reconnect_interval_seconds", 5)
-        while True:
+        while not self._closed:
             try:
                 if self._is_closed(self.healthcheck_ws):
                     await self._connect_healthcheck()
@@ -213,7 +252,7 @@ class MothPublisher:
         interval = self.config.get("registry", {}).get("healthcheck_interval_seconds",
                                                         1)
         logger.info(f"Healthcheck loop 시작: interval={interval}초")
-        while True:
+        while not self._closed:
             await asyncio.sleep(interval)
             try:
                 await self.publish_healthcheck()
@@ -229,7 +268,11 @@ class MothPublisher:
 
     async def publish_healthcheck_payload(self, payload: dict[str, Any]) -> None:
         if not self.healthcheck_connected or self._is_closed(self.healthcheck_ws):
-            logger.warning("Healthcheck 발행 불가: MEB 미연결")
+            self._log_throttled(
+                "healthcheck_publish_unavailable",
+                logging.WARNING,
+                "Healthcheck 발행 일시 중단: MEB 미연결",
+            )
             return
         try:
             msg = json.dumps({
@@ -435,3 +478,18 @@ class MothPublisher:
     @property
     def is_connected(self) -> bool:
         return self.healthcheck_connected or any(self.track_connected.values())
+
+    async def close(self) -> None:
+        self._closed = True
+        sockets = [self.healthcheck_ws, *self.track_ws_dict.values()]
+        self.healthcheck_ws = None
+        self.healthcheck_connected = False
+        for track_type in list(self.track_connected):
+            self.track_connected[track_type] = False
+        for ws in sockets:
+            if ws is None or self._is_closed(ws):
+                continue
+            try:
+                await ws.close()
+            except Exception as exc:
+                logger.debug("Moth WebSocket close failed: %s", exc)

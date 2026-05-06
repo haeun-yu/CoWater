@@ -37,13 +37,14 @@ class AgentRuntime:
         self.identity = self.identity_store.read()
         self.skills = SkillCatalog(self.capabilities)
         self.manifest_builder = ManifestBuilder(self.config, self.skills)
+        configured_name = str(self.agent_config.get("name") or "CoWater Agent").strip()
         self.state = AgentState(
             agent_id=self.identity.get("agent_id") or f"{self.agent_config.get('id', 'agent')}-{self.instance_id}",
             role=str(self.agent_config.get("role") or "device_agent"),
             layer=str(self.agent_config.get("layer") or "lower"),
             device_type=self.agent_config.get("device_type"),
             instance_id=self.instance_id,
-            name=self.identity.get("name") or f"{self.agent_config.get('name', 'CoWater Agent')} {self.instance_id}",
+            name=self.identity.get("name") or configured_name or "CoWater Agent",
         )
         self.registry_client = RegistryClient(self.config.get("registry", {}))
         self.decision_engine = DecisionEngine(self.agent_config, self.skills)
@@ -192,7 +193,7 @@ class AgentRuntime:
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
-            llm_enabled=bool(self.agent_config.get("llm", {}).get("enabled", False)),
+            llm_enabled=bool(self.decision_engine.llm_enabled),
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,

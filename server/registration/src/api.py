@@ -345,20 +345,21 @@ def update_device_connectivity_state(device_id: int, request: DeviceConnectivity
 
 
 class MissionCreateRequest(BaseModel):
-    response_id: str
-    alert_id: str
-    event_id: str
+    response_id: str | None = None
+    alert_id: str | None = None
+    event_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 @app.post("/missions", status_code=status.HTTP_201_CREATED)
 def create_mission(
-    body: MissionCreateRequest = Body(...),
+    body: MissionCreateRequest | None = Body(None),
     response_id: str = Query(None),
     alert_id: str = Query(None),
     event_id: str = Query(None),
 ) -> dict[str, Any]:
     """새 Mission 생성 (Response 기반) - JSON body 우선"""
+    body = body or MissionCreateRequest()
     r_id = body.response_id or response_id
     a_id = body.alert_id or alert_id
     e_id = body.event_id or event_id
@@ -389,6 +390,12 @@ def list_missions() -> list[dict[str, Any]]:
 def list_missions_by_status(status: str) -> list[dict[str, Any]]:
     """특정 상태의 Mission 목록"""
     return [m.to_dict() for m in mission_registry.list_missions_by_status(status)]
+
+
+@app.get("/missions/stats")
+def get_mission_stats() -> dict[str, Any]:
+    """Mission 통계"""
+    return mission_registry.get_mission_stats()
 
 
 @app.get("/missions/{mission_id}")
@@ -463,12 +470,6 @@ def update_mission_status_endpoint(mission_id: str, status: str) -> dict[str, An
         return mission.to_dict()
     except KeyError:
         raise HTTPException(status_code=404, detail="mission not found")
-
-
-@app.get("/missions/stats")
-def get_mission_stats() -> dict[str, Any]:
-    """Mission 통계"""
-    return mission_registry.get_mission_stats()
 
 
 @app.post("/admin/reset", status_code=status.HTTP_204_NO_CONTENT)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -68,7 +69,12 @@ class DeviceRegistry:
         )
 
         # SQLite 영구 저장소
-        resolved_db_path = db_path or Path(__file__).resolve().parents[2] / ".data" / "devices.db"
+        configured_db_path = os.getenv("COWATER_DEVICE_DB_PATH")
+        resolved_db_path = (
+            db_path
+            or (Path(configured_db_path).expanduser() if configured_db_path else None)
+            or Path(__file__).resolve().parents[2] / ".data" / "devices.db"
+        )
         self._db = DeviceDatabase(resolved_db_path)
 
         # DB에서 기존 디바이스 로드
@@ -272,7 +278,7 @@ class DeviceRegistry:
         candidates = [
             device
             for device in self.list_devices()
-            if device.layer == "middle" and device.id != exclude_id
+            if device.layer == "middle" and device.connected and device.id != exclude_id
         ]
         if not candidates:
             return None
@@ -437,6 +443,7 @@ class DeviceRegistry:
                     raise ValueError("main video track must be a VIDEO track")
                 device.main_video_track_name = normalized_name
                 device.updated_at = utc_now_iso()
+                self._persist_device(device)
                 return device
         raise ValueError("specified track does not exist")
 
@@ -444,6 +451,9 @@ class DeviceRegistry:
         device = self.get_device(device_id)
         del self._devices[device.id]
         self._db.delete_device(device.id)
+        if device.layer == "middle":
+            for assignment in self._refresh_lower_assignments(exclude_parent_id=device.id):
+                self.notify_assignment(assignment)
 
     def attach_agent(self, device_id: Any, request: DeviceAgentRegistrationRequest) -> DeviceRecord:
         self._validate_secret_key(request.secretKey)

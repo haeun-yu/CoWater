@@ -1061,6 +1061,11 @@
         );
       }
 
+      function parseFiniteNumber(value, fallback = undefined) {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+
       function validateDevice(device) {
         if (!device || typeof device !== 'object') {
           console.warn('Invalid device:', device);
@@ -1071,17 +1076,21 @@
           registry_id: device.registry_id || device.id,
           name: String(device.name || 'Unknown'),
           device_type: String(device.device_type || 'unknown').toUpperCase(),
+          layer: String(device.layer || ''),
           connected: device.connected !== false,
-          latitude: parseFloat(device.latitude),
-          longitude: parseFloat(device.longitude),
-          altitude: parseFloat(device.altitude) || 0,
-          depth: parseFloat(device.depth),
-          heading: parseFloat(device.heading) || 0,
-          speed: parseFloat(device.speed) || 0,
-          battery: parseFloat(device.last_battery_percent ?? device.battery),
+          latitude: parseFiniteNumber(device.latitude),
+          longitude: parseFiniteNumber(device.longitude),
+          altitude: parseFiniteNumber(device.altitude, 0),
+          depth: parseFiniteNumber(device.depth),
+          heading: parseFiniteNumber(device.heading, 0),
+          speed: parseFiniteNumber(device.speed, 0),
+          battery: parseFiniteNumber(device.last_battery_percent ?? device.battery),
           agent: device.agent || {},
           tracks: Array.isArray(device.tracks) ? device.tracks : [],
           connectivity: String(device.connectivity || ''),
+          parent_id: device.parent_id ?? null,
+          is_submerged: Boolean(device.is_submerged),
+          force_parent_routing: Boolean(device.force_parent_routing),
         };
       }
 
@@ -1123,13 +1132,13 @@
       }
 
       function mapRegistryToScenario(reg) {
-        const lat = reg.latitude || mapState.baseLat;
-        const lon = reg.longitude || mapState.baseLng;
+        const lat = Number.isFinite(reg.latitude) ? reg.latitude : mapState.baseLat;
+        const lon = Number.isFinite(reg.longitude) ? reg.longitude : mapState.baseLng;
         const x = (lon - mapState.baseLng) / mapState.scale;
         const z = (mapState.baseLat - lat) / mapState.scale;
-        const altitude = reg.altitude ?? reg.location?.altitude ?? 0;
+        const altitude = Number.isFinite(reg.altitude) ? reg.altitude : 0;
         const depth =
-          reg.depth !== undefined
+          Number.isFinite(reg.depth)
             ? -Math.abs(reg.depth)
             : altitude < 0
               ? altitude
@@ -1155,12 +1164,12 @@
           name: reg.name,
           type: deviceType,
           position: { x, y: depth, z },
-          heading: reg.heading || reg.course || 0,
-          speed: reg.speed || 0,
+          heading: Number.isFinite(reg.heading) ? reg.heading : 0,
+          speed: Number.isFinite(reg.speed) ? reg.speed : 0,
           battery:
-            reg.last_battery_percent !== undefined
+            Number.isFinite(reg.last_battery_percent)
               ? reg.last_battery_percent
-              : reg.battery !== undefined
+              : Number.isFinite(reg.battery)
                 ? reg.battery
                 : undefined,
           status: reg.connected === false ? "offline" : "active",
@@ -1204,9 +1213,13 @@
       function deriveActiveLinksFromRegistry(devices) {
         if (!Array.isArray(devices) || devices.length === 0) return [];
 
-        const byId = new Map(
-          devices.map((device) => [String(device.id), device]),
-        );
+        const byId = new Map();
+        devices.forEach((device) => {
+          byId.set(String(device.id), device);
+          if (device.registry_id !== undefined && device.registry_id !== null) {
+            byId.set(String(device.registry_id), device);
+          }
+        });
         const middleDevices = devices.filter(
           (device) => String(device.layer || "").toLowerCase() === "middle",
         );
@@ -1227,12 +1240,6 @@
           const parentRef = child.parent_id;
           if (parentRef !== null && parentRef !== undefined) {
             parent = byId.get(String(parentRef)) || null;
-            if (!parent && Number.isFinite(Number(parentRef))) {
-              const idx = Number(parentRef) - 1;
-              if (idx >= 0 && idx < devices.length) {
-                parent = devices[idx];
-              }
-            }
           }
           if (!parent) parent = defaultParent;
           if (!parent) return;

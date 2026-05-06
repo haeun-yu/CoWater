@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Optional
 
@@ -22,6 +23,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _env_bool(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 # 생명 안전 — LLM 없이 즉각 에스컬레이션
 CRITICAL_URGENT = {"distress", "collision_risk"}
 
@@ -30,7 +38,8 @@ class DecisionEngine:
     def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
         self.agent_config = agent_config
         self.skills = skills
-        self.llm_enabled = agent_config.get("llm", {}).get("enabled", False)
+        env_enabled = _env_bool("COWATER_LLM_ENABLED")
+        self.llm_enabled = env_enabled if env_enabled is not None else bool(agent_config.get("llm", {}).get("enabled", False))
         self.llm_client = None
 
         if self.llm_enabled and make_llm_client:
@@ -318,11 +327,20 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         middles = [d for d in devices if str(d.get("layer") or "") == "middle"]
         lowers  = [d for d in devices if str(d.get("layer") or "") == "lower"]
 
-        # middle 디바이스를 id로 직접 조회
+        def registry_id_of(device: dict[str, Any]) -> int | None:
+            raw = device.get("registry_id")
+            if raw is None:
+                raw = device.get("id")
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return None
+
+        # middle 디바이스를 Registry numeric id로 직접 조회
         id_to_middle: dict[int, dict[str, Any]] = {
-            int(d.get("id") or d.get("registry_id") or 0): d
+            rid: d
             for d in middles
-            if d.get("id") or d.get("registry_id")
+            if (rid := registry_id_of(d)) is not None
         }
         middles_sorted = sorted(middles, key=lambda d: d.get("created_at") or "")
 
@@ -338,7 +356,7 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             else:
                 parent = id_to_middle.get(int(pid))
                 if parent:
-                    mid = str(parent.get("id") or parent.get("registry_id") or "")
+                    mid = str(registry_id_of(parent) or parent.get("id") or "")
                     children_of.setdefault(mid, []).append(d)
                 else:
                     unmatched.append(d)
@@ -350,7 +368,7 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             parts.append("─── 중계 계층 (middle) ───")
             for m in middles_sorted:
                 parts.append(self._fmt_device(m))
-                mid_id = str(m.get("id") or m.get("registry_id") or "")
+                mid_id = str(registry_id_of(m) or m.get("id") or "")
                 kids = children_of.get(mid_id, [])
                 for i, child in enumerate(kids):
                     prefix = "  └─" if i == len(kids) - 1 else "  ├─"

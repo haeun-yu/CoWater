@@ -4,6 +4,8 @@ Shared LLM Client - supports Ollama and other LLM providers
 
 import asyncio
 import logging
+import os
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -13,6 +15,13 @@ except ImportError:
     httpx = None
 
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class LLMClient(ABC):
@@ -30,6 +39,9 @@ class OllamaClient(LLMClient):
     def __init__(self, endpoint: str, model: str):
         self.endpoint = endpoint.rstrip("/")
         self.model = model
+        self._failure_count = 0
+        self._circuit_open_until = 0.0
+        self._last_skip_log_at = 0.0
         if httpx:
             # httpx.AsyncClient의 timeout 기본값 설정 (60초)
             self.client = httpx.AsyncClient(timeout=60.0)
@@ -41,6 +53,16 @@ class OllamaClient(LLMClient):
         """Generate text using Ollama"""
         if self.client is None or httpx is None:
             return "LLM unavailable: httpx not installed"
+
+        now = time.monotonic()
+        if now < self._circuit_open_until:
+            if now - self._last_skip_log_at >= 30:
+                logger.warning(
+                    "Ollama unavailable; skipping generation for %.1fs",
+                    self._circuit_open_until - now,
+                )
+                self._last_skip_log_at = now
+            return "LLM unavailable: circuit breaker open"
 
         try:
             response = await self.client.post(
@@ -54,14 +76,18 @@ class OllamaClient(LLMClient):
             )
             response.raise_for_status()
             data = response.json()
+            self._failure_count = 0
+            self._circuit_open_until = 0.0
             return data.get("response", "")
         except Exception as e:
-            # ReadTimeout 등 일부 예외는 str(e)가 비어 있을 수 있어 repr/타입을 함께 남긴다.
-            logger.error(
-                "Ollama generation failed (%s): %r",
+            self._failure_count += 1
+            cooldown = min(120, 5 * (2 ** min(self._failure_count - 1, 4)))
+            self._circuit_open_until = time.monotonic() + cooldown
+            logger.warning(
+                "Ollama generation failed (%s); circuit open for %ss: %s",
                 type(e).__name__,
+                cooldown,
                 e,
-                exc_info=True,
             )
             return f"LLM error: {type(e).__name__}: {repr(e)}"
 
@@ -76,7 +102,9 @@ class FallbackClient(LLMClient):
 
 def make_llm_client(config: dict[str, Any]) -> LLMClient:
     """Factory function to create LLM client"""
-    if not config.get("enabled", False):
+    env_enabled = _env_bool("COWATER_LLM_ENABLED")
+    enabled = env_enabled if env_enabled is not None else bool(config.get("enabled", False))
+    if not enabled:
         logger.info("LLM disabled in config")
         return FallbackClient()
 

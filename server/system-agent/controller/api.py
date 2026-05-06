@@ -31,7 +31,14 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             runtime.state.remember({"kind": "registration_error", "at": utc_now(), "error": str(exc)})
             if runtime.registry_client.required:
                 raise
-        asyncio.create_task(runtime.simulation_loop())
+        app.state.simulation_task = asyncio.create_task(runtime.simulation_loop())
+
+    @app.on_event("shutdown")
+    async def shutdown() -> None:
+        task = getattr(app.state, "simulation_task", None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     @app.get("/health")
     def health() -> dict[str, Any]:

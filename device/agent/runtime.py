@@ -110,6 +110,22 @@ class AgentRuntime:
         self.tools: dict[str, Any] = {}
         self._load_tools()
         self._last_assignment_signature: dict[str, Any] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._stopping = False
+
+    def _create_background_task(self, coro: Any) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def stop(self) -> None:
+        self._stopping = True
+        for task in list(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        await self.moth_publisher.close()
 
     def _load_tools(self) -> None:
         """
@@ -277,7 +293,7 @@ class AgentRuntime:
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
-            llm_enabled=bool(self.agent_config.get("llm", {}).get("enabled", False)),
+            llm_enabled=bool(self.decision_engine.llm_enabled),
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
@@ -302,7 +318,7 @@ class AgentRuntime:
         try:
             if self.state.layer == "system":
                 # System layer: healthcheck만, telemetry는 발송하지 않음
-                asyncio.create_task(self.moth_publisher.healthcheck_loop())
+                self._create_background_task(self.moth_publisher.healthcheck_loop())
                 return
 
             # ===== Moth 연결 초기화 =====
@@ -322,11 +338,11 @@ class AgentRuntime:
             else:
                 logger.warning("Moth connection failed")
 
-            asyncio.create_task(self.moth_publisher._reconnect_loop())
-            asyncio.create_task(self.moth_publisher.healthcheck_loop())
+            self._create_background_task(self.moth_publisher._reconnect_loop())
+            self._create_background_task(self.moth_publisher.healthcheck_loop())
 
             # ===== 메인 simulation loop =====
-            while True:
+            while not self._stopping:
                 # 설정된 주기만큼 대기 (interval_seconds, 기본값 2초)
                 await asyncio.sleep(self.simulator.interval_seconds())
 
