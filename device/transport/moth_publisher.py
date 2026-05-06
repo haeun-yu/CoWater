@@ -1,11 +1,11 @@
 """
-Moth Publisher: Real-time Telemetry & Heartbeat Streaming
+Moth Publisher: Real-time Telemetry & Healthcheck Streaming
 
 엔드포인트 규칙:
-  Heartbeat  : /pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base
-               → 모든 디바이스가 동일 MEB 채널에 publish, Registry가 구독
-  Telemetry  : /pang/ws/pub?channel=instant&name={device_id}&source=base&track=telemetry
-               → 디바이스별 pub 스트림, 클라이언트는 sub로 구독
+    Healthcheck: /pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base
+                             → 모든 디바이스가 동일 MEB 채널에 publish, Registry가 구독
+    Telemetry  : /pang/ws/pub?channel=instant&name={device_id}&source=base&track=telemetry
+                             → 디바이스별 pub 스트림, 클라이언트는 sub로 구독
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 DEFAULT_MOTH_BASE_URL = "wss://cobot.center:8287"
 
-HEARTBEAT_MEB_PATH = "/pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base"
-HEARTBEAT_CHANNEL  = "device.heartbeat"
+HEALTHCHECK_MEB_PATH = "/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base"
+HEALTHCHECK_CHANNEL  = "device.healthcheck"
 
 
 def _extract_base_url(raw_url: str) -> str:
@@ -42,9 +42,9 @@ def _extract_base_url(raw_url: str) -> str:
     return ""
 
 
-def _build_heartbeat_url(base: str) -> str:
+def _build_healthcheck_url(base: str) -> str:
     parsed = urlsplit(base)
-    ep = urlsplit(HEARTBEAT_MEB_PATH)
+    ep = urlsplit(HEALTHCHECK_MEB_PATH)
     return urlunsplit((parsed.scheme, parsed.netloc, ep.path, ep.query, ""))
 
 
@@ -83,7 +83,7 @@ class MothPublisher:
     Moth WebSocket 발행자.
 
     연결 구조:
-      heartbeat_ws  → MEB heartbeat 채널 (모든 디바이스 공유)
+    healthcheck_ws  → MEB healthcheck 채널 (모든 디바이스 공유)
       track_ws_dict → 각 track type별 pub 스트림 (디바이스별)
     """
 
@@ -98,11 +98,11 @@ class MothPublisher:
         self.moth_base_url = base if base in ALLOWED_MOTH_BASE_URLS else DEFAULT_MOTH_BASE_URL
 
         # URL: registration 전에는 임시값, initialize() 이후 확정
-        self.heartbeat_url: str = _build_heartbeat_url(self.moth_base_url)
+        self.healthcheck_url: str = _build_healthcheck_url(self.moth_base_url)
         self.telemetry_url: Optional[str] = None  # device_id 알기 전까지 None
 
-        self.heartbeat_ws: Optional[Any] = None
-        self.heartbeat_connected = False
+        self.healthcheck_ws: Optional[Any] = None
+        self.healthcheck_connected = False
         
         # Track별 WebSocket 관리
         self.track_ws_dict: dict[str, Optional[Any]] = {}  # {track_type: ws}
@@ -139,7 +139,7 @@ class MothPublisher:
                 self.track_connected[track_type] = False
 
         logger.info("MothPublisher 초기화 완료")
-        logger.info(f"  Heartbeat MEB : {self.heartbeat_url}")
+        logger.info(f"  Healthcheck MEB : {self.healthcheck_url}")
         logger.info(f"  Track URLs   : {list(self.track_urls.keys())}")
 
     # ── 연결 ─────────────────────────────────────────────────────────────────
@@ -156,26 +156,26 @@ class MothPublisher:
         return False
 
     async def connect(self) -> None:
-        """heartbeat + track별 WebSocket 연결"""
-        await self._connect_heartbeat()
+        """healthcheck + track별 WebSocket 연결"""
+        await self._connect_healthcheck()
         await self._connect_tracks()
 
-    async def _connect_heartbeat(self) -> None:
+    async def _connect_healthcheck(self) -> None:
         if not self.enabled or websockets is None:
             return
-        if not self._is_closed(self.heartbeat_ws):
+        if not self._is_closed(self.healthcheck_ws):
             return
         try:
-            logger.info(f"Heartbeat Moth 연결 시작: {self.heartbeat_url}")
-            self.heartbeat_ws = await websockets.connect(
-                self.heartbeat_url, ping_interval=30, ping_timeout=10
+            logger.info(f"Healthcheck Moth 연결 시작: {self.healthcheck_url}")
+            self.healthcheck_ws = await websockets.connect(
+                self.healthcheck_url, ping_interval=30, ping_timeout=10
             )
-            self.heartbeat_connected = True
-            logger.info(f"Heartbeat Moth 연결 성공: {self.heartbeat_url}")
+            self.healthcheck_connected = True
+            logger.info(f"Healthcheck Moth 연결 성공: {self.healthcheck_url}")
         except Exception as e:
-            logger.error(f"Heartbeat Moth 연결 실패: {e}")
-            self.heartbeat_connected = False
-            self.heartbeat_ws = None
+            logger.error(f"Healthcheck Moth 연결 실패: {e}")
+            self.healthcheck_connected = False
+            self.healthcheck_ws = None
 
     async def _connect_tracks(self) -> None:
         """각 track type별 pub WebSocket 연결"""
@@ -199,53 +199,54 @@ class MothPublisher:
         interval = self.moth_config.get("reconnect_interval_seconds", 5)
         while True:
             try:
-                if self._is_closed(self.heartbeat_ws):
-                    await self._connect_heartbeat()
+                if self._is_closed(self.healthcheck_ws):
+                    await self._connect_healthcheck()
                 # Track별 재연결
                 await self._connect_tracks()
             except Exception as e:
                 logger.warning(f"재연결 루프 오류: {e}")
             await asyncio.sleep(interval)
 
-    # ── Heartbeat 발행 (MEB) ─────────────────────────────────────────────────
+    # ── Healthcheck 발행 (MEB) ───────────────────────────────────────────────
 
-    async def heartbeat_loop(self) -> None:
-        interval = self.config.get("registry", {}).get("heartbeat_interval_seconds", 1)
-        logger.info(f"Heartbeat loop 시작: interval={interval}초")
+    async def healthcheck_loop(self) -> None:
+        interval = self.config.get("registry", {}).get("healthcheck_interval_seconds",
+                                                        1)
+        logger.info(f"Healthcheck loop 시작: interval={interval}초")
         while True:
             await asyncio.sleep(interval)
             try:
-                await self.publish_heartbeat()
+                await self.publish_healthcheck()
             except Exception as e:
-                logger.warning(f"Heartbeat loop 오류: {e}")
+                logger.warning(f"Healthcheck loop 오류: {e}")
 
-    async def publish_heartbeat(self) -> None:
-        payload = self._heartbeat_payload()
+    async def publish_healthcheck(self) -> None:
+        payload = self._healthcheck_payload()
         payload["route_mode"] = self._determine_route_mode()
-        await self.publish_heartbeat_payload(payload)
+        await self.publish_healthcheck_payload(payload)
         if payload["route_mode"] == "via_parent" and self.state.parent_endpoint:
-            self._send_heartbeat_to_parent(payload)
+            self._send_healthcheck_to_parent(payload)
 
-    async def publish_heartbeat_payload(self, payload: dict[str, Any]) -> None:
-        if not self.heartbeat_connected or self._is_closed(self.heartbeat_ws):
-            logger.warning("Heartbeat 발행 불가: MEB 미연결")
+    async def publish_healthcheck_payload(self, payload: dict[str, Any]) -> None:
+        if not self.healthcheck_connected or self._is_closed(self.healthcheck_ws):
+            logger.warning("Healthcheck 발행 불가: MEB 미연결")
             return
         try:
             msg = json.dumps({
                 "type": "publish",
-                "channel": HEARTBEAT_CHANNEL,
+                "channel": HEALTHCHECK_CHANNEL,
                 "payload": payload,
             })
-            await self.heartbeat_ws.send(msg)
+            await self.healthcheck_ws.send(msg)
             logger.info(
-                f"Heartbeat 발행 완료: device_id={payload.get('device_id')}, "
-                f"url={self.heartbeat_url}"
+                f"Healthcheck 발행 완료: device_id={payload.get('device_id')}, "
+                f"url={self.healthcheck_url}"
             )
         except Exception as e:
-            logger.error(f"Heartbeat 발행 실패: {e}")
-            self.heartbeat_connected = False
+            logger.error(f"Healthcheck 발행 실패: {e}")
+            self.healthcheck_connected = False
 
-    def _heartbeat_payload(self) -> dict[str, Any]:
+    def _healthcheck_payload(self) -> dict[str, Any]:
         hb: dict[str, Any] = {
             "device_id": self.state.registry_id,
             "agent_id": self.state.agent_id,
@@ -284,17 +285,17 @@ class MothPublisher:
             return "via_parent"
         return self.state.route_mode
 
-    def _send_heartbeat_to_parent(self, payload: dict[str, Any]) -> None:
+    def _send_healthcheck_to_parent(self, payload: dict[str, Any]) -> None:
         try:
             req = urllib.request.Request(
-                f"{self.state.parent_endpoint.rstrip('/')}/children/heartbeat",
+                f"{self.state.parent_endpoint.rstrip('/')}/children/healthcheck",
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=0.5).close()
         except Exception as e:
-            logger.debug(f"Parent heartbeat relay 실패: {e}")
+            logger.debug(f"Parent healthcheck relay 실패: {e}")
 
     # ── Telemetry 발행 (pub) ─────────────────────────────────────────────────
 
@@ -433,4 +434,4 @@ class MothPublisher:
 
     @property
     def is_connected(self) -> bool:
-        return self.heartbeat_connected or any(self.track_connected.values())
+        return self.healthcheck_connected or any(self.track_connected.values())

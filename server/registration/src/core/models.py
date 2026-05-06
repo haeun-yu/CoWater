@@ -70,10 +70,10 @@ def as_pub_track_endpoint(endpoint: str) -> str:
     return endpoint.replace("/pang/ws/sub", "/pang/ws/pub")
 
 
-def build_heartbeat_endpoint(device_id: int) -> str:
+def build_healthcheck_endpoint(device_id: int) -> str:
     return (
         "/pang/ws/meb"
-        "?channel=instant&name=heartbeat&source=base&track=base"
+        "?channel=instant&name=healthcheck&source=base&track=base"
     )
 
 
@@ -335,9 +335,9 @@ class DeviceRecord:
     parent_id: Optional[int] = None
     last_location_update: Optional[str] = None
     last_error: Optional[str] = None
-    # ← NEW: Moth topics for telemetry & heartbeat
-    heartbeat_topic: Optional[str] = None
-    heartbeat_endpoint: Optional[str] = None
+    # ← NEW: Moth topics for telemetry & healthcheck
+    healthcheck_topic: Optional[str] = None
+    healthcheck_endpoint: Optional[str] = None
     telemetry_topics: List[Dict[str, str]] = field(default_factory=list)
     # ← NEW: AUV submersion state & connectivity constraints
     is_submerged: bool = False  # AUV 수중 여부
@@ -376,8 +376,8 @@ class DeviceRecord:
             "parent_id": self.parent_id,
             "last_location_update": self.last_location_update,
             # ← NEW: Moth topics
-            "heartbeat_topic": self.heartbeat_topic,
-            "heartbeat_endpoint": self.heartbeat_endpoint,
+            "healthcheck_topic": self.healthcheck_topic,
+            "healthcheck_endpoint": self.healthcheck_endpoint,
             "telemetry_topics": self.telemetry_topics,
             # ← NEW: AUV submersion state
             "is_submerged": self.is_submerged,
@@ -426,7 +426,7 @@ class MainVideoTrackRequest(BaseModel):
     name: str
 
 
-# ← NEW: Heartbeat & Topic Models
+# ← NEW: Healthcheck & Topic Models
 class TelemetryTopicInfo(BaseModel):
     track_type: str
     track_name: str
@@ -441,13 +441,13 @@ class DeviceRegistrationResponse(BaseModel):
     parent_id: Optional[int] = None
     parent_endpoint: Optional[str] = None
     parent_command_endpoint: Optional[str] = None
-    heartbeat_topic: str
+    healthcheck_topic: str
     telemetry_topics: List[TelemetryTopicInfo] = Field(default_factory=list)
     registered_at: str
     last_seen_at: str
 
 
-class HeartbeatUpdate(BaseModel):
+class HealthcheckUpdate(BaseModel):
     device_id: int
     agent_id: str
     layer: str
@@ -555,8 +555,8 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         last_battery_update=data.get("last_battery_update"),
         parent_id=data.get("parent_id"),
         last_location_update=data.get("last_location_update"),
-        heartbeat_topic=data.get("heartbeat_topic"),
-        heartbeat_endpoint=data.get("heartbeat_endpoint"),
+        healthcheck_topic=data.get("healthcheck_topic") or data.get("healthcheck_topic"),
+        healthcheck_endpoint=data.get("healthcheck_endpoint") or data.get("healthcheck_endpoint"),
         telemetry_topics=list(data.get("telemetry_topics") or []),
         is_submerged=bool(data.get("is_submerged", False)),
         submerged_at=data.get("submerged_at"),

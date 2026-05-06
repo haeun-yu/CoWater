@@ -15,6 +15,7 @@ import importlib
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -102,7 +103,7 @@ class AgentRuntime:
         CommandExecutor = getattr(_cmd_mod, "CommandExecutor")
         self.command_controller = CommandController(CommandExecutor())
 
-        # Moth WebSocket 발행자: Heartbeat 및 Telemetry 발행
+        # Moth WebSocket 발행자: Healthcheck 및 Telemetry 발행
         self.moth_publisher = MothPublisher(self.config, self.state)
 
         # 동적 Tool 로드: tools/ 디렉토리에서 센서/제어 클래스 자동 로드
@@ -174,12 +175,12 @@ class AgentRuntime:
                 return
             except Exception as exc:
                 # 서버가 일시적으로 내려가 있어도 로컬 캐시로 Moth 초기화 가능
-                if self.identity.get("tracks") or self.identity.get("heartbeat_topic"):
+                if self.identity.get("tracks") or self.identity.get("healthcheck_topic"):
                     self._registration_response = {
                         "id": self.state.registry_id,
                         "token": self.state.token,
                         "tracks": self.identity.get("tracks", []),
-                        "heartbeat_topic": self.identity.get("heartbeat_topic"),
+                        "healthcheck_topic": self.identity.get("healthcheck_topic"),
                         "telemetry_topics": self.identity.get("telemetry_topics", []),
                     }
                     self.state.connected = False
@@ -213,7 +214,7 @@ class AgentRuntime:
                 "token": self.state.token,
                 "registered_at": self.state.registered_at,
                 "tracks": created.get("tracks", []),
-                "heartbeat_topic": created.get("heartbeat_topic"),
+                "healthcheck_topic": created.get("healthcheck_topic"),
                 "telemetry_topics": created.get("telemetry_topics", []),
             }
         )
@@ -238,7 +239,7 @@ class AgentRuntime:
                 "token": self.state.token,
                 "registered_at": self.state.registered_at,
                 "tracks": self._registration_response.get("tracks", self.identity.get("tracks", [])),
-                "heartbeat_topic": self._registration_response.get("heartbeat_topic", self.identity.get("heartbeat_topic")),
+                "healthcheck_topic": self._registration_response.get("healthcheck_topic", self.identity.get("healthcheck_topic")),
                 "telemetry_topics": self._registration_response.get("telemetry_topics", self.identity.get("telemetry_topics", [])),
             }
         )
@@ -296,18 +297,18 @@ class AgentRuntime:
         이를 통해 realistic feedback loop 형성:
         Simulator → Tools ↔ Decision → Tools → Telemetry → Moth
 
-        System Layer (POC 06)인 경우는 heartbeat만 발송
+        System Layer (POC 06)인 경우는 healthcheck만 발송
         """
         try:
             if self.state.layer == "system":
-                # System layer: heartbeat만, telemetry는 발송하지 않음
-                asyncio.create_task(self.moth_publisher.heartbeat_loop())
+                # System layer: healthcheck만, telemetry는 발송하지 않음
+                asyncio.create_task(self.moth_publisher.healthcheck_loop())
                 return
 
             # ===== Moth 연결 초기화 =====
             # 1. Registration response에서 topics 초기화
             # 2. WebSocket 연결
-            # 3. 자동 재연결 loop, 주기적 heartbeat 시작
+            # 3. 자동 재연결 loop, 주기적 healthcheck 시작
             logger.info(f"Simulation loop 시작: registry_id={self.state.registry_id}")
 
             if hasattr(self, '_registration_response') and self._registration_response:
@@ -322,7 +323,7 @@ class AgentRuntime:
                 logger.warning("Moth connection failed")
 
             asyncio.create_task(self.moth_publisher._reconnect_loop())
-            asyncio.create_task(self.moth_publisher.heartbeat_loop())
+            asyncio.create_task(self.moth_publisher.healthcheck_loop())
 
             # ===== 메인 simulation loop =====
             while True:
@@ -346,9 +347,14 @@ class AgentRuntime:
                 # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
                 self._update_tools_from_telemetry(telemetry)
 
-                # 3️⃣ 의사결정 (Rule 기반 + 비동기 LLM)
-                decision = self.decision_engine.decide(self.state, telemetry)
+                # 3️⃣ 의사결정 (LLM-primary, critical rule override)
+                context = self._build_decision_context(telemetry)
+                decision = self.decision_engine.decide(self.state, telemetry, context)
                 self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
+
+                # 3-b️⃣ Critical rule 발동 시 서버 alert registry에 전송
+                if decision.get("mode") == "critical_rule":
+                    self._post_critical_alert(decision, telemetry)
 
                 # 4️⃣ [ENHANCED] Decision 권장사항을 Tools에 적용
                 # 의사결정 결과가 실제로 motor_control 등에 반영됨
@@ -397,13 +403,22 @@ class AgentRuntime:
         if "imu_reader" in self.tools and "motion" in telemetry:
             motion = telemetry["motion"]
             if isinstance(motion, dict):
-                # Telemetry의 heading을 IMU reader에 반영
                 heading = motion.get("heading") or telemetry.get("navigation", {}).get("cog", 0.0)
                 self.tools["imu_reader"].set_orientation(
                     roll=motion.get("roll", 0.0),
                     pitch=motion.get("pitch", 0.0),
                     yaw=float(heading),
                 )
+
+        # ===== 장애물 시뮬레이션 (USV/표층) =====
+        # 5% 확률로 10~80m 거리에 장애물 발생, 이후 서서히 소거
+        if "obstacle_detector" in self.tools:
+            detector = self.tools["obstacle_detector"]
+            detector.clear()
+            if random.random() < 0.05:
+                distance = round(random.uniform(10.0, 80.0), 1)
+                bearing = round(random.uniform(0.0, 360.0), 1)
+                detector.add_obstacle(distance, bearing)
 
     def _apply_decision_to_tools(self, decision: dict[str, Any]) -> None:
         """
@@ -442,6 +457,61 @@ class AgentRuntime:
             elif action == "return_to_base" and "motor_control" in self.tools:
                 # 기지 복귀: 최대 전진 thrust
                 self.tools["motor_control"].set_thrust(1.0, 0.0)
+
+    def _post_critical_alert(self, decision: dict[str, Any], telemetry: dict[str, Any]) -> None:
+        """Critical rule 발동 시 서버 alert registry에 비동기 전송 (non-blocking)"""
+        try:
+            rec = (decision.get("recommendations") or [{}])[0]
+            reason = rec.get("params", {}).get("reason", "critical_rule")
+            self.registry_client.ingest_alert({
+                "source_system": "device_agent",
+                "event_id": f"critical-{uuid4().hex[:8]}",
+                "source_agent_id": self.state.agent_id,
+                "source_role": self.state.role,
+                "alert_type": reason,
+                "severity": "CRITICAL",
+                "message": (
+                    f"[{self.state.device_type}] {self.state.name}: "
+                    f"{reason} — action={rec.get('action')}, "
+                    f"battery={telemetry.get('battery_percent', '?')}%"
+                ),
+                "recommended_action": rec.get("action"),
+                "auto_remediated": True,
+                "metadata": {
+                    "device_id": self.state.registry_id,
+                    "device_type": self.state.device_type,
+                    "layer": self.state.layer,
+                    "params": rec.get("params", {}),
+                    "location": telemetry.get("position", {}),
+                },
+            })
+        except Exception as e:
+            logger.debug(f"Critical alert 전송 실패: {e}")
+
+    def _build_decision_context(self, telemetry: dict[str, Any]) -> dict[str, Any]:
+        """
+        Tool 읽기값을 모아 decision engine에 전달할 context 구성.
+        telemetry에 없는 상세 센서 데이터(장애물, 항로 진행률, 자세, 테더 등)를 포함합니다.
+        """
+        ctx: dict[str, Any] = {}
+        tool_reads = {
+            "obstacles":      ("obstacle_detector", "detect"),
+            "route":          ("route_planner",     "get_current_route"),
+            "attitude":       ("imu_reader",        "read"),
+            "battery_detail": ("battery_monitor",   "read"),
+            "gps":            ("gps_reader",        "read"),
+            "acoustic":       ("acoustic_modem",    "get_link_status"),
+            "depth_detail":   ("depth_sensor",      "read"),
+            "tether":         ("tether_monitor",    "read"),
+        }
+        for key, (tool_name, method_name) in tool_reads.items():
+            tool = self.tools.get(tool_name)
+            if tool and hasattr(tool, method_name):
+                try:
+                    ctx[key] = getattr(tool, method_name)()
+                except Exception:
+                    pass
+        return ctx
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)

@@ -157,7 +157,8 @@ class AgentRuntime:
 
     async def _registry_keepalive_loop(self) -> None:
         """System Agent는 Registry keepalive로 last_seen_at을 갱신한다."""
-        interval = max(1, int(self.config.get("registry", {}).get("heartbeat_interval_seconds", 1)))
+        interval = max(1, int(self.config.get("registry", {}).get("healthcheck_interval_seconds",
+                                       1)))
         logger = logging.getLogger(__name__)
 
         while True:
@@ -239,11 +240,29 @@ class AgentRuntime:
 
     async def _process_alert(self, alert: dict[str, Any], devices: list[dict[str, Any]], logger: Any) -> dict[str, Any]:
         """단일 alert를 승인/응답/전파까지 처리한다."""
+        # Critical 긴급 상황 — LLM 없이 즉각 에스컬레이션
+        if self.decision_engine.is_critical_urgent(alert):
+            critical = self.decision_engine.critical_response(alert)
+            self.state.remember({"kind": "alert_critical_urgent", "at": utc_now(), "alert": alert.get("alert_type"), "decision": critical})
+            logger.warning(f"CRITICAL URGENT alert: {alert.get('alert_type')} — 즉각 에스컬레이션")
+            # 서버 승인 후 종료 (미션 빌드 없음)
+            try:
+                self.registry_client.acknowledge_alert(str(alert.get("alert_id")), approved=True, notes="Critical urgent — auto escalated")
+            except Exception:
+                pass
+            return critical
+
         async with self._mission_lock:
             alert_id = alert.get("alert_id")
             decision = self.decision_engine.decide(self.state, alert)
+
+            # LLM으로 fleet 컨텍스트 기반 분석 (critical이 아닌 모든 alert)
+            llm_hint = await self.decision_engine.analyze_alert(alert, devices, self.state)
+            if llm_hint:
+                decision["llm_analysis"] = llm_hint
+
             self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
-            logger.info(f"Alert {alert_id} decision: {decision}")
+            logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={bool(llm_hint)}")
 
             response = {
                 "response_id": str(uuid4()),
@@ -256,7 +275,7 @@ class AgentRuntime:
             }
             alert_type = alert.get("alert_type")
             metadata = alert.get("metadata", {})
-            mission_steps = self._build_mission_steps(alert, devices)
+            mission_steps = self._build_mission_steps(alert, devices, llm_hint=llm_hint)
             dispatch_result = self._build_dispatch_result_from_steps(mission_steps)
             response["params"] = {
                 "location": metadata.get("location", {}),
@@ -431,15 +450,24 @@ class AgentRuntime:
                 self._waiting_queue.pop(response_id, None)
             self.registry_client.ingest_response(response)
 
-    def _build_mission_steps(self, alert: dict[str, Any], devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _build_mission_steps(
+        self,
+        alert: dict[str, Any],
+        devices: list[dict[str, Any]],
+        llm_hint: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         alert_type = str(alert.get("alert_type") or "")
         metadata = dict(alert.get("metadata") or {})
         location = metadata.get("location") or {}
         task_param_overrides = metadata.get("task_param_overrides") or {}
         if not isinstance(task_param_overrides, dict):
             task_param_overrides = {}
+
+        preferred_survey = str(llm_hint.get("preferred_survey_device_id") or "") if llm_hint else ""
+        preferred_remove = str(llm_hint.get("preferred_remove_device_id") or "") if llm_hint else ""
+
         if alert_type != "mine_detection":
-            target = self._select_best_device(devices, "survey_depth", location)
+            target = self._select_best_device(devices, "survey_depth", location, preferred_id=preferred_survey or None)
             if not target:
                 return []
             return [
@@ -459,8 +487,8 @@ class AgentRuntime:
                 )
             ]
 
-        survey_target = self._select_best_device(devices, "survey_depth", location)
-        remove_target = self._select_best_device(devices, "remove_mine", location)
+        survey_target = self._select_best_device(devices, "survey_depth", location, preferred_id=preferred_survey or None)
+        remove_target = self._select_best_device(devices, "remove_mine", location, preferred_id=preferred_remove or None)
         steps: list[dict[str, Any]] = []
         if survey_target:
             steps.append(
@@ -816,6 +844,7 @@ class AgentRuntime:
         action: str,
         location: dict[str, Any],
         exclude_ids: set[int] | None = None,
+        preferred_id: str | None = None,
     ) -> dict[str, Any] | None:
         excluded = exclude_ids or set()
         candidates = [
@@ -829,6 +858,15 @@ class AgentRuntime:
         ]
         if not candidates:
             return None
+
+        # LLM이 추천한 디바이스가 있으면 우선 사용
+        if preferred_id:
+            preferred = next(
+                (d for d in candidates if str(d.get("id") or "") == preferred_id),
+                None,
+            )
+            if preferred:
+                return preferred
 
         def rank(device: dict[str, Any]) -> tuple[float, int]:
             return (
@@ -1360,6 +1398,41 @@ class AgentRuntime:
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
+
+    async def handle_command_with_llm(self, command: dict[str, Any]) -> dict[str, Any]:
+        """사용자 명령을 LLM으로 해석한 뒤 실행. LLM 불가 시 직접 실행."""
+        logger = logging.getLogger(__name__)
+        try:
+            devices = self.registry_client.list_devices()
+        except Exception:
+            devices = []
+
+        llm_result = await self.decision_engine.analyze_command(command, devices, self.state)
+
+        if llm_result:
+            self.state.remember({
+                "kind": "command_llm_interpreted",
+                "at": utc_now(),
+                "original": command,
+                "llm": llm_result,
+            })
+            logger.info(f"명령 LLM 해석: {llm_result.get('reasoning', '')[:80]}")
+            # LLM이 해석한 action으로 command를 재구성
+            resolved = {
+                "action": llm_result.get("action") or command.get("action"),
+                "params": {
+                    **command.get("params", {}),
+                    **(llm_result.get("params") or {}),
+                    "target_device_id": llm_result.get("target_device_id"),
+                    "llm_reasoning": llm_result.get("reasoning"),
+                },
+                "reason": command.get("reason") or "user command via LLM",
+                "priority": command.get("priority", "normal"),
+            }
+        else:
+            resolved = command
+
+        return self.command_controller.apply(self.state, resolved)
 
     def classify_event_severity(self, event: dict[str, Any]) -> str:
         raw = str(event.get("severity") or "").strip().upper()

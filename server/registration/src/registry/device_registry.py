@@ -17,14 +17,14 @@ from src.core.models import (
     TrackRecord,
     build_agent_command_endpoint,
     build_agent_endpoint,
-    build_heartbeat_endpoint,
+    build_healthcheck_endpoint,
     build_track_endpoint,
     device_record_from_dict,
     resolve_default_main_video_track_name,
     utc_now_iso,
 )
 from src.registry.device_database import DeviceDatabase
-from src.registry.heartbeat_monitor import HeartbeatMonitor
+from src.registry.healthcheck_monitor import HealthcheckMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +43,9 @@ class DeviceRegistry:
         agent_path_prefix: str,
         agent_command_scheme: str,
         agent_command_path_prefix: str,
-        heartbeat_interval_seconds: int = 1,
-        heartbeat_timeout_seconds: int = 3,
-        heartbeat_topic_template: str = "device.heartbeat",
+        healthcheck_interval_seconds: int = 1,
+        healthcheck_timeout_seconds: int = 3,
+        healthcheck_topic_template: str = "device.healthcheck",
         telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
         db_path: Optional[Path] = None,
     ) -> None:
@@ -59,12 +59,12 @@ class DeviceRegistry:
             "command_scheme": agent_command_scheme,
             "command_path_prefix": agent_command_path_prefix,
         }
-        self._heartbeat_topic_template = heartbeat_topic_template
+        self._healthcheck_topic_template = healthcheck_topic_template
         self._telemetry_topic_template = telemetry_topic_template
-        self.heartbeat_monitor = HeartbeatMonitor(
+        self.healthcheck_monitor = HealthcheckMonitor(
             registry=self,
-            interval_seconds=heartbeat_interval_seconds,
-            timeout_seconds=heartbeat_timeout_seconds,
+            interval_seconds=healthcheck_interval_seconds,
+            timeout_seconds=healthcheck_timeout_seconds,
         )
 
         # SQLite 영구 저장소
@@ -87,8 +87,8 @@ class DeviceRegistry:
                 # 재시작 후 연결 상태는 offline으로 초기화
                 device.connected = False
                 device.agent.connected = False
-                normalized_heartbeat_topic = "device.heartbeat"
-                normalized_heartbeat_endpoint = build_heartbeat_endpoint(device.id)
+                normalized_healthcheck_topic = "device.healthcheck"
+                normalized_healthcheck_endpoint = build_healthcheck_endpoint(device.id)
                 public_id_changed = False
                 if not getattr(device, "public_id", None):
                     device.public_id = f"id-{uuid4().hex[:12]}"
@@ -96,11 +96,11 @@ class DeviceRegistry:
 
                 if (
                     public_id_changed
-                    or device.heartbeat_topic != normalized_heartbeat_topic
-                    or device.heartbeat_endpoint != normalized_heartbeat_endpoint
+                    or device.healthcheck_topic != normalized_healthcheck_topic
+                    or device.healthcheck_endpoint != normalized_healthcheck_endpoint
                 ):
-                    device.heartbeat_topic = normalized_heartbeat_topic
-                    device.heartbeat_endpoint = normalized_heartbeat_endpoint
+                    device.healthcheck_topic = normalized_healthcheck_topic
+                    device.healthcheck_endpoint = normalized_healthcheck_endpoint
                     self._persist_device(device)
                 self._devices[device_id] = device
             except Exception as e:
@@ -219,9 +219,9 @@ class DeviceRegistry:
         if request.location and isinstance(request.location, dict):
             altitude = request.location.get("altitude")
 
-        # Moth topics 생성 (템플릿 사용) 및 heartbeat endpoint
-        heartbeat_topic = self._heartbeat_topic_template.format(device_id=device_id)
-        heartbeat_endpoint = build_heartbeat_endpoint(device_id)
+        # Moth topics 생성 (템플릿 사용) 및 healthcheck endpoint
+        healthcheck_topic = self._healthcheck_topic_template.format(device_id=device_id)
+        healthcheck_endpoint = build_healthcheck_endpoint(device_id)
         telemetry_topics = [
             {
                 "track_type": track.type,
@@ -261,8 +261,8 @@ class DeviceRegistry:
             longitude=longitude,
             parent_id=request.parent_id,
             last_location_update=now if (latitude is not None or longitude is not None) else None,
-            heartbeat_topic=heartbeat_topic,
-            heartbeat_endpoint=heartbeat_endpoint,
+            healthcheck_topic=healthcheck_topic,
+            healthcheck_endpoint=healthcheck_endpoint,
             telemetry_topics=telemetry_topics,
             is_submerged=bool(request.device_type == "AUV" and isinstance(altitude, (int, float)) and altitude < 0),
             force_parent_routing=bool(request.device_type == "ROV"),

@@ -98,14 +98,16 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     def children() -> dict[str, Any]:
         return {"children": list(runtime.state.children.values())}
 
-    @app.post("/children/heartbeat")
-    async def relay_child_heartbeat(payload: dict[str, Any]) -> dict[str, Any]:
+    @app.post("/children/healthcheck")
+    async def relay_child_healthcheck(payload: dict[str, Any]) -> dict[str, Any]:
         child_id = str(payload.get("agent_id") or payload.get("device_id"))
-        runtime.state.children.setdefault(child_id, {})["last_heartbeat_at"] = utc_now()
-        runtime.state.children[child_id]["heartbeat"] = payload
+        now = utc_now()
+        child_state = runtime.state.children.setdefault(child_id, {})
+        child_state["last_healthcheck_at"] = now
+        child_state["healthcheck"] = payload
         publisher = getattr(runtime, "moth_publisher", None)
         if publisher is not None:
-            await publisher.publish_heartbeat_payload(dict(payload, relayed_by=runtime.state.registry_id))
+            await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
         return {"relayed": True, "child": child_id}
 
     @app.get("/tasks")

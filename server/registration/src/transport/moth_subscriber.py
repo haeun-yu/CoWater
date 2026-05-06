@@ -1,9 +1,9 @@
 """
-Moth Heartbeat Subscriber: Device Registration Server 측 heartbeat 수신
+Moth Healthcheck Subscriber: Device Registration Server 측 healthcheck 수신
 
-Moth meb (broadcast) 채널을 통해 모든 디바이스의 heartbeat를 수신합니다:
-- device.heartbeat: 모든 디바이스의 하트비트를 통합 수신
-- Server는 heartbeat_monitor를 통해 device 상태 추적 (online/offline)
+Moth meb (broadcast) 채널을 통해 모든 디바이스의 healthcheck를 수신합니다:
+- device.healthcheck: 모든 디바이스 상태 신호를 통합 수신
+- 하위 호환: device.healthcheck 채널도 함께 구독
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 MOTH_HEALTHCHECK_PATH = "/pang/ws/meb"
-MOTH_HEALTHCHECK_QUERY = "channel=instant&name=heartbeat&source=base&track=base"
+MOTH_HEALTHCHECK_QUERY = "channel=instant&name=healthcheck&source=base&track=base"
 DEFAULT_MOTH_URL = f"wss://cobot.center:8287{MOTH_HEALTHCHECK_PATH}?{MOTH_HEALTHCHECK_QUERY}"
 
 
@@ -42,18 +42,18 @@ def _build_healthcheck_url(base_url: str, query: str = "") -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, MOTH_HEALTHCHECK_PATH, final_query, ""))
 
 
-class MothHeartbeatSubscriber:
+class MothHealthcheckSubscriber:
     """
-    Moth meb 채널을 구독하여 모든 디바이스의 heartbeat을 수신하고
-    HeartbeatMonitor를 통해 device 상태를 추적합니다.
+    Moth meb 채널을 구독하여 모든 디바이스의 healthcheck를 수신하고
+    HealthcheckMonitor를 통해 device 상태를 추적합니다.
     """
 
     def __init__(self, registry: DeviceRegistry, moth_server_url: str):
         """
-        Moth Heartbeat Subscriber 초기화
+        Moth Healthcheck Subscriber 초기화
 
         Args:
-            registry: DeviceRegistry (heartbeat_monitor 포함)
+            registry: DeviceRegistry (healthcheck_monitor 포함)
             moth_server_url: Moth 서버 URL (ws(s)://host:port 또는 전체 URL)
         """
         self.registry = registry
@@ -116,32 +116,39 @@ class MothHeartbeatSubscriber:
             self.is_connected = False
             raise
 
-    async def subscribe_heartbeat_meb(self) -> None:
+    async def subscribe_healthcheck_meb(self) -> None:
         """
-        Moth meb (broadcast) 채널에 heartbeat 구독
+        Moth meb (broadcast) 채널에 healthcheck 구독
 
-        meb 채널은 모든 디바이스의 heartbeat을 통합 수신하는 broadcast stream입니다.
-        각 디바이스가 자신의 heartbeat을 발행할 때, 이 구독이 모든 heartbeat을 수신합니다.
+        meb 채널은 모든 디바이스의 healthcheck를 통합 수신하는 broadcast stream입니다.
+        각 디바이스가 자신의 healthcheck를 발행할 때, 이 구독이 모든 상태 신호를 수신합니다.
         """
         if not self.is_connected or self.ws is None or self._ws_is_closed():
             logger.warning("Cannot subscribe: not connected to Moth")
             return
 
         try:
-            # meb 채널 구독 요청 (모든 heartbeat을 한 곳에서 수신)
+            # 기본: healthcheck 채널 구독
             subscribe_msg = {
                 "type": "subscribe",
-                "channel": "device.heartbeat",  # meb로 모든 heartbeat을 수신
+                "channel": "device.healthcheck",
                 "channel_type": "meb",
             }
             await self.ws.send(json.dumps(subscribe_msg))
-            logger.info("Moth meb 채널 구독 완료: device.heartbeat 채널")
+            # 하위 호환: legacy healthcheck 채널도 구독
+            legacy_subscribe_msg = {
+                "type": "subscribe",
+                "channel": "device.healthcheck",
+                "channel_type": "meb",
+            }
+            await self.ws.send(json.dumps(legacy_subscribe_msg))
+            logger.info("Moth meb 채널 구독 완료: device.healthcheck (+ legacy device.healthcheck)")
         except Exception as e:
             logger.error(f"meb 채널 구독 실패: {e}")
             self.is_connected = False
 
     async def _receive_loop(self) -> None:
-        """Moth로부터 heartbeat 메시지 수신 루프"""
+        """Moth로부터 healthcheck 메시지 수신 루프"""
         while self.is_running:
             if not self.is_connected or self.ws is None or self._ws_is_closed():
                 await asyncio.sleep(1)
@@ -179,7 +186,7 @@ class MothHeartbeatSubscriber:
         메시지 형식:
         {
             "type": "publish",
-            "channel": "device.heartbeat",
+            "channel": "device.healthcheck",
             "payload": {
                 "device_id": int,
                 "agent_id": str,
@@ -202,7 +209,7 @@ class MothHeartbeatSubscriber:
                 logger.debug(f"Non-publish message type: {msg_type}")
 
             if not isinstance(payload, dict) or not payload:
-                logger.debug(f"Ignored message without heartbeat payload: channel={channel}")
+                logger.debug(f"Ignored message without healthcheck payload: channel={channel}")
                 return
             device_id = payload.get("device_id")
             status = payload.get("status", "online")
@@ -211,11 +218,11 @@ class MothHeartbeatSubscriber:
             battery_percent = payload.get("battery_percent")
 
             if device_id is None:
-                logger.warning(f"Invalid heartbeat: device_id 없음 - {payload}")
+                logger.warning(f"Invalid healthcheck: device_id 없음 - {payload}")
                 return
 
-            # HeartbeatMonitor에 기록 (위치 정보 포함)
-            self.registry.heartbeat_monitor.record_heartbeat(
+            # Health monitor에 기록 (위치 정보 포함)
+            self.registry.healthcheck_monitor.record_healthcheck(
                 device_id,
                 status,
                 latitude,
@@ -223,7 +230,7 @@ class MothHeartbeatSubscriber:
                 battery_percent,
             )
             logger.debug(
-                "Heartbeat 기록: device_id=%s, status=%s, location=(%s, %s), battery=%s, channel=%s",
+                "Healthcheck 기록: device_id=%s, status=%s, location=(%s, %s), battery=%s, channel=%s",
                 device_id,
                 status,
                 latitude,
@@ -238,7 +245,7 @@ class MothHeartbeatSubscriber:
             logger.error(f"메시지 처리 오류: {e}")
 
     def _extract_payload(self, data: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
-        """Moth 구현 차이에 따른 래핑(data/payload)을 흡수해 heartbeat payload를 추출한다."""
+        """Moth 구현 차이에 따른 래핑(data/payload)을 흡수해 healthcheck payload를 추출한다."""
         channel = str(data.get("channel") or data.get("topic") or "")
         msg_type = str(data.get("type") or "")
         payload = data.get("payload")
@@ -270,7 +277,7 @@ class MothHeartbeatSubscriber:
                 if not self.is_connected or self.ws is None or self._ws_is_closed():
                     await self.connect()
                     if self.is_connected:
-                        await self.subscribe_heartbeat_meb()
+                        await self.subscribe_healthcheck_meb()
                 await asyncio.sleep(reconnect_interval)
             except Exception as e:
                 logger.debug(f"재연결 오류: {e}")
@@ -283,12 +290,12 @@ class MothHeartbeatSubscriber:
             return
 
         self.is_running = True
-        logger.info(f"MothHeartbeatSubscriber 시작: {self.moth_server_url}")
+        logger.info(f"MothHealthcheckSubscriber 시작: {self.moth_server_url}")
 
         # 초기 연결
         await self.connect()
         if self.is_connected:
-            await self.subscribe_heartbeat_meb()
+            await self.subscribe_healthcheck_meb()
 
         # 백그라운드 루프 시작
         asyncio.create_task(self._receive_loop())
@@ -303,4 +310,6 @@ class MothHeartbeatSubscriber:
                 await self.ws.close()
             except Exception as e:
                 logger.error(f"WebSocket 종료 오류: {e}")
-        logger.info("MothHeartbeatSubscriber 중지")
+        logger.info("MothHealthcheckSubscriber 중지")
+
+

@@ -867,13 +867,13 @@
         }
 
         function subscribeMothTelemetry() {
-            // heartbeat MEB 채널 구독 — 위치/배터리 실시간 업데이트
-            const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base`;
+            // healthcheck MEB 채널 구독 — 위치/배터리 실시간 업데이트
+            const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base`;
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                ws.send(JSON.stringify({ type: 'subscribe', channel: 'device.heartbeat', channel_type: 'meb' }));
-                console.log('[Moth] heartbeat MEB 구독 시작');
+                ws.send(JSON.stringify({ type: 'subscribe', channel: 'device.healthcheck', channel_type: 'meb' }));
+                console.log('[Moth] healthcheck MEB 구독 시작');
             };
 
             ws.onmessage = async (e) => {
@@ -892,10 +892,10 @@
 
                     applyRealtimePayloadToObject(obj, payload);
                     if (payload.route_mode !== undefined) obj.routeMode = payload.route_mode;
-                } catch (err) { console.error('[Moth] heartbeat 파싱 오류:', err); }
+                } catch (err) { console.error('[Moth] healthcheck 파싱 오류:', err); }
             };
 
-            ws.onerror = () => console.warn('[Moth] heartbeat MEB 연결 오류');
+            ws.onerror = () => console.warn('[Moth] healthcheck MEB 연결 오류');
             ws.onclose = () => setTimeout(subscribeMothTelemetry, 5000);
         }
 
@@ -1842,7 +1842,13 @@
                 sessionStorage.setItem('cowater.device.name', obj.name);
                 sessionStorage.setItem('cowater.device.type', obj.type);
                 sessionStorage.setItem('cowater.device.registryId', String(obj.registryId ?? obj.id));
-                window.open('device-detail.html', '_blank');
+                const params = new URLSearchParams({
+                    id: String(obj.id),
+                    name: String(obj.name || ''),
+                    type: String(obj.type || ''),
+                    registryId: String(obj.registryId ?? obj.id),
+                });
+                window.open(`device-detail.html?${params.toString()}`, '_blank');
             },
             renderStats: function() {
                 const types = { ship: 0, rov: 0, auv: 0, drone: 0, usv: 0, control_ship: 0 };

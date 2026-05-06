@@ -30,7 +30,7 @@ from src.core.models import (
 from src.registry.alert_registry import AlertRegistry
 from src.registry.device_registry import DeviceRegistry
 from src.registry.event_registry import EventRegistry
-from src.transport.moth_subscriber import MothHeartbeatSubscriber
+from src.transport.moth_subscriber import MothHealthcheckSubscriber
 
 
 logger = logging.getLogger(__name__)
@@ -47,15 +47,15 @@ registry = DeviceRegistry(
     agent_path_prefix=APP_SETTINGS["agent"]["path_prefix"],
     agent_command_scheme=APP_SETTINGS["agent"]["command_scheme"],
     agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
-    heartbeat_interval_seconds=APP_SETTINGS["heartbeat"]["interval_seconds"],
-    heartbeat_timeout_seconds=APP_SETTINGS["heartbeat"]["timeout_seconds"],
-    heartbeat_topic_template=APP_SETTINGS["moth"]["heartbeat_topic_template"],
+    healthcheck_interval_seconds=APP_SETTINGS["healthcheck"]["interval_seconds"],
+    healthcheck_timeout_seconds=APP_SETTINGS["healthcheck"]["timeout_seconds"],
+    healthcheck_topic_template=APP_SETTINGS["moth"]["healthcheck_topic_template"],
     telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
 )
 alert_registry = AlertRegistry()
 event_registry = EventRegistry()
 
-moth_subscriber = MothHeartbeatSubscriber(
+moth_subscriber = MothHealthcheckSubscriber(
     registry=registry,
     moth_server_url=APP_SETTINGS["moth"]["server_url"],
 )
@@ -75,14 +75,14 @@ async def startup_event() -> None:
     try:
         await moth_subscriber.start()
     except Exception as exc:
-        logger.warning("Moth 구독 시작 실패 - heartbeat monitor만으로 계속 기동합니다: %s", exc)
-    asyncio.create_task(registry.heartbeat_monitor.start())
+        logger.warning("Moth 구독 시작 실패 - healthcheck monitor만으로 계속 기동합니다: %s", exc)
+    asyncio.create_task(registry.healthcheck_monitor.start())
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """서버 종료 시 Moth 구독 중지"""
-    await registry.heartbeat_monitor.stop()
+    await registry.healthcheck_monitor.stop()
     await moth_subscriber.stop()
 
 
