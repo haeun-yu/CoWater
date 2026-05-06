@@ -124,11 +124,11 @@ def register_device(request: DeviceRegistrationRequest) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return device.to_dict()
+    return device.to_device_registration_dict()
 
 
 @app.get("/devices/{device_id}/assignment")
-def get_device_assignment(device_id: int) -> dict[str, Any]:
+def get_device_assignment(device_id: str) -> dict[str, Any]:
     try:
         return registry.assignment_for(device_id)
     except KeyError as exc:
@@ -141,7 +141,7 @@ def list_devices() -> List[dict[str, Any]]:
 
 
 @app.get("/devices/{device_id}")
-def get_device(device_id: int) -> dict[str, Any]:
+def get_device(device_id: str) -> dict[str, Any]:
     try:
         return registry.get_device(device_id).to_dict()
     except KeyError as exc:
@@ -149,7 +149,7 @@ def get_device(device_id: int) -> dict[str, Any]:
 
 
 @app.patch("/devices/{device_id}")
-def rename_device(device_id: int, request: DeviceRenameRequest) -> Response:
+def rename_device(device_id: str, request: DeviceRenameRequest) -> Response:
     try:
         registry.rename(device_id, request.name)
     except KeyError as exc:
@@ -160,7 +160,7 @@ def rename_device(device_id: int, request: DeviceRenameRequest) -> Response:
 
 
 @app.patch("/devices/{device_id}/main-video-track")
-def update_main_video_track(device_id: int, request: MainVideoTrackRequest) -> Response:
+def update_main_video_track(device_id: str, request: MainVideoTrackRequest) -> Response:
     try:
         registry.update_main_video_track(device_id, request.name)
     except KeyError as exc:
@@ -171,7 +171,7 @@ def update_main_video_track(device_id: int, request: MainVideoTrackRequest) -> R
 
 
 @app.delete("/devices/{device_id}")
-def delete_device(device_id: int) -> Response:
+def delete_device(device_id: str) -> Response:
     try:
         registry.delete(device_id)
     except KeyError as exc:
@@ -180,7 +180,7 @@ def delete_device(device_id: int) -> Response:
 
 
 @app.put("/devices/{device_id}/agent")
-def upsert_device_agent(device_id: int, request: DeviceAgentRegistrationRequest) -> dict[str, Any]:
+def upsert_device_agent(device_id: str, request: DeviceAgentRegistrationRequest) -> dict[str, Any]:
     try:
         device = registry.attach_agent(device_id, request)
     except PermissionError as exc:
@@ -193,7 +193,7 @@ def upsert_device_agent(device_id: int, request: DeviceAgentRegistrationRequest)
 
 
 @app.delete("/devices/{device_id}/agent")
-def detach_device_agent(device_id: int, secretKey: str) -> dict[str, Any]:
+def detach_device_agent(device_id: str, secretKey: str) -> dict[str, Any]:
     try:
         device = registry.detach_agent(device_id, secretKey)
     except PermissionError as exc:

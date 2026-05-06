@@ -216,7 +216,7 @@ function renderDashboardDevices(devices) {
               <h3 class="device-title">${escapeHtml(device.name)}</h3>
               <div class="device-meta">
                 ${statusBadge(device.connected)}
-                <span class="badge">id ${device.id}</span>
+                <span class="badge">id ${escapeHtml(device.id || "-")}</span>
                 <span class="badge">${escapeHtml(device.main_video_track_name || "-")}</span>
                 <span class="badge">${escapeHtml(device.agent?.endpoint || "no agent")}</span>
               </div>
@@ -291,7 +291,7 @@ function renderDevicesTable(devices, filterText = "") {
     .map(
       (device) => `
         <tr>
-          <td>${device.id}</td>
+          <td>${escapeHtml(device.id || "-")}</td>
           <td>
             <strong>${escapeHtml(device.name)}</strong><br>
             <span class="muted">${escapeHtml(device.token)}</span>
@@ -309,8 +309,8 @@ function renderDevicesTable(devices, filterText = "") {
             <span class="badge ${device.agent?.connected ? "ok" : "warn"}" style="margin-top:4px; display:inline-block;">${device.agent?.connected ? "agent connected" : "agent disconnected"}</span>
           </td>
           <td>
-            <a class="button" href="device.html?id=${device.id}">Manage</a>
-            <button class="button danger" data-delete-device="${device.id}">Delete</button>
+            <a class="button" href="device.html?id=${device.registry_id ?? device.id}">Manage</a>
+            <button class="button danger" data-delete-device="${device.registry_id ?? device.id}">Delete</button>
           </td>
         </tr>
       `,

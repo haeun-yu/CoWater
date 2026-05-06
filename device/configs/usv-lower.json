@@ -11,7 +11,7 @@
   },
   "agent": {
     "id": "usv-local-agent",
-    "name": "USV Local Agent",
+    "name": "작업용 USV",
     "role": "usv",
     "layer": "lower",
     "device_type": "USV",

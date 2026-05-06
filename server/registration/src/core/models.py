@@ -47,14 +47,26 @@ def normalize_track_name(name: str) -> str:
     return name.strip().lower()
 
 
-def build_track_endpoint(device_id: int, track_name: str, track_type: str) -> str:
+def build_track_endpoint(
+    device_id: int,
+    track_name: str,
+    track_type: str,
+    *,
+    mode: Literal["sub", "pub"] = "sub",
+) -> str:
     channel_name = f"device-{device_id}"
     normalized_track = normalize_track_name(track_name or track_type)
     return (
-        "/pang/ws/meb"
+        f"/pang/ws/{mode}"
         f"?channel=instant&name={quote(channel_name)}"
         f"&source=base&track={quote(normalized_track)}"
     )
+
+
+def as_pub_track_endpoint(endpoint: str) -> str:
+    if not endpoint:
+        return endpoint
+    return endpoint.replace("/pang/ws/sub", "/pang/ws/pub")
 
 
 def build_heartbeat_endpoint(device_id: int) -> str:
@@ -89,6 +101,11 @@ class TrackRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def to_device_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["endpoint"] = as_pub_track_endpoint(self.endpoint)
+        return payload
 
 
 @dataclass
@@ -295,6 +312,7 @@ class ResponseIngestRequest(BaseModel):
 @dataclass
 class DeviceRecord:
     id: int
+    public_id: str
     token: str
     name: str
     connected: bool
@@ -335,7 +353,7 @@ class DeviceRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "id": self.id,
+            "id": self.public_id,
             "token": self.token,
             "name": self.name,
             "connected": self.connected,
@@ -366,6 +384,11 @@ class DeviceRecord:
             "surfaced_at": self.surfaced_at,
             "force_parent_routing": self.force_parent_routing,
         }
+
+    def to_device_registration_dict(self) -> dict[str, Any]:
+        payload = self.to_dict()
+        payload["tracks"] = [track.to_device_dict() for track in self.tracks]
+        return payload
 
 
 class TrackInput(BaseModel):
@@ -410,7 +433,7 @@ class TelemetryTopicInfo(BaseModel):
 
 
 class DeviceRegistrationResponse(BaseModel):
-    id: int
+    id: str
     token: str
     agent_id: str
     name: str
@@ -489,8 +512,29 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         custom=list(actions_d.get("custom") or []),
     )
 
+    raw_id = data.get("id")
+    raw_registry_id = data.get("registry_id")
+
+    numeric_id = raw_registry_id if raw_registry_id is not None else raw_id
+    if numeric_id is None:
+        raise ValueError("device id is missing")
+
+    if isinstance(numeric_id, str):
+        if not numeric_id.isdigit():
+            raise ValueError("numeric registry_id is invalid")
+        numeric_id = int(numeric_id)
+
+    public_id_value = data.get("public_id")
+    if not public_id_value:
+        if isinstance(raw_id, str) and raw_id and not raw_id.isdigit():
+            public_id_value = raw_id
+        else:
+            public_id_value = f"id-{uuid4().hex[:12]}"
+    public_id_value = str(public_id_value)
+
     return DeviceRecord(
-        id=int(data["id"]),
+        id=int(numeric_id),
+        public_id=public_id_value,
         token=str(data["token"]),
         name=str(data["name"]),
         connected=bool(data.get("connected", False)),

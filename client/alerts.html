@@ -181,7 +181,7 @@
         <div class="brand-mark">⚠️</div>
         <div>
             <h1>CoWater 알림 관리</h1>
-            <p>00 서버 원장과 07 실시간 대시보드을 함께 관리합니다</p>
+            <p>Registry Server 원장과 실시간 대시보드를 함께 관리합니다</p>
         </div>
     </div>
     <div class="nav">
@@ -189,7 +189,7 @@
         <a href="alerts.html" class="active">경보 관리</a>
         <a href="javascript:void(0)" onclick="location.href='index.html'">메인으로</a>
         <button class="secondary" onclick="refreshAll()">새로고침</button>
-        <button class="secondary" onclick="promptRegistryUrl()">00 서버 변경</button>
+        <button class="secondary" onclick="promptRegistryUrl()">Registry 주소 변경</button>
     </div>
 </header>
 
@@ -198,11 +198,12 @@
         <div class="panel hero-main">
             <h2>운영 경보 원장</h2>
             <p>
-                00 서버의 알림 API를 기준으로 경보를 관리합니다. 07 실시간 대시보드에서 발생한 실시간 경보와
-                03에 저장된 원장 데이터를 함께 보여주며, 승인/반려 처리와 상세 확인을 이 페이지에서 수행합니다.
+                Registry Server의 알림 API를 기준으로 경보를 관리합니다.
+                실시간 대시보드에서 발생한 경보와 Registry에 저장된 원장 데이터를 함께 보여주며,
+                승인/반려 처리와 상세 확인을 이 페이지에서 수행합니다.
             </p>
             <div class="stats" style="margin-top:18px">
-                <div class="stat"><div class="label">전체 경보</div><div class="value" id="stat-total">0</div><div class="sub">03 + 실시간</div></div>
+                <div class="stat"><div class="label">전체 경보</div><div class="value" id="stat-total">0</div><div class="sub">Registry + 실시간</div></div>
                 <div class="stat"><div class="label">대기중</div><div class="value" id="stat-waiting">0</div><div class="sub">승인 전</div></div>
                 <div class="stat"><div class="label">승인/완료</div><div class="value" id="stat-done">0</div><div class="sub">처리 완료</div></div>
                 <div class="stat"><div class="label">심각 경보</div><div class="value" id="stat-critical">0</div><div class="sub">즉시 주의</div></div>
@@ -238,14 +239,14 @@
                 <label>검색어</label>
                 <input id="filter-query" type="text" placeholder="메시지 / 소스 / 대상 / 알림 ID 검색" oninput="renderAlerts()">
             </div>
-            <div class="footer-note">00 서버의 `/alerts`, `/alerts/{id}/ack`, `/responses` API를 사용합니다.</div>
+            <div class="footer-note">Registry Server의 <code>/alerts</code>, <code>/alerts/{id}/ack</code>, <code>/responses</code> API를 사용합니다.</div>
         </div>
     </section>
 
     <section class="content">
         <div class="panel section">
             <h3>알림 목록</h3>
-            <p class="small">03 원장과 07 실시간 대시보드을 합쳐서 최신순으로 보여줍니다.</p>
+            <p class="small">Registry 원장과 실시간 대시보드를 합쳐서 최신순으로 보여줍니다.</p>
             <div id="alerts-list" class="list"></div>
         </div>
 
@@ -269,19 +270,23 @@
 </div>
 
 <script>
-const DEFAULT_REGISTRY_URL = '9100';
+const DEFAULT_REGISTRY_URL = 'http://127.0.0.1:8280';
+const LOCAL_ALERTS_STORAGE_KEY = 'cowater.dashboard.localAlerts';
+const LOCAL_DEVICE_DIRECTORY_KEY = 'cowater.dashboard.deviceDirectory';
 const state = {
     registryUrl: localStorage.getItem('cowater.dashboard.registryUrl') || DEFAULT_REGISTRY_URL,
     registryAlerts: [],
     localAlerts: [],
     responses: [],
+    devices: [],
+    deviceDirectory: {},
     selectedAlertId: null,
     syncLog: []
 };
 
 function promptRegistryUrl() {
     const current = state.registryUrl;
-    const next = prompt('00 서버 주소', current);
+    const next = prompt('Registry Server 주소 (예: http://127.0.0.1:8280)', current);
     if (next && next.trim()) {
         state.registryUrl = next.trim();
         localStorage.setItem('cowater.dashboard.registryUrl', state.registryUrl);
@@ -295,35 +300,129 @@ function alertStatusLabel(status) {
         approved: '승인',
         rejected: '반려',
         planned: '계획됨',
+        queued: '대기열',
         remediating: '대응중',
         done: '완료',
+        completed: '완료',
         failed: '실패',
+        manual_intervention_required: '수동 개입 필요',
     };
     return map[status] || status || '-';
 }
 
+function responseStatusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'completed' || normalized === 'done') return 'ok';
+    if (normalized === 'failed') return 'critical';
+    if (normalized === 'manual_intervention_required') return 'warn';
+    return 'info';
+}
+
+function readLocalAlerts() {
+    try {
+        const raw = localStorage.getItem(LOCAL_ALERTS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn('local alert parse failed:', err);
+        return [];
+    }
+}
+
+function syncLocalAlertsFromStorage() {
+    state.localAlerts = readLocalAlerts();
+}
+
+function readDeviceDirectory() {
+    try {
+        const raw = localStorage.getItem(LOCAL_DEVICE_DIRECTORY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn('device directory parse failed:', err);
+        return [];
+    }
+}
+
+function buildDeviceDirectory(devices) {
+    const next = {};
+    devices.forEach((device) => {
+        if (!device || device.id === undefined || device.id === null) return;
+        const id = String(device.id);
+        const registryId = String(device.registry_id ?? '');
+        const entry = {
+            id,
+            registry_id: registryId,
+            name: device.name || `device-${id}`,
+            type: device.device_type || device.agent?.role || '-',
+            connected: device.connected !== false,
+        };
+        next[id] = entry;
+        if (registryId) next[registryId] = entry;
+    });
+    state.devices = devices;
+    state.deviceDirectory = next;
+}
+
+function syncDeviceDirectoryFromStorage() {
+    buildDeviceDirectory(readDeviceDirectory());
+}
+
+async function fetchDevices() {
+    try {
+        const resp = await fetch(`${state.registryUrl}/devices`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const devices = await resp.json();
+        if (Array.isArray(devices)) {
+            buildDeviceDirectory(devices);
+            localStorage.setItem(LOCAL_DEVICE_DIRECTORY_KEY, JSON.stringify(devices));
+            return devices;
+        }
+    } catch (err) {
+        syncDeviceDirectoryFromStorage();
+    }
+    return state.devices;
+}
+
+function resolveDevice(deviceRef) {
+    if (deviceRef === undefined || deviceRef === null || deviceRef === '') return null;
+    return state.deviceDirectory[String(deviceRef)] || null;
+}
+
+function formatDeviceRef(deviceRef, fallbackName) {
+    const device = resolveDevice(deviceRef);
+    if (device) {
+        const type = device.type && device.type !== '-' ? ` (${String(device.type).replace(/_/g, ' ')})` : '';
+        return `${device.name}${type}`;
+    }
+    return fallbackName || deviceRef || '-';
+}
+
 function severityClass(severity) {
-    if (severity === 'critical') return 'critical';
-    if (severity === 'warning') return 'warn';
+    const s = (severity || '').toUpperCase();
+    if (s === 'CRITICAL') return 'critical';
+    if (s === 'WARNING') return 'warn';
     return 'info';
 }
 
 function normalizeRegistryAlert(alert) {
     const createdAt = alert.created_at || alert.updated_at || new Date().toISOString();
     return {
-        source: '03',
         alert_id: alert.alert_id,
+        event_id: alert.event_id || null,
+        alert_type: alert.alert_type || alert.type || 'unknown',
         message: alert.message || alert.summary || '알림',
-        severity: alert.severity || 'info',
+        severity: alert.severity || 'INFORMATION',
         status: alert.status || 'waiting',
-        source_system: alert.source_system || 'system_center',
+        source_system: alert.source_system || 'control_center',
         source_role: alert.source_role || null,
         source_agent_id: alert.source_agent_id || null,
         target_agent_id: alert.target_agent_id || null,
+        target_display_name: alert.target_display_name || null,
         recommended_action: alert.recommended_action || null,
         requires_user_approval: !!alert.requires_user_approval,
         auto_remediated: !!alert.auto_remediated,
-        route_mode: alert.route_mode || 'direct',
+        route_mode: alert.route_mode || 'direct_to_system',
         metadata: alert.metadata || {},
         created_at: createdAt,
         updated_at: alert.updated_at || createdAt,
@@ -333,20 +432,25 @@ function normalizeRegistryAlert(alert) {
 function normalizeLocalAlert(alert) {
     const createdAt = alert.created_at || alert.updated_at || new Date().toISOString();
     return {
-        source: '04',
         alert_id: alert.alert_id || `local-${Date.now()}`,
+        event_id: alert.event_id || null,
+        alert_type: alert.alert_type || alert.type || 'unknown',
         message: alert.message || alert.summary || '알림',
-        severity: alert.severity || 'info',
+        severity: alert.severity || 'INFORMATION',
         status: alert.status || 'waiting',
         source_system: alert.source_system || 'realtime_dashboard',
         source_role: alert.source_role || null,
         source_agent_id: alert.source_agent_id || null,
-        target_agent_id: alert.target_agent_id || alert.deviceId || null,
+        target_agent_id: alert.target_agent_id || alert.platformId || alert.deviceId || null,
+        target_display_name: alert.target_display_name || null,
         recommended_action: alert.recommended_action || null,
         requires_user_approval: !!alert.requires_user_approval,
         auto_remediated: !!alert.auto_remediated,
-        route_mode: alert.route_mode || 'direct',
-        metadata: alert.metadata || {},
+        route_mode: alert.route_mode || 'dashboard_local',
+        metadata: {
+            ...(alert.metadata || {}),
+            dashboard_origin: alert.dashboard_origin || '3d_dashboard',
+        },
         created_at: createdAt,
         updated_at: alert.updated_at || createdAt,
     };
@@ -368,6 +472,8 @@ function filteredAlerts() {
             if (!query) return true;
             const haystack = [
                 alert.alert_id,
+                alert.event_id,
+                alert.alert_type,
                 alert.message,
                 alert.source_system,
                 alert.source_role,
@@ -393,7 +499,7 @@ function renderAlerts() {
                         <div class="item-title">${alert.message}</div>
                         <div class="item-meta">
                             ${new Date(alert.created_at).toLocaleString()}<br>
-                            출처: ${alert.source_system || '-'} · 대상: ${alert.target_agent_id || '-'}
+                            유형: ${alert.alert_type || '-'} · 출처: ${alert.source_system || '-'} · 대상: ${formatDeviceRef(alert.target_agent_id, alert.target_display_name)}
                         </div>
                     </div>
                     <span class="pill ${severityClass(alert.severity)}">${alert.severity || 'info'}</span>
@@ -421,8 +527,8 @@ function renderAlerts() {
 function updateStats(alerts) {
     const total = allAlerts().length;
     const waiting = allAlerts().filter(a => a.status === 'waiting' || a.status === 'planned').length;
-    const done = allAlerts().filter(a => ['approved','done','remediating'].includes(a.status)).length;
-    const critical = allAlerts().filter(a => a.severity === 'critical').length;
+    const done = allAlerts().filter(a => ['approved', 'done', 'completed', 'remediating'].includes(a.status)).length;
+    const critical = allAlerts().filter(a => (a.severity || '').toUpperCase() === 'CRITICAL').length;
     document.getElementById('stat-total').textContent = total;
     document.getElementById('stat-waiting').textContent = waiting;
     document.getElementById('stat-done').textContent = done;
@@ -450,10 +556,12 @@ function renderDetail() {
             </div>
             <div class="kv" style="margin-top:14px">
                 <div>상태</div><div>${alertStatusLabel(alert.status)}</div>
+                <div>알림 유형</div><div>${alert.alert_type || '-'}</div>
+                <div>이벤트 ID</div><div>${alert.event_id || '-'}</div>
                 <div>출처 시스템</div><div>${alert.source_system || '-'}</div>
                 <div>출처 역할</div><div>${alert.source_role || '-'}</div>
-                <div>출처 Agent</div><div>${alert.source_agent_id || '-'}</div>
-                <div>대상 Agent</div><div>${alert.target_agent_id || '-'}</div>
+                <div>출처 디바이스</div><div>${formatDeviceRef(alert.source_agent_id)}</div>
+                <div>대상 디바이스</div><div>${formatDeviceRef(alert.target_agent_id, alert.target_display_name)}</div>
                 <div>대응 방식</div><div>${alert.route_mode || '-'}</div>
                 <div>승인 필요</div><div>${alert.requires_user_approval ? '예' : '아니오'}</div>
                 <div>자동 대응</div><div>${alert.auto_remediated ? '예' : '아니오'}</div>
@@ -486,14 +594,16 @@ function renderDetail() {
             <div class="panel-box" style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;gap:10px;">
                     <strong>${resp.action}</strong>
-                    <span class="pill ${resp.status === 'failed' ? 'critical' : resp.status === 'done' ? 'ok' : 'info'}">${resp.status || 'planned'}</span>
+                    <span class="pill ${responseStatusClass(resp.status)}">${alertStatusLabel(resp.status || 'planned')}</span>
                 </div>
                 <div class="item-meta" style="margin-top:8px;">
-                    대상: ${resp.target_agent_id || '-'}<br>
+                    대상: ${formatDeviceRef(resp.target_agent_id)}<br>
                     경로: ${resp.route_mode || '-'}<br>
                     생성: ${new Date(resp.created_at).toLocaleString()}
                 </div>
+                ${resp.notes ? `<div style="margin-top:8px;color:#cbd5e1;">메모: ${resp.notes}</div>` : ''}
                 ${resp.reason ? `<div style="margin-top:8px;color:#cbd5e1;">${resp.reason}</div>` : ''}
+                ${resp.dispatch_result ? `<div style="margin-top:10px;"><pre>${JSON.stringify(resp.dispatch_result, null, 2)}</pre></div>` : ''}
             </div>
         `).join('')}
     `;
@@ -512,7 +622,7 @@ async function ackAlert(approved) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 approved,
-                notes: approved ? '04 alerts page에서 승인' : '04 alerts page에서 반려',
+                notes: approved ? '경보 관리 페이지에서 승인' : '경보 관리 페이지에서 반려',
             }),
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -526,6 +636,8 @@ async function ackAlert(approved) {
 }
 
 async function syncAlerts() {
+    syncLocalAlertsFromStorage();
+    await fetchDevices();
     try {
         const [alertsResp, responsesResp] = await Promise.all([
             fetch(`${state.registryUrl}/alerts`),
@@ -533,7 +645,7 @@ async function syncAlerts() {
         ]);
         if (alertsResp.ok) state.registryAlerts = await alertsResp.json(); else state.registryAlerts = [];
         if (responsesResp.ok) state.responses = await responsesResp.json(); else state.responses = [];
-        pushLog('00 서버 경보 동기화 완료');
+        pushLog('Registry 경보 동기화 완료');
     } catch (err) {
         pushLog(`동기화 실패: ${err.message}`, true);
         state.registryAlerts = [];
@@ -585,6 +697,19 @@ function pushLog(message, isError=false) {
 async function refreshAll() {
     await syncAlerts();
 }
+
+window.addEventListener('storage', (event) => {
+    if (event.key === LOCAL_ALERTS_STORAGE_KEY) {
+        syncLocalAlertsFromStorage();
+        renderAlerts();
+        renderDetail();
+    }
+    if (event.key === LOCAL_DEVICE_DIRECTORY_KEY) {
+        syncDeviceDirectoryFromStorage();
+        renderAlerts();
+        renderDetail();
+    }
+});
 
 document.getElementById('filter-query').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') renderAlerts();

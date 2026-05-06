@@ -81,13 +81,24 @@ class DeviceRegistry:
         rows = self._db.load_all()
         for device_id, data in rows.items():
             try:
+                if "registry_id" not in data:
+                    data["registry_id"] = device_id
                 device = device_record_from_dict(data)
                 # 재시작 후 연결 상태는 offline으로 초기화
                 device.connected = False
                 device.agent.connected = False
                 normalized_heartbeat_topic = "device.heartbeat"
                 normalized_heartbeat_endpoint = build_heartbeat_endpoint(device.id)
-                if device.heartbeat_topic != normalized_heartbeat_topic or device.heartbeat_endpoint != normalized_heartbeat_endpoint:
+                public_id_changed = False
+                if not getattr(device, "public_id", None):
+                    device.public_id = f"id-{uuid4().hex[:12]}"
+                    public_id_changed = True
+
+                if (
+                    public_id_changed
+                    or device.heartbeat_topic != normalized_heartbeat_topic
+                    or device.heartbeat_endpoint != normalized_heartbeat_endpoint
+                ):
                     device.heartbeat_topic = normalized_heartbeat_topic
                     device.heartbeat_endpoint = normalized_heartbeat_endpoint
                     self._persist_device(device)
@@ -122,8 +133,20 @@ class DeviceRegistry:
     def list_devices(self) -> List[DeviceRecord]:
         return [self._devices[device_id] for device_id in sorted(self._devices)]
 
-    def get_device(self, device_id: int) -> DeviceRecord:
-        device = self._devices.get(device_id)
+    def get_device(self, device_id: Any) -> DeviceRecord:
+        internal_id: Optional[int] = None
+
+        if isinstance(device_id, int):
+            internal_id = device_id
+        elif isinstance(device_id, str):
+            if device_id.isdigit() and int(device_id) in self._devices:
+                internal_id = int(device_id)
+            else:
+                for d in self._devices.values():
+                    if d.public_id == device_id:
+                        return d
+
+        device = self._devices.get(internal_id) if internal_id is not None else None
         if device is None:
             raise KeyError(device_id)
         return device
@@ -210,6 +233,7 @@ class DeviceRegistry:
 
         return DeviceRecord(
             id=device_id,
+            public_id=f"id-{uuid4().hex[:12]}",
             token=token,
             name=device_name,
             connected=False,
@@ -305,7 +329,7 @@ class DeviceRegistry:
             },
         }
 
-    def assignment_for(self, device_id: int) -> dict[str, Any]:
+    def assignment_for(self, device_id: Any) -> dict[str, Any]:
         return self._routing_assignment(self.get_device(device_id))
 
     def notify_assignment(self, assignment: dict[str, Any]) -> None:
@@ -390,19 +414,19 @@ class DeviceRegistry:
             self._refresh_lower_assignments()
         return device
 
-    def rename(self, device_id: int, name: str) -> DeviceRecord:
+    def rename(self, device_id: Any, name: str) -> DeviceRecord:
         device = self.get_device(device_id)
         normalized_name = name.strip()
         if not normalized_name:
             raise ValueError("device name must not be empty")
-        if self._name_exists(normalized_name, exclude_id=device_id):
+        if self._name_exists(normalized_name, exclude_id=device.id):
             raise ValueError("device name already exists")
         device.name = normalized_name
         device.updated_at = utc_now_iso()
         self._persist_device(device)
         return device
 
-    def update_main_video_track(self, device_id: int, track_name: str) -> DeviceRecord:
+    def update_main_video_track(self, device_id: Any, track_name: str) -> DeviceRecord:
         device = self.get_device(device_id)
         normalized_name = track_name.strip()
         if not normalized_name:
@@ -416,13 +440,12 @@ class DeviceRegistry:
                 return device
         raise ValueError("specified track does not exist")
 
-    def delete(self, device_id: int) -> None:
-        if device_id not in self._devices:
-            raise KeyError(device_id)
-        del self._devices[device_id]
-        self._db.delete_device(device_id)
+    def delete(self, device_id: Any) -> None:
+        device = self.get_device(device_id)
+        del self._devices[device.id]
+        self._db.delete_device(device.id)
 
-    def attach_agent(self, device_id: int, request: DeviceAgentRegistrationRequest) -> DeviceRecord:
+    def attach_agent(self, device_id: Any, request: DeviceAgentRegistrationRequest) -> DeviceRecord:
         self._validate_secret_key(request.secretKey)
         device = self.get_device(device_id)
         now = utc_now_iso()
@@ -451,7 +474,7 @@ class DeviceRegistry:
             self.notify_assignment(assignment)
         return device
 
-    def detach_agent(self, device_id: int, secret_key: str) -> DeviceRecord:
+    def detach_agent(self, device_id: Any, secret_key: str) -> DeviceRecord:
         self._validate_secret_key(secret_key)
         device = self.get_device(device_id)
         now = utc_now_iso()

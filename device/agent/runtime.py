@@ -70,13 +70,15 @@ class AgentRuntime:
         self.manifest_builder = ManifestBuilder(self.config, self.skills)
 
         # Agent 상태: agent_id, name, layer, device_type, 마지막 텔레메트리 등
+        configured_name = str(self.agent_config.get("name") or "CoWater Agent").strip()
+
         self.state = AgentState(
             agent_id=self.identity.get("agent_id") or f"{self.agent_config.get('id', 'agent')}-{self.instance_id}",
             role=str(self.agent_config.get("role") or "device_agent"),
             layer=str(self.agent_config.get("layer") or "lower"),  # "lower", "middle", "system"
             device_type=self.agent_config.get("device_type"),  # "usv", "auv", "rov", etc.
             instance_id=self.instance_id,
-            name=self.identity.get("name") or f"{self.agent_config.get('name', 'CoWater Agent')} {self.instance_id}",
+            name=configured_name,
         )
 
         # Device Registration Server와의 통신
@@ -158,12 +160,13 @@ class AgentRuntime:
             return
 
         if self.identity.get("registry_id") and self.identity.get("token"):
-            self.state.registry_id = int(self.identity["registry_id"])
+            self.state.registry_id = str(self.identity["registry_id"])
             self.state.token = str(self.identity["token"])
             self.state.registered_at = self.identity.get("registered_at")
             try:
                 self._upsert_agent()
                 self._registration_response = self.registry_client.get_device(self.state.registry_id)
+                self._sync_registry_name()
                 self._refresh_assignment()
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
@@ -193,7 +196,7 @@ class AgentRuntime:
             connectivity=self.agent_config.get("connectivity"),
             location=self.config.get("simulation", {}).get("start_position"),
         )
-        self.state.registry_id = int(created["id"])
+        self.state.registry_id = str(created["id"])
         self.state.token = str(created["token"])
         self.state.registered_at = utc_now()
         self.state.connected = True
@@ -212,6 +215,31 @@ class AgentRuntime:
                 "tracks": created.get("tracks", []),
                 "heartbeat_topic": created.get("heartbeat_topic"),
                 "telemetry_topics": created.get("telemetry_topics", []),
+            }
+        )
+
+    def _sync_registry_name(self) -> None:
+        if not self.state.registry_id or not self._registration_response:
+            return
+
+        registered_name = str(self._registration_response.get("name") or "").strip()
+        desired_name = str(self.state.name or "").strip()
+        if not desired_name or registered_name == desired_name:
+            return
+
+        self.registry_client.rename_device(self.state.registry_id, desired_name)
+        self._registration_response = self.registry_client.get_device(self.state.registry_id)
+        self.identity_store.write(
+            {
+                **self.identity,
+                "agent_id": self.state.agent_id,
+                "name": desired_name,
+                "registry_id": self.state.registry_id,
+                "token": self.state.token,
+                "registered_at": self.state.registered_at,
+                "tracks": self._registration_response.get("tracks", self.identity.get("tracks", [])),
+                "heartbeat_topic": self._registration_response.get("heartbeat_topic", self.identity.get("heartbeat_topic")),
+                "telemetry_topics": self._registration_response.get("telemetry_topics", self.identity.get("telemetry_topics", [])),
             }
         )
 

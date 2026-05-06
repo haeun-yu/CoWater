@@ -22,6 +22,7 @@ class DeviceSimulator:
 
     def next_telemetry(self, state: AgentState) -> dict[str, Any]:
         self._step_position(self.interval_seconds())
+        depth = abs(float(self.position.get("altitude", 0)))  # 깊이 계산
         telemetry = {
             "device_id": state.registry_id,
             "agent_id": state.agent_id,
@@ -30,6 +31,7 @@ class DeviceSimulator:
             "position": self.position,
             "motion": self.motion,
             "battery_percent": round(self.battery, 2),
+            "depth": round(depth, 2),  # 깊이 추가
             "sensors": self._sensor_values(),
         }
         self.battery = max(0, self.battery - random.uniform(0.01, 0.08))

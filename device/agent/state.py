@@ -23,7 +23,7 @@ class AgentState:
     route_mode: str = "direct_to_system"
     force_parent_routing: bool = False
     token: Optional[str] = None
-    registry_id: Optional[int] = None
+    registry_id: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     connected: bool = False

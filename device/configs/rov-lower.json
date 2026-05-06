@@ -11,7 +11,7 @@
   },
   "agent": {
     "id": "rov-local-agent",
-    "name": "ROV Local Agent",
+    "name": "작업용 ROV",
     "role": "rov",
     "layer": "lower",
     "device_type": "ROV",

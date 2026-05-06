@@ -11,7 +11,7 @@
   },
   "agent": {
     "id": "auv-local-agent",
-    "name": "AUV Local Agent",
+    "name": "정찰용 AUV",
     "role": "auv",
     "layer": "lower",
     "device_type": "AUV",

@@ -162,10 +162,10 @@
         </div>
         <div class="header-nav">
             <button class="header-btn active">🌐 3D 작전뷰</button>
-            <button class="header-btn" onclick="location.href='alerts.html'" style="opacity:0.6; cursor:not-allowed;">⚠️ 경보 관리</button>
+            <button class="header-btn" onclick="location.href='alerts.html'">⚠️ 경보 관리</button>
         </div>
     </div>
-    <div id="offline-banner">⚠️ 00 서버(Device Registry)에 연결할 수 없습니다. 서버 상태를 확인하세요.</div>
+    <div id="offline-banner">⚠️ Device Registry 서버에 연결할 수 없습니다. 서버 상태를 확인하세요.</div>
 
     <div id="canvas-container"></div>
     <div id="labels-container"></div>
@@ -186,13 +186,6 @@
         <div class="panel-content">
             <div id="stats-container"></div>
             <hr>
-            <h4>카메라 모드</h4>
-            <select id="camera-mode">
-                <option value="orbit">자유 회전 (Orbit)</option>
-                <option value="follow">플랫폼 추적 (Follow)</option>
-                <option value="topdown">위에서 본 뷰 (Top-down)</option>
-            </select>
-
             <h4>지도 스타일 (미니맵)</h4>
             <select id="map-style">
                 <option value="satellite">위성 지도 (Satellite)</option>
@@ -203,9 +196,6 @@
             <h4>표시 깊이 필터</h4>
             <input type="range" id="depth-filter" min="-200" max="0" value="-200" step="5">
             <span class="control-value" id="depth-value">-200m ~ 0m 표시</span>
-            <h4>시뮬레이션 배속</h4>
-            <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="1">
-            <span class="control-value" id="speed-value">1.0x</span>
             <div class="shortcuts">
                 <strong>단축키</strong><br>
                 <kbd>1</kbd>/<kbd>2</kbd> 객체/통신선 선택<br>
@@ -254,6 +244,9 @@
     <script>
         const REGISTRY_BASE = 'http://127.0.0.1:8280';
         const MOTH_WS_BASE = 'wss://cobot.center:8287';
+        const LOCAL_ALERTS_STORAGE_KEY = 'cowater.dashboard.localAlerts';
+        const LOCAL_DEVICE_DIRECTORY_KEY = 'cowater.dashboard.deviceDirectory';
+        const LOCAL_REGISTRY_DEVICES_KEY = 'cowater.dashboard.registryDevices';
 
         const COLORS = {
             controlCenter: 0xff6b6b, ship: 0x4ecdc4, usv: 0xffd93d, drone: 0xffd93d,
@@ -266,61 +259,132 @@
 
         const mapState = {
             map: null, markers: {}, lines: {}, currentTileLayer: null,
-            baseLat: 35.15, baseLng: 129.15, scale: 0.00005, isProgrammaticMove: false
+            baseLat: 35.15, baseLng: 129.15, scale: 0.00005, isProgrammaticMove: false,
+            terrainMeshes: {}, // 타일별 메시 캐시: key='x,y,z', value={mesh, elevations}
+            loadedTiles: new Set(), // 로드된 타일 좌표 기록
+            zoom: 13,
+            lastCameraPos: { x: 0, z: 0 },
+            tileRadius: 2,
+            tileSize: 256,
+            isLoadingTiles: false
         };
 
         const state = {
-            time: 0, simSpeed: 1.0, cameraMode: 'orbit', depthFilter: -200,
+            time: 0, depthFilter: -200,
             showLabels: true, showGrid: true, selectedId: null, hoveredId: null,
-            objects: [], links: [], alerts: [], tethers: []
+            objects: [], links: [], alerts: [], tethers: [],
+            usingRegistryData: false
         };
 
-        const initialScenarios = [
-            { id: "ship-001", name: "상선 #1", type: "ship", position: {x: 80, y: 0, z: -20}, heading: 45, speed: 12.5, status: "active", battery: 100 },
-            { id: "ship-002", name: "통제 함정", type: "ship", position: {x: -20, y: 0, z: -10}, heading: 90, speed: 5, status: "active", battery: 100 },
-            { id: "drone-001", name: "정찰 드론", type: "drone", position: {x: -20, y: 40, z: 10}, heading: 0, speed: 20, status: "active", battery: 85, hoverCenter: {x:-20, z:10} },
-            { id: "usv-001", name: "통제 USV", type: "usv", position: {x: -10, y: 0, z: -40}, heading: 180, speed: 15, status: "active", battery: 90, hoverCenter: {x:-10, z:-40} },
-            { id: "rov-001", name: "작업용 ROV", type: "rov", position: {x: -20, y: -60, z: -10}, heading: 0, speed: 2, status: "active", battery: 78, tetherTarget: "ship-002" },
-            { id: "auv-001", name: "정찰용 AUV", type: "auv", position: {x: 50, y: -90, z: 20}, heading: -45, speed: 6, status: "active", battery: 95 },
-            { id: "center-001", name: "육상 통제 센터", type: "controlCenter", position: {x: -200, y: 0, z: -400}, heading: 60, speed: 0, status: "active", battery: 100 },
-            { id: "buoy-001", name: "통신 릴레이 부표", type: "commBuoy", position: {x: -100, y: 0, z: -120}, heading: 0, speed: 0, status: "active", battery: 100 },
-            { id: "tower-001", name: "해양 전력 타워", type: "powerTower", position: {x: -180, y: 0, z: -180}, heading: 0, speed: 0, status: "active", battery: 100 },
-            { id: "usv-002", name: "요격용 USV", type: "usv", position: {x: 40, y: 0, z: -60}, heading: 135, speed: 18, status: "active", battery: 95, hoverCenter: {x:40, z:-60} },
-            { id: "glider-001", name: "수중 글라이더", type: "glider", position: {x: -120, y: -40, z: -60}, heading: 45, speed: 3, status: "active", battery: 98 },
-            { id: "sub-001", name: "무인 잠수정 (UUV)", type: "submarine", position: {x: 100, y: -50, z: -80}, heading: 120, speed: 8, status: "active", battery: 80 },
-            { id: "node-001", name: "해저 센서 그리드", type: "sensorNode", position: {x: -80, y: 0, z: 100}, heading: 0, speed: 0, status: "active", battery: 100 }
-        ];
+        const trackStreamSockets = {};
+        const trackStreamRetryTimers = {};
 
-        const linkScenarios = [
-            { id: "link-1", source: "center-001", target: "buoy-001", type: "link_rf", name: "장거리 RF (육상-부표)", packets: ["기상 데이터 (4.2MB/s)", "암호화 작전 통제 신호"] },
-            { id: "link-2", source: "center-001", target: "ship-002", type: "link_satellite", name: "위성 통신망 (광대역)", packets: ["글로벌 AIS 추적", "지휘 통제 명령 C2"] },
-            { id: "link-3", source: "ship-002", target: "usv-001", type: "link_rf", name: "전술 RF 링크 (수상)", packets: ["USV 웨이포인트 업데이트"] },
-            { id: "link-4", source: "usv-001", target: "usv-002", type: "link_rf", name: "USV 군집 제어망", packets: ["상호 충돌 회피 알고리즘", "표적 요격 명령"] },
-            { id: "link-5", source: "ship-002", target: "drone-001", type: "link_rf", name: "지향성 RF 링크 (공중)", packets: ["드론 실시간 4K 영상 스트림", "IR(적외선) 열화상 데이터"] },
-            { id: "link-6", source: "buoy-001", target: "glider-001", type: "link_acoustic", name: "수중 음향 모뎀 (저전력)", packets: ["소나(Sonar) 핑", "해류 데이터 업로드"] },
-            { id: "link-7", source: "usv-001", target: "auv-001", type: "link_acoustic", name: "수중 음향 통신망", packets: ["정찰 목표 업데이트", "양자 센싱 표적 데이터"] },
-            { id: "link-8", source: "auv-001", target: "sub-001", type: "link_acoustic", name: "수중 전술망 (UUV-AUV)", packets: ["적 잠수함 스웜 탐지 데이터"] },
-            { id: "link-9", source: "node-001", target: "glider-001", type: "link_acoustic", name: "해저망-글라이더 중계", packets: ["해저 지진파 데이터"] },
-            { id: "link-10", source: "tower-001", target: "node-001", type: "link_tether", name: "해저 광전송 케이블", packets: ["상시 고전력 공급 (Power)", "대용량 RAW 데이터 스트림"] }
-        ];
+        function getRenderableObjects() {
+            return state.objects.filter((obj) => obj.connected !== false);
+        }
 
-        const alertQueue = [
-            { triggerTime: 15, id: "alert-001", platformId: "ship-001", type: "collision_risk", severity: "CRITICAL", message: "상선 #1 충돌 위험 감지" },
-            { triggerTime: 30, id: "alert-002", platformId: "rov-001", type: "battery_low", severity: "WARNING", message: "ROV-1 배터리 부족 경고" }
-        ];
+        function getSortedObjects() {
+            return [...state.objects].sort((left, right) => {
+                const connectedDiff = Number(right.connected !== false) - Number(left.connected !== false);
+                if (connectedDiff !== 0) return connectedDiff;
+                return String(left.name || '').localeCompare(String(right.name || ''), 'ko');
+            });
+        }
+
+        function findObjectById(id) {
+            return state.objects.find((obj) => obj.id === id || String(obj.id) === String(id));
+        }
+
+        function findRenderableObjectById(id) {
+            return getRenderableObjects().find((obj) => obj.id === id || String(obj.id) === String(id));
+        }
+
+        function readCachedRegistryDevices() {
+            try {
+                const raw = localStorage.getItem(LOCAL_REGISTRY_DEVICES_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (err) {
+                console.warn('cached registry devices parse failed:', err);
+                return [];
+            }
+        }
+
+        function persistRegistryDevices(devices) {
+            localStorage.setItem(LOCAL_REGISTRY_DEVICES_KEY, JSON.stringify(devices));
+        }
+
+        function persistDashboardAlerts() {
+            const payload = state.alerts.map((alert) => ({
+                alert_id: alert.id,
+                event_id: alert.eventId || null,
+                alert_type: alert.type || 'unknown',
+                message: alert.message,
+                severity: String(alert.severity || 'INFORMATION').toUpperCase(),
+                status: alert.status || 'waiting',
+                source_system: alert.source_system || '3d_dashboard',
+                source_role: alert.source_role || 'dashboard',
+                source_agent_id: alert.source_agent_id || null,
+                target_agent_id: alert.target_agent_id || alert.platformId || null,
+                target_display_name: alert.target_display_name || null,
+                recommended_action: alert.recommended_action || null,
+                requires_user_approval: Boolean(alert.requires_user_approval),
+                auto_remediated: Boolean(alert.auto_remediated),
+                route_mode: alert.route_mode || 'dashboard_local',
+                metadata: {
+                    ...(alert.metadata || {}),
+                    platformId: alert.platformId || null,
+                },
+                dashboard_origin: '3d_dashboard',
+                created_at: alert.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            }));
+
+            localStorage.setItem(LOCAL_ALERTS_STORAGE_KEY, JSON.stringify(payload));
+        }
+
+        function persistDeviceDirectory(devices) {
+            const payload = devices.map((device) => ({
+                id: device.id,
+                name: device.name,
+                device_type: device.device_type || device.type || null,
+                connected: device.connected !== false,
+                agent: device.agent || null,
+            }));
+            localStorage.setItem(LOCAL_DEVICE_DIRECTORY_KEY, JSON.stringify(payload));
+        }
 
         async function fetchDevicesFromRegistry() {
             try {
                 const resp = await fetch(`${REGISTRY_BASE}/devices`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const devices = await resp.json();
+                const visibleDevices = Array.isArray(devices)
+                    ? devices.filter((device) => String(device?.device_type || '').toUpperCase() !== 'SYSTEM')
+                    : [];
                 document.getElementById('offline-banner').style.display = 'none';
-                return Array.isArray(devices) ? devices : [];
+                persistRegistryDevices(visibleDevices);
+                return visibleDevices;
             } catch (e) {
                 console.warn('Registry unavailable:', e.message);
+                const cachedDevices = readCachedRegistryDevices();
                 document.getElementById('offline-banner').style.display = 'block';
-                return [];
+                document.getElementById('offline-banner').innerText = cachedDevices.length > 0
+                    ? '⚠️ Device Registry 서버에 연결할 수 없어 마지막 실제 디바이스 상태를 표시합니다.'
+                    : '⚠️ Device Registry 서버에 연결할 수 없습니다. 등록된 실제 디바이스 데이터가 없습니다.';
+                return cachedDevices;
             }
+        }
+
+        function applyInitialMapCenterFromFirstDevice(devices) {
+            if (!Array.isArray(devices) || devices.length === 0) return;
+            const firstConnected = devices.find((device) => device && device.connected !== false);
+            const first = firstConnected || devices[0] || {};
+            const lat = Number(first.latitude);
+            const lng = Number(first.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            mapState.baseLat = lat;
+            mapState.baseLng = lng;
         }
 
         function mapRegistryToScenario(reg) {
@@ -328,7 +392,8 @@
             const lon = reg.longitude || mapState.baseLng;
             const x = (lon - mapState.baseLng) / mapState.scale;
             const z = (mapState.baseLat - lat) / mapState.scale;
-            const depth = -(reg.depth || 0);
+            const altitude = reg.altitude ?? reg.location?.altitude ?? 0;
+            const depth = reg.depth !== undefined ? -Math.abs(reg.depth) : altitude < 0 ? altitude : 0;
             const role = (reg.agent?.role || reg.device_type || 'usv').toLowerCase();
             // device_type 매핑: usv, auv, rov, control_ship, ship
             const typeMap = {
@@ -342,36 +407,154 @@
             const deviceType = typeMap[role] || 'usv';
             return {
                 id: reg.id || `dev-${reg.name}`,
+                registryId: reg.registry_id || reg.id,
                 name: reg.name,
                 type: deviceType,
                 position: { x, y: depth, z },
-                heading: reg.heading || 0,
+                heading: reg.heading || reg.course || 0,
                 speed: reg.speed || 0,
-                battery: reg.battery !== undefined ? reg.battery : 100,
-                status: 'active'
+                battery: reg.last_battery_percent !== undefined ? reg.last_battery_percent : (reg.battery !== undefined ? reg.battery : undefined),
+                status: reg.connected === false ? 'offline' : 'active',
+                connected: reg.connected !== false,
+                registry: reg
             };
         }
 
         function subscribeMothTelemetry() {
-            const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=telemetry&source=base&track=base`;
+            // heartbeat MEB 채널 구독 — 위치/배터리 실시간 업데이트
+            const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=heartbeat&source=base&track=base`;
             const ws = new WebSocket(wsUrl);
-            ws.onmessage = (e) => {
-                try {
-                    const msg = JSON.parse(e.data);
-                    if (msg.device_id && msg.position) {
-                        const obj = state.objects.find(o => o.id === msg.device_id);
-                        if (obj) {
-                            obj.position.x = msg.position.x || obj.position.x;
-                            obj.position.y = msg.position.y || obj.position.y;
-                            obj.position.z = msg.position.z || obj.position.z;
-                            if (msg.battery !== undefined) obj.battery = msg.battery;
-                            if (msg.heading !== undefined) obj.heading = msg.heading;
-                            if (msg.speed !== undefined) obj.speed = msg.speed;
-                        }
-                    }
-                } catch (err) { console.error('Telemetry parse error:', err); }
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'subscribe', channel: 'device.heartbeat', channel_type: 'meb' }));
+                console.log('[Moth] heartbeat MEB 구독 시작');
             };
-            ws.onerror = () => setTimeout(subscribeMothTelemetry, 5000);
+
+            ws.onmessage = async (e) => {
+                try {
+                    const rawText = typeof e.data === 'string' ? e.data : await e.data.text();
+                    if (!rawText || rawText.trim() === 'ping') return;
+                    const raw = JSON.parse(rawText);
+                    // MEB publish 메시지에서 payload 추출
+                    const payload = raw.payload || (raw.device_id !== undefined ? raw : null);
+                    if (!payload || payload.device_id === undefined) return;
+
+                    const deviceId = payload.device_id;
+                    // Registry 디바이스는 id가 숫자형, 로컬 시나리오는 문자열
+                    const obj = state.objects.find(o => o.id === deviceId || o.id === String(deviceId));
+                    if (!obj) return;
+
+                    // 위치 업데이트 (lat/lng → 3D 좌표)
+                    if (payload.latitude !== undefined && payload.longitude !== undefined) {
+                        obj.position.x = (payload.longitude - mapState.baseLng) / mapState.scale;
+                        obj.position.z = (mapState.baseLat - payload.latitude) / mapState.scale;
+                    }
+                    if (payload.battery_percent !== undefined) obj.battery = payload.battery_percent;
+                    if (payload.depth !== undefined) obj.position.y = -Math.abs(payload.depth); // 깊이 업데이트
+                    if (payload.heading !== undefined) obj.heading = payload.heading; // 방향 업데이트
+                    if (payload.speed !== undefined) obj.speed = payload.speed; // 속도 업데이트
+                    if (payload.route_mode !== undefined) obj.routeMode = payload.route_mode;
+                } catch (err) { console.error('[Moth] heartbeat 파싱 오류:', err); }
+            };
+
+            ws.onerror = () => console.warn('[Moth] heartbeat MEB 연결 오류');
+            ws.onclose = () => setTimeout(subscribeMothTelemetry, 5000);
+        }
+
+        function subscribeDeviceTrackStreams(devices) {
+            // 각 device의 track endpoint를 API 응답 그대로 사용해 구독
+            devices.forEach(device => {
+                if (!device.tracks || !Array.isArray(device.tracks)) return;
+
+                device.tracks.forEach(track => {
+                    const trackType = String(track?.type || '').toUpperCase();
+                    const trackName = String(track?.name || '').trim();
+                    const endpoint = String(track?.endpoint || '').trim();
+                    if (!trackType || !endpoint) return;
+
+                    const deviceId = device.id;
+                    const socketKey = `${deviceId}:${trackType}:${trackName}`;
+
+                    // 이미 연결 시도 중/연결된 소켓은 중복 생성하지 않음
+                    const prevSocket = trackStreamSockets[socketKey];
+                    if (prevSocket && (prevSocket.readyState === WebSocket.OPEN || prevSocket.readyState === WebSocket.CONNECTING)) {
+                        return;
+                    }
+
+                    // 서버가 제공한 endpoint를 그대로 사용 (상대경로는 MOTH base에 결합)
+                    let wsUrl = endpoint;
+                    if (!/^wss?:\/\//i.test(wsUrl)) {
+                        wsUrl = `${MOTH_WS_BASE}${wsUrl}`;
+                    }
+
+                    const ws = new WebSocket(wsUrl);
+                    trackStreamSockets[socketKey] = ws;
+                    
+                    ws.onopen = () => {
+                        console.log(`[Moth] Track ${trackType} 구독: device_id=${deviceId}, track=${trackName || '-'} `);
+                    };
+                    
+                    ws.onmessage = async (e) => {
+                        try {
+                            const rawText = typeof e.data === 'string' ? e.data : await e.data.text();
+                            if (!rawText || rawText.trim() === 'ping') return;
+                            const payload = JSON.parse(rawText);
+                            if (!payload.device_id) return;
+                            
+                            const obj = state.objects.find(
+                                o => o.id === payload.device_id
+                                  || o.id === String(payload.device_id)
+                                  || o.registryId === payload.device_id
+                                  || o.registryId === Number(payload.device_id)
+                            );
+                            if (!obj) return;
+                            
+                            // Track type별 데이터 파싱
+                            switch(trackType) {
+                                case 'ODOMETRY':
+                                case 'GPS':
+                                    // 위치/방향/속도 업데이트
+                                    if (payload.latitude !== undefined && payload.longitude !== undefined) {
+                                        obj.position.x = (payload.longitude - mapState.baseLng) / mapState.scale;
+                                        obj.position.z = (mapState.baseLat - payload.latitude) / mapState.scale;
+                                    }
+                                    if (payload.heading !== undefined) obj.heading = payload.heading;
+                                    if (payload.speed !== undefined) obj.speed = payload.speed;
+                                    break;
+                                case 'DEPTH':
+                                    // 깊이 업데이트
+                                    if (payload.depth !== undefined) {
+                                        obj.position.y = -Math.abs(payload.depth);
+                                    } else if (payload.depth_m !== undefined) {
+                                        obj.position.y = -Math.abs(payload.depth_m);
+                                    }
+                                    break;
+                                case 'BATTERY':
+                                    // 배터리 업데이트
+                                    if (payload.battery_percent !== undefined) obj.battery = payload.battery_percent;
+                                    break;
+                                default:
+                                    // 기타 센서 데이터
+                                    console.debug(`[Moth] ${trackType} 데이터 수신:`, payload);
+                            }
+                        } catch (err) { 
+                            console.error(`[Moth] Track ${trackType} 파싱 오류:`, err); 
+                        }
+                    };
+                    
+                    ws.onerror = () => console.warn(`[Moth] Track ${trackType} 연결 오류`);
+                    ws.onclose = () => {
+                        console.warn(`[Moth] Track ${trackType} 연결 종료`);
+                        delete trackStreamSockets[socketKey];
+                        if (trackStreamRetryTimers[socketKey]) {
+                            clearTimeout(trackStreamRetryTimers[socketKey]);
+                        }
+                        trackStreamRetryTimers[socketKey] = setTimeout(() => {
+                            subscribeDeviceTrackStreams([device]);
+                        }, 5000);
+                    };
+                });
+            });
         }
 
         let scene, camera, renderer, controls;
@@ -441,13 +624,14 @@
         }
 
         async function createRealWorldTerrain() {
-            const zoom = 13;
-            const TILE_RADIUS = 2;
+            // 초기 데이터만 사용, 나머지는 동적 로딩
+            mapState.zoom = 13;
+            const TILE_RADIUS = 1; // 초기 로드 최소화 (3x3 타일 = 9개, 전: 25개)
             const TILE_SIZE = 256;
             const CANVAS_SIZE = (TILE_RADIUS * 2 + 1) * TILE_SIZE;
 
-            const cx = Math.floor((mapState.baseLng + 180) / 360 * Math.pow(2, zoom));
-            const cy = Math.floor((1 - Math.log(Math.tan(mapState.baseLat * Math.PI / 180) + 1 / Math.cos(mapState.baseLat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+            const cx = Math.floor((mapState.baseLng + 180) / 360 * Math.pow(2, mapState.zoom));
+            const cy = Math.floor((1 - Math.log(Math.tan(mapState.baseLat * Math.PI / 180) + 1 / Math.cos(mapState.baseLat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, mapState.zoom));
 
             const colorCanvas = document.createElement('canvas');
             colorCanvas.width = colorCanvas.height = CANVAS_SIZE;
@@ -474,7 +658,7 @@
                 const colorPromise = new Promise(resolve => {
                     const img = new Image();
                     img.crossOrigin = "Anonymous";
-                    img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${cy+y}/${cx+x}`;
+                    img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${mapState.zoom}/${cy+y}/${cx+x}`;
                     img.onload = () => { colorCtx.drawImage(img, drawX, drawY); loaded++; showLoadingProgress(loaded/totalTiles*50, '위성 이미지 로딩...'); resolve(); };
                     img.onerror = () => { loaded++; showLoadingProgress(loaded/totalTiles*50, '위성 이미지 로딩...'); resolve(); };
                 });
@@ -482,7 +666,7 @@
                 const elevPromise = new Promise(resolve => {
                     const img = new Image();
                     img.crossOrigin = "Anonymous";
-                    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${cx+x}/${cy+y}.png`;
+                    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${mapState.zoom}/${cx+x}/${cy+y}.png`;
                     img.onload = () => { elevCtx.drawImage(img, drawX, drawY); loaded++; showLoadingProgress(50 + loaded/totalTiles*50, '고도 데이터 로딩...'); resolve(); };
                     img.onerror = () => { loaded++; showLoadingProgress(50 + loaded/totalTiles*50, '고도 데이터 로딩...'); resolve(); };
                 });
@@ -534,11 +718,11 @@
 
             // 지도 전체 표시 (투명도 처리 없음)
 
-            const lonMin = (cx - TILE_RADIUS) / Math.pow(2, zoom) * 360 - 180;
-            const lonMax = (cx + TILE_RADIUS + 1) / Math.pow(2, zoom) * 360 - 180;
-            const nMin = Math.PI - 2 * Math.PI * (cy - TILE_RADIUS) / Math.pow(2, zoom);
+            const lonMin = (cx - TILE_RADIUS) / Math.pow(2, mapState.zoom) * 360 - 180;
+            const lonMax = (cx + TILE_RADIUS + 1) / Math.pow(2, mapState.zoom) * 360 - 180;
+            const nMin = Math.PI - 2 * Math.PI * (cy - TILE_RADIUS) / Math.pow(2, mapState.zoom);
             const latMax = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMin) - Math.exp(-nMin)));
-            const nMax = Math.PI - 2 * Math.PI * (cy + TILE_RADIUS + 1) / Math.pow(2, zoom);
+            const nMax = Math.PI - 2 * Math.PI * (cy + TILE_RADIUS + 1) / Math.pow(2, mapState.zoom);
             const latMin = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMax) - Math.exp(-nMax)));
 
             const planeWidth = (lonMax - lonMin) / mapState.scale;
@@ -575,7 +759,131 @@
                 });
             });
 
+            // 초기 타일 기록
+            for(let x = -TILE_RADIUS; x <= TILE_RADIUS; x++) {
+                for(let y = -TILE_RADIUS; y <= TILE_RADIUS; y++) {
+                    mapState.loadedTiles.add(`${cx+x},${cy+y},${mapState.zoom}`);
+                }
+            }
+
             hideLoadingOverlay();
+        }
+
+        // 동적 타일 로딩 함수
+        async function loadDynamicTiles() {
+            if (mapState.isLoadingTiles) return;
+
+            // 카메라 위치 기반 필요 타일 계산
+            const curLat = mapState.baseLat - (controls.target.z * mapState.scale);
+            const curLng = mapState.baseLng + (controls.target.x * mapState.scale);
+            
+            const cx = Math.floor((curLng + 180) / 360 * Math.pow(2, mapState.zoom));
+            const cy = Math.floor((1 - Math.log(Math.tan(curLat * Math.PI / 180) + 1 / Math.cos(curLat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, mapState.zoom));
+
+            // 카메라 이동 거리 확인 (과도한 업데이트 방지)
+            const camDist = Math.hypot(controls.target.x - mapState.lastCameraPos.x, controls.target.z - mapState.lastCameraPos.z);
+            if (camDist < 10) return; // 10 단위 이상 이동할 때만 업데이트
+
+            mapState.lastCameraPos = { x: controls.target.x, z: controls.target.z };
+
+            const tilesToLoad = [];
+            for(let x = -mapState.tileRadius; x <= mapState.tileRadius; x++) {
+                for(let y = -mapState.tileRadius; y <= mapState.tileRadius; y++) {
+                    const tileKey = `${cx+x},${cy+y},${mapState.zoom}`;
+                    if (!mapState.loadedTiles.has(tileKey)) {
+                        tilesToLoad.push({ x: cx+x, y: cy+y });
+                    }
+                }
+            }
+
+            if (tilesToLoad.length === 0) return;
+
+            mapState.isLoadingTiles = true;
+
+            // 비동기로 타일 로드 (UI 블로킹 방지)
+            await Promise.all(tilesToLoad.map(tile => 
+                loadSingleTile(tile.x, tile.y, mapState.zoom)
+            ));
+
+            mapState.isLoadingTiles = false;
+        }
+
+        // 단일 타일 로드 함수
+        async function loadSingleTile(tileX, tileY, zoom) {
+            const TILE_SIZE = 256;
+            const tileKey = `${tileX},${tileY},${zoom}`;
+
+            return new Promise(async (resolve) => {
+                try {
+                    const colorCanvas = document.createElement('canvas');
+                    colorCanvas.width = colorCanvas.height = TILE_SIZE;
+                    const colorCtx = colorCanvas.getContext('2d');
+
+                    const elevCanvas = document.createElement('canvas');
+                    elevCanvas.width = elevCanvas.height = TILE_SIZE;
+                    const elevCtx = elevCanvas.getContext('2d');
+
+                    // 위성 이미지 로드
+                    const colorImg = await new Promise(res => {
+                        const img = new Image();
+                        img.crossOrigin = 'Anonymous';
+                        img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${tileY}/${tileX}`;
+                        img.onload = () => { colorCtx.drawImage(img, 0, 0); res(true); };
+                        img.onerror = () => res(false);
+                    });
+
+                    // 고도 데이터 로드
+                    const elevImg = await new Promise(res => {
+                        const img = new Image();
+                        img.crossOrigin = 'Anonymous';
+                        img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${tileX}/${tileY}.png`;
+                        img.onload = () => { elevCtx.drawImage(img, 0, 0); res(true); };
+                        img.onerror = () => res(false);
+                    });
+
+                    // 고도 데이터 처리
+                    const elevData = elevCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+                    const elevations = new Float32Array(TILE_SIZE * TILE_SIZE);
+                    for (let i = 0; i < elevData.data.length; i += 4) {
+                        const r = elevData.data[i];
+                        const g = elevData.data[i+1];
+                        const b = elevData.data[i+2];
+                        elevations[i/4] = (r * 256 + g + b / 256) - 32768;
+                    }
+
+                    // 3D 메시 생성
+                    const lonMin = (tileX) / Math.pow(2, zoom) * 360 - 180;
+                    const lonMax = (tileX + 1) / Math.pow(2, zoom) * 360 - 180;
+                    const nMin = Math.PI - 2 * Math.PI * (tileY) / Math.pow(2, zoom);
+                    const latMax = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMin) - Math.exp(-nMin)));
+                    const nMax = Math.PI - 2 * Math.PI * (tileY + 1) / Math.pow(2, zoom);
+                    const latMin = 180 / Math.PI * Math.atan(0.5 * (Math.exp(nMax) - Math.exp(-nMax)));
+
+                    const planeWidth = (lonMax - lonMin) / mapState.scale;
+                    const planeHeight = (latMax - latMin) / mapState.scale;
+                    const offsetX = ((lonMin + lonMax) / 2 - mapState.baseLng) / mapState.scale;
+                    const offsetZ = (mapState.baseLat - (latMin + latMax) / 2) / mapState.scale;
+
+                    const geo = new THREE.PlaneGeometry(planeWidth, planeHeight, 64, 64);
+                    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                        map: new THREE.CanvasTexture(colorCanvas),
+                        transparent: true, opacity: 0.6, depthWrite: false, depthTest: true
+                    }));
+
+                    mesh.rotation.x = -Math.PI / 2;
+                    mesh.position.set(offsetX, 0, offsetZ);
+                    mesh.frustumCulled = false;
+                    scene.add(mesh);
+
+                    // 캐시 저장
+                    mapState.terrainMeshes[tileKey] = { mesh, elevations };
+                    mapState.loadedTiles.add(tileKey);
+
+                } catch (err) {
+                    console.warn(`Failed to load tile ${tileKey}:`, err);
+                }
+                resolve();
+            });
         }
 
         function buildDeviceModel(type, mainColorHex) {
@@ -674,7 +982,7 @@
         }
 
         function initObjects() {
-            state.objects.forEach(data => {
+            getRenderableObjects().forEach(data => {
                 const { group, meshOffset } = buildDeviceModel(data.type, COLORS[data.type] || 0xaaaaaa);
                 group.position.set(data.position.x, data.position.y + meshOffset, data.position.z);
                 group.rotation.y = THREE.MathUtils.degToRad(-data.heading);
@@ -691,7 +999,7 @@
                 Object.assign(data, { mesh: group, meshOffset: meshOffset, labelEl: labelEl, hasAlert: false });
             });
 
-            state.objects.forEach(obj => {
+            getRenderableObjects().forEach(obj => {
                 if (obj.tetherTarget) {
                     const lineMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 8, gapSize: 6, transparent: true, opacity: 0.8 });
                     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
@@ -700,7 +1008,9 @@
                 }
             });
 
-            linkScenarios.forEach(link => {
+            // 실제 Registry 데이터 사용 시에는 픽션 링크 비활성화
+            const activeLinks = [];
+            activeLinks.forEach(link => {
                 const lineMat = new THREE.LineDashedMaterial({ color: COLORS[link.type], dashSize: 10, gapSize: 10, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
                 const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
                 const lineMesh = new THREE.Line(lineGeo, lineMat);
@@ -725,9 +1035,9 @@
 
         function updateSimulation(delta) {
             const time = state.time;
-            const simDelta = delta * state.simSpeed;
+            const simDelta = delta;
 
-            state.objects.forEach(obj => {
+            getRenderableObjects().forEach(obj => {
                 if (['controlCenter', 'sensorNode'].includes(obj.type)) {
                     obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
                 }
@@ -765,7 +1075,7 @@
                     obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
                 }
 
-                if (obj.battery !== undefined && state.simSpeed > 0) obj.battery = Math.max(0, obj.battery - (0.05 * simDelta));
+                if (obj.battery !== undefined) obj.battery = Math.max(0, obj.battery - (0.05 * simDelta));
 
                 obj.mesh.visible = obj.position.y >= state.depthFilter;
                 obj.labelEl.style.display = (state.showLabels && obj.mesh.visible) ? 'block' : 'none';
@@ -797,7 +1107,7 @@
             gridHelpers.forEach(g => { g.position.x = camX; g.position.z = camZ; });
 
             state.tethers.forEach(t => {
-                const s = state.objects.find(o => o.id === t.source), tgt = state.objects.find(o => o.id === t.target);
+                const s = findRenderableObjectById(t.source), tgt = findRenderableObjectById(t.target);
                 if (s && tgt) {
                     const pos = t.line.geometry.attributes.position.array;
                     pos[0]=s.mesh.position.x; pos[1]=s.mesh.position.y; pos[2]=s.mesh.position.z;
@@ -809,8 +1119,8 @@
             });
 
             state.links.forEach(link => {
-                const sObj = state.objects.find(o => o.id === link.source);
-                const tObj = state.objects.find(o => o.id === link.target);
+                const sObj = findRenderableObjectById(link.source);
+                const tObj = findRenderableObjectById(link.target);
 
                 if (sObj && tObj) {
                     const isVisible = sObj.mesh.visible && tObj.mesh.visible;
@@ -850,10 +1160,8 @@
                 }
             });
 
-            alertQueue.forEach(a => { if (!a.triggered && time >= a.triggerTime) { a.triggered = true; triggerAlert(a); } });
-
             if (state.showLabels) {
-                state.objects.forEach(obj => {
+                getRenderableObjects().forEach(obj => {
                     if(!obj.mesh.visible) return;
                     const pos = obj.mesh.position.clone();
                     pos.y += (obj.type==='drone'? 5 : 8);
@@ -870,23 +1178,6 @@
                 scene.background.setHex(ENV_COLORS.sky); scene.fog.color.setHex(ENV_COLORS.sky); scene.fog.density = 0.002;
             }
 
-            if (state.cameraMode === 'follow' && state.selectedId) {
-                const target = state.objects.find(o => o.id === state.selectedId) || state.links.find(l => l.id === state.selectedId);
-                if (target) {
-                    let tPos = target.mesh ? target.mesh.position : target.position;
-                    if(target.source) {
-                        const sObj = state.objects.find(o => o.id === target.source), tObj = state.objects.find(o => o.id === target.target);
-                        if(sObj && tObj) tPos = sObj.mesh.position.clone().lerp(tObj.mesh.position, 0.5);
-                    }
-                    controls.target.lerp(tPos, 0.1);
-                }
-            } else if (state.cameraMode === 'topdown' && state.selectedId) {
-                const target = state.objects.find(o => o.id === state.selectedId);
-                if (target) {
-                    controls.target.lerp(target.mesh.position, 0.1);
-                    camera.position.lerp(target.mesh.position.clone().add(new THREE.Vector3(0,150,0)), 0.05);
-                }
-            }
             controls.update();
         }
 
@@ -897,12 +1188,12 @@
 
             const createIcon = (c) => L.divIcon({ className: 'custom-div-icon', html: `<div style="background-color:#${c.toString(16).padStart(6,'0')}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.8);"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] });
 
-            state.objects.forEach(obj => {
+            getRenderableObjects().forEach(obj => {
                 const marker = L.marker([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)], { icon: createIcon(COLORS[obj.type] || 0xffffff) }).addTo(mapState.map);
                 marker.bindTooltip(obj.name, { direction: 'top', offset: [0, -10] });
                 marker.on('click', () => {
                     uiManager.selectObject(obj.id);
-                    const t = state.objects.find(o => o.id === obj.id);
+                    const t = findRenderableObjectById(obj.id);
                     if(t) { camera.position.copy(t.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(t.mesh.position); }
                 });
                 mapState.markers[obj.id] = marker;
@@ -920,7 +1211,6 @@
             panel.addEventListener('mousedown', (e) => {
                 if (e.button === 0) isDragging = true; if (e.button === 2) isRotating = true;
                 lastX = e.clientX; lastY = e.clientY;
-                if (state.cameraMode !== 'orbit') { state.cameraMode = 'orbit'; document.getElementById('camera-mode').value = 'orbit'; }
             });
 
             window.addEventListener('mousemove', (e) => {
@@ -955,7 +1245,7 @@
 
         function updateMap() {
             if (!mapState.map) return;
-            state.objects.forEach(obj => {
+            getRenderableObjects().forEach(obj => {
                 const marker = mapState.markers[obj.id];
                 if (marker) {
                     marker.setLatLng([mapState.baseLat - (obj.position.z * mapState.scale), mapState.baseLng + (obj.position.x * mapState.scale)]);
@@ -965,8 +1255,8 @@
 
             state.links.forEach(link => {
                 const polyline = mapState.lines[link.id];
-                const sObj = state.objects.find(o => o.id === link.source);
-                const tObj = state.objects.find(o => o.id === link.target);
+                const sObj = findRenderableObjectById(link.source);
+                const tObj = findRenderableObjectById(link.target);
                 if (polyline && sObj && tObj) {
                     const sLat = mapState.baseLat - (sObj.position.z * mapState.scale);
                     const sLng = mapState.baseLng + (sObj.position.x * mapState.scale);
@@ -999,8 +1289,6 @@
                     hideTimer = setTimeout(() => header.classList.remove('visible'), 300);
                 });
 
-                document.getElementById('camera-mode').addEventListener('change', (e) => { state.cameraMode = e.target.value; if(state.cameraMode === 'orbit') controls.target.set(0,0,0); });
-
                 document.getElementById('map-style').addEventListener('change', (e) => {
                     if(mapState.currentTileLayer) mapState.map.removeLayer(mapState.currentTileLayer);
                     let url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -1010,7 +1298,6 @@
                 });
 
                 document.getElementById('depth-filter').addEventListener('input', (e) => { state.depthFilter = parseInt(e.target.value); document.getElementById('depth-value').innerText = `${state.depthFilter}m ~ 0m 표시`; });
-                document.getElementById('sim-speed').addEventListener('input', (e) => { state.simSpeed = parseFloat(e.target.value); document.getElementById('speed-value').innerText = `${state.simSpeed.toFixed(1)}x`; });
                 this.renderStats(); this.renderObjectList();
             },
             togglePanel: function(side) {
@@ -1026,18 +1313,29 @@
                 if (tabName === 'links') this.renderLinkList();
             },
             selectObject: function(id) { state.selectedId = id; this.renderObjectList(); this.renderSelectedDetail(); this.switchTab('objects'); },
+            openDeviceDetail: function(id) {
+                const obj = findObjectById(id);
+                if (!obj) return;
+                sessionStorage.setItem('cowater.device.id', String(obj.id));
+                sessionStorage.setItem('cowater.device.name', obj.name);
+                sessionStorage.setItem('cowater.device.type', obj.type);
+                sessionStorage.setItem('cowater.device.registryId', String(obj.registryId ?? obj.id));
+                window.open('device-detail.html', '_blank');
+            },
             renderStats: function() {
                 const types = { ship: 0, rov: 0, auv: 0, drone: 0, usv: 0, control_ship: 0 };
                 state.objects.forEach(o => { if (types[o.type] !== undefined) types[o.type]++; });
-                document.getElementById('stats-container').innerHTML = `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 디바이스:</span> <strong>${state.objects.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>통신 링크:</span> <strong>${state.links.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? '#f87171' : '#4ade80'}">발생 경보: ${state.alerts.length}건</div>`;
+                document.getElementById('stats-container').innerHTML = `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 디바이스:</span> <strong>${getRenderableObjects().length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>전체 디바이스:</span> <strong>${state.objects.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>통신 링크:</span> <strong>${state.links.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? '#f87171' : '#4ade80'}">발생 경보: ${state.alerts.length}건</div>`;
             },
             renderObjectList: function() {
                 let html = '';
-                state.objects.forEach(obj => {
+                getSortedObjects().forEach(obj => {
                     const batteryText = obj.battery !== undefined ? Math.round(obj.battery) + '%' : 'N/A';
-                    html += `<div class="list-item ${obj.id === state.selectedId ? 'selected' : ''}" onclick="uiManager.selectObject('${obj.id}')"><div class="title"><span>${obj.name}</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">●</span></div><div style="display:flex; justify-content:space-between; color:#94a3b8;"><span>Depth: ${Math.round(obj.position.y)}m</span><span>Bat: ${batteryText}</span></div></div>`;
+                    const statusClass = obj.connected === false ? 'status-warning' : (obj.hasAlert ? 'status-critical' : 'status-active');
+                    const statusText = obj.connected === false ? 'OFF' : '●';
+                    html += `<div class="list-item ${obj.id === state.selectedId ? 'selected' : ''}" onclick="uiManager.selectObject('${obj.id}')"><div class="title"><span>${obj.name}</span><span class="${statusClass}">${statusText}</span></div><div style="display:flex; justify-content:space-between; color:#94a3b8;"><span>Depth: ${Math.round(obj.position.y)}m</span><span>Bat: ${batteryText}</span></div></div>`;
                 });
-                document.getElementById('object-list-container').innerHTML = html;
+                document.getElementById('object-list-container').innerHTML = html || '<div style="text-align:center; color:#64748b; padding:20px;">표시할 실제 디바이스가 없습니다.</div>';
                 document.getElementById('obj-count').innerText = state.objects.length;
             },
             renderLinkList: function() {
@@ -1051,7 +1349,7 @@
             },
             renderSelectedDetail: function() {
                 const d = document.getElementById('selected-detail');
-                const obj = state.objects.find(o => o.id === state.selectedId);
+                const obj = findObjectById(state.selectedId);
                 const link = state.links.find(l => l.id === state.selectedId);
 
                 if (!obj && !link) { d.style.display = 'none'; return; }
@@ -1059,11 +1357,13 @@
 
                 if (obj) {
                     const batteryText = obj.battery !== undefined ? obj.battery.toFixed(1) + '%' : 'N/A';
-                    d.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid #60a5fa;"><h4 style="margin-top:0; color:#60a5fa;">${obj.name}</h4><div style="font-size:0.85rem; display:grid; grid-template-columns: 100px 1fr; gap: 4px;"><span style="color:#94a3b8">타입:</span><span>${obj.type.toUpperCase()}</span><span style="color:#94a3b8">좌표:</span><span>(${obj.position.x.toFixed(1)}, ${obj.position.y.toFixed(1)}, ${obj.position.z.toFixed(1)})</span><span style="color:#94a3b8">속력:</span><span>${obj.speed} knots</span><span style="color:#94a3b8">헤딩:</span><span>${Math.round(obj.heading)}°</span><span style="color:#94a3b8">배터리:</span><span>${batteryText}</span><span style="color:#94a3b8">상태:</span><span class="${obj.hasAlert ? 'status-critical' : 'status-active'}">${obj.hasAlert ? '위험 감지' : '정상 작동'}</span></div></div><hr>`;
+                    const statusClass = obj.connected === false ? 'status-warning' : (obj.hasAlert ? 'status-critical' : 'status-active');
+                    const statusText = obj.connected === false ? '오프라인' : (obj.hasAlert ? '위험 감지' : '정상 작동');
+                    d.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid #60a5fa;"><h4 style="margin-top:0; color:#60a5fa;">${obj.name}</h4><div style="font-size:0.85rem; display:grid; grid-template-columns: 100px 1fr; gap: 4px;"><span style="color:#94a3b8">타입:</span><span>${obj.type.toUpperCase()}</span><span style="color:#94a3b8">좌표:</span><span>(${obj.position.x.toFixed(1)}, ${obj.position.y.toFixed(1)}, ${obj.position.z.toFixed(1)})</span><span style="color:#94a3b8">속력:</span><span>${obj.speed} knots</span><span style="color:#94a3b8">헤딩:</span><span>${Math.round(obj.heading)}°</span><span style="color:#94a3b8">배터리:</span><span>${batteryText}</span><span style="color:#94a3b8">상태:</span><span class="${statusClass}">${statusText}</span></div><div style="margin-top:10px;"><button onclick="uiManager.openDeviceDetail('${obj.id}')" style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;color:#60a5fa;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem;">📋 상세보기 →</button></div></div><hr>`;
                 }
                 else if (link) {
-                    const sObj = state.objects.find(o => o.id === link.source);
-                    const tObj = state.objects.find(o => o.id === link.target);
+                    const sObj = findObjectById(link.source);
+                    const tObj = findObjectById(link.target);
                     const colorStr = '#' + COLORS[link.type].toString(16).padStart(6, '0');
 
                     let packetHtml = link.packets.map(p => `<div class="data-packet">${p}</div>`).join('');
@@ -1084,25 +1384,31 @@
                 }
             },
             addAlert: function(alertData) {
+                alertData.created_at = alertData.created_at || new Date().toISOString();
+                alertData.status = alertData.status || 'waiting';
+                alertData.source_system = alertData.source_system || '3d_dashboard';
+                if (!alertData.target_display_name && alertData.platformId) {
+                    const targetObj = findObjectById(alertData.platformId);
+                    if (targetObj) alertData.target_display_name = targetObj.name;
+                }
                 state.alerts.push(alertData); document.getElementById('alert-count').innerText = state.alerts.length;
+                persistDashboardAlerts();
                 const container = document.getElementById('alert-list-container');
                 if (state.alerts.length === 1) container.innerHTML = '';
                 const el = document.createElement('div');
-                el.className = `list-item ${alertData.severity === 'critical' ? 'alert-critical' : 'alert-warning'}`;
+                el.className = `list-item ${String(alertData.severity).toUpperCase() === 'CRITICAL' ? 'alert-critical' : 'alert-warning'}`;
                 el.innerHTML = `<div class="title"><span>${alertData.message}</span></div><div style="font-size:0.75rem; color:#94a3b8;">Time: ${new Date().toLocaleTimeString()} | Target: ${alertData.platformId}</div>`;
-                el.onclick = () => { this.selectObject(alertData.platformId); const obj = state.objects.find(o => o.id === alertData.platformId); if(obj) { controls.target.copy(obj.mesh.position); camera.position.set(obj.mesh.position.x, obj.mesh.position.y + 40, obj.mesh.position.z + 60); } };
+                el.onclick = () => { this.selectObject(alertData.platformId); const obj = findRenderableObjectById(alertData.platformId); if(obj) { controls.target.copy(obj.mesh.position); camera.position.set(obj.mesh.position.x, obj.mesh.position.y + 40, obj.mesh.position.z + 60); } };
                 container.insertBefore(el, container.firstChild);
                 this.renderStats(); if(state.selectedId === alertData.platformId) this.renderSelectedDetail();
             }
         };
 
-        function triggerAlert(alertData) { const obj = state.objects.find(o => o.id === alertData.platformId); if (obj) { obj.hasAlert = true; obj.status = alertData.severity; uiManager.addAlert(alertData); } }
-
         function onMouseMove(event) {
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1; mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
-            const allIntersectables = [...state.objects.map(o => o.mesh), ...state.links.map(l => l.mesh)];
+            const allIntersectables = [...getRenderableObjects().map(o => o.mesh).filter(Boolean), ...state.links.map(l => l.mesh).filter(Boolean)];
             const intersects = raycaster.intersectObjects(allIntersectables, true);
 
             const tooltip = document.getElementById('tooltip');
@@ -1113,7 +1419,7 @@
 
                 if (hitObj) {
                     state.hoveredId = hitObj.userData.id;
-                    const obj = state.objects.find(o => o.id === state.hoveredId);
+                    const obj = findObjectById(state.hoveredId);
                     const link = state.links.find(l => l.id === state.hoveredId);
 
                     tooltip.style.display = 'block';
@@ -1139,40 +1445,56 @@
                 case '1': if(targetList.length > 0) uiManager.selectObject(targetList[(idx - 1 + targetList.length) % targetList.length].id); break;
                 case '2': if(targetList.length > 0) uiManager.selectObject(targetList[(idx + 1) % targetList.length].id); break;
                 case 'f': if(state.selectedId) {
-                    const obj = state.objects.find(o => o.id === state.selectedId);
+                    const obj = findRenderableObjectById(state.selectedId);
                     if(obj) { camera.position.copy(obj.mesh.position).add(new THREE.Vector3(0, 30, 50)); controls.target.copy(obj.mesh.position); }
                 } break;
                 case 'l': state.showLabels = !state.showLabels; if(!state.showLabels) state.objects.forEach(o => o.labelEl.style.display = 'none'); break;
                 case 'g': state.showGrid = !state.showGrid; gridHelpers.forEach(g => g.visible = state.showGrid); break;
                 case 'z': document.getElementById('depth-filter').value = -200; document.getElementById('depth-filter').dispatchEvent(new Event('input')); break;
-                case '+': case '=': document.getElementById('sim-speed').value = Math.min(3, state.simSpeed + 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
-                case '-': case '_': document.getElementById('sim-speed').value = Math.max(0.1, state.simSpeed - 0.1); document.getElementById('sim-speed').dispatchEvent(new Event('input')); break;
             }
         });
 
         const clock = new THREE.Clock();
+        let tileUpdateCounter = 0;
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            state.time += delta * state.simSpeed;
+            state.time += delta;
             updateSimulation(delta);
             if (Math.floor(state.time * 10) % 10 === 0 && state.selectedId) uiManager.renderSelectedDetail();
             updateMap();
+            
+            // 매 30프레임마다 동적 타일 로딩 확인 (성능 최적화)
+            tileUpdateCounter++;
+            if (tileUpdateCounter >= 30) {
+                tileUpdateCounter = 0;
+                loadDynamicTiles();
+            }
+            
             renderer.render(scene, camera);
         }
 
         window.onload = async () => {
-            init3DEnvironment();
+            localStorage.removeItem(LOCAL_ALERTS_STORAGE_KEY);
 
             // Registry에서 디바이스 가져오기
             const registryDevices = await fetchDevicesFromRegistry();
+
+            // 초기 지도 중심은 첫 번째 디바이스 위치를 사용
+            applyInitialMapCenterFromFirstDevice(registryDevices);
+
+            init3DEnvironment();
+
             if (registryDevices.length > 0) {
                 state.objects = registryDevices.map(mapRegistryToScenario);
+                persistRegistryDevices(registryDevices);
+                persistDeviceDirectory(registryDevices);
+                state.usingRegistryData = true;
             } else {
-                state.objects = initialScenarios;
+                state.objects = [];
+                persistDeviceDirectory([]);
+                state.usingRegistryData = false;
             }
-
-            // linkScenarios는 window.onload에서 할당하지 말고 initObjects()에서 처리
 
             initObjects();
             uiManager.init();
@@ -1180,6 +1502,11 @@
 
             // Moth telemetry 구독
             subscribeMothTelemetry();
+            
+            // 각 device의 track별 pub 스트림 구독
+            if (registryDevices.length > 0) {
+                subscribeDeviceTrackStreams(registryDevices);
+            }
 
             animate();
         };

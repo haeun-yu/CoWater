@@ -11,7 +11,7 @@
   },
   "agent": {
     "id": "control-ship-middle-agent",
-    "name": "Control Ship Middle Agent",
+    "name": "통제 함정",
     "role": "regional_orchestrator",
     "layer": "middle",
     "device_type": "CONTROL_SHIP",

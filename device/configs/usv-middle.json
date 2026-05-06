@@ -11,7 +11,7 @@
   },
   "agent": {
     "id": "relay-usv-middle-agent",
-    "name": "Relay USV Middle Agent",
+    "name": "중계 USV",
     "role": "regional_orchestrator",
     "layer": "middle",
     "device_type": "USV",

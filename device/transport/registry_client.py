@@ -45,6 +45,24 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]
         raise
 
 
+def patch_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+    try:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="PATCH")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = resp.read()
+            return json.loads(payload or b"{}")
+    except urllib.error.HTTPError as e:
+        logger.error(f"HTTP error patching {url}: {e.code}")
+        raise
+    except urllib.error.URLError as e:
+        logger.error(f"Network error patching {url}: {e.reason}")
+        raise
+    except TimeoutError as e:
+        logger.error(f"Timeout patching to {url}: {e}")
+        raise
+
+
 def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
@@ -130,3 +148,6 @@ class RegistryClient:
 
     def get_device(self, registry_id: int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}")
+
+    def rename_device(self, registry_id: int, name: str) -> dict[str, Any]:
+        return patch_json(f"{self.url}/devices/{registry_id}", {"name": name})

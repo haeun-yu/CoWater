@@ -417,10 +417,10 @@
         <div class="panel">
             <h2>📊 실시간 센서 데이터</h2>
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('overview')">개요</button>
-                <button class="tab-btn" onclick="switchTab('gps')">GPS</button>
-                <button class="tab-btn" onclick="switchTab('imu')">IMU</button>
-                <button class="tab-btn" onclick="switchTab('sensors')">센서</button>
+                <button class="tab-btn active" onclick="switchTab('overview', this)">개요</button>
+                <button class="tab-btn" onclick="switchTab('gps', this)">GPS</button>
+                <button class="tab-btn" onclick="switchTab('imu', this)">IMU</button>
+                <button class="tab-btn" onclick="switchTab('sensors', this)">센서</button>
             </div>
 
             <div id="tab-overview" class="tab-content active">
@@ -467,21 +467,34 @@
 </main>
 
 <script>
-const MOTH_BASE = "wss://cobot.center:8287";
-const MOTH_CHANNEL = "instant";
-const MOTH_NAME = "health_check";
-const MOTH_SOURCE = "base";
-const MOTH_TRACK = "base";
+const REGISTRY_BASE = localStorage.getItem('cowater.dashboard.registryUrl') || 'http://127.0.0.1:8280';
+const MOTH_WS_BASE = localStorage.getItem('cowater.dashboard.mothWsBase') || 'wss://cobot.center:8287';
 
 let deviceId = null;
 let deviceName = null;
 let deviceType = null;
 let registryId = null;
-let wsConnection = null;
+let registryDevice = null;
+let wsConnections = {};
+let reconnectTimers = {};
 let sensorData = {};
-let sensorHistory = {};
+let batteryHistory = [];
 
-function loadDeviceInfo() {
+function resolveWsUrl(endpoint) {
+    if (!endpoint) return '';
+    const raw = String(endpoint).trim();
+    if (!raw) return '';
+    if (/^wss?:\/\//i.test(raw)) return raw;
+    return `${MOTH_WS_BASE}${raw}`;
+}
+
+async function fetchDeviceSnapshot() {
+    const resp = await fetch(`${REGISTRY_BASE}/devices/${encodeURIComponent(deviceId)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+}
+
+async function loadDeviceInfo() {
     deviceId = sessionStorage.getItem('cowater.device.id');
     deviceName = sessionStorage.getItem('cowater.device.name');
     deviceType = sessionStorage.getItem('cowater.device.type');
@@ -497,124 +510,143 @@ function loadDeviceInfo() {
     document.getElementById('info-device-id').textContent = deviceId;
     document.getElementById('info-registry-id').textContent = registryId || '—';
 
+    try {
+        registryDevice = await fetchDeviceSnapshot();
+        if (registryDevice?.name) {
+            document.getElementById('device-name').textContent = registryDevice.name;
+        }
+        if (registryDevice?.device_type) {
+            document.getElementById('device-type').textContent = String(registryDevice.device_type || '—').replace(/_/g, ' ');
+        }
+        document.getElementById('info-registry-id').textContent = registryDevice?.id || registryId || '—';
+
+        if (Number.isFinite(Number(registryDevice?.latitude))) {
+            document.getElementById('info-latitude').textContent = Number(registryDevice.latitude).toFixed(5);
+        }
+        if (Number.isFinite(Number(registryDevice?.longitude))) {
+            document.getElementById('info-longitude').textContent = Number(registryDevice.longitude).toFixed(5);
+        }
+        if (Number.isFinite(Number(registryDevice?.last_battery_percent))) {
+            document.getElementById('info-battery').textContent = Number(registryDevice.last_battery_percent).toFixed(0) + '%';
+        }
+    } catch (err) {
+        console.warn('[Registry] 디바이스 스냅샷 조회 실패:', err);
+    }
+
     connectToSensorStream();
 }
 
 function connectToSensorStream() {
-    const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=${MOTH_CHANNEL}&name=${MOTH_NAME}&source=${MOTH_SOURCE}&track=${MOTH_TRACK}`;
-    console.log('[Moth] 센서 스트림 연결 시작:', wsUrl);
-
-    wsConnection = new WebSocket(wsUrl);
-
-    wsConnection.onopen = () => {
-        console.log('[Moth] 센서 스트림 연결 성공');
-        showConnectionStatus(true, '센서 스트림 연결됨');
-
-        // 디바이스 특정 텔레메트리 채널 구독 (소문자 타입명 사용)
-        const telemetryChannels = [
-            `device.telemetry.${deviceId}.gps`,
-            `device.telemetry.${deviceId}.imu`,
-            `device.telemetry.${deviceId}.pressure`,
-            `device.telemetry.${deviceId}.temperature`,
-            `device.telemetry.${deviceId}.battery`,
-            `device.telemetry.${deviceId}.motion`,
-            `device.telemetry.${deviceId}.odometry`,
-            // 대문자 형식도 시도
-            `device.telemetry.${deviceId}.GPS`,
-            `device.telemetry.${deviceId}.IMU`,
-            `device.telemetry.${deviceId}.BATTERY`,
-            `device.telemetry.${deviceId}.ODOMETRY`,
-        ];
-
-        telemetryChannels.forEach(channel => {
-            const subMsg = {
-                type: 'subscribe',
-                channel: channel,
-                channel_type: 'meb'
-            };
-            wsConnection.send(JSON.stringify(subMsg));
-        });
-
-        console.log(`[Moth] ${telemetryChannels.length}개 텔레메트리 채널 구독 시도`);
-    };
-
-    wsConnection.onmessage = (ev) => {
-        if (typeof ev.data === 'string') {
-            try {
-                const msg = JSON.parse(ev.data);
-
-                // 구독 확인 메시지 무시
-                if (msg.type === 'subscribe' || msg.action === 'subscribe') return;
-
-                // publish 메시지만 처리
-                if (msg.type !== 'publish') return;
-
-                handleTelemetryMessage(msg);
-            } catch(e) {
-                console.warn('[Moth] 메시지 파싱 실패:', e);
-            }
-        }
-    };
-
-    wsConnection.onerror = () => {
-        console.error('[Moth] 센서 스트림 에러');
-        showConnectionStatus(false, '연결 실패');
-    };
-
-    wsConnection.onclose = () => {
-        console.warn('[Moth] 센서 스트림 연결 종료, 5초 후 재연결...');
-        showConnectionStatus(false, '연결 종료됨');
-        setTimeout(connectToSensorStream, 5000);
-    };
-}
-
-function handleTelemetryMessage(msg) {
-    const channel = (msg.channel || msg.topic || '').toLowerCase();
-    const payload = msg.payload || msg.data || msg;
-
-    // 채널 타입 추출 (소문자로 정규화)
-    let sensorType = null;
-    if (channel.includes('gps')) sensorType = 'gps';
-    else if (channel.includes('imu')) sensorType = 'imu';
-    else if (channel.includes('pressure')) sensorType = 'pressure';
-    else if (channel.includes('temperature')) sensorType = 'temperature';
-    else if (channel.includes('battery')) sensorType = 'battery';
-    else if (channel.includes('motion') || channel.includes('odometry')) sensorType = 'motion';
-
-    if (!sensorType) {
-        console.debug('[Moth] 알 수 없는 센서 타입:', channel);
+    const tracks = Array.isArray(registryDevice?.tracks) ? registryDevice.tracks : [];
+    if (tracks.length === 0) {
+        showConnectionStatus(false, '트랙 정보 없음 — API 조회 실패 또는 미등록');
         return;
     }
 
-    const data = payload;
-    const timestamp = new Date().toLocaleTimeString();
+    tracks.forEach((track) => {
+        const trackType = String(track?.type || '').toUpperCase();
+        const trackName = String(track?.name || '').trim();
+        const socketKey = `${trackType}:${trackName}`;
+        const wsUrl = resolveWsUrl(track?.endpoint);
+        if (!wsUrl) return;
 
-    // 센서 데이터 저장
-    if (!sensorData[sensorType]) sensorData[sensorType] = {};
-    sensorData[sensorType] = { ...data, timestamp };
+        console.log(`[Moth] ${trackType}/${trackName || '-'} 스트림 연결 시작:`, wsUrl);
 
-    // 위치 정보 갱신 (GPS 또는 motion 에서)
-    if (sensorType === 'gps' && data.latitude !== undefined && data.longitude !== undefined) {
-        document.getElementById('info-latitude').textContent = data.latitude.toFixed(5);
-        document.getElementById('info-longitude').textContent = data.longitude.toFixed(5);
-    }
-
-    if (sensorType === 'motion') {
-        if (data.heading !== undefined) document.getElementById('info-heading').textContent = data.heading.toFixed(1) + '°';
-        if (data.speed !== undefined) document.getElementById('info-speed').textContent = data.speed.toFixed(2) + ' m/s';
-        if (data.altitude !== undefined) document.getElementById('info-altitude').textContent = data.altitude.toFixed(1) + ' m';
-    }
-
-    if (sensorType === 'battery') {
-        const batteryPercent = data.percent !== undefined ? data.percent : data.level;
-        if (batteryPercent !== undefined) {
-            document.getElementById('info-battery').textContent = batteryPercent.toFixed(0) + '%';
+        if (wsConnections[socketKey]) {
+            wsConnections[socketKey].onclose = null;
+            wsConnections[socketKey].close();
         }
-    }
 
+        const ws = new WebSocket(wsUrl);
+        wsConnections[socketKey] = ws;
+
+        ws.onopen = () => {
+            console.log(`[Moth] ${trackType}/${trackName || '-'} 스트림 연결 성공`);
+            showConnectionStatus(true, `${trackType} 스트림 연결됨`);
+        };
+
+        ws.onmessage = async (ev) => {
+            try {
+                const rawText = typeof ev.data === 'string' ? ev.data : await ev.data.text();
+                if (!rawText || rawText.trim() === 'ping') return;
+                const payload = JSON.parse(rawText);
+                handleTelemetryPayload(payload);
+            } catch (e) {
+                console.warn(`[Moth] ${trackType} 메시지 파싱 실패:`, e);
+            }
+        };
+
+        ws.onerror = () => {
+            console.error(`[Moth] ${trackType} 스트림 에러`);
+        };
+
+        ws.onclose = () => {
+            console.warn(`[Moth] ${trackType} 스트림 연결 종료, 5초 후 재연결...`);
+            showConnectionStatus(false, `${trackType} 스트림 연결 종료`);
+            reconnectTimers[socketKey] = setTimeout(() => connectToSensorStream(), 5000);
+        };
+    });
+}
+
+function handleTelemetryPayload(payload) {
+    // pub 엔드포인트에서 오는 통합 텔레메트리 페이로드:
+    // { device_id, agent_id, timestamp, latitude, longitude, battery_percent, motion, depth_m, position }
+    if (!payload || typeof payload !== 'object') return;
+
+    const timestamp = new Date().toLocaleTimeString();
     document.getElementById('info-timestamp').textContent = timestamp;
 
-    // UI 갱신
+    // 위치
+    if (payload.latitude !== undefined) {
+        document.getElementById('info-latitude').textContent = payload.latitude.toFixed(5);
+        sensorData.gps = Object.assign(sensorData.gps || {}, {
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            altitude: payload.position?.altitude,
+            timestamp
+        });
+    }
+    if (payload.longitude !== undefined) {
+        document.getElementById('info-longitude').textContent = payload.longitude.toFixed(5);
+    }
+
+    // 배터리
+    if (payload.battery_percent !== undefined) {
+        document.getElementById('info-battery').textContent = payload.battery_percent.toFixed(0) + '%';
+        sensorData.battery = { percent: payload.battery_percent, timestamp };
+        // 히스토리에 기록
+        batteryHistory.push({ value: payload.battery_percent, time: new Date() });
+        if (batteryHistory.length > 30) batteryHistory.shift();
+        renderChart();
+    }
+
+    // 모션 (track payload는 heading/speed가 top-level로 올 수 있음)
+    if (payload.motion !== undefined) {
+        const motion = payload.motion;
+        if (motion.heading !== undefined) document.getElementById('info-heading').textContent = motion.heading.toFixed(1) + '°';
+        if (motion.speed !== undefined) document.getElementById('info-speed').textContent = motion.speed.toFixed(2) + ' m/s';
+        sensorData.motion = { ...motion, timestamp };
+    } else if (payload.heading !== undefined || payload.speed !== undefined) {
+        const motion = {
+            heading: payload.heading,
+            speed: payload.speed,
+        };
+        if (motion.heading !== undefined) document.getElementById('info-heading').textContent = Number(motion.heading).toFixed(1) + '°';
+        if (motion.speed !== undefined) document.getElementById('info-speed').textContent = Number(motion.speed).toFixed(2) + ' m/s';
+        sensorData.motion = { ...(sensorData.motion || {}), ...motion, timestamp };
+    }
+
+    // 수심
+    if (payload.depth_m !== undefined) {
+        document.getElementById('info-altitude').textContent = payload.depth_m.toFixed(1) + ' m (수심)';
+        sensorData.pressure = { depth_m: payload.depth_m, timestamp };
+    } else if (payload.depth !== undefined) {
+        document.getElementById('info-altitude').textContent = Number(payload.depth).toFixed(1) + ' m (수심)';
+        sensorData.pressure = { depth_m: Number(payload.depth), timestamp };
+    } else if (payload.position?.altitude !== undefined) {
+        document.getElementById('info-altitude').textContent = payload.position.altitude.toFixed(1) + ' m';
+    }
+
     renderSensorData();
     showConnectionStatus(true, '센서 데이터 수신 중');
 }
@@ -777,21 +809,13 @@ function renderSensorData() {
     }
 }
 
-function switchTab(tabName) {
-    // 모든 탭 비활성화
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
+function switchTab(tabName, clickedBtn) {
+    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-    // 선택된 탭 활성화
     const tabEl = document.getElementById(`tab-${tabName}`);
     if (tabEl) tabEl.classList.add('active');
-
-    // 버튼 활성화
-    event.target.classList.add('active');
+    if (clickedBtn) clickedBtn.classList.add('active');
 }
 
 function showConnectionStatus(connected, text) {
@@ -815,9 +839,36 @@ function showConnectionStatus(connected, text) {
 }
 
 function refreshSensorData() {
-    console.log('[Refresh] 센서 데이터 새로고침');
+    console.log('[Refresh] 센서 스트림 재연결');
     sensorData = {};
     renderSensorData();
+    Object.keys(reconnectTimers).forEach((track) => {
+        clearTimeout(reconnectTimers[track]);
+        delete reconnectTimers[track];
+    });
+    Object.keys(wsConnections).forEach((track) => {
+        const ws = wsConnections[track];
+        if (!ws) return;
+        ws.onclose = null;
+        ws.close();
+    });
+    wsConnections = {};
+    connectToSensorStream();
+}
+
+function renderChart() {
+    if (batteryHistory.length < 2) return;
+    const panel = document.getElementById('chart-panel');
+    panel.style.display = 'block';
+    panel.querySelector('h2').textContent = '📈 배터리 히스토리';
+    const container = document.getElementById('chart-container');
+    const max = 100;
+    container.innerHTML = batteryHistory.map(d => {
+        const height = Math.max(2, (d.value / max * 100)).toFixed(1);
+        const color = d.value > 50 ? '#4ade80' : d.value > 20 ? '#fbbf24' : '#f87171';
+        const time = d.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `<div class="chart-bar" style="height:${height}%;background:${color};" title="${d.value.toFixed(1)}% @ ${time}"><span class="chart-bar-label">${d.value.toFixed(0)}</span></div>`;
+    }).join('');
 }
 
 // 페이지 로드
@@ -825,7 +876,13 @@ window.onload = loadDeviceInfo;
 
 // 언로드 시 WebSocket 종료
 window.addEventListener('beforeunload', () => {
-    if (wsConnection) wsConnection.close();
+    Object.keys(reconnectTimers).forEach((track) => {
+        clearTimeout(reconnectTimers[track]);
+        delete reconnectTimers[track];
+    });
+    Object.values(wsConnections).forEach((ws) => {
+        if (ws) ws.close();
+    });
 });
 </script>
 
