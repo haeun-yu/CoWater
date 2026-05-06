@@ -2,24 +2,24 @@
 
 ## 디렉토리 구조
 
-| 디렉토리 | 역할 |
-| --- | --- |
-| `server/registration/` | Registry Server (포트 8280) |
-| `server/system-agent/` | System Agent (포트 9116) |
-| `device/` | Device Agent — 타입·계층을 옵션으로 선택 |
-| `client/` | 실시간 대시보드 (HTML) |
+| 디렉토리               | 역할                                     |
+| ---------------------- | ---------------------------------------- |
+| `server/registration/` | Registry Server (포트 8280)              |
+| `server/system-agent/` | System Agent (포트 9116)                 |
+| `device/`              | Device Agent — 타입·계층을 옵션으로 선택 |
+| `client/`              | 실시간 대시보드 (HTML)                   |
 
 ## 기본 포트
 
-| 포트 | 컴포넌트 |
-| --- | --- |
-| `8280` | Registry Server |
-| `9111` | USV Lower Agent |
-| `9112` | AUV Lower Agent |
-| `9113` | ROV Lower Agent |
-| `9114` | USV Middle Agent |
+| 포트   | 컴포넌트                  |
+| ------ | ------------------------- |
+| `8280` | Registry Server           |
+| `9111` | USV Lower Agent           |
+| `9112` | AUV Lower Agent           |
+| `9113` | ROV Lower Agent           |
+| `9114` | USV Middle Agent          |
 | `9115` | Control Ship Middle Agent |
-| `9116` | System Agent |
+| `9116` | System Agent              |
 
 ## 사전 준비
 
@@ -101,13 +101,13 @@ cd device && python3 device_agent.py --type usv --layer lower --port 9122
 
 ## device_agent.py 옵션
 
-| 옵션 | 필수 | 설명 |
-| --- | --- | --- |
-| `--type` | ✅ | 디바이스 타입: `usv` / `auv` / `rov` / `ship` |
-| `--layer` | ✅ | 에이전트 계층: `lower` / `middle` |
-| `--port` | - | 서버 포트 오버라이드 (기본값: config.json 값) |
-| `--host` | - | 서버 host 오버라이드 |
-| `--config` | - | 커스텀 config.json 경로 |
+| 옵션       | 필수 | 설명                                          |
+| ---------- | ---- | --------------------------------------------- |
+| `--type`   | ✅   | 디바이스 타입: `usv` / `auv` / `rov` / `ship` |
+| `--layer`  | ✅   | 에이전트 계층: `lower` / `middle`             |
+| `--port`   | -    | 서버 포트 오버라이드 (기본값: config.json 값) |
+| `--host`   | -    | 서버 host 오버라이드                          |
+| `--config` | -    | 커스텀 config.json 경로                       |
 
 ## 한 번에 점검할 항목
 
@@ -133,10 +133,10 @@ curl http://127.0.0.1:9113/state | jq '.last_telemetry'
 ## 기본 설정 기준
 
 - 모든 에이전트 `configs/{type}-{layer}.json > registry.url` 기본값은 `http://127.0.0.1:8280`
-- heartbeat 기본값은 `1초 주기`, Registry timeout은 `3초`
-- heartbeat 배터리 필드는 `battery_percent`
+- healthcheck 기본값은 `1초 주기`, Registry timeout은 `3초`
+- healthcheck 배터리 필드는 `battery_percent`
 - Event / Alert / Response canonical ledger는 Registry Server에 있다
-- lower / middle agent는 Moth heartbeat를 사용하고, System Agent는 Registry keepalive를 사용한다
+- lower / middle agent는 Moth healthcheck를 사용하고, System Agent는 Registry keepalive를 사용한다
 
 ## 대표 검증
 

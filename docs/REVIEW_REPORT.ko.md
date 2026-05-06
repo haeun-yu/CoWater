@@ -72,11 +72,11 @@
 
 - 실제 연결 상태가 `True`일 때만 최초 `connected_at`을 기록하도록 변경했습니다.
 
-### 6. Heartbeat 상태 저장 보강
+### 6. Healthcheck 상태 저장 보강
 
 문제:
 
-- heartbeat monitor가 offline 전환과 location update를 메모리에만 반영할 수 있었습니다.
+- healthcheck monitor가 offline 전환과 location update를 메모리에만 반영할 수 있었습니다.
 
 수정:
 

@@ -1,16 +1,18 @@
 # 기뢰 제거 시나리오 가이드
 
+본 문서는 2026-05-06 현재 저장소 구현 기준으로 작성되었습니다.
+
 이 문서는 현재 구현 기준의 `기뢰 탐지 -> Event 기록 -> Alert 생성 -> 대응 배정` 흐름을 정리한다.
 
 ## 시나리오 참여 구성
 
-| 컴포넌트 | 실행 |
-| --- | --- |
-| Registry Server | `server/registration/` |
-| AUV Lower Agent | `device/ --type auv --layer lower` |
-| ROV Lower Agent | `device/ --type rov --layer lower` |
+| 컴포넌트                  | 실행                                 |
+| ------------------------- | ------------------------------------ |
+| Registry Server           | `server/registration/`               |
+| AUV Lower Agent           | `device/ --type auv --layer lower`   |
+| ROV Lower Agent           | `device/ --type rov --layer lower`   |
 | Control Ship Middle Agent | `device/ --type ship --layer middle` |
-| System Agent | `server/system-agent/` |
+| System Agent              | `server/system-agent/`               |
 
 필요에 따라 USV Middle Agent(`--type usv --layer middle`)도 중간 라우팅에 참여할 수 있다.
 
@@ -41,25 +43,27 @@ severity enum:
 
 ## event_type 기본 매핑
 
-`pocs/06-system-agent/config.json > event_rules` 기준:
+`server/system-agent/config.json > event_rules` 기준:
 
-| event_type | severity | recommended_action |
-| --- | --- | --- |
-| `mine_detection` | `CRITICAL` | `survey_depth` |
-| `collision_risk` | `CRITICAL` | `escalate_alert` |
-| `distress` | `CRITICAL` | `escalate_alert` |
-| `battery_low` | `WARNING` | `return_to_base` |
-| `communication_loss` | `WARNING` | `escalate_alert` |
-| `tether_warning` | `WARNING` | `escalate_alert` |
+| event_type           | severity   | recommended_action |
+| -------------------- | ---------- | ------------------ |
+| `mine_detection`     | `CRITICAL` | `survey_depth`     |
+| `collision_risk`     | `CRITICAL` | `escalate_alert`   |
+| `distress`           | `CRITICAL` | `escalate_alert`   |
+| `battery_low`        | `WARNING`  | `return_to_base`   |
+| `communication_loss` | `WARNING`  | `escalate_alert`   |
+| `tether_warning`     | `WARNING`  | `escalate_alert`   |
 
 ## 실행 준비
 
+각 명령은 별도 터미널에서 실행한다.
+
 ```bash
-python3 pocs/00-device-registration-server/device_registration_server.py
-python3 pocs/06-system-agent/system_agent.py
-python3 pocs/05-control-ship-middle-agent/device_agent.py
-python3 pocs/02-auv-lower-agent/device_agent.py
-python3 pocs/03-rov-lower-agent/device_agent.py
+cd server/registration && python3 device_registration_server.py
+cd server/system-agent && python3 system_agent.py
+cd device && python3 device_agent.py --type ship --layer middle
+cd device && python3 device_agent.py --type auv --layer lower
+cd device && python3 device_agent.py --type rov --layer lower
 ```
 
 기본 Registry 주소는 `http://127.0.0.1:8280`이다.
@@ -117,9 +121,11 @@ curl http://127.0.0.1:9115/state | jq '.inbox'
 - Alert severity가 대문자 enum으로 기록된다.
 - Response가 Alert와 연결되어 저장된다.
 - middle agent 또는 lower agent로 `task.assign`가 전달된다.
+- 수동 개입이 필요한 경우 System Agent의 `/manual-interventions`에서 조회할 수 있다.
 
 ## 현재 구현 메모
 
 - System Agent는 `event.report`를 직접 수신해 Event 저장과 Alert 발행을 수행한다.
 - assignment 계산은 Registry Server가 맡고, 임무 판단은 System Agent가 맡는다.
-- heartbeat 위치와 배터리 값은 가능한 경우 `latitude`, `longitude`, `battery_percent`로 발행한다.
+- healthcheck 위치와 배터리 값은 가능한 경우 `latitude`, `longitude`, `battery_percent`로 발행한다.
+- A2A 명령은 Moth가 아니라 HTTP `/message:send`로 전달한다.
