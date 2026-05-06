@@ -323,6 +323,24 @@ class AgentRuntime:
             try:
                 self.registry_client.ingest_response(response)
                 logger.info(f"Response {response['response_id']} ingested for alert {alert_id}")
+
+                # Mission 생성 (Response와 동시에)
+                try:
+                    event_id = alert.get("event_id") or alert.get("metadata", {}).get("event_id")
+                    if not event_id:
+                        logger.warning(f"Missing event_id for alert {alert_id}, skipping mission creation")
+                    else:
+                        mission = self.registry_client.create_mission(
+                            response_id=response["response_id"],
+                            alert_id=str(alert_id),
+                            event_id=str(event_id),
+                            metadata={"alert_type": alert_type},
+                        )
+                        logger.info(f"Mission {mission.get('mission_id')} created for response {response['response_id']}")
+                        response["mission_id"] = mission.get("mission_id")
+                except Exception as e:
+                    logger.warning(f"Failed to create mission: {e}")
+                    
             except Exception as e:
                 logger.warning(f"Failed to ingest response: {e}")
 
@@ -1403,10 +1421,16 @@ class AgentRuntime:
                 }
             }
 
-            # Send POST request to target agent
+            # Send POST request to target agent using JSON-RPC
             data = json.dumps(a2a_message).encode("utf-8")
+            # Device agent handles JSON-RPC at root endpoint
+            rpc_endpoint = endpoint if endpoint else None
+            if not rpc_endpoint:
+                logger.warning(f"Target agent {target_agent_id} has no endpoint")
+                return {"delivered": False, "error": "target_endpoint_missing"}
+            
             req = urllib.request.Request(
-                endpoint,
+                rpc_endpoint,
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST"
@@ -1557,6 +1581,115 @@ class AgentRuntime:
             "event_id": stored_event.get("event_id"),
             "alert_id": stored_alert.get("alert_id"),
             "severity": severity,
+        }
+
+    async def handle_task_result(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Device가 Task 실패를 보고할 때 처리.
+        
+        Device가 명령 실행을 시도했으나 실패했을 때 호출됨.
+        실패 원인에 따라 재시도 또는 수동 개입 결정.
+        """
+        task_id = str(payload.get("task_id") or "")
+        device_id = str(payload.get("device_id") or "")
+        agent_id = str(payload.get("agent_id") or "")
+        status = str(payload.get("status") or "failed").lower()
+        error = str(payload.get("error") or "Unknown error")
+        command = payload.get("command") or {}
+        execution_result = payload.get("execution_result") or {}
+        
+        logger.info(f"Task failure reported: task_id={task_id}, device={device_id}, error={error}")
+        
+        # Record task failure
+        self.state.remember({
+            "kind": "task_failed",
+            "at": utc_now(),
+            "task_id": task_id,
+            "device_id": device_id,
+            "agent_id": agent_id,
+            "error": error,
+            "command": command,
+        })
+        
+        # Find related response by checking all responses for this task
+        # (This will be connected through mission step execution)
+        response_id = None
+        current_response = None
+        
+        # Find response that has this task in execution
+        for resp in self.registry_client.list_responses():
+            if isinstance(resp.get("dispatch_result"), dict):
+                execution_results = resp.get("dispatch_result", {}).get("execution_results", [])
+                for exec_entry in execution_results:
+                    if exec_entry.get("task_id") == task_id or exec_entry.get("id") == task_id:
+                        response_id = resp.get("response_id")
+                        current_response = resp
+                        break
+            if response_id:
+                break
+        
+        if not response_id:
+            # No response found - just log the failure
+            return {
+                "received": True,
+                "message_type": "task.result",
+                "task_id": task_id,
+                "status": "acknowledged",
+                "note": "No related response found - failure logged"
+            }
+        
+        # Update response with task failure
+        dispatch_result = current_response.get("dispatch_result", {}) or {}
+        execution_results = dispatch_result.get("execution_results", [])
+        
+        # Mark the failed task
+        for exec_entry in execution_results:
+            if exec_entry.get("task_id") == task_id or exec_entry.get("id") == task_id:
+                exec_entry["status"] = "failed"
+                exec_entry["error"] = error
+                exec_entry["failed_at"] = utc_now()
+        
+        # Decide: retry or abort
+        # 간단한 재시도 정책: 같은 task 최대 2번까지만 시도
+        retry_count = len([
+            e for e in execution_results 
+            if e.get("task_id") == task_id and e.get("status") == "failed"
+        ])
+        
+        decision = "abort_mission" if retry_count >= 2 else "retry_step"
+        
+        dispatch_result["execution_results"] = execution_results
+        dispatch_result["last_failure"] = {
+            "task_id": task_id,
+            "error": error,
+            "at": utc_now(),
+            "decision": decision
+        }
+        
+        # Update response in registry
+        updated_response = dict(current_response)
+        updated_response["dispatch_result"] = dispatch_result
+        updated_response["updated_at"] = utc_now()
+        if decision == "abort_mission":
+            updated_response["status"] = "failed"
+        
+        self.registry_client.ingest_response(updated_response)
+        
+        self.state.remember({
+            "kind": "task_failure_handled",
+            "at": utc_now(),
+            "response_id": response_id,
+            "task_id": task_id,
+            "decision": decision,
+            "retry_count": retry_count,
+        })
+        
+        return {
+            "received": True,
+            "message_type": "task.result",
+            "task_id": task_id,
+            "status": "processed",
+            "decision": decision,
+            "retry_count": retry_count
         }
 
     async def handle_mission_result(self, payload: dict[str, Any]) -> dict[str, Any]:

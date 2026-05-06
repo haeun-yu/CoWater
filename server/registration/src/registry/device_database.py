@@ -106,3 +106,11 @@ class DeviceDatabase:
                 (str(next_id),),
             )
             conn.commit()
+
+    def clear(self) -> None:
+        """모든 디바이스와 메타데이터 초기화"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM devices")
+            conn.execute("DELETE FROM meta")
+            conn.commit()
+        logger.info("DeviceDatabase 초기화 완료")

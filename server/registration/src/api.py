@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from typing import Any, List
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import Body, FastAPI, HTTPException, Query, Response, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 import uvicorn
 
 from src.core.config import APP_SETTINGS
@@ -27,13 +30,21 @@ from src.core.models import (
     ResponseIngestRequest,
     TRACK_TYPES,
 )
+from src.core.pubsub import get_pubsub_manager
 from src.registry.alert_registry import AlertRegistry
 from src.registry.device_registry import DeviceRegistry
 from src.registry.event_registry import EventRegistry
+from src.registry.mission_registry import MissionRegistry
 from src.transport.moth_subscriber import MothHealthcheckSubscriber
 
 
 logger = logging.getLogger(__name__)
+
+# Determine storage backend: 'sqlite' or 'memory'
+STORAGE_TYPE = os.getenv("COWATER_STORAGE", "memory").lower()
+USE_SQLITE = STORAGE_TYPE == "sqlite"
+
+logger.info(f"🔧 Storage backend: {STORAGE_TYPE}")
 
 
 registry = DeviceRegistry(
@@ -54,6 +65,7 @@ registry = DeviceRegistry(
 )
 alert_registry = AlertRegistry()
 event_registry = EventRegistry()
+mission_registry = MissionRegistry(use_db=USE_SQLITE)
 
 moth_subscriber = MothHealthcheckSubscriber(
     registry=registry,
@@ -330,6 +342,248 @@ def update_device_connectivity_state(device_id: int, request: DeviceConnectivity
         raise HTTPException(status_code=404, detail="device not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class MissionCreateRequest(BaseModel):
+    response_id: str
+    alert_id: str
+    event_id: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/missions", status_code=status.HTTP_201_CREATED)
+def create_mission(
+    body: MissionCreateRequest = Body(...),
+    response_id: str = Query(None),
+    alert_id: str = Query(None),
+    event_id: str = Query(None),
+) -> dict[str, Any]:
+    """새 Mission 생성 (Response 기반) - JSON body 우선"""
+    r_id = body.response_id or response_id
+    a_id = body.alert_id or alert_id
+    e_id = body.event_id or event_id
+    meta = body.metadata
+
+    if not r_id or not a_id or not e_id:
+        raise HTTPException(
+            status_code=400,
+            detail="response_id, alert_id, event_id are required"
+        )
+
+    mission = mission_registry.create_mission(
+        response_id=r_id,
+        alert_id=a_id,
+        event_id=e_id,
+        metadata=meta,
+    )
+    return mission.to_dict()
+
+
+@app.get("/missions")
+def list_missions() -> list[dict[str, Any]]:
+    """모든 Mission 목록"""
+    return [m.to_dict() for m in mission_registry.list_missions()]
+
+
+@app.get("/missions/status/{status}")
+def list_missions_by_status(status: str) -> list[dict[str, Any]]:
+    """특정 상태의 Mission 목록"""
+    return [m.to_dict() for m in mission_registry.list_missions_by_status(status)]
+
+
+@app.get("/missions/{mission_id}")
+def get_mission(mission_id: str) -> dict[str, Any]:
+    """특정 Mission 조회"""
+    try:
+        mission = mission_registry.get_mission(mission_id)
+        return mission.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.post("/missions/{mission_id}/step-execution")
+def record_step_execution(
+    mission_id: str,
+    step_id: str,
+    execution_result: dict[str, Any] = None,
+) -> dict[str, Any]:
+    """Step 실행 결과 기록"""
+    if not step_id:
+        raise HTTPException(status_code=400, detail="step_id is required")
+    
+    try:
+        mission = mission_registry.record_step_execution(
+            mission_id=mission_id,
+            step_id=step_id,
+            execution_result=execution_result or {},
+        )
+        return mission.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.post("/missions/{mission_id}/complete")
+def complete_mission(
+    mission_id: str,
+    completion_report: dict[str, Any] = None,
+) -> dict[str, Any]:
+    """Mission 완료 및 보고서 저장"""
+    try:
+        mission = mission_registry.complete_mission(
+            mission_id=mission_id,
+            completion_report=completion_report or {},
+        )
+        return mission.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.post("/missions/{mission_id}/abort")
+def abort_mission(mission_id: str, reason: str = "Unknown error") -> dict[str, Any]:
+    """Mission 실패 처리"""
+    try:
+        mission = mission_registry.abort_mission(mission_id=mission_id, reason=reason)
+        return mission.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.post("/missions/{mission_id}/update-status")
+def update_mission_status_endpoint(mission_id: str, status: str) -> dict[str, Any]:
+    """Manual Intervention: Mission 상태 업데이트 (재시도용)"""
+    if status not in ["pending", "in_progress", "completed", "failed"]:
+        raise HTTPException(status_code=400, detail="Invalid status value")
+    
+    try:
+        mission = mission_registry.update_mission_status(mission_id=mission_id, status=status)
+        
+        # Publish mission update via WebSocket
+        asyncio.create_task(publish_mission_update(mission_id, "status_update"))
+        
+        return mission.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.get("/missions/stats")
+def get_mission_stats() -> dict[str, Any]:
+    """Mission 통계"""
+    return mission_registry.get_mission_stats()
+
+
+@app.post("/admin/reset", status_code=status.HTTP_204_NO_CONTENT)
+def reset_all_data() -> Response:
+    """
+    모든 Registry 데이터 초기화 (테스트 용도)
+    
+    - 모든 디바이스 삭제
+    - 모든 alert/response 초기화
+    - 모든 event 초기화
+    """
+    logger.warning("Registry 데이터 초기화 시작")
+    device_count = len(registry.list_devices())
+    alert_count = len(alert_registry.list_alerts())
+    response_count = len(alert_registry.list_responses())
+    event_count = len(event_registry.list_events())
+    mission_count = len(mission_registry.list_missions())
+    
+    registry.reset()
+    alert_registry.reset()
+    event_registry.reset()
+    mission_registry.reset()
+    
+    logger.info(
+        f"Registry 초기화 완료: "
+        f"devices={device_count}, alerts={alert_count}, responses={response_count}, "
+        f"events={event_count}, missions={mission_count}"
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ======================== WebSocket Endpoints ========================
+
+@app.websocket("/ws/missions")
+async def websocket_missions(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time mission updates"""
+    connection_id = str(uuid4())
+    channel = "missions"
+    
+    await websocket.accept()
+    pubsub = get_pubsub_manager()
+    await pubsub.connect(channel, connection_id, websocket)
+    
+    logger.info(f"✅ WebSocket client connected: {connection_id}")
+    
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await pubsub.disconnect(channel, connection_id)
+        logger.info(f"✅ WebSocket client disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"❌ WebSocket error: {e}")
+        await pubsub.disconnect(channel, connection_id)
+
+
+@app.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time dashboard updates (all data)"""
+    connection_id = str(uuid4())
+    channel = "dashboard"
+    
+    await websocket.accept()
+    pubsub = get_pubsub_manager()
+    await pubsub.connect(channel, connection_id, websocket)
+    
+    logger.info(f"✅ Dashboard WebSocket connected: {connection_id}")
+    
+    try:
+        # Send initial data
+        initial_data = {
+            "type": "initial",
+            "events": [e.to_dict() for e in event_registry.list_events()],
+            "alerts": [a.to_dict() for a in alert_registry.list_alerts()],
+            "missions": [m.to_dict() for m in mission_registry.list_missions()],
+            "stats": mission_registry.get_mission_stats(),
+        }
+        await websocket.send_json(initial_data)
+        
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await pubsub.disconnect(channel, connection_id)
+        logger.info(f"✅ Dashboard WebSocket disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"❌ Dashboard WebSocket error: {e}")
+        await pubsub.disconnect(channel, connection_id)
+
+
+# Helper function to publish mission updates
+async def publish_mission_update(mission_id: str, update_type: str) -> None:
+    """Publish mission update to WebSocket subscribers"""
+    try:
+        pubsub = get_pubsub_manager()
+        mission = mission_registry.get_mission(mission_id)
+        
+        message = {
+            "type": update_type,
+            "mission_id": mission_id,
+            "mission": mission.to_dict(),
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+        
+        await pubsub.publish("missions", message)
+        await pubsub.publish("dashboard", {
+            "type": "mission_update",
+            "data": message,
+        })
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to publish mission update: {e}")
+
+
+
 
 
 def main() -> None:

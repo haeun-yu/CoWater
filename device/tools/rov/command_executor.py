@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import Any
 
 from agent.state import utc_now
@@ -10,12 +11,37 @@ class CommandExecutor:
         self.history: list[dict] = []
 
     def execute(self, command: dict) -> dict:
+        """Execute ROV command.
+        
+        Simulates task execution with optional failure scenarios.
+        Certain actions have probability of failure (e.g., remove_mine at 15%).
+        """
         self.history.append({"at": utc_now(), "command": command})
         self.history = self.history[-20:]
         action = str(command.get("action") or "")
         params = command.get("params") or {}
         location = params.get("location") or {}
         previous_step_results = params.get("previous_step_results") or []
+        
+        # Simulate random failures for risky actions (mine removal is riskier: 15%)
+        if action.lower() in ["remove_mine", "detonate_mine"]:
+            if random.random() < 0.15:  # 15% failure rate for mine removal
+                return {
+                    "delivered": False,
+                    "command": command,
+                    "error": f"ROV command failed: {action}",
+                    "at": utc_now(),
+                    "status": "failed"
+                }
+        elif action.lower() in ["inspect_target", "scan_target"]:
+            if random.random() < 0.08:  # 8% failure rate for inspection
+                return {
+                    "delivered": False,
+                    "command": command,
+                    "error": f"ROV command failed: {action}",
+                    "at": utc_now(),
+                    "status": "failed"
+                }
 
         result: dict[str, Any] = {
             "delivered": True,

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.runtime import AgentRuntime
 from agent.state import utc_now
-from controller.a2a import A2ASendRequest, build_task, extract_message_data
+from controller.a2a import A2APart, A2AMessage, A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
 
 logger = logging.getLogger(__name__)
@@ -136,6 +136,18 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             "reason": data.get("reason") or f"A2A task {request.taskId}",
         }
         result = runtime.apply_command(command)
+        
+        # If task execution failed, report to System Agent asynchronously
+        if isinstance(result, dict) and result.get('status') == 'failed':
+            asyncio.create_task(
+                _report_task_failure_to_system_agent(
+                    runtime=runtime,
+                    task_id=request.taskId,
+                    command=command,
+                    error=result.get('error'),
+                    execution_result=result
+                )
+            )
     else:
         result = {"received": True, "message_type": msg_type}
     task = build_task(request.taskId, request.message, result)
@@ -161,6 +173,60 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         )
 
     return task
+
+
+async def _report_task_failure_to_system_agent(
+    runtime: AgentRuntime,
+    task_id: str | None,
+    command: dict[str, Any],
+    error: str | None,
+    execution_result: dict[str, Any]
+) -> None:
+    """Report task execution failure to System Agent."""
+    try:
+        system_agent_url = "http://127.0.0.1:9116/message:send"
+        
+        # Build task.result A2A message
+        result_message = A2AMessage(
+            role="device",
+            parts=[
+                A2APart(
+                    type="data",
+                    data={
+                        "message_type": "task.result",
+                        "task_id": task_id,
+                        "status": "failed",
+                        "device_id": runtime.state.device_id,
+                        "agent_id": runtime.state.agent_id,
+                        "command": command,
+                        "error": error,
+                        "execution_result": execution_result,
+                        "timestamp": utc_now(),
+                    }
+                )
+            ]
+        )
+        
+        result_request = A2ASendRequest(
+            message=result_message,
+            taskId=task_id,
+            metadata={"sender_id": runtime.state.agent_id, "sender_device_id": runtime.state.device_id}
+        )
+        
+        # POST to System Agent
+        import json
+        import urllib.request
+        data = json.dumps(result_request.model_dump()).encode("utf-8")
+        req = urllib.request.Request(
+            system_agent_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            logger.info(f"Task failure reported to System Agent: task_id={task_id}")
+    except Exception as e:
+        logger.error(f"Failed to report task failure to System Agent: {e}")
 
 
 def run(config_path: Path, host_override: str | None = None, port_override: int | None = None) -> None:

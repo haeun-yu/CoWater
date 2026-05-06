@@ -588,3 +588,9 @@ class DeviceRegistry:
         device.updated_at = utc_now_iso()
         self._persist_device(device)
         return device
+
+    def reset(self) -> None:
+        """모든 디바이스 초기화 (데이터베이스 삭제)"""
+        self._devices.clear()
+        self._db.clear()
+        self._next_id = 1

@@ -44,3 +44,7 @@ class EventRegistry:
         if event is None:
             raise KeyError(event_id)
         return event
+
+    def reset(self) -> None:
+        """모든 event 초기화"""
+        self._events.clear()

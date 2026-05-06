@@ -89,6 +89,19 @@ class AlertRegistry:
             notes=request.notes,
         )
         self._responses[response.response_id] = response
+        
+        # Alert 상태를 response 상태에 따라 업데이트
+        try:
+            alert = self.get_alert(request.alert_id)
+            if request.status == "planned" or (response.dispatch_result and response.dispatch_result.get("delivered")):
+                alert.touch("dispatched")
+            elif request.status == "queued":
+                alert.touch("queued")
+            elif request.status == "failed":
+                alert.touch("failed")
+        except KeyError:
+            pass  # Alert가 없으면 무시
+        
         return response
 
     def list_responses(self) -> List[ResponseRecord]:
@@ -99,3 +112,8 @@ class AlertRegistry:
         if response is None:
             raise KeyError(response_id)
         return response
+
+    def reset(self) -> None:
+        """모든 alert와 response 초기화"""
+        self._alerts.clear()
+        self._responses.clear()

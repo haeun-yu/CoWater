@@ -20,8 +20,11 @@ PID_FILE="$PROJECT_ROOT/.cowater_pids"
 mkdir -p "$LOG_DIR"
 touch "$PID_FILE"
 
+SYSTEM_AGENT_DIR="$PROJECT_ROOT/server/system-agent"
+
 SERVICES=(
   "Registry|cd '$SERVER_DIR' && '$VENV_PYTHON' device_registration_server.py"
+  "System-Agent|cd '$SYSTEM_AGENT_DIR' && '$VENV_PYTHON' system_agent.py"
   "Ship-Middle|cd '$DEVICE_DIR' && '$VENV_PYTHON' device_agent.py --type ship --layer middle"
   "USV-Lower|cd '$DEVICE_DIR' && '$VENV_PYTHON' device_agent.py --type usv --layer lower"
   "AUV-Lower|cd '$DEVICE_DIR' && '$VENV_PYTHON' device_agent.py --type auv --layer lower"
@@ -79,7 +82,7 @@ start_all() {
   start_one "$reg_name" "$reg_cmd"
   wait_registry
 
-  for i in 1 2 3 4; do
+  for i in 1 2 3 4 5; do
     IFS='|' read -r name cmd <<< "${SERVICES[$i]}"
     start_one "$name" "$cmd"
     sleep 1
@@ -89,7 +92,7 @@ start_all() {
   status_all
   echo
   echo -e "${GREEN}3D 대시보드: file://$CLIENT_DIR/index.html${NC}"
-  echo -e "${GREEN}경보 화면:   file://$CLIENT_DIR/alerts.html${NC}"
+  echo -e "${GREEN}운영 대시보드: file://$CLIENT_DIR/ops.html${NC}"
 }
 
 stop_all() {
@@ -114,6 +117,7 @@ stop_all() {
 
   pkill -f "device_agent.py --type" 2>/dev/null || true
   pkill -f "device_registration_server.py" 2>/dev/null || true
+  pkill -f "system_agent.py" 2>/dev/null || true
 
   : > "$PID_FILE"
   echo -e "${GREEN}[✓] 중지 완료${NC}"
@@ -122,8 +126,8 @@ stop_all() {
 status_all() {
   print_header
   echo -e "${BLUE}프로세스 상태${NC}"
-  if ps aux | grep -E "device_agent.py --type|device_registration_server.py" | grep -v grep >/dev/null; then
-    ps aux | grep -E "device_agent.py --type|device_registration_server.py" | grep -v grep
+  if ps aux | grep -E "device_agent.py --type|device_registration_server.py|system_agent.py" | grep -v grep >/dev/null; then
+    ps aux | grep -E "device_agent.py --type|device_registration_server.py|system_agent.py" | grep -v grep
   else
     echo "실행 중인 CoWater 프로세스 없음"
   fi
@@ -160,7 +164,7 @@ Usage:
   ./cowaterctl.sh stop
   ./cowaterctl.sh status
   ./cowaterctl.sh restart
-  ./cowaterctl.sh logs [Registry|Ship-Middle|USV-Lower|AUV-Lower|ROV-Lower]
+  ./cowaterctl.sh logs [Registry|System-Agent|Ship-Middle|USV-Lower|AUV-Lower|ROV-Lower]
 EOF
 }
 

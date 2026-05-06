@@ -190,6 +190,36 @@ class AlertRecord:
 
 
 @dataclass
+class MissionRecord:
+    """Mission 라이프사이클을 추적하는 기록 (Response 기반)"""
+    mission_id: str
+    response_id: str
+    alert_id: str
+    event_id: str
+    status: str = "pending"  # pending|in_progress|completed|failed
+    step_states: List[Dict[str, Any]] = field(default_factory=list)  # [{step_id, status, tasks, ...}]
+    completion_report: Dict[str, Any] = field(default_factory=dict)  # {...}
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now_iso)
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def touch(self, status: Optional[str] = None) -> None:
+        """상태 업데이트 및 타임스탐프 갱신"""
+        self.updated_at = utc_now_iso()
+        if status:
+            self.status = status
+        if status == "in_progress" and self.started_at is None:
+            self.started_at = utc_now_iso()
+        if status in {"completed", "failed"} and self.completed_at is None:
+            self.completed_at = utc_now_iso()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class EventRecord:
     event_id: str
     source_system: str

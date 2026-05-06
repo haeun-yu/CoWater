@@ -333,6 +333,18 @@ class AgentRuntime:
                 # 1️⃣ 센서 데이터 생성 및 정규화
                 telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
                 self.state.last_seen_at = utc_now()
+
+                # Registry keepalive: Moth 연결 여부와 무관하게 주기적으로 last_seen_at 갱신
+                _keepalive_interval = int(self.config.get("registry", {}).get("healthcheck_interval_seconds", 1))
+                if not hasattr(self, "_keepalive_tick"):
+                    self._keepalive_tick = 0
+                self._keepalive_tick += 1
+                if self._keepalive_tick >= _keepalive_interval:
+                    self._keepalive_tick = 0
+                    try:
+                        self._upsert_agent()
+                    except Exception as _ka_err:
+                        logger.debug(f"Registry keepalive 실패: {_ka_err}")
                 self.state.last_telemetry = telemetry
 
                 # 1-b️⃣ [SYNC GPS] Simulator 위치를 AgentState에 동기화

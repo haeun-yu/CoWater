@@ -166,3 +166,55 @@ class RegistryClient:
 
     def get_response(self, response_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/responses/{response_id}")
+
+    # Mission API
+    def create_mission(
+        self,
+        response_id: str,
+        alert_id: str,
+        event_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """새 Mission 생성"""
+        body = {
+            "response_id": response_id,
+            "alert_id": alert_id,
+            "event_id": event_id,
+            "metadata": metadata or {},
+        }
+        return post_json(f"{self.url}/missions", body)
+
+    def list_missions(self) -> list[dict[str, Any]]:
+        """모든 Mission 목록"""
+        return get_json(f"{self.url}/missions")
+
+    def get_mission(self, mission_id: str) -> dict[str, Any]:
+        """특정 Mission 조회"""
+        return get_json(f"{self.url}/missions/{mission_id}")
+
+    def record_step_execution(
+        self,
+        mission_id: str,
+        step_id: str,
+        execution_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Step 실행 결과 기록"""
+        body = {
+            "step_id": step_id,
+            "execution_result": execution_result,
+        }
+        return post_json(f"{self.url}/missions/{mission_id}/step-execution", body)
+
+    def complete_mission(
+        self,
+        mission_id: str,
+        completion_report: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Mission 완료"""
+        body = {"completion_report": completion_report}
+        return post_json(f"{self.url}/missions/{mission_id}/complete", body)
+
+    def abort_mission(self, mission_id: str, reason: str) -> dict[str, Any]:
+        """Mission 실패 처리"""
+        body = {"reason": reason}
+        return post_json(f"{self.url}/missions/{mission_id}/abort", body)

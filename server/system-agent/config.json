@@ -99,8 +99,6 @@
   },
   "simulation": {},
   "cors": {
-    "allow_origins": [
-      "*"
-    ]
+    "allow_origins": ["*"]
   }
 }
