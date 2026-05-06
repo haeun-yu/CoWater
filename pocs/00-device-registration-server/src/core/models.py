@@ -202,6 +202,7 @@ class ResponseRecord:
     status: str = "planned"
     reason: str = ""
     task_id: Optional[str] = None
+    params: Dict[str, Any] = field(default_factory=dict)
     dispatch_result: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
@@ -286,6 +287,7 @@ class ResponseIngestRequest(BaseModel):
     status: str = "planned"
     reason: str = ""
     task_id: Optional[str] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
     dispatch_result: Dict[str, Any] = Field(default_factory=dict)
     notes: Optional[str] = None
 

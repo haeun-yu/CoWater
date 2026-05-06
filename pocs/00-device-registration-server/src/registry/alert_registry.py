@@ -84,6 +84,7 @@ class AlertRegistry:
             status=request.status,
             reason=request.reason,
             task_id=request.task_id,
+            params=dict(request.params),
             dispatch_result=dict(request.dispatch_result),
             notes=request.notes,
         )

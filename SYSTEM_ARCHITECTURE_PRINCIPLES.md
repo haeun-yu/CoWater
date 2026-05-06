@@ -152,6 +152,7 @@ ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
 - 모든 A2A 메시지는 로깅한다.
 - 대응 명령(`task.assign`)을 받은 에이전트는 `incident_decision` 로그를 남겨야 한다.
 - 대응 수행 후에는 `mission.result`를 상위(또는 지정된 report endpoint)로 보고해야 한다.
+- System Agent는 `mission.result`를 `response_id + step_id + 실제 실행 주체(source_agent_id)` 기준으로 중복 제거한다.
 
 예시:
 
@@ -182,7 +183,7 @@ POST http://{target_endpoint}/message:send
 | Response | Alert 대응 계획/결과 | Registry Server response ledger |
 
 현재 구현 기준에서 System Agent는 A2A로 Event를 수신한 뒤 Event를 Registry Server에 기록하고, severity를 판단해 Alert를 생성하며, 이후 approve/dispatch/response 기록을 담당한다.
-또한 `event.report` 수신 직후 Alert 처리를 비동기로 즉시 시작하며, dispatch 성공 시 Response 상태를 `completed`, 실패 시 `failed`로 갱신한다.
+또한 `event.report` 수신 직후 Alert 처리를 비동기로 즉시 시작하며, 첫 step dispatch 성공 시에는 Response를 `planned` 상태로 유지하고, 이후 `mission.result`가 누적되면서 최종 `completed/failed`로 갱신한다.
 
 기본 `event_type` 매핑은 `System Agent`의 `config.json > event_rules`에서 정의한다.
 
@@ -203,6 +204,12 @@ POST http://{target_endpoint}/message:send
 - Response 상태는 최소 `planned -> completed/failed` 전이를 가져야 한다.
 - `dispatch_result`에는 A2A 전송 결과(성공 여부, 대상 endpoint, 응답 본문 또는 오류)를 기록한다.
 - `mission.result`가 수신되면 System Agent는 해당 response를 현장 실행 결과 기준으로 다시 갱신한다.
+- System Agent는 먼저 이벤트 위치 기준으로 `가장 가까우면서 해당 대응을 수행할 수 있는 디바이스`를 고른다.
+- 선택된 대상 디바이스에 middle parent가 있으면 그 middle을 경유하고, 없으면 해당 디바이스에 직접 전달한다.
+- 하나의 incident가 여러 step으로 구성될 수 있으며, 이전 step의 결과는 다음 step 입력으로 전달할 수 있다.
+- 여러 하위 에이전트가 같은 `response_id`로 결과를 보고할 수 있으므로 `dispatch_result.execution_results`에 실행 주체별 결과를 누적한다.
+- 동일 실행 주체가 같은 `response_id + step_id`로 다시 보고한 `mission.result`는 중복으로 보고 원장을 덮어쓰지 않는다.
+- 집계 상태는 실행 결과 중 하나라도 `failed`면 `failed`, 모두 성공 보고이면 `completed`로 본다.
 
 ---
 

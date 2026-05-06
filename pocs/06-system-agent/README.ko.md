@@ -70,8 +70,13 @@ python3 system_agent.py
 - Event를 Registry Server의 event ledger에 저장한다.
 - `config.json > event_rules`를 기준으로 severity와 `recommended_action`을 결정한다.
 - Alert를 Registry Server에 저장한다.
-- 이후 적절한 middle agent 또는 lower agent에 `task.assign`를 전송한다.
+- 이후 이벤트 위치 기준으로 가장 가까우면서 해당 대응을 수행할 수 있는 디바이스를 고른다.
+- 선택된 디바이스에 middle parent가 있으면 middle agent로 보내고, 없으면 해당 lower agent에 직접 보낸다.
+- 하나의 incident가 여러 step으로 구성되면 `mission_plan` 순서대로 dispatch하고 앞 step 결과를 다음 step에 전달한다.
 - dispatch 성공/실패 결과를 `dispatch_result`에 반영하고 Response 상태를 갱신한다.
+- 현장 수행 결과(`mission.result`)를 수신하면 `dispatch_result.execution_results`에 실행 주체별 결과를 누적한다.
+- 동일 `response_id + step_id + 실행 주체`의 `mission.result`는 중복으로 보고 기존 완료 결과를 덮어쓰지 않는다.
+- 실행 결과 집계는 하나라도 실패이면 `failed`, 모두 성공이면 `completed`로 저장한다.
 
 기본 매핑 예시:
 

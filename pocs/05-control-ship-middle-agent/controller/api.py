@@ -137,6 +137,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         reason = data.get("reason") or f"A2A task {request.taskId}"
         response_id = str(data.get("response_id") or request.taskId or str(uuid4()))
         alert_id = str(data.get("alert_id") or "")
+        step_id = str(data.get("step_id") or "default")
 
         runtime.state.remember(
             {
@@ -145,34 +146,37 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 "source": "control_ship",
                 "response_id": response_id,
                 "alert_id": alert_id,
+                "step_id": step_id,
                 "action": action,
                 "reason": reason,
                 "params": params,
             }
         )
 
-        # For mine-clearing missions, route to lower agents
-        if action == "survey_depth" and params.get("mission_type") == "mine_clearance":
+        if params.get("target_device_id"):
             route_result = await _route_to_lower_agent(
                 runtime,
-                "survey_depth",
+                action,
                 params,
-                f"Mine survey command: {reason}",
+                reason,
                 response_id=response_id,
                 alert_id=alert_id,
+                step_id=step_id,
             )
-            result = {"routed": True, "action": action, "target": "lower_agents", "route_result": route_result}
-            await _report_mission_result_to_system(
-                runtime,
-                response_id=response_id,
-                alert_id=alert_id,
-                execution_status="completed" if route_result.get("overall_status") != "failed" else "failed",
-                execution_log={
-                    "executor": runtime.state.agent_id,
-                    "route_result": route_result,
-                    "note": "Control Ship routed mission to lower agents",
-                },
-            )
+            result = {"routed": True, "action": action, "target": "target_device", "route_result": route_result}
+            if route_result.get("overall_status") == "failed":
+                await _report_mission_result_to_system(
+                    runtime,
+                    response_id=response_id,
+                    alert_id=alert_id,
+                    step_id=step_id,
+                    execution_status="failed",
+                    execution_log={
+                        "executor": runtime.state.agent_id,
+                        "route_result": route_result,
+                        "note": "Control Ship failed to route mission to target device",
+                    },
+                )
         else:
             command = {
                 "action": action,
@@ -184,6 +188,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
                 runtime,
                 response_id=response_id,
                 alert_id=alert_id,
+                step_id=step_id,
                 execution_status="completed",
                 execution_log={"executor": runtime.state.agent_id, "result": result},
             )
@@ -193,10 +198,12 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             runtime,
             response_id=str(data.get("response_id") or request.taskId or str(uuid4())),
             alert_id=str(data.get("alert_id") or ""),
+            step_id=str(data.get("step_id") or "default"),
             execution_status=str(data.get("execution_status") or "completed"),
             execution_log={
                 "forwarded_by": runtime.state.agent_id,
                 "source_agent_id": data.get("source_agent_id"),
+                "step_id": data.get("step_id"),
                 "payload": data,
             },
         )
@@ -216,8 +223,9 @@ async def _route_to_lower_agent(
     *,
     response_id: str,
     alert_id: str,
+    step_id: str,
 ) -> dict[str, Any]:
-    """Route mission to lower agents (AUV, ROV) based on their capabilities"""
+    """Route mission to the explicitly selected lower agent."""
     logger = logging.getLogger(__name__)
 
     # Discover lower agents from registry
@@ -230,77 +238,52 @@ async def _route_to_lower_agent(
         logger.warning(f"Failed to fetch device list for routing: {e}")
         return {"overall_status": "failed", "error": str(e), "children": []}
 
-    # Find suitable lower agents
-    auv_agent = None
-    rov_agent = None
+    target_device_id = int(params.get("target_device_id"))
+    target_agent = None
     for device in all_devices:
         try:
-            if device.get("layer") == "lower" and device.get("connected"):
-                device_type = device.get("device_type", "").lower()
+            if int(device.get("id") or 0) == target_device_id and device.get("layer") == "lower" and device.get("connected"):
                 agent_info = device.get("agent")
                 if not isinstance(agent_info, dict):
                     agent_info = {}
                 endpoint = agent_info.get("endpoint")
-
-                if "auv" in device_type and endpoint and not auv_agent:
-                    auv_agent = {"device_id": device["id"], "endpoint": endpoint, "name": device.get("name")}
-                elif "rov" in device_type and endpoint and not rov_agent:
-                    rov_agent = {"device_id": device["id"], "endpoint": endpoint, "name": device.get("name")}
+                if endpoint:
+                    target_agent = {"device_id": device["id"], "endpoint": endpoint, "name": device.get("name")}
+                    break
         except Exception as e:
             logger.debug(f"Error processing device {device.get('id')}: {e}")
             continue
 
-    child_results: list[dict[str, Any]] = []
+    if not target_agent:
+        return {"overall_status": "failed", "error": f"target_device_not_found:{target_device_id}", "children": []}
 
     routed_params = dict(params)
     routed_params["report_to_endpoint"] = runtime.base_url()
-
-    # Send survey_depth to AUV
-    if auv_agent and action == "survey_depth":
-        try:
-            result = await _send_a2a_task(
-                auv_agent["endpoint"],
-                {
-                    "message_type": "task.assign",
-                    "action": "survey_depth",
-                    "params": routed_params,
-                    "reason": reason,
-                    "alert_id": alert_id,
-                    "response_id": response_id,
-                },
-                task_id=response_id,
-            )
-            logger.info(f"Routed survey_depth to AUV {auv_agent['device_id']}")
-            child_results.append({"device_id": auv_agent["device_id"], "status": "completed", "result": result})
-        except Exception as e:
-            logger.warning(f"Failed to route to AUV: {e}")
-            child_results.append({"device_id": auv_agent["device_id"], "status": "failed", "error": str(e)})
-
-    # Send remove_mine to ROV
-    if rov_agent and action == "survey_depth":  # Both operations for mine clearing
-        try:
-            result = await _send_a2a_task(
-                rov_agent["endpoint"],
-                {
-                    "message_type": "task.assign",
-                    "action": "remove_mine",
-                    "params": routed_params,
-                    "reason": reason,
-                    "alert_id": alert_id,
-                    "response_id": response_id,
-                },
-                task_id=response_id,
-            )
-            logger.info(f"Routed remove_mine to ROV {rov_agent['device_id']}")
-            child_results.append({"device_id": rov_agent["device_id"], "status": "completed", "result": result})
-        except Exception as e:
-            logger.warning(f"Failed to route to ROV: {e}")
-            child_results.append({"device_id": rov_agent["device_id"], "status": "failed", "error": str(e)})
-
-    overall = "completed"
-    if child_results and any(c.get("status") == "failed" for c in child_results):
-        overall = "failed"
-    return {"overall_status": overall, "children": child_results}
+    try:
+        result = await _send_a2a_task(
+            target_agent["endpoint"],
+            {
+                "message_type": "task.assign",
+                "action": action,
+                "params": routed_params,
+                "reason": reason,
+                "alert_id": alert_id,
+                "response_id": response_id,
+                "step_id": step_id,
+            },
+            task_id=f"{response_id}:{step_id}",
+        )
+        logger.info(f"Routed {action} to lower {target_agent['device_id']}")
+        return {
+            "overall_status": "completed",
+            "children": [{"device_id": target_agent["device_id"], "status": "completed", "result": result}],
+        }
+    except Exception as e:
+        logger.warning(f"Failed to route to lower {target_agent['device_id']}: {e}")
+        return {
+            "overall_status": "failed",
+            "children": [{"device_id": target_agent["device_id"], "status": "failed", "error": str(e)}],
+        }
 
 
 async def _send_a2a_task(endpoint: str, data_payload: dict[str, Any], task_id: str) -> dict[str, Any]:
@@ -325,6 +308,7 @@ async def _report_mission_result_to_system(
     *,
     response_id: str,
     alert_id: str,
+    step_id: str,
     execution_status: str,
     execution_log: dict[str, Any],
 ) -> None:
@@ -352,18 +336,20 @@ async def _report_mission_result_to_system(
         "message_type": "mission.result",
         "response_id": response_id,
         "alert_id": alert_id,
+        "step_id": step_id,
         "execution_status": execution_status,
         "source_agent_id": runtime.state.agent_id,
         "execution_log": execution_log,
     }
     try:
-        await _send_a2a_task(system_endpoint, payload, response_id)
+        await _send_a2a_task(system_endpoint, payload, f"{response_id}:{step_id}")
         runtime.state.remember(
             {
                 "kind": "mission_result_reported",
                 "at": utc_now(),
                 "response_id": response_id,
                 "alert_id": alert_id,
+                "step_id": step_id,
                 "status": execution_status,
                 "system_endpoint": system_endpoint,
             }
