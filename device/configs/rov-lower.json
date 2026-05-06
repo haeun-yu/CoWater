@@ -77,6 +77,11 @@
           "type": "BATTERY",
           "name": "power",
           "frequency_hz": 0.5
+        },
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
         }
       ]
     }

@@ -55,7 +55,13 @@
         "direct_route_allowed_when_no_middle_layer",
         "approval_required_for_destructive_actions"
       ],
-      "tracks": []
+      "tracks": [
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
+        }
+      ]
     }
   },
   "moth": {

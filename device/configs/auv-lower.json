@@ -81,6 +81,11 @@
           "type": "ODOMETRY",
           "name": "inertial",
           "frequency_hz": 20
+        },
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
         }
       ]
     }

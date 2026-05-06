@@ -82,6 +82,11 @@
           "type": "VIDEO",
           "name": "rov_video",
           "frequency_hz": 30
+        },
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
         }
       ]
     }

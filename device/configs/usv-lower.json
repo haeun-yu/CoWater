@@ -81,6 +81,11 @@
           "type": "TOPIC",
           "name": "telemetry",
           "frequency_hz": 1
+        },
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
         }
       ]
     }

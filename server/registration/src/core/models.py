@@ -22,6 +22,7 @@ TRACK_TYPES = Literal[
     "TRAJECTORY",
     "DEPTH",
     "PRESSURE",
+    "A2A",
 ]
 
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]

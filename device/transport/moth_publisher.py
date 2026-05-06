@@ -382,6 +382,53 @@ class MothPublisher:
                     logger.debug(f"TOPIC 발행 실패: {e}")
                     self.track_connected["TOPIC"] = False
 
+    async def publish_a2a_event(
+        self,
+        from_device_id: str | int | None,
+        message_type: str,
+        task_id: str | None = None,
+        action: str | None = None,
+        extra: dict | None = None,
+    ) -> None:
+        """A2A 이벤트를 수신 디바이스의 A2A 전용 트랙으로 발행한다.
+        
+        발행 구조: {"a2a_event": {"from": sender, "to": receiver, "type": ..., ...}}
+        - system agent 개입 없음
+        - TOPIC(센서 데이터)과 완전히 분리된 A2A 전용 채널
+        - 프론트엔드가 from/to 파싱해 디바이스 간 직접 링크 표시
+        """
+        if not self.enabled or not self.state.registry_id:
+            return
+
+        if not self.track_connected.get("A2A") or self._is_closed(self.track_ws_dict.get("A2A")):
+            logger.debug("A2A 트랙 미연결: A2A 이벤트 발행 건너뜀")
+            return
+
+        event: dict = {
+            "from": str(from_device_id) if from_device_id is not None else None,
+            "to": str(self.state.registry_id),
+            "type": message_type,
+        }
+        if task_id:
+            event["task_id"] = task_id
+        if action:
+            event["action"] = action
+        if extra:
+            event.update(extra)
+
+        payload = {
+            "device_id": self.state.registry_id,
+            "agent_id": self.state.agent_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "a2a_event": event,
+        }
+        try:
+            await self.track_ws_dict["A2A"].send(json.dumps(payload))
+            logger.info(f"A2A 이벤트 발행: from={event.get('from')} → to={event.get('to')} type={event.get('type')}")
+        except Exception as e:
+            logger.warning(f"A2A 이벤트 발행 실패: {e}")
+            self.track_connected["A2A"] = False
+
     # ── 하위 호환 ─────────────────────────────────────────────────────────────
 
     @property

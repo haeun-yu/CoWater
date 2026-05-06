@@ -252,7 +252,7 @@
         const COLORS = {
             controlCenter: 0xff6b6b, ship: 0x4ecdc4, usv: 0xffd93d, drone: 0xffd93d,
             rov: 0x6bcf7f, auv: 0x95a5ff, alert_warning: 0xff9800, alert_critical: 0xf44336,
-            link_rf: 0x60a5fa, link_tether: 0x94a3b8, link_acoustic: 0x2dd4bf, link_satellite: 0xc084fc,
+            link_rf: 0x60a5fa, link_tether: 0x94a3b8, link_acoustic: 0x2dd4bf, link_satellite: 0xc084fc, link_a2a: 0xfbbf24,
             commBuoy: 0xf97316, powerTower: 0xeab308, glider: 0xa855f7, submarine: 0x334155, sensorNode: 0x14b8a6
         };
 
@@ -288,8 +288,9 @@
         const TRAIL_SAMPLE_MS = 500;
         const TRAIL_MAX_POINTS = 120;
         const DEVICE_MODEL_SCALE = 0.15;
+        const VIRTUAL_SYSTEM_SCALE_MULTIPLIER = 10;
         const VIRTUAL_SYSTEM_ID = 'system-3d-core';
-        const VIRTUAL_SYSTEM_POSITION = { x: -90, y: 8, z: 80 };
+        const VIRTUAL_SYSTEM_POSITION = { x: -90, y: 0, z: 80 };
         const TETHER_DASH_SIZE = 4;
         const TETHER_GAP_SIZE = 3;
         const LINK_DASH_SIZE = 4;
@@ -297,8 +298,8 @@
         const LINK_PACKET_RADIUS = 0.12;
         const LINK_PACKET_LENGTH = 3.2;
         const LINK_PACKET_COUNT = 5;
-        const TRAIL_DASH_SIZE = 2.2;
-        const TRAIL_GAP_SIZE = 1.4;
+        const TRAIL_DASH_SIZE = 0.1;
+        const TRAIL_GAP_SIZE = 0.1;
         const TERRAIN_TILE_ZOOM = 17;
         const ELEVATION_TILE_MAX_ZOOM = 15;
 
@@ -683,6 +684,19 @@
         function summarizeFlowPayload(payload) {
             if (!payload || typeof payload !== 'object') return 'payload 없음';
 
+            // a2a_event 구조 (새 방식: 디바이스 직접 발행)
+            const a2aEvent = payload.a2a_event && typeof payload.a2a_event === 'object' ? payload.a2a_event : null;
+            if (a2aEvent) {
+                const msgType = String(a2aEvent.type || '').trim();
+                const action = String(a2aEvent.action || '').trim();
+                const taskId = String(a2aEvent.task_id || '').trim();
+                const chunks = [];
+                if (msgType) chunks.push(`type=${msgType}`);
+                if (action) chunks.push(`action=${action}`);
+                if (taskId) chunks.push(`task=${taskId.slice(0, 8)}`);
+                return chunks.length > 0 ? chunks.join(', ') : 'A2A 메시지';
+            }
+
             const sensors = payload.sensors && typeof payload.sensors === 'object' ? payload.sensors : null;
             const a2aData = sensors && sensors.a2a && typeof sensors.a2a === 'object' ? sensors.a2a : null;
             if (a2aData) {
@@ -713,32 +727,9 @@
         }
 
         function isA2AFlowEvent(channel, payload) {
-            const normalizedChannel = String(channel || '').toUpperCase();
-            if (!normalizedChannel || normalizedChannel === 'HEARTBEAT') return false;
-
-            const channelHints = [
-                'A2A', 'ACOUSTIC_MODEM', 'COMMAND', 'TASK', 'ASSIGN', 'ROUTE', 'RELAY', 'TETHER_TENSION'
-            ];
-            if (channelHints.some((hint) => normalizedChannel.includes(hint))) return true;
-
             if (!payload || typeof payload !== 'object') return false;
-            const messageType = String(payload.message_type || payload.type || '').toLowerCase();
-            if (messageType.startsWith('task.') || messageType.startsWith('child.') || messageType === 'layer.assignment') {
-                return true;
-            }
-
-            const payloadHints = [
-                'a2a', 'taskId', 'contextId', 'command', 'action', 'route_mode', 'parent_id', 'parent_endpoint',
-                'relayed_by', 'tether_tension', 'acoustic_modem'
-            ];
-            if (payloadHints.some((key) => payload[key] !== undefined)) return true;
-
-            const sensors = payload.sensors;
-            if (sensors && typeof sensors === 'object') {
-                if (sensors.a2a !== undefined) return true;
-                if (sensors.message_type !== undefined || sensors.command !== undefined || sensors.action !== undefined) return true;
-            }
-
+            // a2a_event 키 존재 → 명확한 A2A 이벤트 (새 방식)
+            if (payload.a2a_event && typeof payload.a2a_event === 'object') return true;
             return false;
         }
 
@@ -770,20 +761,22 @@
             return systemObj;
         }
 
-        function ensureSystemLinkForDevice(obj) {
-            if (!obj) return null;
-            const systemObj = ensureVirtualSystemObject();
-            const linkId = `link-${systemObj.id}-${obj.id}`;
+        function ensureDirectA2ALink(fromObj, toObj) {
+            if (!fromObj || !toObj) return null;
+            // 항상 작은 id를 source로 정렬해 중복 방지
+            const [srcObj, dstObj] = String(fromObj.id) < String(toObj.id)
+                ? [fromObj, toObj] : [toObj, fromObj];
+            const linkId = `link-a2a-${srcObj.id}-${dstObj.id}`;
             let link = state.links.find((item) => item.id === linkId);
             if (link) return link;
 
             link = {
                 id: linkId,
-                source: systemObj.id,
-                target: obj.id,
-                type: 'link_rf',
+                source: srcObj.id,
+                target: dstObj.id,
+                type: 'link_a2a',
                 status: 'idle',
-                name: `${systemObj.name} ↔ ${obj.name}`,
+                name: `${srcObj.name} ↔ ${dstObj.name}`,
                 packets: [],
                 totalMessages: 0,
                 lastMessageAt: null,
@@ -797,24 +790,50 @@
         function noteLinkTraffic(deviceId, channel, payload) {
             if (!isA2AFlowEvent(channel, payload)) return;
 
-            const obj = findObjectByRegistryOrId(deviceId);
-            if (!obj) return;
+            const a2aEvent = payload.a2a_event;
+            const fromId = a2aEvent && a2aEvent.from;
+            const toId = a2aEvent && a2aEvent.to;
 
-            const link = state.links.find((item) => String(item.target) === String(obj.id))
-                || state.links.find((item) => String(item.source) === String(obj.id))
-                || ensureSystemLinkForDevice(obj);
-            if (!link) return;
-
-            const now = Date.now();
-            link.totalMessages = Number(link.totalMessages || 0) + 1;
-            link.lastMessageAt = now;
-            link.lastChannel = channel;
-            link.recentEvents = Array.isArray(link.recentEvents) ? link.recentEvents : [];
-            link.recentEvents.unshift({ ts: now, channel, summary: summarizeFlowPayload(payload) });
-            if (link.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
-                link.recentEvents.length = LINK_RECENT_EVENTS_MAX;
+            // 발신자와 수신자 모두 식별 가능할 때 → 직접 링크
+            if (fromId && toId) {
+                const fromObj = findObjectByRegistryOrId(fromId);
+                const toObj = findObjectByRegistryOrId(toId);
+                if (fromObj && toObj) {
+                    const link = ensureDirectA2ALink(fromObj, toObj);
+                    if (!link) return;
+                    const now = Date.now();
+                    link.totalMessages = Number(link.totalMessages || 0) + 1;
+                    link.lastMessageAt = now;
+                    link.lastChannel = channel;
+                    link.recentEvents = Array.isArray(link.recentEvents) ? link.recentEvents : [];
+                    link.recentEvents.unshift({ ts: now, channel, summary: summarizeFlowPayload(payload) });
+                    if (link.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
+                        link.recentEvents.length = LINK_RECENT_EVENTS_MAX;
+                    }
+                    link.packets = link.recentEvents.map((event) => {
+                        const ageSec = ((Date.now() - event.ts) / 1000).toFixed(1);
+                        return `[${event.channel}] ${event.summary} (${ageSec}s 전)`;
+                    });
+                    return;
+                }
             }
-            link.packets = link.recentEvents.map((event) => {
+
+            // fallback: 발신자 불명 → 수신 디바이스만으로 로그
+            const obj = findObjectByRegistryOrId(toId || deviceId);
+            if (!obj) return;
+            const fallbackLink = state.links.find((item) => String(item.target) === String(obj.id))
+                || state.links.find((item) => String(item.source) === String(obj.id));
+            if (!fallbackLink) return;
+            const now = Date.now();
+            fallbackLink.totalMessages = Number(fallbackLink.totalMessages || 0) + 1;
+            fallbackLink.lastMessageAt = now;
+            fallbackLink.lastChannel = channel;
+            fallbackLink.recentEvents = Array.isArray(fallbackLink.recentEvents) ? fallbackLink.recentEvents : [];
+            fallbackLink.recentEvents.unshift({ ts: now, channel, summary: summarizeFlowPayload(payload) });
+            if (fallbackLink.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
+                fallbackLink.recentEvents.length = LINK_RECENT_EVENTS_MAX;
+            }
+            fallbackLink.packets = fallbackLink.recentEvents.map((event) => {
                 const ageSec = ((Date.now() - event.ts) / 1000).toFixed(1);
                 return `[${event.channel}] ${event.summary} (${ageSec}s 전)`;
             });
@@ -950,7 +969,7 @@
         let scene, camera, renderer, controls;
         let seaMesh;
         const raycaster = new THREE.Raycaster();
-        raycaster.params.Line.threshold = 5;
+        raycaster.params.Line.threshold = 0.4;
         const mouse = new THREE.Vector2();
 
         function showLoadingProgress(percent, text) {
@@ -1182,6 +1201,10 @@
             terrain.updateMatrixWorld(true);
             ['controlCenter', 'sensorNode'].forEach(type => {
                 state.objects.filter(o => o.type === type).forEach(obj => {
+                    if (obj.virtualSystem) {
+                        obj.position.y = 0;
+                        return;
+                    }
                     const u = (obj.position.x - offsetX) / planeWidth + 0.5;
                     const v = (obj.position.z - offsetZ) / planeHeight + 0.5;
                     if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
@@ -1424,8 +1447,9 @@
         function initObjects() {
             getRenderableObjects().forEach(data => {
                 const { group, meshOffset } = buildDeviceModel(data.type, COLORS[data.type] || 0xaaaaaa);
-                const scaledMeshOffset = meshOffset * DEVICE_MODEL_SCALE;
-                group.scale.setScalar(DEVICE_MODEL_SCALE);
+                const modelScale = data.virtualSystem ? (DEVICE_MODEL_SCALE * VIRTUAL_SYSTEM_SCALE_MULTIPLIER) : DEVICE_MODEL_SCALE;
+                const scaledMeshOffset = meshOffset * modelScale;
+                group.scale.setScalar(modelScale);
                 group.position.set(data.position.x, data.position.y + scaledMeshOffset, data.position.z);
                 group.rotation.y = THREE.MathUtils.degToRad(-data.heading);
                 group.userData = { id: data.id, isObject: true };
@@ -1492,7 +1516,11 @@
 
             getRenderableObjects().forEach(obj => {
                 if (['controlCenter', 'sensorNode'].includes(obj.type)) {
-                    obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                    if (obj.virtualSystem) {
+                        obj.mesh.position.set(obj.position.x, 0, obj.position.z);
+                    } else {
+                        obj.mesh.position.set(obj.position.x, obj.position.y + obj.meshOffset, obj.position.z);
+                    }
                 }
                 else if (['powerTower', 'commBuoy'].includes(obj.type)) {
                     obj.mesh.position.set(obj.position.x, 0 + obj.meshOffset, obj.position.z);
@@ -1570,6 +1598,28 @@
             });
 
             state.links.forEach(link => {
+                // 동적으로 추가된 링크(A2A 등)에 메쉬가 없으면 lazily 생성
+                if (!link.mesh) {
+                    const linkColor = COLORS[link.type] || COLORS['link_rf'];
+                    const lineMat = new THREE.LineDashedMaterial({ color: linkColor, dashSize: LINK_DASH_SIZE, gapSize: LINK_GAP_SIZE, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending });
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+                    const lineMesh = new THREE.Line(lineGeo, lineMat);
+                    lineMesh.userData = { id: link.id, isLink: true };
+                    scene.add(lineMesh);
+
+                    const packetGeo = new THREE.CylinderGeometry(LINK_PACKET_RADIUS, LINK_PACKET_RADIUS, LINK_PACKET_LENGTH, 8);
+                    packetGeo.rotateX(Math.PI / 2);
+                    const particles = [];
+                    for (let i = 0; i < LINK_PACKET_COUNT; i++) {
+                        const packetMat = new THREE.MeshBasicMaterial({ color: linkColor, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending });
+                        const pMesh = new THREE.Mesh(packetGeo, packetMat);
+                        scene.add(pMesh);
+                        particles.push({ mesh: pMesh, progress: i * (1.0 / LINK_PACKET_COUNT) });
+                    }
+                    link.mesh = lineMesh;
+                    link.particles = particles;
+                }
+
                 const sObj = findRenderableObjectById(link.source);
                 const tObj = findRenderableObjectById(link.target);
 
@@ -1714,6 +1764,12 @@
             });
 
             state.links.forEach(link => {
+                // 동적으로 추가된 링크(A2A 등) lazily polyline 생성
+                if (!mapState.lines[link.id] && mapState.map) {
+                    const colorStr = '#' + (COLORS[link.type] || COLORS['link_rf']).toString(16).padStart(6, '0');
+                    const polyline = L.polyline([], { color: colorStr, weight: 2, dashArray: '5, 5' }).addTo(mapState.map);
+                    mapState.lines[link.id] = polyline;
+                }
                 const polyline = mapState.lines[link.id];
                 const sObj = findRenderableObjectById(link.source);
                 const tObj = findRenderableObjectById(link.target);

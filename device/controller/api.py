@@ -139,6 +139,25 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     task = build_task(request.taskId, request.message, result)
     runtime.state.tasks[task["id"]] = task
     runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
+
+    # A2A 이벤트를 수신 디바이스의 TOPIC 트랙에 발행 (system agent 개입 없음)
+    publisher = getattr(runtime, "moth_publisher", None)
+    if publisher is not None:
+        from_device_id = (
+            data.get("device_id")
+            or data.get("agent_id")
+            or (request.metadata or {}).get("sender_id")
+        )
+        action = str(data.get("action") or data.get("command") or "").strip() or None
+        asyncio.create_task(
+            publisher.publish_a2a_event(
+                from_device_id=from_device_id,
+                message_type=msg_type,
+                task_id=task["id"],
+                action=action,
+            )
+        )
+
     return task
 
 
