@@ -89,8 +89,8 @@
   "simulation": {
     "interval_seconds": 1,
     "start_position": {
-      "latitude": 37.003,
-      "longitude": 129.43,
+      "latitude": 37.0048,
+      "longitude": 129.4182,
       "altitude": -60.0
     },
     "speed_range": [0.1, 1.5],
