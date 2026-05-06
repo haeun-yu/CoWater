@@ -1,0 +1,113 @@
+# POC 06 - System Agent
+
+## 개요
+
+System Agent는 system-layer 최고 의사결정 에이전트다. Event를 수신해 Alert를 생성하고, 대상 에이전트를 선택해 A2A 명령을 배정하며, Response를 기록한다.
+
+## 기본 정보
+
+- 포트: `9116`
+- Registry 기본 주소: `http://127.0.0.1:8280`
+- role: `system_agent`
+- severity enum: `CRITICAL`, `WARNING`, `INFORMATION`
+- 상태 유지 방식: `1초` Registry keepalive
+
+## 실행
+
+```bash
+cd /Users/teamgrit/Documents/CoWater/pocs/06-system-agent
+python3 system_agent.py
+```
+
+## 주요 기능
+
+- Event 수신과 Alert 생성
+- Alert 해석과 대응 우선순위 판단
+- 대상 에이전트 선택과 `task.assign` 전송
+- Response 기록 및 `planned`, `completed`, `failed`, `manual_intervention_required` 상태 갱신
+
+## Capability 기준
+
+스킬:
+
+- `mission_planning`
+- `fleet_supervision`
+- `priority_decision`
+- `response_strategy`
+- `approval_control`
+- `performance_analysis`
+
+도구:
+
+- `device_registry_reader`
+- `mcp_api_client`
+- `a2a_router`
+- `mission_planner`
+- `alert_response_planner`
+- `fleet_monitor`
+- `analytics_engine`
+
+주요 액션:
+
+- `mission.plan`
+- `mission.assign`
+- `task.assign`
+- `approve_response`
+- `route_direct`
+- `route_via_middle`
+- `escalate_alert`
+
+## 주요 엔드포인트
+
+- `GET /health`
+- `GET /state`
+- `GET /manifest`
+- `POST /message:send`
+
+## Event 처리
+
+- A2A `event.report`를 수신한다.
+- Event를 Registry Server의 event ledger에 저장한다.
+- `config.json > event_rules`를 기준으로 severity와 `recommended_action`을 결정한다.
+- Alert를 Registry Server에 저장한다.
+- 이후 이벤트 위치 기준으로 가장 가까우면서 해당 대응을 수행할 수 있는 디바이스를 고른다.
+- 선택된 디바이스에 middle parent가 있으면 middle agent로 보내고, 없으면 해당 lower agent에 직접 보낸다.
+- 원래 최적 디바이스가 예약 중이어도 대체 가능한 available 디바이스가 있으면 즉시 그 디바이스로 재선정한다.
+- 동시 incident가 들어오면 이미 다른 mission에 예약된 lower device는 새 incident 후보에서 제외한다.
+- 현재 구현은 최소 reservation만 지원하고, mission 간 선점(preemption)은 지원하지 않는다.
+- capability는 있으나 장비가 모두 예약 중이면 대응을 `queued`로 저장한다.
+- queue에서 다시 꺼낼 때는 원래 계획을 그대로 실행하지 않고, 현재 시점 기준으로 유효성을 다시 검토하고, 대체 가능한 디바이스가 있으면 그 디바이스로 다시 계획한다.
+- 하나의 incident는 `steps[].tasks[]` 구조로 계획한다. `step`은 순서 단위이고, `task`는 개별 디바이스 실행 단위다.
+- 같은 step 안의 task들은 함께 dispatch한다.
+- 앞 step의 task 결과들은 다음 step 입력의 `previous_step_results`로 전달한다.
+- step 종료 후에는 `step evaluation`을 수행한다. 이때 `step execution status`와 `evaluation decision`은 분리된다.
+- 예를 들어 일부 task가 실패해도 `evaluation_policy`가 충분한 결과라고 판단하면 다음 step으로 진행할 수 있다.
+- 현재 구현은 `proceed_next_step`, `retry_same_step`, `reassign_failed_tasks`, `manual_intervention_required`, `abort_mission` decision을 사용한다.
+- `manual_intervention_required`가 발생하면 Response 상태도 `manual_intervention_required`로 저장하고, `dispatch_result.manual_intervention`에 개입이 필요한 step과 사유를 남긴다.
+- `GET /manual-interventions`로 현재 수동 개입이 필요한 Response 목록을 조회할 수 있다.
+- `GET /manual-interventions/{response_id}`로 특정 수동 개입 건의 상세 정보와 `recommended_operator_actions`를 조회할 수 있다.
+- dispatch 성공/실패 결과를 `dispatch_result`에 반영하고 Response 상태를 갱신한다.
+- 현장 수행 결과(`mission.result`)를 수신하면 `dispatch_result.execution_results`에 실행 주체별 결과를 누적한다.
+- lower task 실행 결과에는 최소 `status`, `usable_output`, `failure_reason`, `confidence`, `artifacts`가 포함될 수 있다.
+- 테스트 시에는 lower task `params.simulate_outcome`으로 `status`, `usable_output`, `failure_reason`, `confidence`, `artifacts`를 강제할 수 있다.
+- 예약 가능한 장비가 없으면 현재 구현은 해당 대응을 실패로 기록한다.
+- 동일 `response_id + step_id + task_id + 실행 주체`의 `mission.result`는 중복으로 보고 기존 완료 결과를 덮어쓰지 않는다.
+- 실행 결과 집계(`dispatch_result.execution_aggregate_status`)는 하나라도 실패이면 `failed`, 모두 성공이면 `completed`다.
+- 다만 최종 Response 상태는 evaluation 결과를 반영하므로 `manual_intervention_required`가 될 수 있다.
+
+기본 매핑 예시:
+
+| event_type | severity | recommended_action |
+| --- | --- | --- |
+| `mine_detection` | `CRITICAL` | `survey_depth` |
+| `battery_low` | `WARNING` | `return_to_base` |
+
+## 점검 예시
+
+```bash
+curl http://127.0.0.1:9116/health | jq .
+curl http://127.0.0.1:9116/state | jq '.outbox'
+curl http://127.0.0.1:8280/events | jq .
+curl http://127.0.0.1:8280/alerts | jq .
+curl http://127.0.0.1:8280/responses | jq .
+```

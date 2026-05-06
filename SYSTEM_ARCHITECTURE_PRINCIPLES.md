@@ -1,867 +1,388 @@
 # CoWater 시스템 아키텍처 원칙 및 규칙
 
-**버전**: 1.1  
+**버전**: 1.3  
 **최초 작성**: 2026-04-29  
-**최종 수정**: 2026-04-30  
-**변경 이력**:
-- v1.1 (2026-04-30): Heartbeat 단일 공통 스트림으로 정리, A2A 전송 방식 정정 (Moth → HTTP), DEVICE_TYPES enum 추가, Safety-Critical 예외 규칙 추가, 하위→상위 이벤트 발행 케이스 추가, 표준 HTTP 클라이언트(`urllib.request`) 명시  
+**최종 수정**: 2026-05-04
 
-**목적**: 시스템의 핵심 목적, 설계 원칙, 구현 규칙을 정의하여 팀원과 AI Agent가 일관된 방식으로 개발할 수 있도록 함
+**목적**: CoWater의 시스템 구조, 책임 경계, 통신 규칙, 상태 소유권을 한 문서에서 일관되게 정의한다.
 
 ---
 
-## 목차
+## 1. 문서 사용 원칙
 
-1. [시스템의 비전 및 목적](#시스템의-비전-및-목적)
-2. [핵심 설계 원칙](#핵심-설계-원칙)
-3. [아키텍처 규칙](#아키텍처-규칙)
-4. [계층별 책임](#계층별-책임)
-5. [통신 및 메시징 규칙](#통신-및-메시징-규칙)
-6. [상태 관리 원칙](#상태-관리-원칙)
-7. [에러 처리 및 복원력](#에러-처리-및-복원력)
-8. [개발 가이드라인](#개발-가이드라인)
-9. [의사결정 플로우](#의사결정-플로우)
-10. [코드 리뷰 체크리스트](#코드-리뷰-체크리스트)
+- 이 문서는 "정의"를 한 번만 적는다.
+- 세부 구현이나 예시는 정의를 반복하지 않고 해당 정의를 참조한다.
+- 현재 구현과 다른 이상적 구조를 섞어 쓰지 않는다.
 
 ---
 
-## 시스템의 비전 및 목적
+## 2. 시스템 개요
 
-### 🎯 전체 비전
+**CoWater**는 해양 무인 시스템(AUV, ROV, USV 등)의 협력 운용을 위한 멀티레이어 분산 에이전트 시스템이다.
 
-**CoWater**: 해양 무인 시스템(AUV, ROV, USV 등)의 자율적 협력 운영을 위한 멀티레이어 분산 에이전트 플랫폼
+### 계층 구조
 
-### 🎯 핵심 목적
-
-1. **자율성**: 각 로봇이 자신의 역할을 독립적으로 수행
-2. **협력**: 상위 지시를 받아 다른 로봇들과 협력
-3. **강건성**: 개별 로봇 장애가 전체 시스템을 마비시키지 않음
-4. **확장성**: 새로운 로봇 추가 시 기존 시스템 수정 최소화
-5. **실시간성**: 중요한 메시지(경고, 명령)의 빠른 전달
-6. **추적성**: 모든 의사결정과 행동의 기록
-
-### 🎯 사용 사례 (예시: 기뢰 탐지 및 제거)
-
+```text
+System Layer  : server/system-agent    System Agent
+Middle Layer  : device/  --type usv --layer middle    USV Middle
+                device/  --type ship --layer middle   Control Ship
+Lower Layer   : device/  --type usv --layer lower     USV
+                device/  --type auv --layer lower     AUV
+                device/  --type rov --layer lower     ROV
+Shared Server : server/registration                   Registry Server
 ```
-1. 센서 (외부 시스템) → 기뢰 탐지 알림 → Registry
-2. Registry → System Supervisor: 알림 저장
-3. System Supervisor → Decision: 어떤 Control Ship에 할당할지 판단
-4. System Supervisor → Control Ship (A2A): "survey_depth 임무 할당"
-5. Control Ship → Decision: 어떤 AUV/ROV에 명령할지 판단
-6. Control Ship → AUV (A2A): "survey_depth 실행"
-7. Control Ship → ROV (A2A): "remove_mine 실행"
-8. AUV, ROV → 임무 실행 → 결과 보고
-9. System Supervisor → Registry: 완료 기록
-```
+
+### 핵심 목표
+
+- 각 에이전트는 자신의 계층 책임 안에서 독립적으로 동작한다.
+- 계층 간 의도적 상호작용은 명시적 메시지로만 수행한다.
+- 공유 상태는 Registry Server 또는 Moth를 통해서만 접근한다.
+- 개별 에이전트 장애가 전체 시스템 정지로 이어지지 않아야 한다.
 
 ---
 
-## 핵심 설계 원칙
+## 3. 용어 정의
 
-### 1️⃣ 계층화 (Layering)
+| 용어 | 의미 |
+| --- | --- |
+| `Registry Server` | `server/registration`. 디바이스 등록, 상태 저장, heartbeat 반영, assignment 계산, alert/response 원장 제공 |
+| `System Agent` | `server/system-agent`. system-layer 최고 의사결정 에이전트 |
+| `Middle Agent` | `device/ --layer middle`. 상위 명령을 하위 디바이스에 분배·중계하는 에이전트 |
+| `Lower Agent` | `device/ --layer lower`. 실제 임무를 수행하는 에이전트 |
+| `Event` | 실제로 발생한 사실. 예: 기뢰 감지, 통신 두절, 배터리 부족 |
+| `Alert` | 대응 결정을 유도하기 위한 알림 레코드 |
+| `Response` | Alert에 대해 계획되거나 실행된 대응 레코드 |
+| `A2A` | 에이전트 간 직접 메시지 전송 |
+| `MCP` | 에이전트가 외부 API 또는 도구를 구조화된 인터페이스로 호출할 때 사용하는 도구 접근 계층 |
+| `Telemetry` | 센서·장비 데이터 스트림 |
+| `Heartbeat` | 생존·위치·배터리 등의 최소 상태 스냅샷 |
 
-**원칙**: 시스템은 3개의 명확한 계층으로 구성되며, 계층 간 통신은 정해진 프로토콜만 사용
-
-```
-┌─────────────────────────────────────────┐
-│   System Layer (POC 06)                 │
-│   - System Supervisor Agent             │
-│   - 전체 시스템 모니터링 및 의사결정    │
-└─────────────┬───────────────────────────┘
-              │ A2A Message (task.assign)
-              ↓
-┌─────────────────────────────────────────┐
-│   Middle Layer (POC 04, 05)             │
-│   - Control Ship, USV Middle Agents     │
-│   - 하위 디바이스 조율 및 중계          │
-└─────────────┬───────────────────────────┘
-              │ A2A Message (command)
-              ↓
-┌─────────────────────────────────────────┐
-│   Lower Layer (POC 01, 02, 03)          │
-│   - USV, AUV, ROV Lower Agents          │
-│   - 실제 작업 수행                      │
-└─────────────────────────────────────────┘
-```
-
-**규칙**:
-
-- 하위 계층이 상위 계층으로 직접 메시지 보내면 안 됨 (항상 중간 계층을 거쳐야 함)
-- 상위 계층이 하위 계층을 건너뛰어 직접 명령하면 안 됨
-- 각 계층은 자신의 책임만 담당
-
-### 2️⃣ 자율성과 의존성 최소화
-
-**원칙**: 각 에이전트는 최대한 독립적으로 동작하되, 필요한 정보는 Registry나 Moth를 통해 획득
-
-**규칙**:
-
-- 에이전트는 다른 에이전트의 내부 상태를 직접 조회하면 안 됨
-- 모든 공유 정보는 Registry 또는 Moth pub-sub을 통해서만 접근
-- "필요한 정보를 얻기 위해 A 에이전트가 B 에이전트를 기다려야 하는" 상황 금지
-
-**예외 — 하위 에이전트가 상위에 이벤트를 발행해야 하는 경우**:
-
-하위 에이전트가 자체 센서로 중요 이벤트를 감지했을 때는 상위로 이벤트를 올려야 한다. 이 경우 직접 상위를 호출하는 것이 아니라 **Registry에 Alert를 등록**하고, System Supervisor가 주기적으로 조회하는 방식을 따른다.
-
-```
-AUV가 지뢰 감지
-    ↓ (직접 상위 호출 ❌)
-    ↓ POST http://registry:8280/alerts  ✅
-        { alert_type: "mine_detection", severity: "critical", ... }
-    ↓
-System Supervisor가 2초 주기로 alerts 조회 → 감지 → 의사결정
-```
-
-**허용되는 상위 참조**:
-- Registry에서 자신의 `parent_id`나 부모 에이전트의 엔드포인트 조회 → ✅ (공개 정보)
-- 부모 에이전트의 `/state` 직접 조회 → ❌
-
-### 3️⃣ 명확한 책임 경계 (Single Responsibility)
-
-**원칙**: 각 에이전트는 하나의 명확한 책임을 가짐
-
-| 에이전트                   | 책임                                        |
-| -------------------------- | ------------------------------------------- |
-| Registry (POC 00)          | 디바이스 등록, 위치 관리, 하트비트 모니터링 |
-| System Supervisor (POC 06) | 알림 감지, 최고 수준 의사결정, 미션 할당    |
-| Control Ship (POC 05)      | 하위 디바이스 조율, A2A 라우팅              |
-| AUV/ROV/USV (POC 01-03)    | 할당받은 임무 실행                          |
-
-**규칙**:
-
-- "하나의 에이전트가 여러 책임을 가져야 하는" 상황은 아키텍처 문제
-- 새 기능 추가 시 기존 에이전트 책임에 벗어나면 새 에이전트 추가 검토
-
-### 4️⃣ 명시적 메시징 (Explicit Messaging)
-
-**원칙**: 모든 의도적 상호작용은 명시적 메시지(하트비트, A2A, 명령어)로 표현되어야 함
-
-**규칙**:
-
-- 암묵적 상태 공유 금지 (예: "파일을 몰래 수정하면 다른 에이전트가 읽을 거야")
-- 모든 중요한 메시지는 로깅되어야 함
-- Moth를 통해 발행된 메시지는 외부에서 추적 가능해야 함
-
-### 5️⃣ 약속된 인터페이스 (Contract-Based)
-
-**원칙**: 에이전트 간 상호작용은 명확히 약속된 메시지 형식으로만 가능
-
-**규칙**:
-
-- A2A 메시지 형식 변경 시 모든 수신자에게 영향 → 반드시 호환성 유지 또는 버전 관리
-- API 응답 형식은 문서화되어야 하고, 변경 시 마이그레이션 계획 필요
-- "암묵적 이해"에 의존하는 인터페이스 금지
+현재 구현/설정 기준으로 MCP 관련 도구는 주로 `System Agent` capability에 선언되며, 일반적인 에이전트 간 명령 전달 수단은 아니다.
 
 ---
 
-## 아키텍처 규칙
+## 4. 정식 식별자
 
-### 디바이스 타입 Enum (공식 정의)
-
-실제 Registry 서버(`src/core/models.py`)에 정의된 공식 값. 에이전트 등록, heartbeat, A2A 메시지 모두 이 값을 사용한다.
+### Device Type / Layer
 
 ```python
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
-LAYERS      = Literal["lower", "middle", "system"]
+LAYERS = Literal["lower", "middle", "system"]
+ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
 ```
 
-| DEVICE_TYPE | 계층 | 설명 |
-|---|---|---|
-| `USV` | lower | 무인 수상 로봇 |
-| `AUV` | lower | 자율 수중 로봇 |
-| `ROV` | lower | 원격 수중 로봇 |
-| `CONTROL_SHIP` | middle | 지휘함 (하위 디바이스 조율) |
-| `SYSTEM` | system | System Supervisor |
+- Registry API에는 대문자 `DEVICE_TYPE`만 사용한다.
+- `SYSTEM`은 `System Agent`를 의미한다.
+- Alert severity는 대문자 enum `CRITICAL`, `WARNING`, `INFORMATION`만 사용한다.
 
-> ⚠️ 소문자 사용 금지. Registry API는 대문자만 허용하며, 소문자로 보내면 유효성 검사 오류 발생.
+### 포트 (기본값)
+
+| 포트 | 컴포넌트 | 실행 명령 |
+| --- | --- | --- |
+| `8280` | Registry Server | `server/registration/` |
+| `9111` | USV Lower Agent | `--type usv --layer lower` |
+| `9112` | AUV Lower Agent | `--type auv --layer lower` |
+| `9113` | ROV Lower Agent | `--type rov --layer lower` |
+| `9114` | USV Middle Agent | `--type usv --layer middle` |
+| `9115` | Control Ship Middle Agent | `--type ship --layer middle` |
+| `9116` | System Agent | `server/system-agent/` |
+
+동일 타입을 여러 터미널에서 실행할 때는 `--port` 옵션으로 포트를 구분한다.
 
 ---
 
-### 포트 할당 규칙
+## 5. 책임 분담
 
-```
-8280      Device Registry Server (POC 00)
-9010      AUV Lower Agent (POC 02)
-9011      ROV Lower Agent (POC 03)
-9012      USV Lower Agent (POC 01)
-9014      USV Middle Agent (POC 04)
-9015      Control Ship Middle Agent (POC 05)
-9116      System Supervisor Agent (POC 06)
-```
+### 책임 표
 
-**규칙**:
+| 컴포넌트 | 책임 |
+| --- | --- |
+| Registry Server | 등록·조회 API, heartbeat 반영, 위치/연결 상태 갱신, parent assignment 계산, alert/response ledger |
+| System Agent | alert 해석, 타깃 선정, 최고 수준 의사결정, A2A task dispatch, response 기록 |
+| Middle Agent | 하위 디바이스 조율, A2A 라우팅/중계, 하위 상태 인지 |
+| Lower Agent | 임무 수행, telemetry/heartbeat 발행, 결과/이벤트 상향 보고 |
 
-- 각 POC는 기본 포트를 가짐
-- 포트 충돌 시 config.json에서 변경 (코드 수정 금지)
-- 다중 인스턴스 실행 시 포트 번호가 중복되면 안 됨
+### 책임 경계 규칙
 
-### 메시지 라우팅 규칙
+- 하나의 에이전트는 여러 하위 기능을 가질 수 있다.
+- 다만 그 기능들은 하나의 계층/도메인 책임 아래 응집되어 있어야 한다.
+- 새 기능이 기존 에이전트의 책임 경계를 넘어선다면 분리 여부를 먼저 검토한다.
+- Registry Server는 에이전트가 아니라 공용 서버 컴포넌트다.
 
-```
-System Supervisor (9116)
-    ↓ [A2A]
-Control Ship (9015)
-    ├─ [A2A] → AUV (9010)
-    ├─ [A2A] → ROV (9011)
-    └─ [A2A] → USV (9012)
-```
+### 각 컴포넌트가 할 수 없는 것
 
-**규칙**:
+| 컴포넌트 | 금지 |
+| --- | --- |
+| Registry Server | System Agent가 맡아야 할 임무 할당·대응 판단 수행, 하위 에이전트에 직접 임무 명령, 타 에이전트 내부 state 직접 조작 |
+| System Agent | 중간 계층이 존재하는데 lower에 직접 명령, 타 디바이스 상태 임의 수정 |
+| Middle Agent | 상위 명령 없이 일반 업무 의사결정 수행, System Agent 우회 alert 생성 |
+| Lower Agent | 상위 지시 없이 일반 임무 결정, 다른 lower agent 내부 상태 직접 조회 |
 
-- 상위 → 하위: A2A 메시지 사용
-- 하위 → 상위: Heartbeat + Registry 조회
-- 같은 계층: 직접 메시지 금지 (상위 계층을 거쳐야 함)
+### Safety-Critical 예외
 
-### 데이터 흐름 규칙
+| 주체 | 상황 | 허용 조치 |
+| --- | --- | --- |
+| Middle Agent | 자식 배터리 급락, 충돌 위험, 장기 통신 두절 | 즉시 귀환, 비상정지, 복구 명령 |
+| Lower Agent | 자신의 배터리 임계치, 충돌 임박 | 자체 귀환, 비상정지 |
 
-**Moth pub-sub 채널**:
-
-- `device.heartbeat`: 모든 디바이스와 시스템의 주기적 상태 스냅샷(생존, 위치, 배터리)
-- `system.a2a`: 에이전트 간 A2A 메시지
-- `device.telemetry`: 센서 데이터
-
-**Registry**:
-
-- 읽기: 모든 에이전트가 자유롭게 접근 가능
-- 쓰기: 자신의 정보만 업데이트 가능 (다른 디바이스 정보 수정 불가)
+예외 조치 후에는 반드시 상위에 A2A 또는 heartbeat로 상황을 알린다.
 
 ---
 
-## 계층별 책임
+## 6. 통신 규칙
 
-### System Layer (POC 06)
+### 통신 매트릭스
 
-**책임**:
+| 용도 | 방식 | 비고 |
+| --- | --- | --- |
+| 상위 명령 전달 | A2A over HTTP | 중간 계층이 있으면 경유, 없으면 직접 |
+| 하위 이벤트 보고 | A2A over HTTP | 중간 계층이 있으면 경유, 없으면 직접 |
+| 하위/중간 대응 결과 보고 | A2A over HTTP (`mission.result`) | 수행 결과를 상위로 보고 |
+| 생존/위치/배터리 상태 | Moth `device.heartbeat` | Registry Server가 구독 |
+| 센서 데이터 | Moth `device.telemetry.*` | 실시간 스트림 |
+| Event 조회/기록 | Registry HTTP API | canonical ledger |
+| Alert 조회/기록 | Registry HTTP API | canonical ledger |
+| Response 기록/조회 | Registry HTTP API | canonical ledger |
 
-1. Registry에서 알림 주기적 조회 (2초 주기)
-2. 각 알림에 대한 의사결정 (DecisionEngine)
-3. 적절한 middle-layer 에이전트에 A2A 메시지 전송
-4. 의사결정 이력 저장
+### A2A 규칙
 
-**할 수 없는 것**:
+- 실제 A2A 전송은 Moth가 아니라 HTTP POST 직접 호출이다.
+- 대상 endpoint는 Registry의 `agent.endpoint` 또는 `agent.command_endpoint`에서 얻는다.
+- 모든 A2A 메시지는 최소한 다음 필드를 가져야 한다.
+  - `message_type`
+  - `action` 또는 `event_type`
+  - `reason`
+- 모든 A2A 메시지는 로깅한다.
+- 대응 명령(`task.assign`)을 받은 에이전트는 `incident_decision` 로그를 남겨야 한다.
+- 대응 수행 후에는 `mission.result`를 상위(또는 지정된 report endpoint)로 보고해야 한다.
+- System Agent는 `mission.result`를 `response_id + step_id + task_id + 실제 실행 주체(source_agent_id)` 기준으로 중복 제거한다.
 
-- ❌ 직접 lower agent에 명령
-- ❌ Registry에 저장된 다른 디바이스의 정보 수정
-- ❌ 다른 System Supervisor와 통신 (구조상 1개만 존재)
+예시:
 
-**주요 인터페이스**:
-
-```
-GET http://localhost:8280/alerts         # 알림 조회
-POST http://target:9015/message:send     # Control Ship에 A2A 전송
-GET http://localhost:8280/devices        # 디바이스 목록 조회
-```
-
-### Middle Layer (POC 04, 05)
-
-**책임**:
-
-1. System Supervisor로부터 받은 A2A 메시지 처리
-2. 받은 명령을 하위 에이전트들에게 분배
-3. 하위 에이전트들의 상태 모니터링
-4. System Supervisor에게 상태 보고 (heartbeat 또는 직접 호출)
-
-**일반적으로 할 수 없는 것**:
-
-- ❌ 독립적인 의사결정 (시스템 명령이 없이 자체 판단으로 명령 발송)
-- ❌ System Supervisor를 건너뛰고 직접 Registry 알림 생성
-
-**Safety-Critical 예외** (즉각 조치가 필요한 경우):
-
-상위 에이전트의 지시를 기다릴 수 없는 상황에서는 Middle Layer도 독립 판단이 허용된다.
-
-| 상황 | 허용 조치 | 이유 |
-|---|---|---|
-| 자식 디바이스 배터리 < 10% | 즉시 귀환 명령 | 손실 방지 |
-| 자식 디바이스와 통신 두절 (30초) | 마지막 알려진 위치로 복구 명령 | 장애 격리 |
-| 충돌 위험 감지 | 즉시 비상정지 | 물리적 안전 |
-
-조치 이후에는 반드시 Registry에 Alert를 등록하여 System Supervisor가 인지하도록 한다.
-
-**주요 인터페이스**:
-
-```
-GET http://localhost:9015/state          # 자신의 상태 조회
-GET http://localhost:9015/children       # 자식 디바이스 목록
-POST http://target:9010/message:send     # Lower agent에 A2A 전송
-POST http://localhost:8280/devices/X/    # 자신의 정보 업데이트
-```
-
-### Lower Layer (POC 01, 02, 03)
-
-**책임**:
-
-1. Middle layer로부터 받은 명령 실행
-2. 주기적으로 heartbeat 발행 (10초)
-3. 센서 데이터를 telemetry로 발행
-4. 작업 결과를 상위에 보고
-
-**일반적으로 할 수 없는 것**:
-
-- ❌ 상위 계층의 지시 없이 독립적으로 행동
-- ❌ 다른 lower agent와 직접 통신
-
-**Safety-Critical 예외**:
-
-| 상황 | 허용 조치 |
-|---|---|
-| 자신의 배터리 < 5% | 자체 판단으로 귀환 시작 |
-| 장애물 충돌 임박 | 자체 판단으로 비상정지 |
-| 중요 이벤트(지뢰 감지 등) 감지 | Registry에 Alert 즉시 등록 |
-
-> 단, 이러한 자율 판단 이후에는 반드시 heartbeat 또는 Registry Alert를 통해 상위에 상황을 알려야 한다.
-
-**주요 인터페이스**:
-
-```
-GET http://localhost:9010/state          # 자신의 상태 조회
-GET http://localhost:8280/devices        # Registry에서 정보 조회
-Moth: device.heartbeat 채널에 발행       # 주기적 상태 발행
-```
-
----
-
-## 통신 및 메시징 규칙
-
-### Heartbeat 메시지
-
-**목적**: 주기적으로 "나는 살아있고 정상 작동 중"을 알림
-
-**발행 주기**: 10초  
-**타임아웃**: 30초 (3회 heartbeat 미수신)
-
-#### 단일 공통 스트림 (실제 구현 기준)
-
-각 디바이스와 시스템은 heartbeat를 **하나의 공통 스트림**에 발행한다:
-
-| 채널 | 예시 | 목적 |
-|---|---|---|
-| `device.heartbeat` | `device.heartbeat` | **공통 채널** — Registry(POC 00)가 구독하여 전체 디바이스 상태 추적 및 위치/배터리 갱신 |
-
-> 공통 스트림에는 `device_id`, `status`, `latitude`/`longitude`, `battery_percent` 같은 최소 상태가 함께 포함된다. Registry는 이 하나의 스트림만 보고 생존 여부와 최신 위치를 갱신한다.
-
-**메시지 형식**:
-
-```json
-{
-  "device_id": "auv-001",
-  "agent_id": "agent-uuid",
-  "timestamp": "2026-04-29T10:30:00Z",
-  "latitude": 37.003,
-  "longitude": 129.425,
-  "altitude": -25,
-  "battery": 85,
-  "heading": 45,
-  "speed": 1.5
-}
-```
-
-**위치/배터리가 heartbeat에서 빠졌을 때 사이드 이펙트**:
-
-Registry는 heartbeat을 수신할 때 `latitude`/`longitude`와 `battery_percent`가 있으면 디바이스 상태를 업데이트한다. 이 값들이 없으면:
-1. Registry의 위치 정보가 이전 값 그대로 유지 (stale)
-2. 대시보드/다른 에이전트가 Registry 조회 시 **오래된 위치** 반환
-3. 지뢰 탐지 등 위치 기반 의사결정 시 **잘못된 좌표로 미션 할당** 가능
-4. GPS와 별도로 `device.telemetry.{id}.gps` 채널로 위치를 발행하더라도 Registry 업데이트는 발생하지 않음 (telemetry는 Registry가 구독하지 않음)
-5. 배터리 값이 누락되면 배터리 기반 안전 판단이 stale 상태를 그대로 사용할 수 있음
-
-**규칙**:
-
-- 모든 에이전트는 10초마다 heartbeat 발행 의무
-- heartbeat 미수신 시 Registry가 자동으로 오프라인 처리
-- GPS 데이터가 있을 경우 반드시 heartbeat에 포함 (위치 정확성 유지)
-
-### A2A (Agent-to-Agent) 메시지
-
-**목적**: 에이전트 간 명령/이벤트 전달
-
-**전송 방식**: Moth 채널이 아닌 **HTTP POST 직접 호출** (실제 구현 기준)
-
-```
+```http
 POST http://{target_endpoint}/message:send
 ```
 
-> Moth의 `system.a2a` 채널은 대시보드 시각화용 발행에만 사용될 수 있으며, 실제 명령 전달은 각 에이전트의 HTTP 엔드포인트를 직접 호출한다. target_endpoint는 Registry의 `agent.endpoint` 필드에서 획득.
+### Heartbeat 규칙
 
-**메시지 형식**:
+- 모든 에이전트는 `1초` 주기로 heartbeat를 발행한다.
+- `3초` 이상 heartbeat가 없으면 Registry가 offline으로 처리한다.
+- 위치 데이터를 생성하거나 읽을 수 있는 에이전트는 `latitude`, `longitude`를 heartbeat에 포함해야 한다.
+- 배터리 데이터를 생성하거나 읽을 수 있는 에이전트는 배터리 값을 heartbeat에 포함해야 한다.
+- 현재 구현에서 lower / middle agent는 Moth `device.heartbeat`를 사용하고, System Agent는 Registry keepalive로 `last_seen_at`을 갱신한다.
 
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "message/send",
-  "id": "uuid",
-  "params": {
-    "message": {
-      "role": "user",
-      "parts": [
-        {
-          "type": "data",
-          "data": {
-            "message_type": "task.assign",
-            "action": "survey_depth",
-            "params": {
-              "mission_type": "mine_clearance",
-              "location": { "lat": 37.003, "lon": 129.425 }
-            },
-            "reason": "System supervisor decision"
-          }
-        }
-      ]
-    },
-    "taskId": "uuid",
-    "metadata": {}
-  }
-}
-```
+### Telemetry 규칙
 
-**규칙**:
+- telemetry는 센서 데이터 스트림이다.
+- Registry의 canonical 상태 갱신 기준은 telemetry가 아니라 heartbeat다.
+- telemetry만 발행하고 heartbeat에 위치를 넣지 않으면 Registry 위치 정보는 stale해질 수 있다.
 
-- `message_type`: task.assign, layer.assignment 등으로 명확히 구분
-- `action`: 수신자가 수행할 구체적 행동
-- `reason`: 왜 이 명령을 내렸는지 설명 (감시 및 분석용)
-- 모든 A2A 메시지는 로깅되어야 함
+### Event / Alert / Response 규칙
 
-### Telemetry 메시지
+| 도메인 | 역할 | canonical 저장 위치 |
+| --- | --- | --- |
+| Event | 발생 사실 전달 | Registry Server event ledger |
+| Alert | 대응 필요 알림 | Registry Server alert ledger |
+| Response | Alert 대응 계획/결과 | Registry Server response ledger |
 
-**목적**: 센서 데이터를 실시간으로 발행
+현재 구현 기준에서 System Agent는 A2A로 Event를 수신한 뒤 Event를 Registry Server에 기록하고, severity를 판단해 Alert를 생성하며, 이후 approve/dispatch/response 기록을 담당한다.
+또한 `event.report` 수신 직후 Alert 처리를 비동기로 즉시 시작하며, 첫 step dispatch 성공 시에는 Response를 `planned` 상태로 유지하고, 이후 `mission.result`가 누적되면서 최종 `completed/failed`로 갱신한다.
 
-**채널**: `device.telemetry`
+기본 `event_type` 매핑은 `System Agent`의 `config.json > event_rules`에서 정의한다.
 
-**메시지 형식**:
+| event_type | 기본 severity | 기본 recommended_action |
+| --- | --- | --- |
+| `mine_detection` | `CRITICAL` | `survey_depth` |
+| `collision_risk` | `CRITICAL` | `escalate_alert` |
+| `distress` | `CRITICAL` | `escalate_alert` |
+| `battery_low` | `WARNING` | `return_to_base` |
+| `communication_loss` | `WARNING` | `escalate_alert` |
+| `tether_warning` | `WARNING` | `escalate_alert` |
 
-```json
-{
-  "device_id": "auv-001",
-  "timestamp": "2026-04-29T10:30:00Z",
-  "sensor_type": "sonar",
-  "data": {
-    "frequency": 200,
-    "range": 500,
-    "target_detected": true,
-    "target_distance": 150
-  }
-}
-```
+규칙:
 
-**규칙**:
-
-- sensor_type로 센서 종류 명시
-- 센서별로 다른 데이터 구조 가능
-- 민감한 정보 제거 (보안)
-
----
-
-## 상태 관리 원칙
-
-### 단일 진실 공급원 (Single Source of Truth)
-
-**원칙**: 각 정보의 "진실"은 정확히 한 곳에만 존재
-
-| 정보                  | 진실의 출처                               |
-| --------------------- | ----------------------------------------- |
-| 디바이스 위치         | Registry (heartbeat로 업데이트)           |
-| 디바이스 연결 상태    | Registry (heartbeat timeout)              |
-| 현재 활성화된 임무    | 해당 에이전트의 state                     |
-| 알림                  | Registry                                  |
-| 에이전트 간 통신 이력 | Moth pub-sub + 각 에이전트의 inbox/outbox |
-
-**규칙**:
-
-- 한 정보가 여러 곳에 동시에 존재하면, 동기화 로직 필수
-- 동기화 필요한 경우, 명확한 "master" 지정
-- 충돌 시 해결 방법 명시
-
-### 상태의 일관성 (Consistency)
-
-**규칙**:
-
-- A가 B에게 명령을 보내면, 두 곳 모두 그 명령의 기록을 유지
-- Registry의 디바이스 정보와 실제 디바이스 상태가 다르면, Registry 신뢰 (다음 heartbeat 까지 기다림)
-- 중간에 통신 끊김이 발생해도 데이터 손실 없이 복구 가능해야 함
+- A2A `event.report`에 severity가 명시되면 그 값을 우선 사용한다.
+- severity가 없으면 `event_rules`의 기본값을 사용한다.
+- 매핑이 없으면 severity는 `INFORMATION`으로 본다.
+- Response 상태는 최소 `planned`, `completed`, `failed`, `manual_intervention_required`를 표현할 수 있어야 한다.
+- `dispatch_result`에는 A2A 전송 결과(성공 여부, 대상 endpoint, 응답 본문 또는 오류)를 기록한다.
+- `mission.result`가 수신되면 System Agent는 해당 response를 현장 실행 결과 기준으로 다시 갱신한다.
+- System Agent는 먼저 이벤트 위치 기준으로 `가장 가까우면서 해당 대응을 수행할 수 있는 디바이스`를 고른다.
+- 선택된 대상 디바이스에 middle parent가 있으면 그 middle을 경유하고, 없으면 해당 디바이스에 직접 전달한다.
+- 원래 가장 가까운 디바이스가 reservation 중이어도, 같은 task를 수행할 수 있는 다른 available 디바이스가 있으면 queue에 넣지 않고 그 대체 디바이스에 즉시 할당한다.
+- 동시 incident가 여러 개 있을 때 System Agent는 `device reservation`으로 이미 배정 중인 lower device를 새 incident 후보에서 제외해야 한다.
+- 현재 구현은 최소 reservation만 지원하며, mission 간 `preemption`이나 복잡한 전역 스케줄 최적화는 아직 지원하지 않는다.
+- reservation 때문에 즉시 실행할 수 없는 대응은 `queued` 상태로 둘 수 있다.
+- `queued` 대응은 나중에 다시 시도할 때 원래 계획을 그대로 쓰지 않고, 당시 시점의 alert 유효성과 현재 사용 가능한 디바이스를 기준으로 재검토해야 한다.
+- queue 재검토 시 원래 디바이스가 아니어도 같은 task를 수행할 수 있는 대체 디바이스가 있으면 그 디바이스로 다시 계획할 수 있다.
+- 하나의 incident는 `steps[].tasks[]` 구조로 구성한다. `step`은 순서 단위이고 `task`는 개별 디바이스 실행 단위다.
+- 같은 step 안의 모든 task가 `completed`이면 그 step의 `execution status`는 `completed`다. 하나라도 `failed`이면 그 step의 `execution status`는 `failed`다.
+- 앞 step의 task 결과들은 다음 step 입력으로 전달할 수 있다.
+- `step`의 실행 상태와 다음 행동 판단은 분리한다. 즉 `step execution status`가 `failed`여도, 평가 결과가 충분하다고 판단되면 다음 step으로 진행할 수 있다.
+- System Agent는 step 종료 시 `step evaluation`을 기록해야 하며, 최소 `policy`, `sufficient`, `decision`, `reason`을 남긴다.
+- `step evaluation decision`은 최소 `proceed_next_step`, `retry_same_step`, `reassign_failed_tasks`, `manual_intervention_required`, `abort_mission`을 지원할 수 있어야 한다.
+- `manual_intervention_required`가 발생하면 Response 상태도 `manual_intervention_required`로 저장하고, `dispatch_result.manual_intervention`에 개입이 필요한 step, 이유, 최신 step 결과를 구조적으로 남겨야 한다.
+- 수동 개입이 필요한 대응은 조회 가능한 API 또는 동등한 조회 경로를 제공해야 하며, 최소 개입 대상 `response_id`, 해당 step, 이유, 최신 step 결과, 권장 운영자 조치를 확인할 수 있어야 한다.
+- 부분 성공 허용 여부는 `evaluation_policy`가 결정한다. 정책은 step type별로 다를 수 있다.
+- 재계획 또는 중단 판단이 발생하면 `replan_history`에 그 근거를 남긴다.
+- lower task 실행 결과는 가능하면 `status`, `usable_output`, `failure_reason`, `confidence`, `artifacts`를 포함해야 한다.
+- 테스트/시뮬레이션을 위해 lower task 입력 `params`에 `simulate_outcome` 또는 `simulate_failure=true`를 넣어 결과를 강제할 수 있다.
+- reservation 가능한 장비가 전혀 없으면 현재 구현은 해당 대응을 즉시 실패(`no_capable_target_or_available_device`)로 기록한다.
+- 다만 capability는 있으나 장비가 모두 reservation 중이면 현재 구현은 `queued`로 기록하고, 이후 queue 재검토에서 재할당을 시도한다.
+- 여러 하위 에이전트가 같은 `response_id`로 결과를 보고할 수 있으므로 `dispatch_result.execution_results`에 실행 주체별 결과를 누적한다.
+- 동일 실행 주체가 같은 `response_id + step_id + task_id`로 다시 보고한 `mission.result`는 중복으로 보고 원장을 덮어쓰지 않는다.
+- 단순 실행 결과 집계(`dispatch_result.execution_aggregate_status`)는 실행 결과 중 하나라도 `failed`면 `failed`, 모두 성공 보고이면 `completed`로 본다.
+- 다만 최종 Response 상태는 step evaluation 결과를 반영하므로 `manual_intervention_required`로 저장될 수 있다.
 
 ---
 
-## 에러 처리 및 복원력
+## 7. 상태 소유권
 
-### 장애 분류 및 대응
+### Single Source of Truth
 
-| 장애 유형             | 원인                    | 대응                                      |
-| --------------------- | ----------------------- | ----------------------------------------- |
-| **Heartbeat Timeout** | 에이전트 다운           | 자동으로 오프라인 처리, 자식 재할당       |
-| **Network Error**     | Moth/Registry 연결 끊김 | 자동 재연결 (5초 주기)                    |
-| **Message Loss**      | 전송 중 에러            | 재전송 (발신자가 책임)                    |
-| **Deadlock**          | 순환 대기               | 타임아웃 설정 (A→B 메시지 응답 30초 대기) |
+| 정보 | 소유자 |
+| --- | --- |
+| 디바이스 위치 | Registry Server |
+| 디바이스 연결 상태 | Registry Server |
+| `parent_id`, `route_mode`, `force_parent_routing` | Registry Server |
+| 현재 활성 임무 | 해당 에이전트 state |
+| Event | Registry Server |
+| Alert | Registry Server |
+| Response | Registry Server |
+| A2A 통신 이력 | Moth 시각화 + 각 에이전트 inbox/outbox |
 
-### 복원력 원칙 (Resilience)
+### 상태 규칙
 
-**원칙**: 한 에이전트의 장애가 전체 시스템을 마비시키면 안 됨
-
-**규칙**:
-
-1. **타임아웃**: 모든 외부 호출은 타임아웃 설정 필수
-
-   ```python
-   urllib.request.urlopen(req, timeout=5)  # 5초 이상 걸리면 에러
-   ```
-
-2. **재연결**: 연결 끊김 시 자동으로 재연결 (지수 백오프)
-
-   ```python
-   # 1차 실패: 1초 후 재시도
-   # 2차 실패: 2초 후 재시도
-   # 3차 실패: 4초 후 재시도
-   # ... (최대 30초)
-   ```
-
-3. **로깅**: 모든 에러는 로깅되어야 함
-
-   ```python
-   logger.error(f"Failed to send A2A to {target}: {e}")
-   ```
-
-4. **Graceful Degradation**: 선택적 기능 실패는 핵심 기능을 막으면 안 됨
-   - 예: LLM 분석 실패 → 규칙 기반 decision으로 폴백
+- 하나의 사실은 하나의 canonical owner만 가져야 한다.
+- 같은 정보를 여러 위치에 유지하면 동기화 기준을 명시해야 한다.
+- Registry 상태와 로컬 체감 상태가 다르면, 다음 heartbeat 전까지 Registry를 공용 기준으로 본다.
 
 ---
 
-## 개발 가이드라인
+## 8. Assignment 규칙
 
-### 코드 작성 원칙
+Registry Server는 lower-layer에 대해 다음 정보를 계산·배포한다.
 
-#### 1. 명확한 책임 (SRP)
+- `parent_id`
+- `parent_endpoint`
+- `parent_command_endpoint`
+- `route_mode`
+- `force_parent_routing`
+
+기본 규칙:
+
+- middle-layer 후보가 있으면 lower-layer는 가능한 parent를 가진다.
+- ROV는 parent 기반 라우팅이 강제될 수 있다.
+- AUV는 submerged 상태에 따라 라우팅이 달라질 수 있다.
+- middle-layer가 offline이면 Registry가 자식을 재할당하거나 `direct_to_system`으로 전환한다.
+
+---
+
+## 9. 장애 처리 및 복원력
+
+### 장애 표
+
+| 장애 | 기본 대응 |
+| --- | --- |
+| Heartbeat timeout | offline 처리, 필요 시 자식 재할당 |
+| Registry 연결 실패 | 재시도, 가능한 범위에서 로컬 캐시로 기본 동작 유지 |
+| Moth 연결 실패 | 재연결 시도, 핵심 명령 흐름은 중단하지 않음 |
+| A2A 전송 실패 | timeout, 로깅, 재시도 또는 상위 보고 |
+| LLM 기능 실패 | 규칙 기반 처리로 폴백 |
+
+### 복원력 규칙
+
+- 모든 외부 호출에는 timeout이 있어야 한다.
+- 연결 실패는 로깅되어야 한다.
+- 선택적 기능 실패가 핵심 기능을 막아서는 안 된다.
+- 재시도 정책은 무한 대기가 아니라 backoff를 가져야 한다.
+
+예시:
 
 ```python
-# ❌ 나쁜 예: 여러 책임을 혼합
-class ControlShip:
-    def handle_a2a_message(self, msg):
-        # A2A 처리
-        # + Moth 발행
-        # + Registry 업데이트
-        # + 자식 에이전트 관리
-        pass
-
-# ✅ 좋은 예: 각각 분리
-class ControlShip:
-    def handle_a2a_message(self, msg):
-        # A2A 처리만 담당
-        pass
-
-    def publish_heartbeat(self):
-        # Moth 발행은 별도
-        pass
-
-    def update_registry(self):
-        # Registry 업데이트는 별도
-        pass
-```
-
-#### 2. 명시적 에러 처리
-
-```python
-# ❌ 나쁜 예: 에러 무시
-try:
-    response = urllib.request.urlopen(req)
-except:
-    pass  # 에러 무시
-
-# ✅ 좋은 예: 에러 처리 및 로깅
-try:
-    response = urllib.request.urlopen(req, timeout=5)
-except urllib.error.HTTPError as e:
-    logger.error(f"HTTP error: {e.code}")
-    raise  # 또는 적절한 폴백
-except Exception as e:
-    logger.error(f"Network error: {e}")
-    await self._retry_with_backoff()
-```
-
-#### 3. 로깅 규칙
-
-```python
-# 형식: [Component] Level: Message
-logger.info("[ControlShip] A2A message received from System Supervisor")
-logger.warning("[AUV] Battery low: 15%")
-logger.error("[ROV] Failed to connect to parent: connection timeout")
-```
-
-#### 4. HTTP 클라이언트 표준
-
-```python
-# ✅ 표준: urllib.request (표준 라이브러리, 외부 의존성 없음)
-import urllib.request
-import json
-
-req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
-with urllib.request.urlopen(req, timeout=5) as resp:
-    result = json.loads(resp.read().decode())
-
-# ⚠️ 예외: LLM 클라이언트 호출 시에만 httpx 허용 (비동기 필요)
-import httpx  # llm_client.py 내부에서만 사용
-```
-
-#### 5. 설정 vs 코드
-
-```python
-# ❌ 나쁜 예: 포트가 코드에 하드코딩
-app = create_app()
-app.run(host="127.0.0.1", port=9015)
-
-# ✅ 좋은 예: config에서 읽음
-config = load_config("config.json")
-app = create_app(config)
-app.run(host=config["server"]["host"], port=config["server"]["port"])
-```
-
-### 동작 검증 규칙
-
-> 여기서 테스트는 unit test가 아닌 **실제 동작(end-to-end) 테스트**를 의미한다. 각 에이전트는 실제 서버로 띄웠을 때 다음을 보장해야 한다.
-
-**필수 검증 항목**:
-
-- `GET /health` → 200 OK 응답
-- Moth 연결 없어도 단독 실행 가능 (graceful degradation)
-- Registry 연결 없어도 기본 동작 유지 (연결 실패 시 재시도, 서비스 중단 금지)
-- 10초 주기 heartbeat가 실제로 발행되는지 확인 (`tail -f logs/device.log | grep Heartbeat`)
-
-**동작 테스트 방법**:
-
-```bash
-# 1. 에이전트 실행
-python device_agent.py
-
-# 2. 헬스체크
-curl http://localhost:{port}/health | jq .
-
-# 3. 상태 확인
-curl http://localhost:{port}/state | jq .
-
-# 4. Moth 메시지 실시간 확인
-tail -f logs/device.log | grep "Heartbeat\|A2A\|Telemetry"
+urllib.request.urlopen(req, timeout=5)
 ```
 
 ---
 
-### 버전 관리 규칙
+## 10. 구현 원칙
 
-#### API 변경 시
+### 코드 작성
 
-1. **구버전 지원**: 최소 1 메이저 버전까지는 구 형식 지원
-2. **마이그레이션 경로**: 변경 전에 마이그레이션 가이드 문서화
-3. **Deprecation Warning**: 변경 예정을 미리 공지
+- 설정값은 코드에 하드코딩하지 않고 `config.json`에서 읽는다.
+- 에러를 삼키지 않고 로깅 또는 폴백 경로를 남긴다.
+- 메시지 포맷 변경 시 하위 호환성 영향을 먼저 검토한다.
+- 외부 에이전트 내부 상태를 직접 조회하지 않는다.
 
-#### 메시지 형식 변경 시
+### HTTP 클라이언트
 
-```python
-# 변경 전: 새 필드 추가 (하위호환성 유지)
-{
-  "message_type": "task.assign",
-  "action": "survey_depth",
-  "params": {...},
-  # 새 필드 (선택)
-  "priority": "high"
-}
+- 기본 표준은 `urllib.request`
+- 예외적으로 비동기 LLM 호출에 한해 별도 클라이언트 사용 가능
 
-# 변경 후: 구 필드 제거 (1 버전 후)
-{
-  "message_type": "task.assign",
-  "action": "survey_depth",
-  "params": {...},
-  "priority": "high"  # 이제 필수
-}
-```
+### MCP 사용 원칙
 
----
+- MCP는 에이전트의 외부 도구/API 접근에 사용한다.
+- 에이전트 간 명령/이벤트 전달은 MCP가 아니라 A2A를 사용한다.
+- 공용 상태 조회/기록은 MCP가 아니라 Registry Server 또는 Moth 규칙을 따른다.
 
-## 의사결정 플로우
+### 동작 검증
 
-### 기뢰 탐지 시나리오 의사결정
-
-```
-입력: Registry에 mine_detection 알림 저장
-      └─ alert_type: "mine_detection"
-      └─ severity: "critical"
-      └─ metadata: {location: {lat, lon}}
-
-↓ System Supervisor의 alert processing loop
-
-의사결정 1: 누구에게 할당할 것인가?
-├─ Rule: Control Ship이 있는가?
-├─ If Yes → Control Ship 선택
-└─ If No → 다른 middle-layer 에이전트 선택
-
-의사결정 2: 어떤 명령을 내릴 것인가?
-├─ Rule: alert_type이 mine_detection?
-├─ If Yes → action: "survey_depth", target: AUV/ROV
-└─ If No → 다른 action 결정
-
-의사결정 3: 확인 후 진행 또는 거절?
-├─ Rule: Control Ship이 응답 가능 상태?
-├─ If Yes → A2A 메시지 전송
-└─ If No → 다시 대기 (다음 주기에서)
-
-결과: A2A 메시지 발송 및 로깅
-```
-
-### 의사결정 권한 매트릭스
-
-| 의사결정                                | System Supervisor | Control Ship | Lower Agent      |
-| --------------------------------------- | ----------------- | ------------ | ---------------- |
-| 어느 Control Ship에 할당?               | ✅                | ❌           | ❌               |
-| Control Ship이 어느 Lower Agent에 할당? | ❌                | ✅           | ❌               |
-| 구체적인 실행 방법?                     | ❌                | ❌           | ✅               |
-| 임무 포기 결정?                         | ✅                | ✅ (부분)    | ✅ (자신의 임무) |
+- `GET /health`가 정상 응답해야 한다.
+- Registry 없이도 가능한 기본 동작은 유지되어야 한다.
+- Moth 없이도 서비스 전체가 즉시 중단되면 안 된다.
+- heartbeat, telemetry, A2A 로그가 실제로 남아야 한다.
+- `layer.assignment` 로그는 할당 변경 시에만 남겨 핵심 incident 로그가 밀리지 않게 유지한다.
 
 ---
 
-## 코드 리뷰 체크리스트
+## 11. 대표 시나리오
 
-새로운 코드를 추가할 때 다음을 확인하세요:
+### 기뢰 탐지
 
-### 아키텍처 규칙
-
-- [ ] 계층 구조를 위반하지 않는가? (하위가 상위를 호출하지 않는가?)
-- [ ] 책임 경계가 명확한가?
-- [ ] 외부 에이전트의 내부 상태를 직접 조회하지 않는가?
-
-### 통신 규칙
-
-- [ ] 모든 메시지가 명시적으로 정의되어 있는가?
-- [ ] A2A 메시지에 `reason` 필드가 있는가?
-- [ ] Moth pub-sub 채널을 올바르게 사용하는가?
-
-### 상태 관리
-
-- [ ] 정보의 "진실의 공급원"이 명확한가?
-- [ ] 필요한 경우 동기화 로직이 있는가?
-- [ ] 상태 충돌 시 해결 방법이 명시되어 있는가?
-
-### 에러 처리
-
-- [ ] 모든 외부 호출에 타임아웃이 있는가?
-- [ ] 연결 실패 시 재시도 로직이 있는가?
-- [ ] 에러 발생 시 로깅이 되는가?
-- [ ] 폴백 전략이 있는가?
-
-### 코드 품질
-
-- [ ] 함수/메서드가 하나의 책임만 가지는가?
-- [ ] 로깅이 충분한가? (의사결정 시점마다)
-- [ ] 설정 파일에서 읽을 수 있는가? (하드코딩 없음)
-- [ ] 문서화가 되어 있는가? (특히 인터페이스)
-
-### 호환성
-
-- [ ] 기존 메시지 형식과 호환성이 유지되는가?
-- [ ] API 변경이 필요한가? 그렇다면 마이그레이션 가이드가 있는가?
-- [ ] 다른 에이전트의 코드도 함께 수정해야 하는가?
-
----
-
-## 추가 원칙
-
-### "모르면 물어보라"
-
-- 의사결정이 불명확하면 코드를 짜지 말고 먼저 물어보기
-- 이 문서에 없는 내용은 팀 또는 AI와 상의
-
-### "변경의 최소 영향"
-
-- 기존 기능 수정 시 다른 곳에 미치는 영향 검토
-- 가능하면 기존 코드를 건드리지 말고 새 코드 추가
-- "A를 수정하면 B도 수정해야 하는" 상황 = 설계 문제
-
-### "투명성 극대화"
-
-- 모든 의사결정을 로깅하기
-- 외부 의존성은 명시적으로 표시하기
-- 암묵적 가정 없이 명시적으로 표현하기
-
----
-
-## 예제: 올바른 구현
-
-### ❌ 잘못된 구현
-
-```python
-# Control Ship이 AUV의 상태를 직접 조회
-class ControlShip:
-    def get_auv_status(self):
-        response = requests.get("http://localhost:9010/state")
-        return response.json()
-
-    def make_decision(self):
-        auv_status = self.get_auv_status()
-        if auv_status['battery'] < 20:
-            # AUV에 직접 명령 전송 (System Supervisor 우회)
-            self.send_command_to_auv("return_to_base")
+```text
+1. Lower Agent 또는 외부 시스템이 mine_detection Event를 상위로 보고
+2. System Agent가 Event를 Registry Server event ledger에 기록한다
+3. System Agent가 Event의 위험도를 판단해 Alert를 생성하고 Registry Server alert ledger에 적재한다
+4. System Agent가 Alert를 해석하고 가용 디바이스를 조회
+5. middle-layer가 있으면 middle에 task.assign, 없으면 lower에 직접 task.assign
+6. 수행 결과는 상위로 다시 A2A 보고
+7. 대응 계획과 결과는 Response로 기록
 ```
 
-**문제점**:
+### 의사결정 권한
 
-1. Control Ship이 AUV의 내부 상태를 직접 조회
-2. System Supervisor의 권한을 침범
-3. 에러 처리가 없음 (AUV가 다운되면?)
-
-### ✅ 올바른 구현
-
-```python
-# Registry에서 공개 정보만 조회, 명령은 System Supervisor 기다림
-class ControlShip(Agent):
-    def handle_a2a_message(self, msg):
-        """System Supervisor로부터 온 A2A 메시지 처리"""
-        logger.info(f"[ControlShip] A2A received: {msg.get('action')}")
-
-        if msg.get("action") == "deploy_auv":
-            self.deploy_auv(msg.get("params"))
-
-    def deploy_auv(self, params):
-        """AUV 배치 임무"""
-        try:
-            # AUV에 A2A 메시지 전송
-            target_endpoint = self.get_child_endpoint("auv-001")
-            a2a_msg = {
-                "message_type": "task.assign",
-                "action": "survey_depth",
-                "params": params,
-                "reason": "Deployed by Control Ship per System Supervisor order"
-            }
-            self.send_a2a(target_endpoint, a2a_msg, timeout=5)
-            logger.info(f"[ControlShip] AUV deploy message sent")
-        except Exception as e:
-            logger.error(f"[ControlShip] Failed to deploy AUV: {e}")
-            # System Supervisor에 실패 보고 (heartbeat + inbox)
-            self.report_failure("auv_deployment_failed", str(e))
-
-    def get_child_endpoint(self, child_id):
-        """Registry에서 공개 정보 조회"""
-        try:
-            # 표준: urllib.request 사용 (외부 라이브러리 불필요)
-            req = urllib.request.Request(
-                "http://localhost:8280/devices",
-                headers={"Accept": "application/json"},
-                method="GET"
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                devices = json.loads(resp.read().decode())
-            for device in devices:
-                if device.get("id") == child_id:
-                    return device.get("agent", {}).get("endpoint")
-            raise RuntimeError(f"Device {child_id} not found")
-        except Exception as e:
-            logger.error(f"[ControlShip] Failed to get device endpoint: {e}")
-            raise
-```
-
-**좋은 점**:
-
-1. A2A 메시지로만 통신
-2. Registry에서 공개 정보만 조회
-3. 에러 처리 및 로깅
-4. System Supervisor의 의사결정 존중
-5. 모든 액션이 명시적
+| 질문 | System | Middle | Lower |
+| --- | --- | --- | --- |
+| 어느 middle agent에 맡길까 | ✅ | ❌ | ❌ |
+| 어느 lower agent에 분배할까 | ❌ | ✅ | ❌ |
+| 실제 장비를 어떻게 움직일까 | ❌ | ❌ | ✅ |
+| 자기 안전 때문에 임무를 중단할까 | ❌ | 부분 허용 | ✅ |
 
 ---
 
-**마지막으로**: 이 문서는 살아있는 문서입니다.
-새로운 패턴이 발견되거나 원칙이 더 필요하면 업데이트하세요!
+## 12. 리뷰 체크리스트
+
+- 계층 구조를 위반하지 않는가
+- 책임 경계가 기존 정의와 맞는가
+- Registry Server를 에이전트처럼 취급하지 않는가
+- A2A와 Moth 역할을 혼동하지 않는가
+- canonical state owner가 명확한가
+- heartbeat 필수 필드가 빠지지 않았는가
+- 외부 호출에 timeout과 에러 로깅이 있는가
+- 새 메시지/API 변경의 호환성 영향을 검토했는가
+
+---
+
+## 13. 나쁜 예와 좋은 예
+
+### 나쁜 예
+
+- Middle Agent가 lower agent의 `/state`를 직접 조회해 임무를 결정한다.
+- Registry Server가 직접 lower agent에 임무 명령을 내린다.
+- telemetry만 위치를 발행하고 heartbeat에는 위치를 넣지 않는다.
+
+### 좋은 예
+
+- Middle Agent는 Registry의 공개 정보만 조회하고, 명령은 A2A로 보낸다.
+- System Agent는 Registry의 alert를 읽고 대상만 결정한다.
+- Lower Agent는 자신의 상태를 heartbeat로 주기적으로 발행한다.
