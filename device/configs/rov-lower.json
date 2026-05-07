@@ -1,0 +1,119 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9113
+  },
+  "registry": {
+    "url": "http://127.0.0.1:8280",
+    "secret_key": "server-secret",
+    "required": true,
+    "healthcheck_interval_seconds": 1
+  },
+  "agent": {
+    "id": "rov-local-agent",
+    "name": "작업용 ROV",
+    "role": "rov",
+    "layer": "lower",
+    "device_type": "ROV",
+    "connectivity": "wired",
+    "requires_parent": false,
+    "description": "Lower-layer execution agent for a single ROV.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": 120
+    },
+    "rules": {
+      "critical": {
+        "battery_emergency_percent": 5,
+        "max_depth_m": 200
+      }
+    },
+    "capabilities": {
+      "skills": [
+        "precise_manipulation",
+        "high_resolution_inspection",
+        "deep_water_operations",
+        "tether_management"
+      ],
+      "tools": [
+        "high_def_camera",
+        "lights",
+        "manipulator_arm",
+        "tether_monitor",
+        "pressure_sensor"
+      ],
+      "actions": [
+        "move_forward",
+        "move_up",
+        "rotate",
+        "grab_object",
+        "release_object",
+        "adjust_lights",
+        "record_video"
+      ],
+      "constraints": [
+        "avoid_fast_motion_in_deep_water",
+        "keep_camera_view_stable"
+      ],
+      "tracks": [
+        {
+          "type": "VIDEO",
+          "name": "main_camera",
+          "frequency_hz": 30
+        },
+        {
+          "type": "TOPIC",
+          "name": "tether_tension",
+          "frequency_hz": 1
+        },
+        {
+          "type": "PRESSURE",
+          "name": "depth",
+          "frequency_hz": 10
+        },
+        {
+          "type": "BATTERY",
+          "name": "power",
+          "frequency_hz": 0.5
+        },
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
+        }
+      ]
+    }
+  },
+  "moth": {
+    "enabled": true,
+    "server_url": "wss://cobot.center:8287",
+    "reconnect_interval_seconds": 5
+  },
+  "simulation": {
+    "interval_seconds": 1,
+    "start_position": {
+      "latitude": 37.0048,
+      "longitude": 129.4182,
+      "altitude": -60.0
+    },
+    "speed_range": [
+      0.1,
+      1.5
+    ],
+    "altitude_range": [
+      -200.0,
+      -20.0
+    ]
+  },
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  },
+  "system_agent": {
+    "url": "http://127.0.0.1:9116"
+  }
+}

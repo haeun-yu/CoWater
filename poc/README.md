@@ -1,4 +1,4 @@
-# CoWater PoC - 3D 해양 운영 시각화
+# CoWater POC - 3D 해양 운영 시각화
 
 미래형 3D 기반 해양 운영 시스템 시각화 검증 프로젝트
 
@@ -73,18 +73,18 @@ open poc/graphics/ocean-visualization.html
 
 ## 다음 단계 (검증 후)
 
-### Phase 2: 데이터 바인딩
+### 2단계: 데이터 바인딩
 - [ ] WebSocket 연결 → CoWater `core` API와 실시간 동기화
 - [ ] Redis pub/sub → 해양 객체 위치 업데이트
 - [ ] 경보 이벤트 → 3D 시각화 반영 (색상/애니메이션 변화)
 
-### Phase 3: 고급 시각화
+### 3단계: 고급 시각화
 - [ ] 경로 추적 (Trail) - 각 선박/ROV의 궤적 표시
 - [ ] 통신 링크 - 선박↔드론, 센터↔ROV 간 연결선
 - [ ] 센서 범위 - ROV/AUV의 스캔 영역 시각화
 - [ ] 환경 효과 - 조명/날씨에 따른 수심 가시도 변화
 
-### Phase 4: 분산 배포
+### 4단계: 분산 배포
 - [ ] REST API 엔드포인트 (Node.js Express)
 - [ ] 시나리오 기반 자동 시뮬레이션
 - [ ] 여러 사용자 동시 접속 (WebGL 클라우드 렌더링)

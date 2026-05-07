@@ -66,6 +66,9 @@ postgres-data/
 timescale-data/
 redis-data/
 
+# ===== Runtime / Temporary =====
+.runtime/
+
 # ===== Secrets / Certs =====
 *.pem
 *.key

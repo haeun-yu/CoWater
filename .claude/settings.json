@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -v http://127.0.0.1:8280/devices)",
+      "Bash(python -c \"import sys, json; data = json.load\\(sys.stdin\\); print\\(json.dumps\\(data[0] if data else {}, indent=2\\)\\)\")"
+    ]
+  }
+}
