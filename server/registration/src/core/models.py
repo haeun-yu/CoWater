@@ -170,7 +170,7 @@ class AlertRecord:
     alert_type: str
     severity: ALERT_SEVERITIES
     message: str
-    status: str = "waiting"
+    status: str = "registered"
     recommended_action: Optional[str] = None
     target_agent_id: Optional[str] = None
     requires_user_approval: bool = False

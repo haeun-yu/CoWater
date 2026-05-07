@@ -149,6 +149,31 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         }
         result = runtime.apply_command(command)
 
+        # Report mission result back to the upstream endpoint when correlation ids are present.
+        response_id = str(data.get("response_id") or "")
+        if response_id:
+            report_base = str((command.get("params") or {}).get("report_to_endpoint") or "").strip()
+            if not report_base:
+                report_base = str(runtime.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116").strip()
+            report_endpoint = report_base if report_base.endswith("/message:send") else f"{report_base.rstrip('/')}/message:send"
+            execution_status = "failed"
+            if isinstance(result, dict) and str(result.get("status") or "").lower() in {"ok", "success", "completed"}:
+                execution_status = "completed"
+
+            asyncio.create_task(
+                _report_mission_result_to_endpoint(
+                    runtime=runtime,
+                    response_id=response_id,
+                    alert_id=str(data.get("alert_id") or ""),
+                    step_id=str(data.get("step_id") or ""),
+                    task_id=str(data.get("task_id") or request.taskId or ""),
+                    command=command,
+                    execution_result=result if isinstance(result, dict) else {"status": "unknown", "raw": result},
+                    execution_status=execution_status,
+                    endpoint=report_endpoint,
+                )
+            )
+
         # If task execution failed, report to System Agent asynchronously
         if isinstance(result, dict) and result.get('status') == 'failed':
             # config에서 system agent URL 조회
@@ -187,11 +212,17 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     # A2A 이벤트를 수신 디바이스의 TOPIC 트랙에 발행 (system agent 개입 없음)
     publisher = getattr(runtime, "moth_publisher", None)
     if publisher is not None:
+        metadata = request.metadata or {}
         from_device_id = (
-            data.get("device_id")
+            metadata.get("sender_device_id")
+            or data.get("sender_device_id")
+            or data.get("from_device_id")
+            or data.get("source_device_id")
+            or metadata.get("sender_id")
             or data.get("agent_id")
-            or (request.metadata or {}).get("sender_id")
         )
+        if from_device_id is None and msg_type in {"event.report", "mission.result", "task.result"}:
+            from_device_id = data.get("device_id")
         action = str(data.get("action") or data.get("command") or "").strip() or None
         asyncio.create_task(
             publisher.publish_a2a_event(
@@ -257,6 +288,89 @@ async def _report_task_failure_to_system_agent(
             logger.info(f"Task failure reported to System Agent: task_id={task_id}")
     except Exception as e:
         logger.error(f"Failed to report task failure to System Agent: {e}")
+
+
+async def _report_mission_result_to_endpoint(
+    runtime: AgentRuntime,
+    response_id: str,
+    alert_id: str,
+    step_id: str,
+    task_id: str,
+    command: dict[str, Any],
+    execution_result: dict[str, Any],
+    execution_status: str,
+    endpoint: str,
+) -> None:
+    """Report mission execution status to an upstream A2A endpoint."""
+    try:
+        normalized_status = "completed" if str(execution_status).lower() == "completed" else "failed"
+        source_agent_id = str(runtime.state.agent_id or "")
+        source_device_id = str(runtime.state.registry_id or "")
+        payload = {
+            "message_type": "mission.result",
+            "response_id": response_id,
+            "alert_id": alert_id,
+            "step_id": step_id or "default",
+            "task_id": task_id or "default",
+            "source_agent_id": source_agent_id,
+            "execution_status": normalized_status,
+            "execution_log": {
+                "source_agent_id": source_agent_id,
+                "source_device_id": source_device_id,
+                "step_id": step_id or "default",
+                "task_id": task_id or "default",
+                "action": command.get("action"),
+                "command": command,
+                "result": execution_result,
+                "reported_at": utc_now(),
+                "payload": {
+                    "response_id": response_id,
+                    "alert_id": alert_id,
+                    "step_id": step_id or "default",
+                    "task_id": task_id or "default",
+                    "source_agent_id": source_agent_id,
+                },
+            },
+        }
+
+        result_message = A2AMessage(
+            role="device",
+            parts=[A2APart(type="data", data=payload)],
+        )
+        result_request = A2ASendRequest(
+            message=result_message,
+            taskId=task_id or response_id,
+            metadata={"sender_id": source_agent_id, "sender_device_id": source_device_id},
+        )
+
+        import json
+        import urllib.request
+
+        data = json.dumps(result_request.model_dump()).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            logger.info(
+                "Mission result reported: response_id=%s step_id=%s task_id=%s status=%s endpoint=%s",
+                response_id,
+                step_id or "default",
+                task_id or "default",
+                normalized_status,
+                endpoint,
+            )
+    except Exception as e:
+        logger.error(
+            "Failed to report mission result: response_id=%s step_id=%s task_id=%s endpoint=%s error=%s",
+            response_id,
+            step_id,
+            task_id,
+            endpoint,
+            e,
+        )
 
 
 def run(config_path: Path, host_override: str | None = None, port_override: int | None = None) -> None:

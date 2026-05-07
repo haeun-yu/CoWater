@@ -62,6 +62,47 @@ def as_list(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def poll_latest_completion(
+    response_id: str,
+    alert_id: str,
+    timeout_seconds: int = 60,
+    interval_seconds: int = 2,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    deadline = time.time() + timeout_seconds
+    latest_response: dict[str, Any] = {}
+    latest_alert: dict[str, Any] = {}
+    latest_mission: dict[str, Any] = {}
+
+    while time.time() < deadline:
+        responses = as_list(http("GET", f"{REGISTRY}/responses"))
+        alerts = as_list(http("GET", f"{REGISTRY}/alerts"))
+        missions = as_list(http("GET", f"{REGISTRY}/missions"))
+
+        latest_response = next(
+            (item for item in responses if str(item.get("response_id") or "") == response_id),
+            latest_response,
+        )
+        latest_alert = next(
+            (item for item in alerts if str(item.get("alert_id") or "") == alert_id),
+            latest_alert,
+        )
+        latest_mission = next(
+            (item for item in missions if str(item.get("response_id") or "") == response_id),
+            latest_mission,
+        )
+
+        dispatch_result = latest_response.get("dispatch_result") or {}
+        aggregate_status = str(dispatch_result.get("execution_aggregate_status") or "")
+        mission_status = str(latest_mission.get("status") or "")
+        alert_status = str(latest_alert.get("status") or "")
+        if aggregate_status == "completed" and mission_status == "completed" and alert_status == "completed":
+            break
+
+        time.sleep(interval_seconds)
+
+    return latest_response, latest_alert, latest_mission
+
+
 # ──────────────────────────────────────────────────────────
 # Step 0. 사전 점검
 # ──────────────────────────────────────────────────────────
@@ -210,12 +251,12 @@ if new_alerts:
     if al.get("status") == "waiting" and al.get("alert_id"):
         for _ in range(30):
             refreshed = http("GET", f"{REGISTRY}/alerts/{al.get('alert_id')}")
-            if isinstance(refreshed, dict) and refreshed.get("status") in ("approved", "dispatched", "completed"):
+            if isinstance(refreshed, dict) and refreshed.get("status") in ("processing", "completed", "approved", "dispatched"):
                 al = refreshed
                 break
             time.sleep(1)
 
-    check("status가 approved/dispatched", al.get("status") in ("approved", "dispatched", "completed"), al.get("status"))
+    check("status가 processing/completed", al.get("status") in ("processing", "completed", "approved", "dispatched"), al.get("status"))
     check("alert_id 존재", bool(al.get("alert_id")), al.get("alert_id", "")[:30])
     alert_id = al.get("alert_id")
 else:
@@ -262,7 +303,11 @@ if new_responses:
     if delivered is None and dispatch:
         # dispatch_result 자체가 존재하면 성공으로 간주
         delivered = True
-    check("초기 dispatch 전달 성공", bool(delivered), str(delivered))
+    check(
+        "초기 dispatch snapshot 확보",
+        bool(dispatch),
+        f"delivered={delivered}, agg={dispatch.get('execution_aggregate_status')}",
+    )
 
 # ──────────────────────────────────────────────────────────
 # Step 6. System Agent outbox / device inbox 확인
@@ -292,12 +337,41 @@ section("시나리오 완료 — 최종 Registry 상태")
 events_after = as_list(http("GET", f"{REGISTRY}/events"))
 alerts_after = as_list(http("GET", f"{REGISTRY}/alerts"))
 responses_after = as_list(http("GET", f"{REGISTRY}/responses"))
+missions_after = as_list(http("GET", f"{REGISTRY}/missions"))
+
+latest_response: dict[str, Any] = {}
+latest_alert: dict[str, Any] = {}
+latest_mission: dict[str, Any] = {}
+if new_responses:
+    response_id = str(new_responses[-1].get("response_id") or "")
+    latest_response, latest_alert, latest_mission = poll_latest_completion(response_id, alert_id)
+
+dispatch_result = latest_response.get("dispatch_result") or {}
+aggregate_status = str(dispatch_result.get("execution_aggregate_status") or "")
+mission_status = str(latest_mission.get("status") or "")
+alert_status = str(latest_alert.get("status") or "")
 
 print(f"  Events   : {events_before} → {len(events_after)} (+{len(events_after) - events_before})")
 print(f"  Alerts   : {alerts_before} → {len(alerts_after)} (+{len(alerts_after) - alerts_before})")
 print(f"  Responses: {responses_before} → {len(responses_after)} (+{len(responses_after) - responses_before})")
+print(f"  Missions : {len(missions_after)}개")
 print()
 print("  성공 기준:")
 print("  - Event Registry 기록 ✅" if len(events_after) > events_before else "  - Event Registry 기록 ❌")
 print("  - Alert 생성 (CRITICAL) ✅" if len(alerts_after) > alerts_before else "  - Alert 생성 ❌")
 print("  - Response 연결 ✅" if len(responses_after) > responses_before else "  - Response 연결 ❌")
+print("  - Alert 최종 완료 ✅" if alert_status == "completed" else f"  - Alert 최종 완료 ❌ ({alert_status or 'unknown'})")
+print("  - Response 최종 완료 ✅" if aggregate_status == "completed" else f"  - Response 최종 완료 ❌ ({aggregate_status or 'unknown'})")
+print("  - Mission 최종 완료 ✅" if mission_status == "completed" else f"  - Mission 최종 완료 ❌ ({mission_status or 'unknown'})")
+
+overall_success = (
+    len(events_after) > events_before
+    and len(alerts_after) > alerts_before
+    and len(responses_after) > responses_before
+    and alert_status == "completed"
+    and aggregate_status == "completed"
+    and mission_status == "completed"
+)
+
+if not overall_success:
+    raise SystemExit(1)

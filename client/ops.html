@@ -255,26 +255,19 @@
         opacity: 0;
         visibility: hidden;
       }
-      .detail::before {
-        content: '';
+      #modal-backdrop {
+        display: none;
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        top: 0; left: 0; right: 0; bottom: 0;
         background: rgba(0, 0, 0, 0.5);
         z-index: 999;
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.2s, visibility 0.2s;
+      }
+      #modal-backdrop.visible {
+        display: block;
       }
       .detail.visible {
         display: flex;
         pointer-events: auto;
-        opacity: 1;
-        visibility: visible;
-      }
-      .detail.visible::before {
         opacity: 1;
         visibility: visible;
       }
@@ -511,6 +504,7 @@
       </div>
     </div>
 
+    <div id="modal-backdrop" onclick="hideDetail()"></div>
     <div class="detail" id="detail" onclick="event.stopPropagation()">
       <div class="detail-title">
         <span id="detail-title">상세 정보</span>
@@ -540,7 +534,7 @@
             clearTimeout(wsReconnectTimer);
           };
 
-          ws.onmessage = (event) => {
+          ws.onmessage = async (event) => {
             try {
               const msg = JSON.parse(event.data);
               console.log("📨 WebSocket message:", msg.type);
@@ -548,6 +542,7 @@
               if (msg.type === "initial") {
                 data.events = (msg.events || []).reverse();
                 data.alerts = (msg.alerts || []).reverse();
+                data.responses = (msg.responses || []).reverse();
                 data.missions = (msg.missions || []).reverse();
                 console.log(`📦 Initial data: ${data.missions.length} missions`);
                 updateUI();
@@ -566,7 +561,7 @@
                   console.log(`  Added as new mission`);
                 }
                 updateUI();
-              } else if (msg.type && msg.type.includes('event') || msg.type.includes('alert')) {
+              } else if (msg.type && (msg.type.includes('event') || msg.type.includes('alert'))) {
                 // Other event/alert updates
                 await loadData();
               }
@@ -691,20 +686,22 @@
 
       function getStatusBadge(status) {
         const badges = {
-          pending: "badge-pending",
-          in_progress: "badge-inprogress",
+          registered: "badge-pending",
+          processing: "badge-inprogress",
           completed: "badge-completed",
           failed: "badge-failed",
-          dispatched: "badge-ok",
+          pending: "badge-pending",
+          in_progress: "badge-inprogress",
           CRITICAL: "badge-critical",
           WARNING: "badge-warning",
         };
         const label = {
+          registered: "⏳ 등록됨",
+          processing: "▶️ 처리중",
+          completed: "✅ 대응완료",
+          failed: "❌ 실패",
           pending: "⏳ 대기",
           in_progress: "▶️ 진행",
-          completed: "✅ 완료",
-          failed: "❌ 실패",
-          dispatched: "✅ 전달",
           CRITICAL: "🔴 심각",
           WARNING: "🟡 경고",
         };
@@ -723,7 +720,7 @@
             const meta = e.metadata || {};
             const raw = meta.raw_event || {};
             return (
-              '<div class="card" onclick="showEvent(\'' +
+              '<div class="card" onclick="event.stopPropagation();showEvent(\'' +
               e.event_id +
               "')\">" +
               '<div class="card-title">' +
@@ -760,7 +757,7 @@
                 )
               : null;
             return (
-              '<div class="card" onclick="showAlert(\'' +
+              '<div class="card" onclick="event.stopPropagation();showAlert(\'' +
               a.alert_id +
               "')\">" +
               '<div class="card-title">' +
@@ -803,9 +800,9 @@
               : "-";
 
             return (
-              '<div class="card" onclick="showMission(\'' +
+              '<div class="card" onclick="event.stopPropagation();location.href=\'mission.html?id=' +
               m.mission_id +
-              "')\">" +
+              '\'">' +
               '<div class="card-title">' +
               getStatusBadge(m.status) +
               " " +
@@ -827,13 +824,16 @@
           .join("");
       }
 
+      function fmtCoord(v) { return typeof v === "number" ? v.toFixed(4) : (v || "—"); }
+
       function showEvent(id) {
         const e = data.events.find((x) => x.event_id === id);
+        if (!e) return;
         const meta = e.metadata || {};
         const raw = meta.raw_event || {};
         const loc = meta.location || {};
 
-        document.getElementById("detail-title").textContent =
+        document.getElementById("detail-title").innerHTML =
           e.event_type + " " + getStatusBadge(e.severity);
         document.getElementById("detail-body").innerHTML =
           '<div class="kv">' +
@@ -850,9 +850,9 @@
           (raw.description || "—") +
           "</div>" +
           '<div class="kv-key">위치</div><div class="kv-val">' +
-          (loc.latitude || "—").toFixed(4) +
+          fmtCoord(loc.latitude) +
           ", " +
-          (loc.longitude || "—").toFixed(4) +
+          fmtCoord(loc.longitude) +
           "</div>" +
           '<div class="kv-key">깊이</div><div class="kv-val">' +
           (loc.depth_m || "—") +
@@ -861,17 +861,18 @@
           new Date(e.created_at).toLocaleTimeString("ko-KR") +
           "</div>" +
           "</div>";
-        document.getElementById("detail").className = "detail visible";
+        showDetail();
       }
 
       function showAlert(id) {
         const a = data.alerts.find((x) => x.alert_id === id);
+        if (!a) return;
         const e = data.events.find((x) => x.event_id === a.event_id);
         const r = data.responses.find((x) => x.alert_id === a.alert_id);
         const m = r
           ? data.missions.find((x) => x.response_id === r.response_id)
           : null;
-        const meta = e ? e.metadata || {} : {};
+        const meta = e ? e.metadata || {} : (a.metadata || {});
         const raw = meta.raw_event || {};
         const loc = meta.location || {};
 
@@ -894,7 +895,7 @@
           });
         }
 
-        document.getElementById("detail-title").textContent =
+        document.getElementById("detail-title").innerHTML =
           a.alert_type +
           " " +
           getStatusBadge(a.status) +
@@ -915,9 +916,9 @@
           ((raw.confidence || 0) * 100).toFixed(1) +
           "%</div>" +
           '<div class="kv-key">위치</div><div class="kv-val">' +
-          (loc.latitude || "—").toFixed(4) +
+          fmtCoord(loc.latitude) +
           ", " +
-          (loc.longitude || "—").toFixed(4) +
+          fmtCoord(loc.longitude) +
           "</div>" +
           '<div class="kv-key">깊이</div><div class="kv-val">' +
           (loc.depth_m || "—") +
@@ -937,7 +938,7 @@
               stepsHtml +
               "</div>"
             : '<div style="margin-top: 12px; color: #94a3b8;">📋 응답 대기 중</div>');
-        document.getElementById("detail").className = "detail visible";
+        showDetail();
       }
 
       function showMission(id) {
@@ -1019,7 +1020,7 @@
             "</div>";
         }
 
-        document.getElementById("detail-title").textContent =
+        document.getElementById("detail-title").innerHTML =
           "Mission " + getStatusBadge(m.status);
         document.getElementById("detail-body").innerHTML =
           '<div class="kv">' +
@@ -1027,8 +1028,8 @@
           m.mission_id +
           "</div>" +
           '<div class="kv-key">응답 ID</div><div class="kv-val" style="font-family: monospace; font-size: 11px;">' +
-          m.response_id.substring(0, 20) +
-          "…</div>" +
+          (m.response_id ? m.response_id.substring(0, 20) + "…" : "—") +
+          "</div>" +
           '<div class="kv-key">상태</div><div class="kv-val">' +
           getStatusBadge(m.status) +
           "</div>" +
@@ -1062,26 +1063,23 @@
             : "") +
           completionHtml +
           actionButtons;
-        document.getElementById("detail").className = "detail visible";
+        showDetail();
       }
 
+      function showDetail() {
+        document.getElementById("detail").className = "detail visible";
+        document.getElementById("modal-backdrop").className = "visible";
+      }
       function hideDetail() {
         const detail = document.getElementById("detail");
         detail.classList.remove("visible");
+        document.getElementById("modal-backdrop").className = "";
       }
 
       // Close detail modal when clicking outside (on overlay)
       document.addEventListener("click", function (e) {
         const detail = document.getElementById("detail");
-        // Check if detail is visible and click is on the overlay (::before element)
-        if (detail.classList.contains("visible")) {
-          // If click is NOT on the detail content itself, close it
-          if (!e.target.closest(".detail-title") && !e.target.closest(".detail-content")) {
-            if (e.target === detail || e.target.closest(".detail") === null) {
-              hideDetail();
-            }
-          }
-        }
+        // backdrop div이 클릭을 처리하므로 여기선 아무것도 안 함
       });
 
       // ======================== Manual Intervention ========================

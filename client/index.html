@@ -794,13 +794,13 @@
       }
 
       function findObjectByRegistryOrId(deviceId) {
+        if (deviceId === null || deviceId === undefined) return null;
+        const key = String(deviceId).trim();
+        if (!key) return null;
+
         return state.objects.find(
           (obj) =>
-            obj.id === deviceId ||
-            obj.id === String(deviceId) ||
-            obj.registryId === deviceId ||
-            obj.registryId === Number(deviceId) ||
-            String(obj.registryId) === String(deviceId),
+            String(obj.id) === key || String(obj.registryId) === key,
         );
       }
 
@@ -1185,23 +1185,20 @@
       }
 
       function resolveLinkTypeFromDevice(device) {
-        const connectivity = String(device?.connectivity || "").toLowerCase();
-        const trackNames = Array.isArray(device?.tracks)
-          ? device.tracks.map((track) =>
-              String(track?.name || "").toLowerCase(),
-            )
-          : [];
-
-        if (
-          trackNames.includes("tether_tension") ||
-          connectivity.includes("wired")
-        ) {
+        if (device?.force_parent_routing) {
           return "link_tether";
         }
-        if (
-          trackNames.includes("acoustic_modem") ||
-          connectivity.includes("acoustic")
-        ) {
+
+        const deviceType = String(device?.device_type || "").toUpperCase();
+        if (deviceType === "AUV" && Boolean(device?.is_submerged)) {
+          return "link_acoustic";
+        }
+
+        const connectivity = String(device?.connectivity || "").toLowerCase();
+        if (connectivity.includes("wired")) {
+          return "link_tether";
+        }
+        if (connectivity.includes("acoustic")) {
           return "link_acoustic";
         }
         if (connectivity.includes("satellite")) {
@@ -1213,36 +1210,32 @@
       function deriveActiveLinksFromRegistry(devices) {
         if (!Array.isArray(devices) || devices.length === 0) return [];
 
-        const byId = new Map();
+        const byRegistryId = new Map();
         devices.forEach((device) => {
-          byId.set(String(device.id), device);
           if (device.registry_id !== undefined && device.registry_id !== null) {
-            byId.set(String(device.registry_id), device);
+            byRegistryId.set(String(device.registry_id), device);
           }
         });
-        const middleDevices = devices.filter(
-          (device) => String(device.layer || "").toLowerCase() === "middle",
-        );
-        const defaultParent =
-          middleDevices.find(
-            (device) =>
-              String(device.device_type || "").toUpperCase() === "CONTROL_SHIP",
-          ) ||
-          middleDevices[0] ||
-          null;
 
         const links = [];
 
         devices.forEach((child) => {
           if (String(child.layer || "").toLowerCase() !== "lower") return;
 
-          let parent = null;
           const parentRef = child.parent_id;
-          if (parentRef !== null && parentRef !== undefined) {
-            parent = byId.get(String(parentRef)) || null;
-          }
-          if (!parent) parent = defaultParent;
+          if (parentRef === null || parentRef === undefined) return;
+
+          // 서버 parent assignment 기준: parent_id(registry numeric id)로만 연결
+          const parent = byRegistryId.get(String(parentRef)) || null;
           if (!parent) return;
+
+          // 잘못된 매핑으로 자기 자신 링크가 생성되는 경우 방지
+          if (
+            String(parent.id) === String(child.id) ||
+            String(parent.registry_id) === String(child.registry_id)
+          ) {
+            return;
+          }
 
           links.push({
             id: `link-${parent.id}-${child.id}`,
@@ -1380,11 +1373,11 @@
 
       function ensureDirectA2ALink(fromObj, toObj) {
         if (!fromObj || !toObj) return null;
-        // 항상 작은 id를 source로 정렬해 중복 방지
-        const [srcObj, dstObj] =
-          String(fromObj.id) < String(toObj.id)
-            ? [fromObj, toObj]
-            : [toObj, fromObj];
+        if (String(fromObj.id) === String(toObj.id)) return null;
+
+        // 송신/수신 방향성을 보존한다.
+        const srcObj = fromObj;
+        const dstObj = toObj;
         const linkId = `link-a2a-${srcObj.id}-${dstObj.id}`;
         let link = state.links.find((item) => item.id === linkId);
         if (link) return link;
@@ -1395,7 +1388,7 @@
           target: dstObj.id,
           type: "link_a2a",
           status: "idle",
-          name: `${srcObj.name} ↔ ${dstObj.name}`,
+          name: `${srcObj.name} → ${dstObj.name}`,
           packets: [],
           totalMessages: 0,
           lastMessageAt: null,
@@ -1413,60 +1406,32 @@
         const fromId = a2aEvent && a2aEvent.from;
         const toId = a2aEvent && a2aEvent.to;
 
-        // 발신자와 수신자 모두 식별 가능할 때 → 직접 링크
-        if (fromId && toId) {
-          const fromObj = findObjectByRegistryOrId(fromId);
-          const toObj = findObjectByRegistryOrId(toId);
-          if (fromObj && toObj) {
-            const link = ensureDirectA2ALink(fromObj, toObj);
-            if (!link) return;
-            const now = Date.now();
-            link.totalMessages = Number(link.totalMessages || 0) + 1;
-            link.lastMessageAt = now;
-            link.lastChannel = channel;
-            link.recentEvents = Array.isArray(link.recentEvents)
-              ? link.recentEvents
-              : [];
-            link.recentEvents.unshift({
-              ts: now,
-              channel,
-              summary: summarizeFlowPayload(payload),
-            });
-            if (link.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
-              link.recentEvents.length = LINK_RECENT_EVENTS_MAX;
-            }
-            link.packets = link.recentEvents.map((event) => {
-              const ageSec = ((Date.now() - event.ts) / 1000).toFixed(1);
-              return `[${event.channel}] ${event.summary} (${ageSec}s 전)`;
-            });
-            return;
-          }
-        }
+        // from/to가 명확할 때만 링크를 기록한다.
+        if (!fromId || !toId || String(fromId) === String(toId)) return;
 
-        // fallback: 발신자 불명 → 수신 디바이스만으로 로그
-        const obj = findObjectByRegistryOrId(toId || deviceId);
-        if (!obj) return;
-        const fallbackLink =
-          state.links.find((item) => String(item.target) === String(obj.id)) ||
-          state.links.find((item) => String(item.source) === String(obj.id));
-        if (!fallbackLink) return;
+        const fromObj = findObjectByRegistryOrId(fromId);
+        const toObj = findObjectByRegistryOrId(toId);
+        if (!fromObj || !toObj) return;
+
+        const link = ensureDirectA2ALink(fromObj, toObj);
+        if (!link) return;
+
         const now = Date.now();
-        fallbackLink.totalMessages =
-          Number(fallbackLink.totalMessages || 0) + 1;
-        fallbackLink.lastMessageAt = now;
-        fallbackLink.lastChannel = channel;
-        fallbackLink.recentEvents = Array.isArray(fallbackLink.recentEvents)
-          ? fallbackLink.recentEvents
+        link.totalMessages = Number(link.totalMessages || 0) + 1;
+        link.lastMessageAt = now;
+        link.lastChannel = channel;
+        link.recentEvents = Array.isArray(link.recentEvents)
+          ? link.recentEvents
           : [];
-        fallbackLink.recentEvents.unshift({
+        link.recentEvents.unshift({
           ts: now,
           channel,
           summary: summarizeFlowPayload(payload),
         });
-        if (fallbackLink.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
-          fallbackLink.recentEvents.length = LINK_RECENT_EVENTS_MAX;
+        if (link.recentEvents.length > LINK_RECENT_EVENTS_MAX) {
+          link.recentEvents.length = LINK_RECENT_EVENTS_MAX;
         }
-        fallbackLink.packets = fallbackLink.recentEvents.map((event) => {
+        link.packets = link.recentEvents.map((event) => {
           const ageSec = ((Date.now() - event.ts) / 1000).toFixed(1);
           return `[${event.channel}] ${event.summary} (${ageSec}s 전)`;
         });
@@ -3342,7 +3307,8 @@
 
         if (registryDevices.length > 0) {
           state.objects = registryDevices.map(mapRegistryToScenario);
-          state.links = deriveActiveLinksFromRegistry(registryDevices);
+          // 링크는 실제 A2A 송수신(from/to) 관측 시에만 생성한다.
+          state.links = [];
           ensureVirtualSystemObject();
           persistRegistryDevices(registryDevices);
           persistDeviceDirectory(registryDevices);

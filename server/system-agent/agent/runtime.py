@@ -55,6 +55,11 @@ class AgentRuntime:
         self._mission_lock = asyncio.Lock()
         self._device_allocations: dict[int, dict[str, Any]] = {}
         self._waiting_queue: dict[str, dict[str, Any]] = {}
+        self._action_aliases: dict[str, list[str]] = {
+            "survey_depth": ["survey_depth", "scan_area", "sonar_scanning"],
+            "remove_mine": ["remove_mine", "grab_object", "precise_manipulation"],
+            "return_to_base": ["return_to_base", "surface", "hold_position"],
+        }
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -121,12 +126,19 @@ class AgentRuntime:
             logger.warning(f"_restore_device_allocations: failed to list responses: {exc}")
             return
 
+        ttl_seconds = self._allocation_restore_ttl_seconds()
+        now_ts = time.time()
         restored = 0
         for response in responses:
             if not isinstance(response, dict):
                 continue
             if str(response.get("status") or "") not in {"planned", "dispatched"}:
                 continue
+
+            updated_ts = self._parse_iso_ts(str(response.get("updated_at") or response.get("created_at") or ""))
+            if updated_ts and (now_ts - updated_ts) > ttl_seconds:
+                continue
+
             response_id = str(response.get("response_id") or "")
             dispatch_result = response.get("dispatch_result") or {}
             if not isinstance(dispatch_result, dict):
@@ -159,6 +171,13 @@ class AgentRuntime:
         if restored:
             logger.info(f"Restored {restored} device allocation(s) from active responses")
             self.state.remember({"kind": "device_allocations_restored", "at": utc_now(), "count": restored})
+
+    def _allocation_restore_ttl_seconds(self) -> int:
+        rules = self.agent_config.get("rules") or {}
+        try:
+            return max(60, int(rules.get("device_allocation_restore_ttl_seconds", 900)))
+        except (TypeError, ValueError):
+            return 900
 
     def apply_assignment(self, assignment: dict[str, Any]) -> None:
         signature = {
@@ -283,14 +302,13 @@ class AgentRuntime:
                     logger.debug(f"Failed to fetch alerts: {e}")
                     continue
 
-                # Process unprocessed waiting alerts
+                # handle_event_report에서 처리 못 한 registered 상태 alert만 폴백 처리
                 now_ts = time.time()
-                stale_cutoff = now_ts - 30 * 60  # 30분 이상 된 alerts는 건너뜀
+                stale_cutoff = now_ts - 30 * 60
                 waiting_alerts = [
                     alert for alert in alerts
-                    if alert.get("status") == "waiting"
+                    if alert.get("status") == "registered"
                     and str(alert.get("alert_id")) not in processed_alerts
-                    and not alert.get("approved_at")  # 이미 승인된 것 제외
                     and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
                 ]
                 waiting_alerts.sort(
@@ -393,12 +411,6 @@ class AgentRuntime:
                 else:
                     response["status"] = "failed"
                     response["notes"] = "no_capable_target_or_available_device"
-
-            try:
-                self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent approved")
-                logger.info(f"Alert {alert_id} acknowledged")
-            except Exception as e:
-                logger.warning(f"Failed to acknowledge alert {alert_id}: {e}")
 
             try:
                 self.registry_client.ingest_response(response)
@@ -576,7 +588,8 @@ class AgentRuntime:
         preferred_remove = str(llm_hint.get("preferred_remove_device_id") or "") if llm_hint else ""
 
         if alert_type != "mine_detection":
-            target = self._select_best_device(devices, "survey_depth", location, preferred_id=preferred_survey or None)
+            requested_action = self._canonical_action(str(alert.get("recommended_action") or "survey_depth"))
+            target = self._select_best_device(devices, requested_action, location, preferred_id=preferred_survey or None)
             if not target:
                 return []
             return [
@@ -587,10 +600,10 @@ class AgentRuntime:
                     tasks=[
                         self._build_task(
                             "task-1",
-                            "survey_depth",
+                            requested_action,
                             target,
                             location,
-                            extra_params=task_param_overrides.get("survey_depth"),
+                            extra_params=task_param_overrides.get(requested_action),
                         )
                     ],
                 )
@@ -789,9 +802,12 @@ class AgentRuntime:
         *,
         extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        requested_action = self._canonical_action(action)
+        dispatch_action = self._resolve_device_action(target_device, requested_action)
         route_hop = self._resolve_route_hop(target_device)
         merged_params = {
-            "action": action,
+            "action": dispatch_action,
+            "requested_action": requested_action,
             "location": location,
             "mission_type": "mine_clearance",
             "target_device_id": self._device_id(target_device),
@@ -803,7 +819,8 @@ class AgentRuntime:
             "logical_task_id": task_id,
             "attempt": 0,
             "attempted_device_ids": [self._device_id(target_device)],
-            "action": action,
+            "action": dispatch_action,
+            "requested_action": requested_action,
             "target_device_id": self._device_id(target_device),
             "target_device_name": target_device.get("name"),
             "target_device_type": target_device.get("device_type"),
@@ -891,8 +908,9 @@ class AgentRuntime:
                 return "waiting_for_remove_device"
             return None
 
-        available = self._has_capable_device(devices, "survey_depth", location, include_reserved=False)
-        exists = self._has_capable_device(devices, "survey_depth", location, include_reserved=True)
+        requested_action = self._canonical_action(str(alert.get("recommended_action") or "survey_depth"))
+        available = self._has_capable_device(devices, requested_action, location, include_reserved=False)
+        exists = self._has_capable_device(devices, requested_action, location, include_reserved=True)
         if not available and exists:
             return "waiting_for_available_device"
         return None
@@ -1018,19 +1036,47 @@ class AgentRuntime:
         endpoint = agent.get("endpoint")
         return str(endpoint) if endpoint else None
 
-    def _device_can_execute(self, device: dict[str, Any], action: str) -> bool:
-        device_type = str(device.get("device_type") or "").upper()
+    def _canonical_action(self, action: str | None) -> str:
+        raw = str(action or "").strip().lower()
+        if not raw:
+            return ""
+        for canonical, aliases in self._action_aliases.items():
+            if raw == canonical or raw in aliases:
+                return canonical
+        return raw
+
+    def _device_supported_actions(self, device: dict[str, Any]) -> set[str]:
         actions = set(str(v).lower() for v in (device.get("actions") or {}).get("custom", []))
         agent = device.get("agent") or {}
         if isinstance(agent, dict):
             actions.update(str(v).lower() for v in agent.get("available_actions") or [])
             actions.update(str(v).lower() for v in agent.get("skills") or [])
+        return actions
 
-        if action == "survey_depth":
-            return device_type == "AUV" or any(keyword in actions for keyword in {"scan_area", "sonar_scanning"})
-        if action == "remove_mine":
-            return device_type == "ROV" or any(keyword in actions for keyword in {"grab_object", "precise_manipulation"})
-        return bool(actions)
+    def _resolve_device_action(self, device: dict[str, Any], action: str) -> str:
+        canonical = self._canonical_action(action)
+        supported = self._device_supported_actions(device)
+        for candidate in self._action_aliases.get(canonical, [canonical]):
+            if candidate in supported:
+                return candidate
+
+        device_type = str(device.get("device_type") or "").upper()
+        if canonical == "survey_depth" and device_type == "AUV":
+            return "scan_area" if "scan_area" in supported else canonical
+        if canonical == "remove_mine" and device_type == "ROV":
+            return "grab_object" if "grab_object" in supported else canonical
+        return canonical
+
+    def _device_can_execute(self, device: dict[str, Any], action: str) -> bool:
+        canonical = self._canonical_action(action)
+        device_type = str(device.get("device_type") or "").upper()
+        actions = self._device_supported_actions(device)
+
+        if canonical == "survey_depth":
+            return device_type == "AUV" or any(keyword in actions for keyword in self._action_aliases["survey_depth"])
+        if canonical == "remove_mine":
+            return device_type == "ROV" or any(keyword in actions for keyword in self._action_aliases["remove_mine"])
+        return canonical in actions
 
     def _device_id(self, device: dict[str, Any]) -> int:
         """registry_id(내부 numeric id) 우선, 없으면 id 변환 시도."""
@@ -1399,6 +1445,8 @@ class AgentRuntime:
                     "execution_results": dispatch_result.get("execution_results") or [],
                     "execution_result": dispatch_result.get("execution_result"),
                     "execution_aggregate_status": dispatch_result.get("execution_aggregate_status"),
+                    "step_evaluations": dispatch_result.get("step_evaluations") or {},
+                    "replan_history": dispatch_result.get("replan_history") or [],
                 }
             return {
                 "delivered": True,
@@ -1409,6 +1457,8 @@ class AgentRuntime:
                 "execution_results": dispatch_result.get("execution_results") or [],
                 "execution_result": dispatch_result.get("execution_result"),
                 "execution_aggregate_status": dispatch_result.get("execution_aggregate_status"),
+                "step_evaluations": dispatch_result.get("step_evaluations") or {},
+                "replan_history": dispatch_result.get("replan_history") or [],
             }
 
         return {
@@ -1419,6 +1469,8 @@ class AgentRuntime:
             "execution_results": dispatch_result.get("execution_results") or [],
             "execution_result": dispatch_result.get("execution_result"),
             "execution_aggregate_status": dispatch_result.get("execution_aggregate_status"),
+            "step_evaluations": dispatch_result.get("step_evaluations") or {},
+            "replan_history": dispatch_result.get("replan_history") or [],
         }
 
     async def _send_a2a_task(
@@ -1497,7 +1549,10 @@ class AgentRuntime:
                         f"{response.get('response_id')}:{response.get('step_id') or 'default'}"
                         f":{response.get('task_id') or 'default'}"
                     ),
-                    "metadata": {}
+                    "metadata": {
+                        "sender_id": self.state.agent_id,
+                        "sender_device_id": "system",
+                    }
                 }
             }
 
@@ -1594,7 +1649,7 @@ class AgentRuntime:
         rule = self.event_rules.get(event_type, {})
         action = rule.get("recommended_action")
         if isinstance(action, str) and action.strip():
-            return action.strip()
+            return self._canonical_action(action.strip())
         if severity == "CRITICAL":
             return "escalate_alert"
         return None
@@ -1635,12 +1690,17 @@ class AgentRuntime:
             "metadata": metadata,
         }
         stored_alert = self.registry_client.ingest_alert(alert_record)
+        alert_id = stored_alert.get("alert_id")
+        try:
+            self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent processing")
+        except Exception:
+            pass
         try:
             devices = self.registry_client.list_devices()
             loop = asyncio.get_running_loop()
             loop.create_task(self._process_alert(stored_alert, devices, logging.getLogger(__name__)))
         except Exception:
-            # fallback: polling loop will process waiting alerts
+            # fallback: polling loop will process registered alerts
             pass
 
         self.state.remember(
@@ -2059,6 +2119,32 @@ class AgentRuntime:
                     self._release_response_devices(dispatch_result, reason=str(step_evaluation.get("decision")))
                 elif aggregate_status == "completed":
                     self._release_response_devices(dispatch_result, reason="mission_completed")
+                    # Mission completed → Registry mission 완료 처리
+                    mission_id = str(existing.get("mission_id") or "")
+                    if not mission_id:
+                        try:
+                            missions = self.registry_client.list_missions()
+                            matched = next(
+                                (m for m in missions if str(m.get("response_id") or "") == response_id),
+                                None,
+                            )
+                            if matched:
+                                mission_id = str(matched.get("mission_id") or "")
+                        except Exception:
+                            pass
+                    if mission_id:
+                        try:
+                            self.registry_client.complete_mission(
+                                mission_id=mission_id,
+                                completion_report={
+                                    "outcome": "completed",
+                                    "final_status": "completed",
+                                    "notes": f"Mission completed via handle_mission_result for response {response_id}",
+                                    "completed_at": utc_now(),
+                                },
+                            )
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Failed to complete mission {mission_id}: {e}")
 
                 response_record = {
                     "response_id": response_id,

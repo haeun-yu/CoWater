@@ -67,7 +67,7 @@ class AlertRegistry:
 
     def acknowledge_alert(self, alert_id: str, approved: bool = True, notes: Optional[str] = None) -> AlertRecord:
         alert = self.get_alert(alert_id)
-        alert.touch("approved" if approved else "rejected")
+        alert.touch("processing" if approved else "failed")
         if notes:
             alert.metadata["notes"] = notes
         return alert
@@ -93,10 +93,8 @@ class AlertRegistry:
         # Alert 상태를 response 상태에 따라 업데이트
         try:
             alert = self.get_alert(request.alert_id)
-            if request.status == "planned" or (response.dispatch_result and response.dispatch_result.get("delivered")):
-                alert.touch("dispatched")
-            elif request.status == "queued":
-                alert.touch("queued")
+            if response.dispatch_result and response.dispatch_result.get("delivered"):
+                alert.touch("completed")
             elif request.status == "failed":
                 alert.touch("failed")
         except KeyError:

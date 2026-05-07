@@ -264,6 +264,21 @@ def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]
 @app.post("/responses/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_response(request: ResponseIngestRequest) -> dict[str, Any]:
     response = alert_registry.ingest_response(request)
+    # response가 completed이면 연관 mission 자동 완료 처리
+    if request.status == "completed":
+        try:
+            mission = mission_registry.get_mission_by_response(response.response_id)
+            if mission and mission.status != "completed":
+                mission_registry.complete_mission(
+                    mission_id=mission.mission_id,
+                    completion_report={
+                        "outcome": "completed",
+                        "final_status": "completed",
+                        "notes": f"Auto-completed via response {response.response_id}",
+                    },
+                )
+        except Exception:
+            pass
     return response.to_dict()
 
 
@@ -545,6 +560,7 @@ async def websocket_dashboard(websocket: WebSocket) -> None:
             "type": "initial",
             "events": [e.to_dict() for e in event_registry.list_events()],
             "alerts": [a.to_dict() for a in alert_registry.list_alerts()],
+            "responses": [r.to_dict() for r in alert_registry.list_responses()],
             "missions": [m.to_dict() for m in mission_registry.list_missions()],
             "stats": mission_registry.get_mission_stats(),
         }
