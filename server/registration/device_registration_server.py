@@ -1,4 +1,4 @@
-from src.device_registration_server import app, main
+from src.api import app, main
 
 
 __all__ = ["app", "main"]
