@@ -402,9 +402,16 @@ class AgentRuntime:
             self._create_background_task(self.moth_publisher.healthcheck_loop())
 
             # ===== 메인 simulation loop =====
+            _prev_connected_state = self.state.connected
             while not self._stopping:
                 # 설정된 주기만큼 대기 (interval_seconds, 기본값 2초)
                 await asyncio.sleep(self.simulator.interval_seconds())
+
+                # ✅ Detect recovery from disconnection (Ch.16)
+                if not _prev_connected_state and self.state.connected:
+                    logger.info("🔄 Device recovered from disconnection, reporting recovery state")
+                    await self._report_recovery_to_system()
+                _prev_connected_state = self.state.connected
 
                 # 1️⃣ 센서 데이터 생성 및 정규화
                 telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
@@ -452,6 +459,9 @@ class AgentRuntime:
                 # 5️⃣ Moth로 Telemetry 발행
                 # Real-time streaming: server에서 위치 업데이트 받고 dynamic re-binding 판단
                 await self.moth_publisher.publish_telemetry(telemetry)
+
+                # 6️⃣ ✅ Sensor health monitoring (Ch.15)
+                self._check_sensor_health(telemetry)
 
         except Exception as e:
             logger.error(f"Simulation loop 에러: {e}", exc_info=True)
@@ -663,6 +673,63 @@ class AgentRuntime:
                 }
                 self.registry_client.ingest_event(event)
                 logger.critical(f"⚠️ Depth exceeded event reported: {depth_m}m")
+
+    async def _report_recovery_to_system(self) -> None:
+        """Report device recovery to System Agent (Ch.16)"""
+        try:
+            # Build recovery report with local device state
+            recovery_report = {
+                "device_id": str(self.state.registry_id),
+                "agent_id": self.state.agent_id,
+                "recovered_at": utc_now(),
+                "local_state": {
+                    "battery": self.state.last_telemetry.get("battery", {}) if self.state.last_telemetry else {},
+                    "position": self.state.last_telemetry.get("position", {}) if self.state.last_telemetry else {},
+                    "status": self.state.status if hasattr(self.state, 'status') else "active",
+                },
+                "completed_tasks": [],  # Placeholder for task results from task_id_store
+                "pending_events": [],   # Placeholder for local events
+            }
+
+            # Try to get System Agent endpoint from registration response or config
+            system_agent_endpoint = None
+            if hasattr(self, '_registration_response') and self._registration_response:
+                parents = self._registration_response.get("parents") or []
+                for parent in parents:
+                    if parent.get("role") == "system_agent" or parent.get("layer") == "system":
+                        agent_info = parent.get("agent") or {}
+                        system_agent_endpoint = agent_info.get("endpoint")
+                        break
+
+            if not system_agent_endpoint:
+                # Try to get from config
+                system_config = self.config.get("system_agent", {})
+                system_agent_endpoint = system_config.get("endpoint")
+
+            if not system_agent_endpoint:
+                logger.warning("Could not determine System Agent endpoint for recovery report")
+                return
+
+            # POST recovery report to System Agent
+            import urllib.request
+            import json
+            data = json.dumps(recovery_report).encode("utf-8")
+            req = urllib.request.Request(
+                f"{system_agent_endpoint}/device-recovery",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    result = json.loads(resp.read() or b"{}")
+                    logger.info(f"✅ Recovery report sent successfully: {result}")
+                    self.state.remember({"kind": "recovery_reported", "at": utc_now(), "result": result})
+            except Exception as e:
+                logger.warning(f"Failed to send recovery report: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in recovery reporting: {e}", exc_info=True)
 
     def can_accept_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
         action = str(command.get("action") or "").strip().lower()
