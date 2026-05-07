@@ -136,8 +136,13 @@ class DeviceRegistry:
     def agent_dict(self) -> dict[str, object]:
         return dict(self._agent)
 
-    def list_devices(self) -> List[DeviceRecord]:
-        return [self._devices[device_id] for device_id in sorted(self._devices)]
+    def list_devices(self, limit: int | None = None, offset: int = 0) -> List[DeviceRecord]:
+        devices = [self._devices[device_id] for device_id in sorted(self._devices)]
+        if offset:
+            devices = devices[offset:]
+        if limit is not None:
+            devices = devices[:limit]
+        return devices
 
     def get_device(self, device_id: Any) -> DeviceRecord:
         internal_id: Optional[int] = None

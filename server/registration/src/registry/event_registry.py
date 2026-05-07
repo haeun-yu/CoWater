@@ -105,9 +105,20 @@ class EventRegistry:
         self._persist_event(event)
         return event
 
-    def list_events(self) -> List[EventRecord]:
+    def list_events(self, limit: int | None = None, offset: int = 0) -> List[EventRecord]:
+        query = "SELECT event_id, data, created_at, updated_at FROM events ORDER BY created_at, event_id"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute("SELECT event_id, data, created_at, updated_at FROM events ORDER BY created_at, event_id").fetchall()
+            rows = conn.execute(query, params).fetchall()
         return [self._row_to_event(row) for row in rows]
 
     def get_event(self, event_id: str) -> EventRecord:

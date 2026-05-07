@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Any, List
 from uuid import uuid4
@@ -31,24 +30,13 @@ from src.core.models import (
     TRACK_TYPES,
 )
 from src.core.pubsub import get_pubsub_manager
-from src.registry.a2a_log_registry import A2ALogRegistry
-from src.registry.alert_registry import AlertRegistry
-from src.registry.device_registry import DeviceRegistry
-from src.registry.domain_registry import DomainRegistry, utc_now_iso
-from src.registry.event_registry import EventRegistry
-from src.registry.policy_registry import PolicyRegistry
+from src.application.bootstrap import build_registry_components
+from src.registry.domain_registry import utc_now_iso
 from src.db.connection import close_db
-from src.transport.moth_subscriber import MothHealthcheckSubscriber
 from src.transport.moth_publisher import get_publisher as get_moth_publisher
 
 
 logger = logging.getLogger(__name__)
-
-# Determine storage backend: 'sqlite' or 'memory'
-STORAGE_TYPE = os.getenv("COWATER_STORAGE", "sqlite").lower()
-USE_SQLITE = STORAGE_TYPE == "sqlite"
-
-logger.info(f"🔧 Storage backend: {STORAGE_TYPE}")
 
 INTERNAL_CALLER_HEADER = "system-agent"
 
@@ -69,38 +57,14 @@ def require_internal_caller(x_cowater_internal: str | None) -> None:
         raise HTTPException(status_code=403, detail="system agent only")
 
 
-registry = DeviceRegistry(
-    secret_key=APP_SETTINGS["secret_key"],
-    host=APP_SETTINGS["server"]["host"],
-    port=APP_SETTINGS["server"]["port"],
-    ping_endpoint=APP_SETTINGS["server"]["ping_endpoint"],
-    agent_scheme=APP_SETTINGS["agent"]["scheme"],
-    agent_host=APP_SETTINGS["agent"]["host"],
-    agent_port=APP_SETTINGS["agent"]["port"],
-    agent_path_prefix=APP_SETTINGS["agent"]["path_prefix"],
-    agent_command_scheme=APP_SETTINGS["agent"]["command_scheme"],
-    agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
-    healthcheck_interval_seconds=APP_SETTINGS["healthcheck"]["interval_seconds"],
-    healthcheck_timeout_seconds=APP_SETTINGS["healthcheck"]["timeout_seconds"],
-    healthcheck_topic_template=APP_SETTINGS["moth"]["healthcheck_topic_template"],
-    telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
-)
-
-# Alert/Event/A2A Log/Policy 저장소: COWATER_STORAGE 환경변수로 제어
-_alert_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/alerts.db"
-_event_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/events.db"
-_a2a_log_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/a2a_logs.db"
-
-alert_registry = AlertRegistry(db_path=_alert_db_path)
-event_registry = EventRegistry(db_path=_event_db_path)
-a2a_log_registry = A2ALogRegistry(db_path=_a2a_log_db_path)
-policy_registry = PolicyRegistry()
-domain_registry = DomainRegistry()
-
-moth_subscriber = MothHealthcheckSubscriber(
-    registry=registry,
-    moth_server_url=APP_SETTINGS["moth"]["server_url"],
-)
+components = build_registry_components()
+registry = components.registry
+alert_registry = components.alert_registry
+event_registry = components.event_registry
+a2a_log_registry = components.a2a_log_registry
+policy_registry = components.policy_registry
+domain_registry = components.domain_registry
+moth_subscriber = components.moth_subscriber
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -181,8 +145,11 @@ def get_device_assignment(device_id: str) -> dict[str, Any]:
 
 
 @app.get("/devices")
-def list_devices() -> List[dict[str, Any]]:
-    return [device.to_dict() for device in registry.list_devices()]
+def list_devices(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> List[dict[str, Any]]:
+    return [device.to_dict() for device in registry.list_devices(limit=limit, offset=offset)]
 
 
 @app.get("/devices/{device_id}")
@@ -262,7 +229,9 @@ def update_device_connectivity(
         registry.upsert_device(device)
         logger.info(f"Device {device_id} connectivity updated to {device.connectivity_status}")
         return device.to_dict()
-    except (ValueError, KeyError) as exc:
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
         raise HTTPException(status_code=404, detail="device not found") from exc
 
 
@@ -283,8 +252,11 @@ def ingest_event(request: EventIngestRequest) -> dict[str, Any]:
 
 
 @app.get("/events")
-def list_events() -> list[dict[str, Any]]:
-    return [event.to_dict() for event in event_registry.list_events()]
+def list_events(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [event.to_dict() for event in event_registry.list_events(limit=limit, offset=offset)]
 
 
 @app.get("/events/{event_id}")
@@ -296,8 +268,11 @@ def get_event(event_id: str) -> dict[str, Any]:
 
 
 @app.get("/alerts")
-def list_alerts() -> list[dict[str, Any]]:
-    return [alert.to_dict() for alert in alert_registry.list_alerts()]
+def list_alerts(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [alert.to_dict() for alert in alert_registry.list_alerts(limit=limit, offset=offset)]
 
 
 @app.get("/alerts/{alert_id}")
@@ -352,6 +327,7 @@ def get_a2a_logs(
     message_type: str | None = Query(None, description="Filter by message type"),
     direction: str | None = Query(None, description="Filter by direction (inbound/outbound)"),
     limit: int = Query(1000, description="Max logs to return"),
+    offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
     """A2A 로그 조회 (필터링 지원)"""
     return a2a_log_registry.get_logs(
@@ -362,6 +338,7 @@ def get_a2a_logs(
         message_type=message_type,
         direction=direction,
         limit=limit,
+        offset=offset,
     )
 
 
@@ -375,9 +352,12 @@ def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(
 
 
 @app.get("/policies")
-def list_policies() -> list[dict[str, Any]]:
+def list_policies(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
     """정책 목록 조회"""
-    return policy_registry.get_policies()
+    return policy_registry.list_policies(limit=limit, offset=offset)
 
 
 @app.get("/policies/{policy_id}")
@@ -408,8 +388,11 @@ def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(defaul
 
 
 @app.get("/device-roles")
-def list_device_roles() -> list[dict[str, Any]]:
-    return [item.to_dict() for item in domain_registry.list_device_roles()]
+def list_device_roles(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_device_roles(limit=limit, offset=offset)]
 
 
 @app.get("/device-roles/{device_id}")
@@ -436,8 +419,11 @@ def create_operation_plan(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/operation-plans")
-def list_operation_plans() -> list[dict[str, Any]]:
-    return [item.to_dict() for item in domain_registry.list_operation_plans()]
+def list_operation_plans(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_operation_plans(limit=limit, offset=offset)]
 
 
 @app.get("/operation-plans/{operation_plan_id}")
@@ -468,8 +454,11 @@ def create_insight(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/insights")
-def list_insights() -> list[dict[str, Any]]:
-    return [item.to_dict() for item in domain_registry.list_insights()]
+def list_insights(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_insights(limit=limit, offset=offset)]
 
 
 @app.get("/insights/{insight_id}")
@@ -488,8 +477,11 @@ def create_approval(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/approvals")
-def list_approvals() -> list[dict[str, Any]]:
-    return [item.to_dict() for item in domain_registry.list_approvals()]
+def list_approvals(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_approvals(limit=limit, offset=offset)]
 
 
 @app.get("/approvals/{approval_id}")
@@ -527,8 +519,11 @@ def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/mission-proposals")
-def list_mission_proposals() -> list[dict[str, Any]]:
-    return [item.to_dict() for item in domain_registry.list_mission_proposals()]
+def list_mission_proposals(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_mission_proposals(limit=limit, offset=offset)]
 
 
 @app.get("/mission-proposals/{proposal_id}")
@@ -655,8 +650,11 @@ def create_mission(
 
 
 @app.get("/missions")
-def list_missions() -> list[dict[str, Any]]:
-    return [m.to_dict() for m in domain_registry.list_missions()]
+def list_missions(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [m.to_dict() for m in domain_registry.list_missions(limit=limit, offset=offset)]
 
 
 @app.get("/missions/status/{status}")
@@ -772,7 +770,9 @@ def reset_all_data() -> Response:
     alert_registry.reset()
     event_registry.reset()
     domain_registry.reset()
-    
+    policy_registry.reset()
+    a2a_log_registry.reset()
+
     logger.info(
         f"Registry 초기화 완료: "
         f"devices={device_count}, alerts={alert_count}, "

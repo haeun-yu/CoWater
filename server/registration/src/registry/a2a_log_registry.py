@@ -115,6 +115,7 @@ class A2ALogRegistry:
         message_type: str | None = None,
         direction: str | None = None,
         limit: int = 1000,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """A2A 로그 조회 (필터링 지원)"""
         try:
@@ -151,9 +152,10 @@ class A2ALogRegistry:
                 FROM a2a_logs
                 WHERE {where_clause}
                 ORDER BY logged_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
             """
             params.append(limit)
+            params.append(offset)
 
             with self._connect() as conn:
                 rows = conn.execute(query, params).fetchall()
@@ -197,3 +199,13 @@ class A2ALogRegistry:
         except Exception as e:
             logger.error(f"A2A 로그 삭제 실패: {e}")
             return 0
+
+    def reset(self) -> None:
+        if self._db_path == ":memory:":
+            return
+        try:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM a2a_logs")
+                conn.commit()
+        except Exception as e:
+            logger.error(f"A2A 로그 초기화 실패: {e}")

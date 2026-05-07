@@ -1,6 +1,6 @@
 """SQLite Schema definitions for CoWater Mission Tracking"""
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Mission 테이블 스키마
 MISSIONS_TABLE = """
@@ -43,10 +43,11 @@ CREATE INDEX IF NOT EXISTS idx_missions_created_at ON missions(created_at);
 DOMAIN_RECORDS_TABLE = """
 CREATE TABLE IF NOT EXISTS domain_records (
     record_type TEXT NOT NULL,
-    record_id TEXT PRIMARY KEY,
+    record_id TEXT NOT NULL,
     data TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (record_type, record_id)
 );
 """
 
@@ -84,8 +85,25 @@ def init_schema(conn):
         cursor.execute("PRAGMA foreign_keys = ON")
         cursor.execute(MISSIONS_TABLE)
         cursor.executescript(MISSIONS_INDEXES)
-        cursor.execute(DOMAIN_RECORDS_TABLE)
-        cursor.execute(DOMAIN_RECORDS_INDEX)
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='domain_records'")
+        has_domain_records = cursor.fetchone() is not None
+        if has_domain_records and current_version < 3:
+            cursor.execute("ALTER TABLE domain_records RENAME TO domain_records_legacy")
+            cursor.execute(DOMAIN_RECORDS_TABLE)
+            cursor.execute(DOMAIN_RECORDS_INDEX)
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO domain_records (record_type, record_id, data, created_at, updated_at)
+                SELECT record_type, record_id, data, created_at, updated_at
+                FROM domain_records_legacy
+                """
+            )
+            cursor.execute("DROP TABLE domain_records_legacy")
+        else:
+            cursor.execute(DOMAIN_RECORDS_TABLE)
+            cursor.execute(DOMAIN_RECORDS_INDEX)
+
         cursor.execute(POLICIES_TABLE)
         cursor.execute(POLICIES_INDEX)
 

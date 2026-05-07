@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
@@ -16,6 +16,7 @@ except ImportError:
     websockets = None
 
 from agent.runtime import AgentRuntime
+from application.bootstrap import build_agent_runtime
 from agent.state import utc_now
 from controller.a2a import A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
@@ -66,6 +67,7 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             if task is not None:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+            runtime.runtime_store.close()
 
     app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
@@ -132,9 +134,10 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     async def relay_child_healthcheck(payload: dict[str, Any]) -> dict[str, Any]:
         child_id = str(payload.get("agent_id") or payload.get("device_id"))
         now = utc_now()
-        child_state = runtime.state.children.setdefault(child_id, {})
+        child_state = runtime.state.children.get(child_id, {})
         child_state["last_healthcheck_at"] = now
         child_state["healthcheck"] = payload
+        runtime.state.children[child_id] = child_state
         publisher = getattr(runtime, "moth_publisher", None)
         if publisher is not None:
             await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
@@ -227,15 +230,14 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return await runtime.decide_approval_flow(approval_id, approved, decided_by=decided_by, notes=notes)
 
     @app.get("/overview")
-    def overview() -> dict[str, Any]:
-        result = {
-            "devices": runtime.registry_client.list_devices(),
-            "device_roles": runtime.registry_client.list_device_roles(),
-            "operation_plans": runtime.registry_client.list_operation_plans(),
-            "insights": runtime.registry_client.list_insights(),
-            "approvals": runtime.registry_client.list_approvals(),
-            "mission_proposals": runtime.registry_client.list_mission_proposals(),
-            "missions": runtime.registry_client.list_missions(),
+    def overview(
+        limit: int = Query(default=100, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        result = runtime.registry_client.get_overview(limit=limit, offset=offset)
+        result["meta"] = {
+            "limit": limit,
+            "offset": offset,
         }
         # Publish to Moth in background
         _schedule_background_task(_publish_overview_to_moth(result))
@@ -278,7 +280,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     return task
 
 
-def run(default_config_path: Path) -> None:
+def run(default_config_path: Path, runtime: AgentRuntime | None = None) -> None:
     import argparse
     import os
 
@@ -288,7 +290,7 @@ def run(default_config_path: Path) -> None:
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
     config_path = (args.config or default_config_path).resolve()
-    runtime = AgentRuntime(config_path)
+    runtime = runtime or build_agent_runtime(config_path)
     host = args.host or runtime.server.get("host") or "127.0.0.1"
     port = args.port or int(os.getenv("COWATER_AGENT_PORT") or runtime.server.get("port") or 9010)
     runtime.server["host"] = host

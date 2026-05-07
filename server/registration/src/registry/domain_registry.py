@@ -158,9 +158,9 @@ class DomainRegistry:
         self.db.execute(
             """
             INSERT OR REPLACE INTO domain_records (record_type, record_id, data, created_at, updated_at)
-            VALUES (?, ?, ?, COALESCE((SELECT created_at FROM domain_records WHERE record_id = ?), ?), ?)
+            VALUES (?, ?, ?, COALESCE((SELECT created_at FROM domain_records WHERE record_type = ? AND record_id = ?), ?), ?)
             """,
-            (record_type, record_id, data, record_id, created_at or now, now),
+            (record_type, record_id, data, record_type, record_id, created_at or now, now),
         )
         self.db.commit()
 
@@ -181,11 +181,26 @@ class DomainRegistry:
         data = self._apply_record_defaults(record_type, data)
         return factory(**data)
 
-    def _list(self, record_type: str, factory: Callable[[dict[str, Any]], T]) -> list[T]:
-        cursor = self.db.execute(
-            "SELECT record_id, data, created_at, updated_at FROM domain_records WHERE record_type = ? ORDER BY created_at, record_id",
-            (record_type,),
-        )
+    def _list(
+        self,
+        record_type: str,
+        factory: Callable[[dict[str, Any]], T],
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[T]:
+        query = "SELECT record_id, data, created_at, updated_at FROM domain_records WHERE record_type = ? ORDER BY created_at, record_id"
+        params: list[Any] = [record_type]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
+        cursor = self.db.execute(query, tuple(params))
         rows = cursor.fetchall()
         records: list[T] = []
         for row in rows:
@@ -258,8 +273,8 @@ class DomainRegistry:
         self._save("device_roles", record_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_device_roles(self) -> list[DeviceRoleRecord]:
-        return self._list("device_roles", DeviceRoleRecord)
+    def list_device_roles(self, limit: int | None = None, offset: int = 0) -> list[DeviceRoleRecord]:
+        return self._list("device_roles", DeviceRoleRecord, limit=limit, offset=offset)
 
     def get_device_role(self, device_id: str) -> DeviceRoleRecord:
         return self._load("device_roles", str(device_id), DeviceRoleRecord)
@@ -290,8 +305,8 @@ class DomainRegistry:
         self._save("operation_plans", plan_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_operation_plans(self) -> list[OperationPlanRecord]:
-        return self._list("operation_plans", OperationPlanRecord)
+    def list_operation_plans(self, limit: int | None = None, offset: int = 0) -> list[OperationPlanRecord]:
+        return self._list("operation_plans", OperationPlanRecord, limit=limit, offset=offset)
 
     def get_operation_plan(self, plan_id: str) -> OperationPlanRecord:
         return self._load("operation_plans", str(plan_id), OperationPlanRecord)
@@ -322,8 +337,8 @@ class DomainRegistry:
         self._save("insights", insight_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_insights(self) -> list[InsightRecord]:
-        return self._list("insights", InsightRecord)
+    def list_insights(self, limit: int | None = None, offset: int = 0) -> list[InsightRecord]:
+        return self._list("insights", InsightRecord, limit=limit, offset=offset)
 
     def get_insight(self, insight_id: str) -> InsightRecord:
         return self._load("insights", str(insight_id), InsightRecord)
@@ -356,8 +371,8 @@ class DomainRegistry:
         self._save("approvals", approval_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_approvals(self) -> list[ApprovalRecord]:
-        return self._list("approvals", ApprovalRecord)
+    def list_approvals(self, limit: int | None = None, offset: int = 0) -> list[ApprovalRecord]:
+        return self._list("approvals", ApprovalRecord, limit=limit, offset=offset)
 
     def get_approval(self, approval_id: str) -> ApprovalRecord:
         return self._load("approvals", str(approval_id), ApprovalRecord)
@@ -402,8 +417,8 @@ class DomainRegistry:
         self._save("mission_proposals", proposal_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_mission_proposals(self) -> list[MissionProposalRecord]:
-        return self._list("mission_proposals", MissionProposalRecord)
+    def list_mission_proposals(self, limit: int | None = None, offset: int = 0) -> list[MissionProposalRecord]:
+        return self._list("mission_proposals", MissionProposalRecord, limit=limit, offset=offset)
 
     def get_mission_proposal(self, proposal_id: str) -> MissionProposalRecord:
         return self._load("mission_proposals", str(proposal_id), MissionProposalRecord)
@@ -446,8 +461,8 @@ class DomainRegistry:
         self._save("missions", mission_id, record.to_dict(), created_at=record.created_at)
         return record
 
-    def list_missions(self) -> list[MissionRecord]:
-        return self._list("missions", MissionRecord)
+    def list_missions(self, limit: int | None = None, offset: int = 0) -> list[MissionRecord]:
+        return self._list("missions", MissionRecord, limit=limit, offset=offset)
 
     def get_mission(self, mission_id: str) -> MissionRecord:
         return self._load("missions", str(mission_id), MissionRecord)

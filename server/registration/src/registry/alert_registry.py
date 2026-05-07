@@ -151,9 +151,20 @@ class AlertRegistry:
         self._persist_alert(alert)
         return alert
 
-    def list_alerts(self) -> List[AlertRecord]:
+    def list_alerts(self, limit: int | None = None, offset: int = 0) -> List[AlertRecord]:
+        query = "SELECT alert_id, data, created_at, updated_at FROM alerts ORDER BY created_at, alert_id"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute("SELECT alert_id, data, created_at, updated_at FROM alerts ORDER BY created_at, alert_id").fetchall()
+            rows = conn.execute(query, params).fetchall()
         return [self._row_to_alert(row) for row in rows]
 
     def get_alert(self, alert_id: str) -> AlertRecord:

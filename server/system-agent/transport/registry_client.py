@@ -56,7 +56,12 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str
         raise
 
 
-def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
+def get_json(url: str, timeout: int = 5, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    if params:
+        query = urlencode({key: value for key, value in params.items() if value is not None})
+        if query:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{query}"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -145,14 +150,14 @@ class RegistryClient:
     def get_device(self, registry_id: int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}")
 
-    def list_devices(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/devices")
+    def list_devices(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/devices", params={"limit": limit, "offset": offset})
 
     def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/events/ingest", event)
 
-    def list_events(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/events")
+    def list_events(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/events", params={"limit": limit, "offset": offset})
 
     def get_event(self, event_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/events/{event_id}")
@@ -160,8 +165,8 @@ class RegistryClient:
     def ingest_alert(self, alert: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/alerts/ingest", alert)
 
-    def list_alerts(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/alerts")
+    def list_alerts(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/alerts", params={"limit": limit, "offset": offset})
 
     def get_alert(self, alert_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/alerts/{alert_id}")
@@ -172,8 +177,8 @@ class RegistryClient:
             body["notes"] = notes
         return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
 
-    def list_device_roles(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/device-roles")
+    def list_device_roles(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/device-roles", params={"limit": limit, "offset": offset})
 
     def get_device_role(self, device_id: str | int) -> dict[str, Any]:
         return get_json(f"{self.url}/device-roles/{device_id}")
@@ -185,22 +190,22 @@ class RegistryClient:
             headers=self._internal_headers(),
         )
 
-    def get_overview(self) -> dict[str, Any]:
+    def get_overview(self, *, limit: int | None = 100, offset: int = 0) -> dict[str, Any]:
         return {
-            "devices": self.list_devices(),
-            "device_roles": self.list_device_roles(),
-            "operation_plans": self.list_operation_plans(),
-            "insights": self.list_insights(),
-            "approvals": self.list_approvals(),
-            "mission_proposals": self.list_mission_proposals(),
-            "missions": self.list_missions(),
+            "devices": self.list_devices(limit=limit, offset=offset),
+            "device_roles": self.list_device_roles(limit=limit, offset=offset),
+            "operation_plans": self.list_operation_plans(limit=limit, offset=offset),
+            "insights": self.list_insights(limit=limit, offset=offset),
+            "approvals": self.list_approvals(limit=limit, offset=offset),
+            "mission_proposals": self.list_mission_proposals(limit=limit, offset=offset),
+            "missions": self.list_missions(limit=limit, offset=offset),
         }
 
     def create_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/operation-plans", payload)
 
-    def list_operation_plans(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/operation-plans")
+    def list_operation_plans(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/operation-plans", params={"limit": limit, "offset": offset})
 
     def get_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/operation-plans/{operation_plan_id}")
@@ -215,11 +220,11 @@ class RegistryClient:
     def create_insight(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/insights", payload)
 
-    def list_insights(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/insights")
+    def list_insights(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/insights", params={"limit": limit, "offset": offset})
 
-    def list_policies(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/policies")
+    def list_policies(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/policies", params={"limit": limit, "offset": offset})
 
     def get_policy(self, policy_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/policies/{policy_id}")
@@ -227,8 +232,8 @@ class RegistryClient:
     def create_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/approvals", payload)
 
-    def list_approvals(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/approvals")
+    def list_approvals(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/approvals", params={"limit": limit, "offset": offset})
 
     def get_approval(self, approval_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/approvals/{approval_id}")
@@ -242,8 +247,8 @@ class RegistryClient:
     def create_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/mission-proposals", payload)
 
-    def list_mission_proposals(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/mission-proposals")
+    def list_mission_proposals(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/mission-proposals", params={"limit": limit, "offset": offset})
 
     def get_mission_proposal(self, proposal_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/mission-proposals/{proposal_id}")
@@ -251,8 +256,8 @@ class RegistryClient:
     def create_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/missions", payload)
 
-    def list_missions(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/missions")
+    def list_missions(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/missions", params={"limit": limit, "offset": offset})
 
     def get_mission(self, mission_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/missions/{mission_id}")

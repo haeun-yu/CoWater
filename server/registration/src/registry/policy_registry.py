@@ -105,8 +105,19 @@ class PolicyRegistry:
     def get_policies(self) -> list[dict[str, Any]]:
         return self.list_policies()
 
-    def list_policies(self) -> list[dict[str, Any]]:
-        cursor = self.db.execute("SELECT policy_id, data, created_at, updated_at FROM policies ORDER BY policy_id")
+    def list_policies(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        query = "SELECT policy_id, data, created_at, updated_at FROM policies ORDER BY policy_id"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
+        cursor = self.db.execute(query, tuple(params))
         rows = cursor.fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -173,6 +184,11 @@ class PolicyRegistry:
         self.db.execute("DELETE FROM policies WHERE policy_id = ?", (policy_id,))
         self.db.commit()
         logger.info(f"Policy deleted: {policy_id}")
+
+    def reset(self) -> None:
+        self.db.execute("DELETE FROM policies")
+        self.db.commit()
+        self._seed_default_policies()
 
     def find_policies_by_trigger(self, event_type: str) -> list[dict[str, Any]]:
         matched = []

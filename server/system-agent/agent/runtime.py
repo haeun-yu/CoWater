@@ -19,6 +19,7 @@ from controller.commands import CommandController
 from simulator.device import DeviceSimulator
 from skills.catalog import SkillCatalog
 from storage.identity_store import IdentityStore
+from storage.runtime_store import PersistentLog, PersistentMapping, RuntimeStore
 from tools.command_executor import CommandExecutor
 from tools.telemetry_reader import TelemetryReader
 from transport.registry_client import RegistryClient
@@ -35,6 +36,7 @@ class AgentRuntime:
         self.instance_id = self._resolve_instance_id()
         self.identity_store = IdentityStore(config_path.parent / ".runtime", self.instance_id)
         self.identity = self.identity_store.read()
+        self.runtime_store = RuntimeStore(config_path.parent / ".runtime" / f"{self.instance_id}.db")
         self.skills = SkillCatalog(self.capabilities)
         self.manifest_builder = ManifestBuilder(self.config, self.skills)
         configured_name = str(self.agent_config.get("name") or "CoWater Agent").strip()
@@ -51,9 +53,19 @@ class AgentRuntime:
         self.telemetry_reader = TelemetryReader()
         self.simulator = DeviceSimulator(self.config.get("simulation", {}), self.skills.list_tracks())
         self.command_controller = CommandController(CommandExecutor())
+        self.state.children = PersistentMapping(self.runtime_store, "children")
+        self.state.tasks = PersistentMapping(self.runtime_store, "tasks")
+        self.state.inbox = PersistentLog(self.runtime_store, "inbox", keep_last_n=200)
+        self.state.outbox = PersistentLog(self.runtime_store, "outbox", keep_last_n=200)
+        self.state.memory = PersistentLog(self.runtime_store, "memory", keep_last_n=100)
         self._last_assignment_signature: dict[str, Any] | None = None
         self._mission_lock = asyncio.Lock()
-        self._device_allocations: dict[int, dict[str, Any]] = {}
+        self._device_allocations = PersistentMapping(
+            self.runtime_store,
+            "device_allocations",
+            key_encoder=lambda key: str(int(key)),
+            key_decoder=lambda key: int(key),
+        )
         self._waiting_queue: dict[str, dict[str, Any]] = {}
         self._action_aliases: dict[str, list[str]] = {
             "survey_depth": ["survey_depth", "scan_area", "sonar_scanning"],
@@ -240,9 +252,9 @@ class AgentRuntime:
                         self.state.tasks.pop(k, None)
                 # inbox/outbox: 크기 제한
                 if len(self.state.inbox) > max_inbox_outbox:
-                    self.state.inbox = self.state.inbox[-max_inbox_outbox:]
+                    self.state.inbox.trim(max_inbox_outbox)
                 if len(self.state.outbox) > max_inbox_outbox:
-                    self.state.outbox = self.state.outbox[-max_inbox_outbox:]
+                    self.state.outbox.trim(max_inbox_outbox)
             except Exception as e:
                 logging.getLogger(__name__).debug(f"State cleanup error: {e}")
 
