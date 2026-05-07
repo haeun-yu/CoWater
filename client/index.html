@@ -1071,6 +1071,8 @@
           console.warn('Invalid device:', device);
           return null;
         }
+        // Support both old (connected) and new (connectivity_status) format
+        const connStatus = device.connectivity_status || (device.connected !== false ? 'online' : 'offline');
         return {
           id: device.id,
           registry_id: device.registry_id || device.id,
@@ -1078,6 +1080,7 @@
           device_type: String(device.device_type || 'unknown').toUpperCase(),
           layer: String(device.layer || ''),
           connected: device.connected !== false,
+          connectivity_status: connStatus, // New field: online/lost/offline
           latitude: parseFiniteNumber(device.latitude),
           longitude: parseFiniteNumber(device.longitude),
           altitude: parseFiniteNumber(device.altitude, 0),

@@ -104,6 +104,13 @@
         color: var(--accent);
         font-size: 11px;
       }
+      .pill.online { background: #d4edda; color: #155724; }
+      .pill.lost { background: #fff3cd; color: #856404; }
+      .pill.offline { background: #f8d7da; color: #721c24; }
+      .sensor-status { font-size: 12px; padding: 6px; border-radius: 6px; background: rgba(255,255,255,0.1); }
+      .sensor-status.ok { background: rgba(74,222,128,0.15); color: #4ade80; }
+      .sensor-status.warn { background: rgba(251,191,36,0.15); color: #fbbf24; }
+      .sensor-status.error { background: rgba(248,113,113,0.15); color: #f87171; }
       .stats {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -188,6 +195,29 @@
         <h2>Events, Alerts, Insights</h2>
         <div class="list" id="signals"></div>
       </section>
+
+      <section class="card">
+        <h2>Device Connectivity Status</h2>
+        <div class="list" id="device-connectivity"></div>
+      </section>
+
+      <section class="card">
+        <h2>Policy Management</h2>
+        <label for="policy-name">정책 이름</label>
+        <input id="policy-name" placeholder="예: auto_rtb_on_lost" />
+        <label for="policy-trigger">트리거 조건</label>
+        <input id="policy-trigger" placeholder="예: device.connectivity_status=lost" />
+        <div class="actions">
+          <button id="create-policy">Create Policy</button>
+          <button class="secondary" id="refresh-policies">Refresh</button>
+        </div>
+        <div class="list" id="policies"></div>
+      </section>
+
+      <section class="card">
+        <h2>Sensor Monitoring</h2>
+        <div class="list" id="sensor-monitoring"></div>
+      </section>
     </main>
 
     <script>
@@ -244,6 +274,74 @@
             </div>`;
         }).join("");
         document.getElementById("roles").innerHTML = html || `<div class="empty">No devices.</div>`;
+      }
+
+      function renderDeviceConnectivity(devices) {
+        const html = (devices || []).map(device => {
+          const status = device.connectivity_status || (device.connected ? 'online' : 'offline');
+          const statusEmoji = {'online':'🟢','lost':'🟡','offline':'⚫'}[status] || '❓';
+          return `
+            <div class="item">
+              <strong>${device.name}</strong> <span class="pill ${status}">${statusEmoji} ${status.toUpperCase()}</span>
+              <div class="meta">
+                <span>Type: ${device.device_type || "-"}</span>
+                <span>Layer: ${device.layer || "-"}</span>
+                <span>Last Seen: ${device.last_seen_at ? new Date(device.last_seen_at).toLocaleString('ko-KR') : "Never"}</span>
+              </div>
+              ${device.connected === false && status === 'lost' ? `
+                <div style="padding:8px;background:rgba(251,191,36,0.1);border-radius:6px;margin-top:6px;color:#c85e00;font-size:12px">
+                  ⚠️ Device lost connection and may have pending tasks
+                </div>
+              ` : ""}
+            </div>`;
+        }).join("");
+        document.getElementById("device-connectivity").innerHTML = html || `<div class="empty">No devices.</div>`;
+      }
+
+      function renderPolicies(policies) {
+        const html = (policies || []).map(policy => `
+          <div class="item">
+            <strong>${policy.name}</strong> <span class="pill">${policy.enabled ? 'ENABLED' : 'DISABLED'}</span>
+            <div>${policy.description || 'No description'}</div>
+            <div class="meta">
+              <span>ID: ${policy.id}</span>
+              <span>Trigger: ${policy.trigger || "unknown"}</span>
+            </div>
+            <div class="actions">
+              <button class="secondary" onclick="togglePolicy('${policy.id}')">${policy.enabled ? 'Disable' : 'Enable'}</button>
+            </div>
+          </div>
+        `).join("");
+        document.getElementById("policies").innerHTML = html || `<div class="empty">No policies configured.</div>`;
+      }
+
+      function renderSensorMonitoring(devices, events) {
+        const sensorMap = new Map();
+        (events || []).forEach(event => {
+          if (event.event_type === 'sensor_status_changed') {
+            const key = `${event.source_agent_id}_${event.metadata?.sensor_id || 'unknown'}`;
+            if (!sensorMap.has(key) || new Date(event.timestamp) > new Date((sensorMap.get(key) || {}).timestamp || 0)) {
+              sensorMap.set(key, event);
+            }
+          }
+        });
+
+        const html = Array.from(sensorMap.values()).map(event => {
+          const meta = event.metadata || {};
+          const statusClass = event.severity === 'CRITICAL' ? 'error' : event.severity === 'WARNING' ? 'warn' : 'ok';
+          return `
+            <div class="item">
+              <strong>${meta.sensor_id || 'Unknown Sensor'}</strong> <span class="sensor-status ${statusClass}">${event.severity || 'INFO'}</span>
+              <div class="meta">
+                <span>Type: ${meta.sensor_type || "-"}</span>
+                <span>Status: ${meta.status || "-"}</span>
+                <span>Updated: ${new Date(event.timestamp).toLocaleString('ko-KR')}</span>
+              </div>
+              <div style="font-size:12px;margin-top:6px">${event.message || ""}</div>
+            </div>
+          `;
+        }).join("");
+        document.getElementById("sensor-monitoring").innerHTML = html || `<div class="empty">No sensor events detected.</div>`;
       }
 
       function renderPlans(plans) {
@@ -328,20 +426,36 @@
       }
 
       async function loadOverview() {
-        const overview = await j(`${SYSTEM}/overview`);
-        const stats = await j(`${REGISTRY}/missions/stats`);
-        const events = await j(`${REGISTRY}/events`);
-        const alerts = await j(`${REGISTRY}/alerts`);
-        const insights = await j(`${REGISTRY}/insights`);
-        const data = { ...overview, stats };
-        renderStats(data);
-        renderRoles(data.devices, data.device_roles);
-        renderPlans(data.operation_plans);
-        renderApprovals(data.approvals);
-        renderProposals(data.mission_proposals);
-        renderMissions(data.missions);
-        renderSignals(events, alerts, insights);
-        window.__overview = data;
+        try {
+          const overview = await j(`${SYSTEM}/overview`);
+          const stats = await j(`${REGISTRY}/missions/stats`);
+          const events = await j(`${REGISTRY}/events`);
+          const alerts = await j(`${REGISTRY}/alerts`);
+          const insights = await j(`${REGISTRY}/insights`);
+
+          // Load policies
+          let policies = [];
+          try {
+            policies = await j(`${REGISTRY}/policies`);
+          } catch (e) {
+            console.debug("Policies not available:", e);
+          }
+
+          const data = { ...overview, stats };
+          renderStats(data);
+          renderRoles(data.devices, data.device_roles);
+          renderPlans(data.operation_plans);
+          renderApprovals(data.approvals);
+          renderProposals(data.mission_proposals);
+          renderMissions(data.missions);
+          renderSignals(events, alerts, insights);
+          renderDeviceConnectivity(data.devices);
+          renderPolicies(policies);
+          renderSensorMonitoring(data.devices, events);
+          window.__overview = data;
+        } catch (e) {
+          console.error("Failed to load overview:", e);
+        }
       }
 
       async function applyRole(deviceId) {
@@ -427,6 +541,47 @@
         await loadOverview();
       };
 
+      async function togglePolicy(policyId) {
+        try {
+          const policies = await j(`${REGISTRY}/policies`);
+          const policy = policies.find(p => p.id === policyId);
+          if (!policy) return;
+          await j(`${REGISTRY}/policies/${policyId}`, {
+            method: "PUT",
+            body: JSON.stringify({ ...policy, enabled: !policy.enabled }),
+          });
+          await loadOverview();
+        } catch (e) {
+          alert("Failed to toggle policy: " + e.message);
+        }
+      }
+
+      document.getElementById("create-policy").onclick = async () => {
+        const name = document.getElementById("policy-name").value;
+        const trigger = document.getElementById("policy-trigger").value;
+        if (!name || !trigger) {
+          alert("Please fill in all fields");
+          return;
+        }
+        try {
+          await j(`${REGISTRY}/policies`, {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              trigger,
+              enabled: true,
+              description: `Auto-created policy: ${name}`,
+            }),
+          });
+          document.getElementById("policy-name").value = "";
+          document.getElementById("policy-trigger").value = "";
+          await loadOverview();
+        } catch (e) {
+          alert("Failed to create policy: " + e.message);
+        }
+      };
+
+      document.getElementById("refresh-policies").onclick = loadOverview;
       document.getElementById("refresh-overview-1").onclick = loadOverview;
       document.getElementById("refresh-overview-2").onclick = loadOverview;
       loadOverview();
@@ -434,6 +589,7 @@
       window.applyRole = applyRole;
       window.decideApproval = decideApproval;
       window.activatePlan = activatePlan;
+      window.togglePolicy = togglePolicy;
     </script>
   </body>
 </html>

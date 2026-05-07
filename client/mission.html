@@ -59,7 +59,7 @@
         color: var(--muted);
         font-size: 12px;
       }
-      .step, .entry {
+      .step, .entry, .timeline-item {
         border: 1px solid var(--line);
         border-radius: 14px;
         padding: 12px;
@@ -70,6 +70,42 @@
         padding-top: 8px;
         border-top: 1px dashed var(--line);
       }
+      .timeline-item {
+        border-left: 4px solid var(--accent);
+      }
+      .event-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 6px;
+        background: var(--accent);
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+        margin-right: 8px;
+      }
+      .actor-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: #f0f0f0;
+        color: #666;
+        font-size: 10px;
+        margin-left: 4px;
+      }
+      .task-state {
+        display: inline-block;
+        padding: 3px 7px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 4px;
+      }
+      .task-state.pending { background: #e8e8e8; color: #666; }
+      .task-state.assigned { background: #d4e6ff; color: #006d5b; }
+      .task-state.running { background: #fff4e6; color: #c85e00; }
+      .task-state.completed { background: #d4edda; color: #155724; }
+      .task-state.failed { background: #f8d7da; color: #721c24; }
+      .task-state.rejected { background: #f5c6cb; color: #721c24; }
       pre {
         white-space: pre-wrap;
         word-break: break-word;
@@ -162,27 +198,34 @@
 
         document.getElementById("steps").innerHTML = (mission.steps || []).map(step => `
           <div class="step">
-            <strong>${step.step_id}</strong> ${pill(step.status || "pending")}
+            <strong>${step.step_id}</strong> <span class="task-state ${step.status || "pending"}">${step.status || "pending"}</span>
             <div class="meta">
-              <span>${step.step_type || "-"}</span>
-              <span>${step.evaluation_policy || "-"}</span>
+              <span>Type: ${step.step_type || "-"}</span>
+              <span>Policy: ${step.evaluation_policy || "-"}</span>
             </div>
-            ${(step.tasks || []).map(task => `
-              <div class="task">
-                <div><strong>${task.task_id}</strong> ${pill(task.execution_status || task.dispatch_status || "pending")}</div>
-                <div class="meta">
-                  <span>Action: ${task.action || "-"}</span>
-                  <span>Target: ${task.target_device_name || task.target_device_id || "-"}</span>
-                  <span>Route: ${task.route_agent_name || task.route_agent_id || "-"}</span>
+            ${(step.tasks || []).map(task => {
+              const taskStatus = task.execution_status || task.dispatch_status || "pending";
+              return `
+                <div class="task">
+                  <div><strong>${task.task_id}</strong> <span class="task-state ${taskStatus}">${taskStatus}</span></div>
+                  <div class="meta">
+                    <span>Action: ${task.action || "-"}</span>
+                    <span>Target: ${task.target_device_name || task.target_device_id || "-"}</span>
+                    <span>Route: ${task.route_agent_name || task.route_agent_id || "-"}</span>
+                  </div>
+                  ${task.failure_category ? `<div class="meta" style="color: #c85e00"><span>Failure: ${task.failure_category} - ${task.failure_message || ""}</span></div>` : ""}
+                  <pre>${JSON.stringify({
+                    acceptance_status: task.acceptance_status,
+                    dispatch_status: task.dispatch_status,
+                    attempt: task.attempt,
+                    attempted_device_ids: task.attempted_device_ids,
+                    params: task.params,
+                    completed_at: task.completed_at,
+                    failure_category: task.failure_category
+                  }, null, 2)}</pre>
                 </div>
-                <pre>${JSON.stringify({
-                  attempt: task.attempt,
-                  attempted_device_ids: task.attempted_device_ids,
-                  params: task.params,
-                  completed_at: task.completed_at
-                }, null, 2)}</pre>
-              </div>
-            `).join("")}
+              `;
+            }).join("")}
           </div>
         `).join("") || `<div class="empty">No steps.</div>`;
 
@@ -212,13 +255,27 @@
             </div>`;
         }).join("") || `<div class="empty">No execution results yet.</div>`;
 
-        document.getElementById("timeline").innerHTML = (mission.timeline || []).map(item => `
-          <div class="entry">
-            <strong>${item.type || "event"}</strong> ${pill(item.timestamp || "-")}
-            <div>${item.message || ""}</div>
-            <pre>${JSON.stringify(item.data || {}, null, 2)}</pre>
-          </div>
-        `).join("") || `<div class="empty">No timeline entries yet.</div>`;
+        document.getElementById("timeline").innerHTML = (mission.timeline || []).map(item => {
+          // Support both old and new timeline formats
+          const eventType = item.event_type || item.type || "event";
+          const timestamp = item.timestamp || "-";
+          const actor = item.actor || "system";
+          const details = item.details || item.data || {};
+          const taskId = item.related_task_id || item.task_id || "-";
+
+          return `
+            <div class="timeline-item">
+              <div style="margin-bottom: 8px;">
+                <span class="event-badge">${eventType}</span>
+                <span class="actor-badge">${actor}</span>
+                <span style="font-size: 11px; color: var(--muted);">${new Date(timestamp).toLocaleString('ko-KR')}</span>
+              </div>
+              ${item.message ? `<div style="font-size: 13px; margin-bottom: 8px;">${item.message}</div>` : ""}
+              ${taskId !== "-" ? `<div style="font-size: 12px; color: var(--muted);">Task: ${taskId}</div>` : ""}
+              <pre>${JSON.stringify({...details}, null, 2)}</pre>
+            </div>
+          `;
+        }).join("") || `<div class="empty">No timeline entries yet.</div>`;
 
         document.getElementById("final-result").innerHTML = Object.keys(mission.final_result || {}).length
           ? `<pre>${JSON.stringify(mission.final_result, null, 2)}</pre>`
