@@ -4,6 +4,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -182,8 +183,11 @@ class RegistryClient:
             if mission_id:
                 params["mission_id"] = mission_id
 
+            query = urlencode(params)
             url = f"{self.url}/a2a-logs/ingest"
-            post_json(url, payload, params=params, timeout=3)
+            if query:
+                url = f"{url}?{query}"
+            post_json(url, payload, timeout=3)
         except Exception as e:
             logger.debug(f"A2A 로깅 전송 실패 (non-critical): {e}")
 

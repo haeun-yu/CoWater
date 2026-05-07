@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -37,17 +38,20 @@ async def _publish_overview_to_moth(data: Any) -> None:
         pass  # Silently ignore Moth publish errors
 
 
-def create_app(runtime: AgentRuntime) -> FastAPI:
-    app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=runtime.config.get("cors", {}).get("allow_origins", ["*"]),
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+def _schedule_background_task(coro: Any) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        close = getattr(coro, "close", None)
+        if callable(close):
+            close()
+        return
+    loop.create_task(coro)
 
-    @app.on_event("startup")
-    async def startup() -> None:
+
+def create_app(runtime: AgentRuntime) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         try:
             runtime.register()
         except Exception as exc:
@@ -55,13 +59,21 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             if runtime.registry_client.required:
                 raise
         app.state.simulation_task = asyncio.create_task(runtime.simulation_loop())
+        try:
+            yield
+        finally:
+            task = getattr(app.state, "simulation_task", None)
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        task = getattr(app.state, "simulation_task", None)
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+    app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=runtime.config.get("cors", {}).get("allow_origins", ["*"]),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -175,7 +187,25 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         body = body or {}
         plan = runtime.recommend_operation_plan(body)
         merged = {**plan, **body}
-        return runtime.registry_client.create_operation_plan(merged)
+        merged.setdefault("status", "draft")
+        saved_plan = runtime.registry_client.create_operation_plan(merged)
+        try:
+            runtime.registry_client.create_approval(
+                {
+                    "target_type": "operation_plan",
+                    "target_id": saved_plan.get("operation_plan_id") or saved_plan.get("id") or "",
+                    "summary": f"Approve operation plan: {saved_plan.get('name') or 'Operation Plan'}",
+                    "requested_action": "approve_operation_plan",
+                    "requested_by": "system_agent",
+                    "metadata": {
+                        "operation_plan_id": saved_plan.get("operation_plan_id") or saved_plan.get("id"),
+                        "goal": saved_plan.get("goal"),
+                    },
+                }
+            )
+        except Exception as exc:
+            runtime.state.remember({"kind": "operation_plan_approval_create_failed", "at": utc_now(), "error": str(exc)})
+        return saved_plan
 
     @app.post("/operation-plans/{operation_plan_id}/activate")
     def activate_operation_plan(operation_plan_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
@@ -208,7 +238,7 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             "missions": runtime.registry_client.list_missions(),
         }
         # Publish to Moth in background
-        asyncio.create_task(_publish_overview_to_moth(result))
+        _schedule_background_task(_publish_overview_to_moth(result))
         return result
 
     return app

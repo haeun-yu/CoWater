@@ -4,6 +4,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -217,6 +218,12 @@ class RegistryClient:
     def list_insights(self) -> list[dict[str, Any]]:
         return get_json(f"{self.url}/insights")
 
+    def list_policies(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/policies")
+
+    def get_policy(self, policy_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/policies/{policy_id}")
+
     def create_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/approvals", payload)
 
@@ -306,8 +313,7 @@ class RegistryClient:
                 params["mission_id"] = mission_id
 
             url = f"{self.url}/a2a-logs/ingest"
-            # Build query string
-            query_params = "&".join(f"{k}={v}" for k, v in params.items() if v)
+            query_params = urlencode({k: v for k, v in params.items() if v})
             if query_params:
                 url = f"{url}?{query_params}"
 

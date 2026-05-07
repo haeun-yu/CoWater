@@ -274,7 +274,6 @@ class AgentRuntime:
     async def _alert_processing_loop(self) -> None:
         """System-layer agent alert processing loop"""
         logger = logging.getLogger(__name__)
-        processed_alerts = set()
         poll_interval = 2
         all_devices: list[dict[str, Any]] = []
 
@@ -301,7 +300,6 @@ class AgentRuntime:
                 waiting_alerts = [
                     alert for alert in alerts
                     if alert.get("status") == "registered"
-                    and str(alert.get("alert_id")) not in processed_alerts
                     and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
                 ]
                 waiting_alerts.sort(
@@ -316,7 +314,14 @@ class AgentRuntime:
                     alert_id = alert.get("alert_id")
 
                     logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
-                    processed_alerts.add(str(alert_id))
+                    try:
+                        self.registry_client.acknowledge_alert(
+                            str(alert_id),
+                            approved=True,
+                            notes="system-agent claimed alert for processing",
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to claim alert {alert_id}: {exc}")
                     await self._process_alert(alert, all_devices, logger)
 
                 await self._process_waiting_queue(all_devices, logger)
@@ -338,7 +343,7 @@ class AgentRuntime:
                 # Device LOST 상황
                 if connectivity_status == "lost":
                     # auto_rtb_on_lost 정책 검사
-                    policy = self.registry_client.policy_registry.get_policy("auto_rtb_on_lost")
+                    policy = self.registry_client.get_policy("auto_rtb_on_lost")
                     if policy and policy.get("enabled"):
                         logger.info(f"🚨 Policy triggered: {policy.get('policy_name')} for device {device.get('id')}")
                         # 자동 Mission 생성: Return to Base
@@ -1552,7 +1557,7 @@ class AgentRuntime:
         if not parent_id:
             return target_device
         try:
-            parent = self.registry_client.get_device(int(parent_id))
+            parent = self.registry_client.get_device(str(parent_id))
         except Exception:
             return target_device
         if self._device_is_connected(parent) and self._device_endpoint(parent):
@@ -1671,6 +1676,7 @@ class AgentRuntime:
                 logger.info(f"✅ Device {device_id} marked as online")
 
             # Task 결과 동기화
+            missions_to_update: list[dict[str, Any]] = []
             for task_result in report.get("local_task_results", []):
                 task_id = task_result.get("task_id")
                 if task_id:
@@ -1685,9 +1691,17 @@ class AgentRuntime:
                                         # Task 상태 업데이트
                                         task["execution_status"] = task_result.get("status", "completed")
                                         task["result"] = task_result
+                                        if mission not in missions_to_update:
+                                            missions_to_update.append(mission)
                                         logger.info(f"✅ Task {task_id} result synced: {task_result.get('status')}")
                     except Exception as e:
                         logger.debug(f"Failed to sync task {task_id}: {e}")
+
+            for mission in missions_to_update:
+                try:
+                    self.registry_client.replace_mission(str(mission.get("mission_id") or ""), mission)
+                except Exception as exc:
+                    logger.debug(f"Failed to persist synced mission {mission.get('mission_id')}: {exc}")
 
             # Event 동기화
             for event in report.get("local_events", []):

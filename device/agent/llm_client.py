@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Shared LLM Client - supports Ollama and other LLM providers
 """

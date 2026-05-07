@@ -71,6 +71,7 @@ body {
 .message-ts { color: var(--muted); font-size: 0.65rem; }
 .empty { text-align: center; padding: 30px 16px; color: var(--muted); font-size: 0.8rem; }
 </style>
+<link rel="stylesheet" href="assets/common.css">
 </head>
 <body>
 
@@ -82,6 +83,7 @@ body {
     </div>
     <div class="nav">
       <a href="index.html">3D 지도</a>
+      <a href="alerts.html">알림</a>
       <a href="ops.html">운영 관제</a>
       <a href="device.html" class="active">디바이스</a>
     </div>
@@ -145,11 +147,13 @@ body {
 
 </div>
 
+<script src="assets/common.js"></script>
 <script>
 const R='http://127.0.0.1:8280';
 const params=new URLSearchParams(window.location.search);
 const deviceId=params.get('id');
 let state={device:null,lastTelem:null,lastDecision:null};
+const { escapeHtml, formatTimestamp } = window.CoWaterUI;
 
 async function load(){
   if(!deviceId){document.querySelector('.wrap').innerHTML='<div class="empty" style="margin-top:40px">URL에 ?id=디바이스ID를 추가하세요<br>예: device.html?id=id-c2849329bbb0</div>';return}
@@ -188,40 +192,41 @@ function render(){
   const connStatus = dev.connectivity_status || (dev.connected ? 'online' : 'offline');
 
   document.getElementById('telem-position').innerHTML=`
-    <div class="kv-key">위도</div><div class="kv-val">${pos.latitude?.toFixed(6)||'—'}</div>
-    <div class="kv-key">경도</div><div class="kv-val">${pos.longitude?.toFixed(6)||'—'}</div>
-    <div class="kv-key">깊이</div><div class="kv-val">${t.depth?.toFixed(2)||'—'} m</div>
-    <div class="kv-key">속도</div><div class="kv-val">${(t.motion?.speed||0).toFixed(2)} m/s</div>
+    <div class="kv-key">위도</div><div class="kv-val">${escapeHtml(pos.latitude?.toFixed(6)||'—')}</div>
+    <div class="kv-key">경도</div><div class="kv-val">${escapeHtml(pos.longitude?.toFixed(6)||'—')}</div>
+    <div class="kv-key">깊이</div><div class="kv-val">${escapeHtml(t.depth?.toFixed(2)||'—')} m</div>
+    <div class="kv-key">속도</div><div class="kv-val">${escapeHtml((t.motion?.speed||0).toFixed(2))} m/s</div>
   ` + `<div class="connectivity-info">
-    <div><strong>연결 상태:</strong> ${['online','lost','offline'].includes(connStatus) ? ({'online':'🟢 온라인','lost':'🟡 연결 끊김','offline':'⚫ 오프라인'}[connStatus]) : '❓ ' + connStatus}</div>
-    <div><strong>마지막 업데이트:</strong> ${new Date(dev.last_seen_at).toLocaleString('ko-KR')}</div>
+    <div><strong>연결 상태:</strong> ${['online','lost','offline'].includes(connStatus) ? ({'online':'🟢 온라인','lost':'🟡 연결 끊김','offline':'⚫ 오프라인'}[connStatus]) : '❓ ' + escapeHtml(connStatus)}</div>
+    <div><strong>마지막 업데이트:</strong> ${escapeHtml(formatTimestamp(dev.last_seen_at))}</div>
+  </div>
   `;
   
   const batt=t.battery_percent||0;
   document.getElementById('telem-battery').innerHTML=`
-    <div class="kv-key">배터리</div><div class="kv-val">${batt.toFixed(1)}%<div class="progress-bar" style="margin-top:4px"><div class="progress-fill" style="width:${batt}%"></div></div></div>
-    <div class="kv-key">타임스탬프</div><div class="kv-val">${new Date(t.timestamp).toLocaleString('ko-KR')}</div>
+    <div class="kv-key">배터리</div><div class="kv-val">${escapeHtml(batt.toFixed(1))}%<div class="progress-bar" style="margin-top:4px"><div class="progress-fill" style="width:${batt}%"></div></div></div>
+    <div class="kv-key">타임스탬프</div><div class="kv-val">${escapeHtml(formatTimestamp(t.timestamp))}</div>
   `;
   
   const sensors=t.sensors||{};
   document.getElementById('sensor-status').innerHTML=Object.entries(sensors).map(([k,v])=>`
     <div class="sensor-item">
-      <span class="sensor-name">${k}</span>
-      <span class="sensor-status ${v.status==='ok'?'':'alert'}">${v.status||'—'}</span>
+      <span class="sensor-name">${escapeHtml(k)}</span>
+      <span class="sensor-status ${v.status==='ok'?'':'alert'}">${escapeHtml(v.status||'—')}</span>
     </div>
   `).join('')||'<div class="empty">센서 없음</div>';
   
   const dec=state.lastDecision||{};
   document.getElementById('llm-analysis').innerHTML=`
-    <div class="kv-key">모드</div><div class="kv-val">${dec.mode||'—'}</div>
-    <div class="kv-key">시간</div><div class="kv-val">${new Date(dec.at).toLocaleString('ko-KR')}</div>
+    <div class="kv-key">모드</div><div class="kv-val">${escapeHtml(dec.mode||'—')}</div>
+    <div class="kv-key">시간</div><div class="kv-val">${escapeHtml(formatTimestamp(dec.at))}</div>
   `;
   
   const recs=dec.recommendations||[];
   document.getElementById('recommendations').innerHTML=recs.map(r=>`
     <div style="padding:8px;background:rgba(96,165,250,0.08);border-radius:6px;margin-bottom:6px;border-left:3px solid #60a5fa">
-      <div style="font-size:0.78rem;font-weight:600">${r.action}</div>
-      <div style="font-size:0.7rem;color:#64748b;margin-top:2px">신뢰도: ${(r.confidence||0).toFixed(2)}</div>
+      <div style="font-size:0.78rem;font-weight:600">${escapeHtml(r.action)}</div>
+      <div style="font-size:0.7rem;color:#64748b;margin-top:2px">신뢰도: ${escapeHtml((r.confidence||0).toFixed(2))}</div>
     </div>
   `).join('')||'<div class="empty">권장사항 없음</div>';
 }

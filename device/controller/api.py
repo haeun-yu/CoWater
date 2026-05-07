@@ -350,7 +350,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
 async def _relay_task_to_child(runtime: AgentRuntime, request: A2ASendRequest, data: dict[str, Any]) -> dict[str, Any]:
     target_device_id = str(data.get("target_device_id") or (data.get("params") or {}).get("target_device_id") or "")
     try:
-        child_device = runtime.registry_client.get_device(int(target_device_id))
+        child_device = runtime.registry_client.get_device(target_device_id)
     except Exception as exc:
         return {
             "status": "REJECTED",

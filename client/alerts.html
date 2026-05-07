@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater Alerts</title>
+    <style>
+      :root {
+        --bg: #eef1ea;
+        --card: #fffdf8;
+        --ink: #17251f;
+        --muted: #66746d;
+        --line: #d5ddd4;
+        --accent: #006d5b;
+        --warn: #c85e00;
+        --danger: #b03030;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans KR", "Noto Sans KR", sans-serif;
+        background: linear-gradient(180deg, #f6f7f1, #eaf0e5);
+        color: var(--ink);
+      }
+      main {
+        padding: 20px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+      }
+      .stack { display: grid; gap: 16px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        box-shadow: 0 10px 24px rgba(23,37,31,0.05);
+      }
+      .card h2 { margin: 0 0 12px; font-size: 18px; }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .toolbar button {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .toolbar button.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .list { display: grid; gap: 10px; }
+      .item {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255,255,255,0.75);
+      }
+      .meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e6f2ef;
+        color: var(--accent);
+        font-size: 11px;
+      }
+      .pill.warning { background: #fff0d7; color: var(--warn); }
+      .pill.critical { background: #fde3e3; color: var(--danger); }
+      .pill.pending { background: #edf3fb; color: #2457a6; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+      button.action {
+        border: 0;
+        border-radius: 999px;
+        padding: 9px 12px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button.danger { background: var(--danger); }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .stat {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px;
+      }
+      .stat b { display: block; font-size: 22px; margin-top: 4px; }
+      .empty { color: var(--muted); font-size: 14px; }
+      @media (max-width: 900px) {
+        main { grid-template-columns: 1fr; }
+        .stats { grid-template-columns: 1fr 1fr; }
+      }
+    </style>
+    <link rel="stylesheet" href="assets/common.css" />
+  </head>
+  <body>
+    <nav class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🌊</div>
+        <h1>CoWater<span>Alerts</span></h1>
+      </div>
+      <div class="nav">
+        <a href="index.html">3D 지도</a>
+        <a href="alerts.html" class="active">알림</a>
+        <a href="ops.html">운영 관제</a>
+        <a href="mission.html">미션</a>
+        <a href="device.html">디바이스</a>
+      </div>
+    </nav>
+
+    <main>
+      <div class="stack">
+        <section class="card">
+          <h2>Signal Overview</h2>
+          <div class="stats" id="stats"></div>
+        </section>
+
+        <section class="card">
+          <h2>Alerts</h2>
+          <div class="toolbar">
+            <button class="active" data-filter="all">All</button>
+            <button data-filter="registered">Registered</button>
+            <button data-filter="processing">Processing</button>
+            <button data-filter="completed">Completed</button>
+            <button data-filter="failed">Failed</button>
+          </div>
+          <div class="list" id="alerts"></div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="card">
+          <h2>Approvals</h2>
+          <div class="list" id="approvals"></div>
+        </section>
+
+        <section class="card">
+          <h2>Insights</h2>
+          <div class="list" id="insights"></div>
+        </section>
+
+        <section class="card">
+          <h2>Events</h2>
+          <div class="list" id="events"></div>
+        </section>
+      </div>
+    </main>
+
+    <script src="assets/common.js"></script>
+    <script>
+      const REGISTRY = "http://127.0.0.1:8280";
+      const { escapeHtml } = window.CoWaterUI;
+      let state = { alerts: [], approvals: [], insights: [], events: [], filter: "all" };
+
+      async function load() {
+        const [alerts, approvals, insights, events] = await Promise.all([
+          fetch(`${REGISTRY}/alerts`).then(r => r.json()),
+          fetch(`${REGISTRY}/approvals`).then(r => r.json()),
+          fetch(`${REGISTRY}/insights`).then(r => r.json()),
+          fetch(`${REGISTRY}/events`).then(r => r.json()),
+        ]);
+        state = { ...state, alerts, approvals, insights, events };
+        render();
+      }
+
+      function pill(text, cls = "") {
+        return `<span class="pill ${cls}">${escapeHtml(text || "-")}</span>`;
+      }
+
+      function renderStats() {
+        const alerts = state.alerts || [];
+        const approvals = state.approvals || [];
+        const rows = [
+          ["Alerts", alerts.length],
+          ["Pending", alerts.filter(a => a.status === "registered").length],
+          ["Approvals", approvals.length],
+          ["Waiting", approvals.filter(a => a.status === "pending").length],
+        ];
+        document.getElementById("stats").innerHTML = rows.map(([k, v]) => `<div class="stat"><div>${escapeHtml(k)}</div><b>${escapeHtml(v)}</b></div>`).join("");
+      }
+
+      function renderAlerts() {
+        const alerts = (state.alerts || []).filter(alert => state.filter === "all" ? true : alert.status === state.filter);
+        document.getElementById("alerts").innerHTML = alerts.map(alert => `
+          <div class="item">
+            <strong>${escapeHtml(alert.alert_type)}</strong> ${pill(alert.severity, alert.severity === "CRITICAL" ? "critical" : alert.severity === "WARNING" ? "warning" : "")} ${pill(alert.status)}
+            <div>${escapeHtml(alert.message)}</div>
+            <div class="meta">
+              <span>${escapeHtml(alert.alert_id)}</span>
+              <span>${escapeHtml(alert.event_id || "-")}</span>
+              <span>${escapeHtml(alert.created_at || "-")}</span>
+            </div>
+            <div class="actions">
+              ${alert.status === "registered" ? `<button class="action" onclick="ackAlert('${alert.alert_id}')">Claim</button>` : ""}
+            </div>
+          </div>
+        `).join("") || `<div class="empty">No alerts.</div>`;
+      }
+
+      function renderApprovals() {
+        document.getElementById("approvals").innerHTML = (state.approvals || []).map(item => `
+          <div class="item">
+            <strong>${escapeHtml(item.summary)}</strong> ${pill(item.status, item.status === "pending" ? "pending" : "")}
+            <div class="meta">
+              <span>${escapeHtml(item.approval_id)}</span>
+              <span>${escapeHtml(item.target_type)}:${escapeHtml(item.target_id)}</span>
+            </div>
+            ${item.status === "pending" ? `
+              <div class="actions">
+                <button class="action" onclick="decideApproval('${item.approval_id}', true)">Approve</button>
+                <button class="action danger" onclick="decideApproval('${item.approval_id}', false)">Reject</button>
+              </div>` : ""}
+          </div>
+        `).join("") || `<div class="empty">No approvals.</div>`;
+      }
+
+      function renderInsights() {
+        document.getElementById("insights").innerHTML = (state.insights || []).map(item => `
+          <div class="item">
+            <strong>${escapeHtml(item.summary)}</strong> ${pill(item.severity)}
+            <div>${escapeHtml(item.reason_summary || "")}</div>
+            <div class="meta">
+              <span>${escapeHtml(item.insight_id)}</span>
+              <span>${escapeHtml(item.recommended_action || "-")}</span>
+            </div>
+          </div>
+        `).join("") || `<div class="empty">No insights.</div>`;
+      }
+
+      function renderEvents() {
+        document.getElementById("events").innerHTML = (state.events || []).slice(-8).reverse().map(item => `
+          <div class="item">
+            <strong>${escapeHtml(item.event_type)}</strong> ${pill(item.severity)}
+            <div>${escapeHtml(item.message)}</div>
+            <div class="meta">
+              <span>${escapeHtml(item.event_id)}</span>
+              <span>${escapeHtml(item.created_at || "")}</span>
+            </div>
+          </div>
+        `).join("") || `<div class="empty">No events.</div>`;
+      }
+
+      function render() {
+        renderStats();
+        renderAlerts();
+        renderApprovals();
+        renderInsights();
+        renderEvents();
+      }
+
+      async function ackAlert(alertId) {
+        await fetch(`${REGISTRY}/alerts/${encodeURIComponent(alertId)}/ack`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved: true, notes: "claimed from alerts page" }),
+        });
+        await load();
+      }
+
+      async function decideApproval(approvalId, approved) {
+        await fetch(`${REGISTRY}/approvals/${encodeURIComponent(approvalId)}/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved, decided_by: "user" }),
+        });
+        await load();
+      }
+
+      document.querySelectorAll("[data-filter]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("[data-filter]").forEach(item => item.classList.remove("active"));
+          btn.classList.add("active");
+          state.filter = btn.dataset.filter;
+          renderAlerts();
+        });
+      });
+
+      window.ackAlert = ackAlert;
+      window.decideApproval = decideApproval;
+      load();
+    </script>
+  </body>
+</html>

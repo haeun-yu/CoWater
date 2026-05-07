@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any, List
 from uuid import uuid4
 
@@ -36,6 +37,7 @@ from src.registry.device_registry import DeviceRegistry
 from src.registry.domain_registry import DomainRegistry, utc_now_iso
 from src.registry.event_registry import EventRegistry
 from src.registry.policy_registry import PolicyRegistry
+from src.db.connection import close_db
 from src.transport.moth_subscriber import MothHealthcheckSubscriber
 from src.transport.moth_publisher import get_publisher as get_moth_publisher
 
@@ -43,12 +45,23 @@ from src.transport.moth_publisher import get_publisher as get_moth_publisher
 logger = logging.getLogger(__name__)
 
 # Determine storage backend: 'sqlite' or 'memory'
-STORAGE_TYPE = os.getenv("COWATER_STORAGE", "memory").lower()
+STORAGE_TYPE = os.getenv("COWATER_STORAGE", "sqlite").lower()
 USE_SQLITE = STORAGE_TYPE == "sqlite"
 
 logger.info(f"🔧 Storage backend: {STORAGE_TYPE}")
 
 INTERNAL_CALLER_HEADER = "system-agent"
+
+
+def _schedule_background_task(coro: Any) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        close = getattr(coro, "close", None)
+        if callable(close):
+            close()
+        return
+    loop.create_task(coro)
 
 
 def require_internal_caller(x_cowater_internal: str | None) -> None:
@@ -89,30 +102,29 @@ moth_subscriber = MothHealthcheckSubscriber(
     moth_server_url=APP_SETTINGS["moth"]["server_url"],
 )
 
-app = FastAPI(title="CoWater Device Registration Server", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Server lifecycle management."""
+    try:
+        await moth_subscriber.start()
+    except Exception as exc:
+        logger.warning("Moth 구독 시작 실패 - healthcheck monitor만으로 계속 기동합니다: %s", exc)
+    _schedule_background_task(registry.healthcheck_monitor.start())
+    try:
+        yield
+    finally:
+        await registry.healthcheck_monitor.stop()
+        await moth_subscriber.stop()
+        close_db()
+
+
+app = FastAPI(title="CoWater Device Registration Server", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=APP_SETTINGS["cors"]["allow_origins"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """서버 시작 시 Moth 구독 시작"""
-    try:
-        await moth_subscriber.start()
-    except Exception as exc:
-        logger.warning("Moth 구독 시작 실패 - healthcheck monitor만으로 계속 기동합니다: %s", exc)
-    asyncio.create_task(registry.healthcheck_monitor.start())
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """서버 종료 시 Moth 구독 중지"""
-    await registry.healthcheck_monitor.stop()
-    await moth_subscriber.stop()
 
 
 @app.get("/health")
@@ -245,7 +257,7 @@ def update_device_connectivity(
     """Device 연결 상태 업데이트 (Ch.16 - 통신 복구 동기화)"""
     require_internal_caller(x_cowater_internal)
     try:
-        device = registry.get_device(int(device_id))
+        device = registry.get_device(device_id)
         device.connectivity_status = body.get("connectivity_status", "offline")
         registry.upsert_device(device)
         logger.info(f"Device {device_id} connectivity updated to {device.connectivity_status}")
@@ -258,7 +270,7 @@ def update_device_connectivity(
 def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
     alert = alert_registry.ingest_alert(request)
     result = alert.to_dict()
-    asyncio.create_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+    _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
     return result
 
 
@@ -266,7 +278,7 @@ def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
 def ingest_event(request: EventIngestRequest) -> dict[str, Any]:
     event = event_registry.ingest_event(request)
     result = event.to_dict()
-    asyncio.create_task(get_moth_publisher().publish("events", [e.to_dict() for e in event_registry.list_events()]))
+    _schedule_background_task(get_moth_publisher().publish("events", [e.to_dict() for e in event_registry.list_events()]))
     return result
 
 
@@ -300,7 +312,7 @@ def get_alert(alert_id: str) -> dict[str, Any]:
 def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]:
     try:
         result = alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
-        asyncio.create_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+        _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
         return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="alert not found") from exc
@@ -358,7 +370,7 @@ def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(
     """정책 생성 (Ch.17.1)"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.create_policy(body)
-    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
     return result
 
 
@@ -382,7 +394,7 @@ def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str 
     """정책 업데이트"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.update_policy(policy_id, body)
-    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
     return result
 
 
@@ -391,7 +403,7 @@ def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(defaul
     """정책 삭제"""
     require_internal_caller(x_cowater_internal)
     policy_registry.delete_policy(policy_id)
-    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
     return Response(status_code=204)
 
 
@@ -471,7 +483,7 @@ def get_insight(insight_id: str) -> dict[str, Any]:
 @app.post("/approvals", status_code=status.HTTP_201_CREATED)
 def create_approval(body: dict[str, Any]) -> dict[str, Any]:
     result = domain_registry.create_approval(body).to_dict()
-    asyncio.create_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
+    _schedule_background_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
     return result
 
 
@@ -501,7 +513,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
             notes=notes,
         )
         result = approval.to_dict()
-        asyncio.create_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
+        _schedule_background_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
         return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="approval not found") from exc
@@ -510,7 +522,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
 @app.post("/mission-proposals", status_code=status.HTTP_201_CREATED)
 def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
     result = domain_registry.create_mission_proposal(body).to_dict()
-    asyncio.create_task(get_moth_publisher().publish("mission_proposals", [item.to_dict() for item in domain_registry.list_mission_proposals()]))
+    _schedule_background_task(get_moth_publisher().publish("mission_proposals", [item.to_dict() for item in domain_registry.list_mission_proposals()]))
     return result
 
 
@@ -638,7 +650,7 @@ def create_mission(
     async def publish_mission():
         await get_moth_publisher().publish("missions", [m.to_dict() for m in domain_registry.list_missions()])
         await get_moth_publisher().publish(f"mission.{mission.mission_id}", result)
-    asyncio.create_task(publish_mission())
+    _schedule_background_task(publish_mission())
     return result
 
 
@@ -695,7 +707,7 @@ def replace_mission(mission_id: str, body: dict[str, Any]) -> dict[str, Any]:
     async def publish_mission():
         await get_moth_publisher().publish("missions", [m.to_dict() for m in domain_registry.list_missions()])
         await get_moth_publisher().publish(f"mission.{mission_id}", result)
-    asyncio.create_task(publish_mission())
+    _schedule_background_task(publish_mission())
     return result
 
 
@@ -732,7 +744,7 @@ def append_mission_timeline(mission_id: str, body: dict[str, Any] | None = Body(
 
         mission = domain_registry.get_mission(mission_id)
         result = {"appended": True, "mission_id": mission_id, "event_type": event_type}
-        asyncio.create_task(get_moth_publisher().publish(f"mission.{mission_id}", mission.to_dict()))
+        _schedule_background_task(get_moth_publisher().publish(f"mission.{mission_id}", mission.to_dict()))
         return result
     except KeyError:
         raise HTTPException(status_code=404, detail="mission not found")

@@ -120,8 +120,22 @@
         main { grid-template-columns: 1fr; }
       }
     </style>
+    <link rel="stylesheet" href="assets/common.css" />
   </head>
   <body>
+    <nav class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🌊</div>
+        <h1>CoWater<span>Mission</span></h1>
+      </div>
+      <div class="nav">
+        <a href="index.html">3D 지도</a>
+        <a href="alerts.html">알림</a>
+        <a href="ops.html">운영 관제</a>
+        <a href="mission.html" class="active">미션</a>
+        <a href="device.html">디바이스</a>
+      </div>
+    </nav>
     <header>
       <h1 id="title">Mission</h1>
       <div class="sub" id="summary">Loading…</div>
@@ -152,9 +166,11 @@
         </section>
       </div>
     </main>
+    <script src="assets/common.js"></script>
     <script>
       const REGISTRY = "http://127.0.0.1:8280";
       const missionId = new URLSearchParams(location.search).get("id");
+      const { escapeHtml } = window.CoWaterUI;
 
       async function load() {
         if (!missionId) {
@@ -171,7 +187,7 @@
       }
 
       function pill(text) {
-        return `<span class="pill">${text || "-"}</span>`;
+        return `<span class="pill">${escapeHtml(text || "-")}</span>`;
       }
 
       function render(mission) {
@@ -180,12 +196,12 @@
         document.getElementById("overview").innerHTML = `
           <div class="meta">
             <span>${pill(mission.status)}</span>
-            <span>${mission.mission_id}</span>
-            <span>${mission.mission_type || "-"}</span>
-            <span>Proposal: ${mission.proposal_id || "-"}</span>
-            <span>Approval: ${mission.approval_id || "-"}</span>
+            <span>${escapeHtml(mission.mission_id)}</span>
+            <span>${escapeHtml(mission.mission_type || "-")}</span>
+            <span>Proposal: ${escapeHtml(mission.proposal_id || "-")}</span>
+            <span>Approval: ${escapeHtml(mission.approval_id || "-")}</span>
           </div>
-          <pre>${JSON.stringify({
+          <pre>${escapeHtml(JSON.stringify({
             created_at: mission.created_at,
             approved_at: mission.approved_at,
             started_at: mission.started_at,
@@ -194,27 +210,27 @@
             insight_id: mission.insight_id,
             alert_id: mission.alert_id,
             event_id: mission.event_id
-          }, null, 2)}</pre>`;
+          }, null, 2))}</pre>`;
 
         document.getElementById("steps").innerHTML = (mission.steps || []).map(step => `
           <div class="step">
-            <strong>${step.step_id}</strong> <span class="task-state ${step.status || "pending"}">${step.status || "pending"}</span>
+            <strong>${escapeHtml(step.step_id)}</strong> <span class="task-state ${escapeHtml(step.status || "pending")}">${escapeHtml(step.status || "pending")}</span>
             <div class="meta">
-              <span>Type: ${step.step_type || "-"}</span>
-              <span>Policy: ${step.evaluation_policy || "-"}</span>
+              <span>Type: ${escapeHtml(step.step_type || "-")}</span>
+              <span>Policy: ${escapeHtml(step.evaluation_policy || "-")}</span>
             </div>
             ${(step.tasks || []).map(task => {
               const taskStatus = task.execution_status || task.dispatch_status || "pending";
               return `
                 <div class="task">
-                  <div><strong>${task.task_id}</strong> <span class="task-state ${taskStatus}">${taskStatus}</span></div>
+                  <div><strong>${escapeHtml(task.task_id)}</strong> <span class="task-state ${escapeHtml(taskStatus)}">${escapeHtml(taskStatus)}</span></div>
                   <div class="meta">
-                    <span>Action: ${task.action || "-"}</span>
-                    <span>Target: ${task.target_device_name || task.target_device_id || "-"}</span>
-                    <span>Route: ${task.route_agent_name || task.route_agent_id || "-"}</span>
+                    <span>Action: ${escapeHtml(task.action || "-")}</span>
+                    <span>Target: ${escapeHtml(task.target_device_name || task.target_device_id || "-")}</span>
+                    <span>Route: ${escapeHtml(task.route_agent_name || task.route_agent_id || "-")}</span>
                   </div>
-                  ${task.failure_category ? `<div class="meta" style="color: #c85e00"><span>Failure: ${task.failure_category} - ${task.failure_message || ""}</span></div>` : ""}
-                  <pre>${JSON.stringify({
+                  ${task.failure_category ? `<div class="meta" style="color: #c85e00"><span>Failure: ${escapeHtml(task.failure_category)} - ${escapeHtml(task.failure_message || "")}</span></div>` : ""}
+                  <pre>${escapeHtml(JSON.stringify({
                     acceptance_status: task.acceptance_status,
                     dispatch_status: task.dispatch_status,
                     attempt: task.attempt,
@@ -222,7 +238,7 @@
                     params: task.params,
                     completed_at: task.completed_at,
                     failure_category: task.failure_category
-                  }, null, 2)}</pre>
+                  }, null, 2))}</pre>
                 </div>
               `;
             }).join("")}
@@ -232,14 +248,14 @@
         document.getElementById("results").innerHTML = (mission.device_execution_results || []).map(result => {
           return `
             <div class="entry">
-              <strong>${result.task_id}</strong> ${pill(result.task_status || result.status)}
+              <strong>${escapeHtml(result.task_id)}</strong> ${pill(result.task_status || result.status)}
               <div class="meta">
-                <span>Reporter: ${result.reporter || "-"}</span>
-                <span>Device: ${result.device_id || "-"}</span>
-                <span>Step: ${result.step_id || "-"}</span>
-                <span>Reported: ${result.received_at || "-"}</span>
+                <span>Reporter: ${escapeHtml(result.reporter || "-")}</span>
+                <span>Device: ${escapeHtml(result.device_id || "-")}</span>
+                <span>Step: ${escapeHtml(result.step_id || "-")}</span>
+                <span>Reported: ${escapeHtml(result.received_at || "-")}</span>
               </div>
-              <pre>${JSON.stringify({
+              <pre>${escapeHtml(JSON.stringify({
                 task_status: result.task_status || result.status,
                 acceptance_status: result.acceptance_status,
                 started_at: result.started_at,
@@ -251,7 +267,7 @@
                 raw_data_ref: result.raw_data_ref,
                 device_state_changes: result.device_state_changes,
                 device_agent_judgement: result.device_agent_judgement
-              }, null, 2)}</pre>
+              }, null, 2))}</pre>
             </div>`;
         }).join("") || `<div class="empty">No execution results yet.</div>`;
 
@@ -266,19 +282,19 @@
           return `
             <div class="timeline-item">
               <div style="margin-bottom: 8px;">
-                <span class="event-badge">${eventType}</span>
-                <span class="actor-badge">${actor}</span>
-                <span style="font-size: 11px; color: var(--muted);">${new Date(timestamp).toLocaleString('ko-KR')}</span>
+                <span class="event-badge">${escapeHtml(eventType)}</span>
+                <span class="actor-badge">${escapeHtml(actor)}</span>
+                <span style="font-size: 11px; color: var(--muted);">${escapeHtml(new Date(timestamp).toLocaleString('ko-KR'))}</span>
               </div>
-              ${item.message ? `<div style="font-size: 13px; margin-bottom: 8px;">${item.message}</div>` : ""}
-              ${taskId !== "-" ? `<div style="font-size: 12px; color: var(--muted);">Task: ${taskId}</div>` : ""}
-              <pre>${JSON.stringify({...details}, null, 2)}</pre>
+              ${item.message ? `<div style="font-size: 13px; margin-bottom: 8px;">${escapeHtml(item.message)}</div>` : ""}
+              ${taskId !== "-" ? `<div style="font-size: 12px; color: var(--muted);">Task: ${escapeHtml(taskId)}</div>` : ""}
+              <pre>${escapeHtml(JSON.stringify({...details}, null, 2))}</pre>
             </div>
           `;
         }).join("") || `<div class="empty">No timeline entries yet.</div>`;
 
         document.getElementById("final-result").innerHTML = Object.keys(mission.final_result || {}).length
-          ? `<pre>${JSON.stringify(mission.final_result, null, 2)}</pre>`
+          ? `<pre>${escapeHtml(JSON.stringify(mission.final_result, null, 2))}</pre>`
           : `<div class="empty">Mission final result not available yet.</div>`;
       }
 

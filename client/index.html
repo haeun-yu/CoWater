@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3D 해양 무인 작전 체계 시각화 PoC</title>
+    <link rel="stylesheet" href="assets/common.css" />
     <style>
       /* === 전역 스타일 === */
       body {
@@ -478,20 +479,15 @@
   </head>
   <body>
     <div id="header-trigger"></div>
-    <div id="header">
-      <div style="display: flex; align-items: center; gap: 12px">
-        <span style="font-size: 1rem; font-weight: bold; color: #60a5fa"
-          >CoWater</span
-        >
-        <span style="font-size: 0.75rem; color: #64748b"
-          >해양 무인 시스템 작전 플랫폼</span
-        >
+    <div id="header" class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🌊</div>
+        <h1>CoWater<span>해양 무인 시스템 작전 플랫폼</span></h1>
       </div>
-      <div class="header-nav">
-        <button class="header-btn active">🌐 3D 작전뷰</button>
-        <button class="header-btn" onclick="location.href = 'ops.html'">
-          ⚠️ 운영 관제
-        </button>
+      <div class="nav">
+        <a href="index.html" class="active">🌐 3D 작전뷰</a>
+        <a href="alerts.html">🚨 알림</a>
+        <a href="ops.html">⚠️ 운영 관제</a>
       </div>
     </div>
     <div id="offline-banner">

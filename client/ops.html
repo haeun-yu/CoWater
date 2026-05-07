@@ -128,8 +128,23 @@
         .stats, .grid2 { grid-template-columns: 1fr; }
       }
     </style>
+    <link rel="stylesheet" href="assets/common.css" />
   </head>
   <body>
+    <nav class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🌊</div>
+        <h1>CoWater<span>Operations</span></h1>
+      </div>
+      <div class="nav">
+        <a href="index.html">3D 지도</a>
+        <a href="alerts.html">알림</a>
+        <a href="ops.html" class="active">운영 관제</a>
+        <a href="mission.html">미션</a>
+        <a href="device.html">디바이스</a>
+      </div>
+    </nav>
+
     <header>
       <h1>CoWater Mission Operations</h1>
       <div class="sub">Device Role → Operation Plan → Mission Proposal → Approval → Mission Execution</div>
@@ -167,7 +182,7 @@
         <input id="plan-location" placeholder='{"latitude":35.1,"longitude":129.1}' />
         <div class="actions">
           <button id="recommend-plan">Recommend Plan</button>
-          <button class="secondary" id="save-plan">Save Plan</button>
+          <button class="secondary" id="save-plan">Save Draft</button>
         </div>
         <div class="list" id="plans"></div>
       </section>
@@ -206,7 +221,7 @@
         <label for="policy-name">정책 이름</label>
         <input id="policy-name" placeholder="예: auto_rtb_on_lost" />
         <label for="policy-trigger">트리거 조건</label>
-        <input id="policy-trigger" placeholder="예: device.connectivity_status=lost" />
+        <input id="policy-trigger" placeholder='예: {"event_type":"device_connectivity_changed","new_status":"lost"}' />
         <div class="actions">
           <button id="create-policy">Create Policy</button>
           <button class="secondary" id="refresh-policies">Refresh</button>
@@ -220,9 +235,12 @@
       </section>
     </main>
 
+    <script src="assets/common.js"></script>
     <script>
       const REGISTRY = "http://127.0.0.1:8280";
       const SYSTEM = "http://127.0.0.1:9116";
+      const { escapeHtml } = window.CoWaterUI;
+      const INTERNAL_HEADERS = { "X-CoWater-Internal": "system-agent" };
 
       async function j(url, opts) {
         const res = await fetch(url, {
@@ -240,7 +258,7 @@
       }
 
       function statusPill(status) {
-        return `<span class="pill">${status || "unknown"}</span>`;
+        return `<span class="pill">${escapeHtml(status || "unknown")}</span>`;
       }
 
       function renderStats(data) {
@@ -253,7 +271,7 @@
           ["Completed Missions", stats.completed || 0],
           ["Failed Missions", stats.failed || 0],
         ];
-        document.getElementById("stats").innerHTML = rows.map(([k, v]) => `<div class="stat"><div>${k}</div><b>${v}</b></div>`).join("");
+        document.getElementById("stats").innerHTML = rows.map(([k, v]) => `<div class="stat"><div>${escapeHtml(k)}</div><b>${escapeHtml(v)}</b></div>`).join("");
       }
 
       function renderRoles(devices, roles) {
@@ -262,12 +280,12 @@
           const role = roleMap.get(String(device.id)) || roleMap.get(String(device.registry_id));
           return `
             <div class="item">
-              <strong>${device.name}</strong> ${statusPill(device.layer || "-")}
+              <strong>${escapeHtml(device.name)}</strong> ${statusPill(device.layer || "-")}
               <div class="meta">
-                <span>${device.device_type || "-"}</span>
-                <span>${role ? role.role_name : "unassigned"}</span>
+                <span>${escapeHtml(device.device_type || "-")}</span>
+                <span>${escapeHtml(role ? role.role_name : "unassigned")}</span>
               </div>
-              <div>${role ? role.responsibility : "Role not assigned."}</div>
+              <div>${escapeHtml(role ? role.responsibility : "Role not assigned.")}</div>
               <div class="actions">
                 <button class="secondary" onclick="applyRole('${device.id}')">Request Role Approval</button>
               </div>
@@ -282,11 +300,11 @@
           const statusEmoji = {'online':'🟢','lost':'🟡','offline':'⚫'}[status] || '❓';
           return `
             <div class="item">
-              <strong>${device.name}</strong> <span class="pill ${status}">${statusEmoji} ${status.toUpperCase()}</span>
+              <strong>${escapeHtml(device.name)}</strong> <span class="pill ${escapeHtml(status)}">${statusEmoji} ${escapeHtml(status.toUpperCase())}</span>
               <div class="meta">
-                <span>Type: ${device.device_type || "-"}</span>
-                <span>Layer: ${device.layer || "-"}</span>
-                <span>Last Seen: ${device.last_seen_at ? new Date(device.last_seen_at).toLocaleString('ko-KR') : "Never"}</span>
+                <span>Type: ${escapeHtml(device.device_type || "-")}</span>
+                <span>Layer: ${escapeHtml(device.layer || "-")}</span>
+                <span>Last Seen: ${device.last_seen_at ? escapeHtml(new Date(device.last_seen_at).toLocaleString('ko-KR')) : "Never"}</span>
               </div>
               ${device.connected === false && status === 'lost' ? `
                 <div style="padding:8px;background:rgba(251,191,36,0.1);border-radius:6px;margin-top:6px;color:#c85e00;font-size:12px">
@@ -301,14 +319,14 @@
       function renderPolicies(policies) {
         const html = (policies || []).map(policy => `
           <div class="item">
-            <strong>${policy.name}</strong> <span class="pill">${policy.enabled ? 'ENABLED' : 'DISABLED'}</span>
-            <div>${policy.description || 'No description'}</div>
+            <strong>${escapeHtml(policy.policy_name || policy.name || policy.policy_id)}</strong> <span class="pill">${policy.enabled ? 'ENABLED' : 'DISABLED'}</span>
+            <div>${escapeHtml(policy.description || 'No description')}</div>
             <div class="meta">
-              <span>ID: ${policy.id}</span>
-              <span>Trigger: ${policy.trigger || "unknown"}</span>
+              <span>ID: ${escapeHtml(policy.policy_id || policy.id)}</span>
+              <span>Trigger: ${escapeHtml(JSON.stringify(policy.trigger_condition || policy.trigger || {}))}</span>
             </div>
             <div class="actions">
-              <button class="secondary" onclick="togglePolicy('${policy.id}')">${policy.enabled ? 'Disable' : 'Enable'}</button>
+              <button class="secondary" onclick="togglePolicy('${policy.policy_id || policy.id}')">${policy.enabled ? 'Disable' : 'Enable'}</button>
             </div>
           </div>
         `).join("");
@@ -331,13 +349,13 @@
           const statusClass = event.severity === 'CRITICAL' ? 'error' : event.severity === 'WARNING' ? 'warn' : 'ok';
           return `
             <div class="item">
-              <strong>${meta.sensor_id || 'Unknown Sensor'}</strong> <span class="sensor-status ${statusClass}">${event.severity || 'INFO'}</span>
+              <strong>${escapeHtml(meta.sensor_id || 'Unknown Sensor')}</strong> <span class="sensor-status ${escapeHtml(statusClass)}">${escapeHtml(event.severity || 'INFO')}</span>
               <div class="meta">
-                <span>Type: ${meta.sensor_type || "-"}</span>
-                <span>Status: ${meta.status || "-"}</span>
-                <span>Updated: ${new Date(event.timestamp).toLocaleString('ko-KR')}</span>
+                <span>Type: ${escapeHtml(meta.sensor_type || "-")}</span>
+                <span>Status: ${escapeHtml(meta.status || "-")}</span>
+                <span>Updated: ${escapeHtml(new Date(event.timestamp).toLocaleString('ko-KR'))}</span>
               </div>
-              <div style="font-size:12px;margin-top:6px">${event.message || ""}</div>
+              <div style="font-size:12px;margin-top:6px">${escapeHtml(event.message || "")}</div>
             </div>
           `;
         }).join("");
@@ -347,28 +365,28 @@
       function renderPlans(plans) {
         const html = (plans || []).map(plan => `
           <div class="item">
-            <strong>${plan.name}</strong> ${statusPill(plan.status)}
-            <div>${plan.summary || plan.goal || ""}</div>
+            <strong>${escapeHtml(plan.name)}</strong> ${statusPill(plan.status)}
+            <div>${escapeHtml(plan.summary || plan.goal || "")}</div>
             <div class="meta">
-              <span>${plan.operation_plan_id}</span>
-              <span>${(plan.mission_templates || []).length} mission template(s)</span>
+              <span>${escapeHtml(plan.operation_plan_id)}</span>
+              <span>${escapeHtml((plan.mission_templates || []).length)} mission template(s)</span>
             </div>
             ${plan.status !== "active" ? `<div class="actions"><button class="secondary" onclick="activatePlan('${plan.operation_plan_id}')">Activate</button></div>` : ""}
           </div>
         `).join("");
         document.getElementById("plans").innerHTML = html || `<div class="empty">No operation plans.</div>`;
         const select = document.getElementById("proposal-plan");
-        select.innerHTML = `<option value="">No Plan</option>` + (plans || []).map(plan => `<option value="${plan.operation_plan_id}">${plan.name}</option>`).join("");
+        select.innerHTML = `<option value="">No Plan</option>` + (plans || []).map(plan => `<option value="${escapeHtml(plan.operation_plan_id)}">${escapeHtml(plan.name)}</option>`).join("");
       }
 
       function renderApprovals(approvals) {
         const html = (approvals || []).map(item => `
           <div class="item">
             <strong>Approval</strong> ${statusPill(item.status)}
-            <div>${item.summary}</div>
+            <div>${escapeHtml(item.summary)}</div>
             <div class="meta">
-              <span>${item.approval_id}</span>
-              <span>${item.target_type}:${item.target_id}</span>
+              <span>${escapeHtml(item.approval_id)}</span>
+              <span>${escapeHtml(item.target_type)}:${escapeHtml(item.target_id)}</span>
             </div>
             ${item.status === "pending" ? `
               <div class="actions">
@@ -383,12 +401,12 @@
       function renderProposals(proposals) {
         const html = (proposals || []).map(item => `
           <div class="item">
-            <strong>${item.title}</strong> ${statusPill(item.status)}
-            <div>${item.summary || item.goal}</div>
+            <strong>${escapeHtml(item.title)}</strong> ${statusPill(item.status)}
+            <div>${escapeHtml(item.summary || item.goal)}</div>
             <div class="meta">
-              <span>${item.proposal_id}</span>
-              <span>${item.mission_type}</span>
-              <span>${(item.steps || []).length} step(s)</span>
+              <span>${escapeHtml(item.proposal_id)}</span>
+              <span>${escapeHtml(item.mission_type)}</span>
+              <span>${escapeHtml((item.steps || []).length)} step(s)</span>
             </div>
           </div>
         `).join("");
@@ -398,13 +416,13 @@
       function renderMissions(missions) {
         const html = (missions || []).map(item => `
           <div class="item">
-            <strong><a href="mission.html?id=${encodeURIComponent(item.mission_id)}">${item.title}</a></strong> ${statusPill(item.status)}
-            <div>${item.goal || item.summary || ""}</div>
+            <strong><a href="mission.html?id=${encodeURIComponent(item.mission_id)}">${escapeHtml(item.title)}</a></strong> ${statusPill(item.status)}
+            <div>${escapeHtml(item.goal || item.summary || "")}</div>
             <div class="meta">
-              <span>${item.mission_id}</span>
-              <span>${item.mission_type}</span>
-              <span>${(item.steps || []).length} step(s)</span>
-              <span>${(item.device_execution_results || []).length} execution result(s)</span>
+              <span>${escapeHtml(item.mission_id)}</span>
+              <span>${escapeHtml(item.mission_type)}</span>
+              <span>${escapeHtml((item.steps || []).length)} step(s)</span>
+              <span>${escapeHtml((item.device_execution_results || []).length)} execution result(s)</span>
             </div>
           </div>
         `).join("");
@@ -419,9 +437,9 @@
         ];
         document.getElementById("signals").innerHTML = rows.map(row => `
           <div class="item">
-            <strong>${row.type}</strong> ${statusPill(row.status)}
-            <div>${row.title}</div>
-            <div class="meta"><span>${row.body}</span></div>
+            <strong>${escapeHtml(row.type)}</strong> ${statusPill(row.status)}
+            <div>${escapeHtml(row.title)}</div>
+            <div class="meta"><span>${escapeHtml(row.body)}</span></div>
           </div>`).join("") || `<div class="empty">No signals.</div>`;
       }
 
@@ -513,7 +531,7 @@
           method: "POST",
           body: JSON.stringify(body),
         });
-        document.getElementById("plans").innerHTML = `<div class="item"><strong>${plan.name}</strong> ${statusPill(plan.status)}<div>${plan.summary}</div><pre>${JSON.stringify(plan, null, 2)}</pre></div>`;
+        document.getElementById("plans").innerHTML = `<div class="item"><strong>${escapeHtml(plan.name)}</strong> ${statusPill(plan.status)}<div>${escapeHtml(plan.summary)}</div><pre>${escapeHtml(JSON.stringify(plan, null, 2))}</pre></div>`;
       };
 
       document.getElementById("save-plan").onclick = async () => {
@@ -544,10 +562,11 @@
       async function togglePolicy(policyId) {
         try {
           const policies = await j(`${REGISTRY}/policies`);
-          const policy = policies.find(p => p.id === policyId);
+          const policy = policies.find(p => p.policy_id === policyId || p.id === policyId);
           if (!policy) return;
           await j(`${REGISTRY}/policies/${policyId}`, {
             method: "PUT",
+            headers: INTERNAL_HEADERS,
             body: JSON.stringify({ ...policy, enabled: !policy.enabled }),
           });
           await loadOverview();
@@ -564,11 +583,28 @@
           return;
         }
         try {
+          const triggerCondition = (() => {
+            try {
+              return JSON.parse(trigger);
+            } catch {
+              const pairs = trigger.split(",").map(chunk => chunk.trim()).filter(Boolean);
+              const condition = {};
+              for (const pair of pairs) {
+                const [key, ...rest] = pair.split("=");
+                if (!key || rest.length === 0) continue;
+                condition[key.trim()] = rest.join("=").trim();
+              }
+              return Object.keys(condition).length ? condition : { event_type: trigger };
+            }
+          })();
           await j(`${REGISTRY}/policies`, {
             method: "POST",
+            headers: INTERNAL_HEADERS,
             body: JSON.stringify({
+              policy_id: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+              policy_name: name,
               name,
-              trigger,
+              trigger_condition: triggerCondition,
               enabled: true,
               description: `Auto-created policy: ${name}`,
             }),
