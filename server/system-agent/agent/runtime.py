@@ -891,6 +891,22 @@ class AgentRuntime:
                     "data": {"approval_id": approval_id, "approved": approved},
                 }
             )
+            # ✅ Record mission reapproval decision timeline event (Ch.18-20)
+            event_type = "mission_approved" if approved else "mission_rejected"
+            try:
+                self.registry_client.append_mission_timeline_event(
+                    mission_id=mission_id,
+                    event_type=event_type,
+                    actor=f"user_{decided_by}",
+                    details={
+                        "approval_id": str(approval.get("approval_id") or approval_id),
+                        "step_id": str((approval.get("metadata") or {}).get("step_id") or ""),
+                        "recovery_mode": str((approval.get("metadata") or {}).get("recovery_mode") or ""),
+                        "notes": notes or "",
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Failed to record reapproval timeline: {e}")
             if not approved:
                 mission["status"] = "failed"
                 mission["completed_at"] = utc_now()
@@ -930,6 +946,19 @@ class AgentRuntime:
             return {"approval": approval, "proposal": proposal, "mission": None}
         mission = self._mission_from_proposal(proposal, approval_id=str(approval.get("approval_id") or approval_id))
         mission = self.registry_client.create_mission(mission)
+        # ✅ Record mission approval timeline event (Ch.18-20)
+        try:
+            self.registry_client.append_mission_timeline_event(
+                mission_id=mission.get("mission_id", ""),
+                event_type="mission_approved",
+                actor=f"user_{decided_by}",
+                details={
+                    "approval_id": str(approval.get("approval_id") or approval_id),
+                    "notes": notes or "",
+                },
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record mission approval timeline: {e}")
         mission = await self._start_mission_execution(mission)
         return {"approval": approval, "proposal": proposal, "mission": mission}
 
