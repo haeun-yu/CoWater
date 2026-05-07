@@ -283,7 +283,51 @@
       }
 
       load();
-      setInterval(load, 5000);
+
+      // WebSocket 구독: 실시간 미션 업데이트
+      const MOTH_BASE = "wss://cobot.center:8287";
+      const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=mission.${missionId}&source=mission-client&track=mission-client`;
+      let missionWs = null;
+
+      function subscribeToMission() {
+        try {
+          missionWs = new WebSocket(wsUrl);
+
+          missionWs.onopen = () => {
+            missionWs.send(JSON.stringify({ type: "subscribe", channel: `mission.${missionId}`, channel_type: "meb" }));
+            console.log(`[Moth] Subscribed to mission.${missionId}`);
+          };
+
+          missionWs.onmessage = async (e) => {
+            try {
+              const rawText = typeof e.data === "string" ? e.data : await e.data.text();
+              if (!rawText || rawText.trim() === "ping") return;
+              const raw = JSON.parse(rawText);
+              const payload = raw.payload || raw.data || raw;
+              if (!payload) return;
+
+              // Update UI with new mission data
+              load();
+            } catch (err) {
+              console.debug("[Moth] mission parse error:", err);
+            }
+          };
+
+          missionWs.onerror = () => {
+            console.warn("[Moth] mission connection error");
+            setTimeout(subscribeToMission, 5000);
+          };
+
+          missionWs.onclose = () => {
+            setTimeout(subscribeToMission, 5000);
+          };
+        } catch (err) {
+          console.warn("[Moth] Failed to subscribe to mission:", err);
+          setTimeout(subscribeToMission, 5000);
+        }
+      }
+
+      subscribeToMission();
     </script>
   </body>
 </html>

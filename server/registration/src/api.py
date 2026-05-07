@@ -37,6 +37,7 @@ from src.registry.domain_registry import DomainRegistry, utc_now_iso
 from src.registry.event_registry import EventRegistry
 from src.registry.policy_registry import PolicyRegistry
 from src.transport.moth_subscriber import MothHealthcheckSubscriber
+from src.transport.moth_publisher import get_publisher as get_moth_publisher
 
 
 logger = logging.getLogger(__name__)
@@ -256,13 +257,17 @@ def update_device_connectivity(
 @app.post("/alerts/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
     alert = alert_registry.ingest_alert(request)
-    return alert.to_dict()
+    result = alert.to_dict()
+    asyncio.create_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+    return result
 
 
 @app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_event(request: EventIngestRequest) -> dict[str, Any]:
     event = event_registry.ingest_event(request)
-    return event.to_dict()
+    result = event.to_dict()
+    asyncio.create_task(get_moth_publisher().publish("events", [e.to_dict() for e in event_registry.list_events()]))
+    return result
 
 
 @app.get("/events")
@@ -294,7 +299,9 @@ def get_alert(alert_id: str) -> dict[str, Any]:
 @app.post("/alerts/{alert_id}/ack")
 def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]:
     try:
-        return alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
+        result = alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
+        asyncio.create_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+        return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="alert not found") from exc
 
@@ -350,7 +357,9 @@ def get_a2a_logs(
 def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
     """정책 생성 (Ch.17.1)"""
     require_internal_caller(x_cowater_internal)
-    return policy_registry.create_policy(body)
+    result = policy_registry.create_policy(body)
+    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    return result
 
 
 @app.get("/policies")
@@ -372,7 +381,9 @@ def get_policy(policy_id: str) -> dict[str, Any]:
 def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
     """정책 업데이트"""
     require_internal_caller(x_cowater_internal)
-    return policy_registry.update_policy(policy_id, body)
+    result = policy_registry.update_policy(policy_id, body)
+    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    return result
 
 
 @app.delete("/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -380,6 +391,7 @@ def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(defaul
     """정책 삭제"""
     require_internal_caller(x_cowater_internal)
     policy_registry.delete_policy(policy_id)
+    asyncio.create_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
     return Response(status_code=204)
 
 
@@ -458,7 +470,9 @@ def get_insight(insight_id: str) -> dict[str, Any]:
 
 @app.post("/approvals", status_code=status.HTTP_201_CREATED)
 def create_approval(body: dict[str, Any]) -> dict[str, Any]:
-    return domain_registry.create_approval(body).to_dict()
+    result = domain_registry.create_approval(body).to_dict()
+    asyncio.create_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
+    return result
 
 
 @app.get("/approvals")
@@ -486,14 +500,18 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
             decided_by=decided_by,
             notes=notes,
         )
-        return approval.to_dict()
+        result = approval.to_dict()
+        asyncio.create_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in domain_registry.list_approvals()]))
+        return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="approval not found") from exc
 
 
 @app.post("/mission-proposals", status_code=status.HTTP_201_CREATED)
 def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
-    return domain_registry.create_mission_proposal(body).to_dict()
+    result = domain_registry.create_mission_proposal(body).to_dict()
+    asyncio.create_task(get_moth_publisher().publish("mission_proposals", [item.to_dict() for item in domain_registry.list_mission_proposals()]))
+    return result
 
 
 @app.get("/mission-proposals")
@@ -616,7 +634,12 @@ def create_mission(
     if not mission_payload.get("status"):
         mission_payload["status"] = "pending_approval"
     mission = domain_registry.create_mission(mission_payload)
-    return mission.to_dict()
+    result = mission.to_dict()
+    async def publish_mission():
+        await get_moth_publisher().publish("missions", [m.to_dict() for m in domain_registry.list_missions()])
+        await get_moth_publisher().publish(f"mission.{mission.mission_id}", result)
+    asyncio.create_task(publish_mission())
+    return result
 
 
 @app.get("/missions")
@@ -668,7 +691,12 @@ def replace_mission(mission_id: str, body: dict[str, Any]) -> dict[str, Any]:
             "updated_at": utc_now_iso(),
         }
     )
-    return mission.to_dict()
+    result = mission.to_dict()
+    async def publish_mission():
+        await get_moth_publisher().publish("missions", [m.to_dict() for m in domain_registry.list_missions()])
+        await get_moth_publisher().publish(f"mission.{mission_id}", result)
+    asyncio.create_task(publish_mission())
+    return result
 
 
 @app.get("/missions/{mission_id}/timeline")
@@ -703,7 +731,9 @@ def append_mission_timeline(mission_id: str, body: dict[str, Any] | None = Body(
         )
 
         mission = domain_registry.get_mission(mission_id)
-        return {"appended": True, "mission_id": mission_id, "event_type": event_type}
+        result = {"appended": True, "mission_id": mission_id, "event_type": event_type}
+        asyncio.create_task(get_moth_publisher().publish(f"mission.{mission_id}", mission.to_dict()))
+        return result
     except KeyError:
         raise HTTPException(status_code=404, detail="mission not found")
     except Exception as e:

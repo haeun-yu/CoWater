@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +9,32 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+try:
+    import websockets
+except ImportError:
+    websockets = None
+
 from agent.runtime import AgentRuntime
 from agent.state import utc_now
 from controller.a2a import A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
+
+
+async def _publish_overview_to_moth(data: Any) -> None:
+    """System Agent overview를 Moth에 발행"""
+    if websockets is None:
+        return
+    try:
+        moth_url = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=overview&source=system-agent&track=system-agent"
+        async with websockets.connect(moth_url, ping_interval=None) as ws:
+            message = {
+                "type": "publish",
+                "channel": "overview",
+                "data": data,
+            }
+            await ws.send(json.dumps(message))
+    except Exception:
+        pass  # Silently ignore Moth publish errors
 
 
 def create_app(runtime: AgentRuntime) -> FastAPI:
@@ -175,7 +198,7 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
 
     @app.get("/overview")
     def overview() -> dict[str, Any]:
-        return {
+        result = {
             "devices": runtime.registry_client.list_devices(),
             "device_roles": runtime.registry_client.list_device_roles(),
             "operation_plans": runtime.registry_client.list_operation_plans(),
@@ -184,6 +207,9 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             "mission_proposals": runtime.registry_client.list_mission_proposals(),
             "missions": runtime.registry_client.list_missions(),
         }
+        # Publish to Moth in background
+        asyncio.create_task(_publish_overview_to_moth(result))
+        return result
 
     return app
 

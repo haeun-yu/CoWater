@@ -585,7 +585,53 @@
       document.getElementById("refresh-overview-1").onclick = loadOverview;
       document.getElementById("refresh-overview-2").onclick = loadOverview;
       loadOverview();
-      setInterval(loadOverview, 5000);
+
+      // WebSocket 구독: 실시간 데이터 업데이트
+      const MOTH_BASE = "wss://cobot.center:8287";
+      const channels = ["overview", "missions", "approvals", "mission_proposals", "events", "alerts", "insights", "policies"];
+      const sockets = {};
+
+      function subscribeToChannel(channel) {
+        const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=${channel}&source=ops-client&track=ops-client`;
+        try {
+          const ws = new WebSocket(wsUrl);
+          sockets[channel] = ws;
+
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: "subscribe", channel: channel, channel_type: "meb" }));
+            console.log(`[Moth] Subscribed to ${channel}`);
+          };
+
+          ws.onmessage = async (e) => {
+            try {
+              const rawText = typeof e.data === "string" ? e.data : await e.data.text();
+              if (!rawText || rawText.trim() === "ping") return;
+              const raw = JSON.parse(rawText);
+              const payload = raw.payload || (Array.isArray(raw.data) ? raw : raw.data) || raw;
+              if (!payload) return;
+
+              // Update UI with new data
+              loadOverview();
+            } catch (err) {
+              console.debug(`[Moth] ${channel} parse error:`, err);
+            }
+          };
+
+          ws.onerror = () => {
+            console.warn(`[Moth] ${channel} connection error`);
+            setTimeout(() => subscribeToChannel(channel), 5000);
+          };
+
+          ws.onclose = () => {
+            setTimeout(() => subscribeToChannel(channel), 5000);
+          };
+        } catch (err) {
+          console.warn(`[Moth] Failed to subscribe ${channel}:`, err);
+          setTimeout(() => subscribeToChannel(channel), 5000);
+        }
+      }
+
+      channels.forEach(subscribeToChannel);
       window.applyRole = applyRole;
       window.decideApproval = decideApproval;
       window.activatePlan = activatePlan;

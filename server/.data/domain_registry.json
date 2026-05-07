@@ -1,0 +1,2565 @@
+{
+  "device_roles": {
+    "id-940df2f5c11e": {
+      "device_id": "id-940df2f5c11e",
+      "role_name": "relay_and_safety_host",
+      "responsibility": "Relays tasks/results for downstream devices and maintains local failsafe control.",
+      "assigned_by": "user",
+      "status": "active",
+      "metadata": {},
+      "created_at": "2026-05-07T08:22:27.460132+00:00",
+      "updated_at": "2026-05-07T08:22:27.460139+00:00"
+    },
+    "id-293f1c53c58d": {
+      "device_id": "id-293f1c53c58d",
+      "role_name": "underwater_survey",
+      "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+      "assigned_by": "user",
+      "status": "active",
+      "metadata": {},
+      "created_at": "2026-05-07T08:22:28.981098+00:00",
+      "updated_at": "2026-05-07T08:22:36.989220+00:00"
+    },
+    "id-2ffa96a55f3f": {
+      "device_id": "id-2ffa96a55f3f",
+      "role_name": "support",
+      "responsibility": "General support role.",
+      "assigned_by": "user",
+      "status": "active",
+      "metadata": {},
+      "created_at": "2026-05-07T08:22:29.553431+00:00",
+      "updated_at": "2026-05-07T08:22:32.919323+00:00"
+    }
+  },
+  "operation_plans": {
+    "op-5b7b8e30-c846-483f-94e2-a603d1b01ae3": {
+      "operation_plan_id": "op-5b7b8e30-c846-483f-94e2-a603d1b01ae3",
+      "name": "기뢰 탐지",
+      "goal": "주변 기뢰 모두 탐지",
+      "status": "active",
+      "summary": "Plan for 주변 기뢰 모두 탐지",
+      "triggers": [
+        {
+          "type": "MANUAL",
+          "summary": "Operator-triggered execution"
+        }
+      ],
+      "device_roles": [
+        {
+          "device_id": "id-293f1c53c58d",
+          "role_name": "underwater_survey",
+          "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+          "assigned_by": "user",
+          "status": "active",
+          "metadata": {},
+          "created_at": "2026-05-07T08:22:28.981098+00:00",
+          "updated_at": "2026-05-07T08:22:36.989220+00:00"
+        },
+        {
+          "device_id": "id-2ffa96a55f3f",
+          "role_name": "support",
+          "responsibility": "General support role.",
+          "assigned_by": "user",
+          "status": "active",
+          "metadata": {},
+          "created_at": "2026-05-07T08:22:29.553431+00:00",
+          "updated_at": "2026-05-07T08:22:32.919323+00:00"
+        },
+        {
+          "device_id": "id-940df2f5c11e",
+          "role_name": "relay_and_safety_host",
+          "responsibility": "Relays tasks/results for downstream devices and maintains local failsafe control.",
+          "assigned_by": "user",
+          "status": "active",
+          "metadata": {},
+          "created_at": "2026-05-07T08:22:27.460132+00:00",
+          "updated_at": "2026-05-07T08:22:27.460139+00:00"
+        }
+      ],
+      "mission_templates": [
+        {
+          "mission_type": "generic_mission",
+          "goal": "주변 기뢰 모두 탐지",
+          "location": {},
+          "requires_approval": true
+        }
+      ],
+      "recommended_by": "system_agent",
+      "metadata": {},
+      "created_at": "2026-05-07T08:23:39.860916+00:00",
+      "updated_at": "2026-05-07T08:23:44.598681+00:00"
+    }
+  },
+  "insights": {
+    "insight-b7e47986-9e91-4a64-a869-049516adc5e9": {
+      "insight_id": "insight-b7e47986-9e91-4a64-a869-049516adc5e9",
+      "summary": "Mission proposal prepared for generic_mission",
+      "reason_summary": "Current device availability, roles, and routing support execution.",
+      "severity": "INFORMATION",
+      "recommended_action": "review_and_approve_mission",
+      "confidence_level": "medium",
+      "related_event_id": null,
+      "related_alert_id": null,
+      "related_mission_id": null,
+      "metadata": {
+        "goal": "",
+        "location": {}
+      },
+      "created_at": "2026-05-07T08:22:23.496237+00:00",
+      "updated_at": "2026-05-07T08:22:23.496253+00:00"
+    },
+    "insight-4ae5c624-c07d-46b5-8970-c85d34fb803d": {
+      "insight_id": "insight-4ae5c624-c07d-46b5-8970-c85d34fb803d",
+      "summary": "Mission proposal prepared for mine_clearance",
+      "reason_summary": "Current device availability, roles, and routing support execution.",
+      "severity": "CRITICAL",
+      "recommended_action": "review_and_approve_mission",
+      "confidence_level": "medium",
+      "related_event_id": "event-37c6a284-57d3-48f9-ad7f-62bdeae2388f",
+      "related_alert_id": "alert-a2608d40-2a6d-46a6-a58d-53f2a0b9f74c",
+      "related_mission_id": null,
+      "metadata": {
+        "goal": "mine_detection reported",
+        "location": {
+          "latitude": 37.005,
+          "longitude": 129.425,
+          "depth_m": 15.0
+        }
+      },
+      "created_at": "2026-05-07T08:22:57.625300+00:00",
+      "updated_at": "2026-05-07T08:22:57.625307+00:00"
+    },
+    "insight-7a382e9c-8ddb-43a3-9cef-9058be533a20": {
+      "insight_id": "insight-7a382e9c-8ddb-43a3-9cef-9058be533a20",
+      "summary": "Mission proposal prepared for generic_mission",
+      "reason_summary": "Current device availability, roles, and routing support execution.",
+      "severity": "INFORMATION",
+      "recommended_action": "review_and_approve_mission",
+      "confidence_level": "medium",
+      "related_event_id": null,
+      "related_alert_id": null,
+      "related_mission_id": null,
+      "metadata": {
+        "goal": "주변 기뢰 모두 탐지",
+        "location": {}
+      },
+      "created_at": "2026-05-07T08:23:44.606676+00:00",
+      "updated_at": "2026-05-07T08:23:44.606687+00:00"
+    }
+  },
+  "approvals": {
+    "approval-687de252-24c8-4228-8a05-4815ec73272d": {
+      "approval_id": "approval-687de252-24c8-4228-8a05-4815ec73272d",
+      "target_type": "device_role_assignment",
+      "target_id": "id-2ffa96a55f3f",
+      "summary": "Apply device role to id-2ffa96a55f3f",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "support",
+        "responsibility": "General support role.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:17:25.049816+00:00",
+      "updated_at": "2026-05-07T08:22:29.548620+00:00",
+      "decided_at": "2026-05-07T08:22:29.548620+00:00"
+    },
+    "approval-3948a93c-bb41-4b19-9a97-8f4cdb26d40f": {
+      "approval_id": "approval-3948a93c-bb41-4b19-9a97-8f4cdb26d40f",
+      "target_type": "device_role_assignment",
+      "target_id": "id-940df2f5c11e",
+      "summary": "Apply device role to id-940df2f5c11e",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "relay_and_safety_host",
+        "responsibility": "Relays tasks/results for downstream devices and maintains local failsafe control.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:17:29.125883+00:00",
+      "updated_at": "2026-05-07T08:22:27.458136+00:00",
+      "decided_at": "2026-05-07T08:22:27.458136+00:00"
+    },
+    "approval-7b17844e-bff1-4844-920f-a8688bac05be": {
+      "approval_id": "approval-7b17844e-bff1-4844-920f-a8688bac05be",
+      "target_type": "device_role_assignment",
+      "target_id": "id-2ffa96a55f3f",
+      "summary": "Apply device role to id-2ffa96a55f3f",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "support",
+        "responsibility": "General support role.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:17:50.044668+00:00",
+      "updated_at": "2026-05-07T08:22:32.457543+00:00",
+      "decided_at": "2026-05-07T08:22:32.457543+00:00"
+    },
+    "approval-7fc3a00c-71cc-4df1-a081-d8bcb7e2b5d8": {
+      "approval_id": "approval-7fc3a00c-71cc-4df1-a081-d8bcb7e2b5d8",
+      "target_type": "device_role_assignment",
+      "target_id": "id-2ffa96a55f3f",
+      "summary": "Apply device role to id-2ffa96a55f3f",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "support",
+        "responsibility": "General support role.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:17:52.139058+00:00",
+      "updated_at": "2026-05-07T08:22:32.914419+00:00",
+      "decided_at": "2026-05-07T08:22:32.914419+00:00"
+    },
+    "approval-6ba91f7a-e0f4-4433-b782-bbf273ee0602": {
+      "approval_id": "approval-6ba91f7a-e0f4-4433-b782-bbf273ee0602",
+      "target_type": "device_role_assignment",
+      "target_id": "id-2ffa96a55f3f",
+      "summary": "Apply device role to id-2ffa96a55f3f",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "support",
+        "responsibility": "General support role.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:17:57.667316+00:00",
+      "updated_at": "2026-05-07T08:22:30.859854+00:00",
+      "decided_at": "2026-05-07T08:22:30.859854+00:00"
+    },
+    "approval-60b5f41a-ffbd-443a-a034-5e233613c126": {
+      "approval_id": "approval-60b5f41a-ffbd-443a-a034-5e233613c126",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:19.551281+00:00",
+      "updated_at": "2026-05-07T08:22:28.972714+00:00",
+      "decided_at": "2026-05-07T08:22:28.972714+00:00"
+    },
+    "approval-731cdfd8-ec11-4ab9-ad3b-fcd9c7e015f5": {
+      "approval_id": "approval-731cdfd8-ec11-4ab9-ad3b-fcd9c7e015f5",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:27.123135+00:00",
+      "updated_at": "2026-05-07T08:22:31.979231+00:00",
+      "decided_at": "2026-05-07T08:22:31.979231+00:00"
+    },
+    "approval-bf268fb2-48f1-4e85-aea2-872de0e91668": {
+      "approval_id": "approval-bf268fb2-48f1-4e85-aea2-872de0e91668",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:27.264819+00:00",
+      "updated_at": "2026-05-07T08:22:36.974200+00:00",
+      "decided_at": "2026-05-07T08:22:36.974200+00:00"
+    },
+    "approval-90525245-7128-434f-a50f-a8c384baa2b7": {
+      "approval_id": "approval-90525245-7128-434f-a50f-a8c384baa2b7",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:27.431249+00:00",
+      "updated_at": "2026-05-07T08:22:35.004215+00:00",
+      "decided_at": "2026-05-07T08:22:35.004215+00:00"
+    },
+    "approval-87adcceb-0927-4ceb-82ee-1a05cc30bf17": {
+      "approval_id": "approval-87adcceb-0927-4ceb-82ee-1a05cc30bf17",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:27.580898+00:00",
+      "updated_at": "2026-05-07T08:22:33.484668+00:00",
+      "decided_at": "2026-05-07T08:22:33.484668+00:00"
+    },
+    "approval-9d84929f-f8ce-4b16-b9d5-b369ee42179c": {
+      "approval_id": "approval-9d84929f-f8ce-4b16-b9d5-b369ee42179c",
+      "target_type": "device_role_assignment",
+      "target_id": "id-293f1c53c58d",
+      "summary": "Apply device role to id-293f1c53c58d",
+      "requested_action": "apply_device_role",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": null,
+      "metadata": {
+        "role_name": "underwater_survey",
+        "responsibility": "Performs underwater scanning, anomaly survey, and area mapping.",
+        "status": "active",
+        "notes": null,
+        "metadata": {}
+      },
+      "created_at": "2026-05-07T08:21:30.180414+00:00",
+      "updated_at": "2026-05-07T08:22:35.643249+00:00",
+      "decided_at": "2026-05-07T08:22:35.643249+00:00"
+    },
+    "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40": {
+      "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40",
+      "target_type": "mission_proposal",
+      "target_id": "proposal-81cce422-34a0-4676-90d0-96540a737d6e",
+      "summary": "Approve mission proposal 'Generic Mission Proposal'",
+      "requested_action": "approve_mission_proposal",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": "insight-b7e47986-9e91-4a64-a869-049516adc5e9",
+      "metadata": {
+        "mission_type": "generic_mission",
+        "goal": "generic_mission",
+        "location": {}
+      },
+      "created_at": "2026-05-07T08:22:23.500644+00:00",
+      "updated_at": "2026-05-07T08:22:25.949075+00:00",
+      "decided_at": "2026-05-07T08:22:25.949075+00:00"
+    },
+    "approval-ca6a135c-3671-4785-8dc7-adb1db257cb2": {
+      "approval_id": "approval-ca6a135c-3671-4785-8dc7-adb1db257cb2",
+      "target_type": "mission_proposal",
+      "target_id": "proposal-75c60588-fcbc-4d3a-8d10-43c0b807e319",
+      "summary": "Approve mission proposal 'Mine Detection Mission Proposal'",
+      "requested_action": "approve_mission_proposal",
+      "status": "pending",
+      "requested_by": "system_agent",
+      "decided_by": null,
+      "decision_notes": null,
+      "related_insight_id": "insight-4ae5c624-c07d-46b5-8970-c85d34fb803d",
+      "metadata": {
+        "mission_type": "mine_clearance",
+        "goal": "mine_detection reported",
+        "location": {
+          "latitude": 37.005,
+          "longitude": 129.425,
+          "depth_m": 15.0
+        }
+      },
+      "created_at": "2026-05-07T08:22:57.629046+00:00",
+      "updated_at": "2026-05-07T08:22:57.629050+00:00",
+      "decided_at": null
+    },
+    "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945": {
+      "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945",
+      "target_type": "mission_proposal",
+      "target_id": "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f",
+      "summary": "Approve mission proposal '기뢰 탐지 Proposal'",
+      "requested_action": "approve_mission_proposal",
+      "status": "approved",
+      "requested_by": "system_agent",
+      "decided_by": "user",
+      "decision_notes": null,
+      "related_insight_id": "insight-7a382e9c-8ddb-43a3-9cef-9058be533a20",
+      "metadata": {
+        "mission_type": "generic_mission",
+        "goal": "주변 기뢰 모두 탐지",
+        "location": {}
+      },
+      "created_at": "2026-05-07T08:23:44.612420+00:00",
+      "updated_at": "2026-05-07T08:24:02.508620+00:00",
+      "decided_at": "2026-05-07T08:24:02.508620+00:00"
+    }
+  },
+  "mission_proposals": {
+    "proposal-81cce422-34a0-4676-90d0-96540a737d6e": {
+      "proposal_id": "proposal-81cce422-34a0-4676-90d0-96540a737d6e",
+      "title": "Generic Mission Proposal",
+      "mission_type": "generic_mission",
+      "goal": "generic_mission",
+      "status": "approved",
+      "summary": "Proposal with 1 step(s) for operator review.",
+      "source": "system_agent",
+      "alert_id": null,
+      "event_id": null,
+      "operation_plan_id": null,
+      "insight_id": "insight-b7e47986-9e91-4a64-a869-049516adc5e9",
+      "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40",
+      "steps": [
+        {
+          "step_id": "step-1",
+          "step_type": "generic_action",
+          "evaluation_policy": "all_tasks_success_v1",
+          "depends_on": [],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                3
+              ],
+              "action": "return_to_base",
+              "requested_action": "return_to_base",
+              "target_device_id": 3,
+              "target_device_name": "작업용 USV",
+              "target_device_type": "USV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "return_to_base",
+                "requested_action": "return_to_base",
+                "location": {},
+                "mission_type": "mine_clearance",
+                "target_device_id": 3
+              }
+            }
+          ]
+        }
+      ],
+      "metadata": {
+        "location": {},
+        "fingerprint": "generic_mission::"
+      },
+      "created_at": "2026-05-07T08:22:23.498814+00:00",
+      "updated_at": "2026-05-07T08:22:25.952430+00:00"
+    },
+    "proposal-75c60588-fcbc-4d3a-8d10-43c0b807e319": {
+      "proposal_id": "proposal-75c60588-fcbc-4d3a-8d10-43c0b807e319",
+      "title": "Mine Detection Mission Proposal",
+      "mission_type": "mine_clearance",
+      "goal": "mine_detection reported",
+      "status": "pending_approval",
+      "summary": "Proposal generated from alert alert-a2608d40-2a6d-46a6-a58d-53f2a0b9f74c.",
+      "source": "event_report",
+      "alert_id": "alert-a2608d40-2a6d-46a6-a58d-53f2a0b9f74c",
+      "event_id": "event-37c6a284-57d3-48f9-ad7f-62bdeae2388f",
+      "operation_plan_id": null,
+      "insight_id": "insight-4ae5c624-c07d-46b5-8970-c85d34fb803d",
+      "approval_id": "approval-ca6a135c-3671-4785-8dc7-adb1db257cb2",
+      "steps": [
+        {
+          "step_id": "survey",
+          "step_type": "survey",
+          "evaluation_policy": "survey_sufficiency_v1",
+          "depends_on": [],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                4
+              ],
+              "action": "scan_area",
+              "requested_action": "survey_depth",
+              "target_device_id": 4,
+              "target_device_name": "정찰용 AUV",
+              "target_device_type": "AUV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "scan_area",
+                "requested_action": "survey_depth",
+                "location": {
+                  "latitude": 37.005,
+                  "longitude": 129.425,
+                  "depth_m": 15.0
+                },
+                "mission_type": "mine_clearance",
+                "target_device_id": 4
+              }
+            }
+          ]
+        },
+        {
+          "step_id": "remove",
+          "step_type": "remove",
+          "evaluation_policy": "all_tasks_success_v1",
+          "depends_on": [
+            "survey"
+          ],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                5
+              ],
+              "action": "grab_object",
+              "requested_action": "remove_mine",
+              "target_device_id": 5,
+              "target_device_name": "작업용 ROV",
+              "target_device_type": "ROV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "grab_object",
+                "requested_action": "remove_mine",
+                "location": {
+                  "latitude": 37.005,
+                  "longitude": 129.425,
+                  "depth_m": 15.0
+                },
+                "mission_type": "mine_clearance",
+                "target_device_id": 5
+              }
+            }
+          ]
+        }
+      ],
+      "metadata": {
+        "location": {
+          "latitude": 37.005,
+          "longitude": 129.425,
+          "depth_m": 15.0
+        },
+        "fingerprint": "mine_clearance:mine_detection reported:alert-a2608d40-2a6d-46a6-a58d-53f2a0b9f74c"
+      },
+      "created_at": "2026-05-07T08:22:57.627306+00:00",
+      "updated_at": "2026-05-07T08:22:57.631615+00:00"
+    },
+    "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f": {
+      "proposal_id": "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f",
+      "title": "기뢰 탐지 Proposal",
+      "mission_type": "generic_mission",
+      "goal": "주변 기뢰 모두 탐지",
+      "status": "approved",
+      "summary": "Manual trigger activated by user.",
+      "source": "operation_plan_manual_trigger",
+      "alert_id": null,
+      "event_id": null,
+      "operation_plan_id": "op-5b7b8e30-c846-483f-94e2-a603d1b01ae3",
+      "insight_id": "insight-7a382e9c-8ddb-43a3-9cef-9058be533a20",
+      "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945",
+      "steps": [
+        {
+          "step_id": "step-1",
+          "step_type": "generic_action",
+          "evaluation_policy": "all_tasks_success_v1",
+          "depends_on": [],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                3
+              ],
+              "action": "return_to_base",
+              "requested_action": "return_to_base",
+              "target_device_id": 3,
+              "target_device_name": "작업용 USV",
+              "target_device_type": "USV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "return_to_base",
+                "requested_action": "return_to_base",
+                "location": {},
+                "mission_type": "mine_clearance",
+                "target_device_id": 3
+              }
+            }
+          ]
+        }
+      ],
+      "metadata": {
+        "location": {},
+        "fingerprint": "generic_mission:주변 기뢰 모두 탐지:"
+      },
+      "created_at": "2026-05-07T08:23:44.609545+00:00",
+      "updated_at": "2026-05-07T08:24:02.517050+00:00"
+    }
+  },
+  "missions": {
+    "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0": {
+      "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+      "title": "Generic Mission Proposal",
+      "mission_type": "generic_mission",
+      "goal": "generic_mission",
+      "status": "completed",
+      "summary": "Proposal with 1 step(s) for operator review.",
+      "source": "system_agent",
+      "alert_id": null,
+      "event_id": null,
+      "operation_plan_id": null,
+      "proposal_id": "proposal-81cce422-34a0-4676-90d0-96540a737d6e",
+      "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40",
+      "insight_id": "insight-b7e47986-9e91-4a64-a869-049516adc5e9",
+      "steps": [
+        {
+          "step_id": "step-1",
+          "step_type": "generic_action",
+          "evaluation_policy": "all_tasks_success_v1",
+          "depends_on": [],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                3
+              ],
+              "action": "return_to_base",
+              "requested_action": "return_to_base",
+              "target_device_id": 3,
+              "target_device_name": "작업용 USV",
+              "target_device_type": "USV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "return_to_base",
+                "requested_action": "return_to_base",
+                "location": {},
+                "mission_type": "mine_clearance",
+                "target_device_id": 3
+              },
+              "dispatch_status": "dispatched",
+              "execution_status": "completed",
+              "completed_at": "2026-05-07T08:22:26.362241+00:00"
+            }
+          ],
+          "status": "completed"
+        }
+      ],
+      "timeline": [
+        {
+          "timestamp": "2026-05-07T08:22:25.953553+00:00",
+          "type": "mission_created",
+          "message": "Mission created from approved proposal.",
+          "data": {
+            "proposal_id": "proposal-81cce422-34a0-4676-90d0-96540a737d6e",
+            "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:25.953562+00:00",
+          "type": "user_approval",
+          "message": "User approval recorded.",
+          "data": {
+            "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:25.959035+00:00",
+          "type": "mission_started",
+          "message": "Mission execution started.",
+          "data": {
+            "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.354503+00:00",
+          "type": "step_started",
+          "message": "Step step-1 started.",
+          "data": {
+            "step_id": "step-1",
+            "step_type": "generic_action"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.354511+00:00",
+          "type": "task_started",
+          "message": "Task task-1 dispatched for execution.",
+          "data": {
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "target_device_id": 3,
+            "route_agent_id": 2,
+            "dispatch": {
+              "delivered": true,
+              "endpoint": "http://127.0.0.1:9115",
+              "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+              "a2a_result": {
+                "jsonrpc": "2.0",
+                "id": "50210580-df1e-4693-a850-6e08d421dc83",
+                "result": {
+                  "id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                  "status": {
+                    "state": "completed"
+                  },
+                  "createdAt": "2026-05-07T08:22:26.349839+00:00",
+                  "updatedAt": "2026-05-07T08:22:26.349839+00:00",
+                  "message": {
+                    "role": "user",
+                    "parts": [
+                      {
+                        "type": "data",
+                        "text": null,
+                        "data": {
+                          "message_type": "task.assign",
+                          "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                          "action": "return_to_base",
+                          "params": {
+                            "action": "return_to_base",
+                            "requested_action": "return_to_base",
+                            "location": {},
+                            "mission_type": "mine_clearance",
+                            "target_device_id": 3
+                          },
+                          "reason": "Generic Mission Proposal",
+                          "alert_id": null,
+                          "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                          "step_id": "step-1",
+                          "task_id": "task-1"
+                        }
+                      }
+                    ]
+                  },
+                  "artifacts": [
+                    {
+                      "name": "result",
+                      "parts": [
+                        {
+                          "type": "data",
+                          "data": {
+                            "acceptance_status": "ACCEPTED",
+                            "task_id": "task-1",
+                            "relayed": true,
+                            "relayed_to_device_id": "3",
+                            "relayed_to_endpoint": "http://127.0.0.1:9111"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "acceptance_status": "ACCEPTED",
+              "reason": null
+            }
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.354515+00:00",
+          "type": "task_dispatched",
+          "message": "Initial mission step dispatched.",
+          "data": {
+            "delivered": true,
+            "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1",
+            "step_id": "step-1",
+            "task_results": [
+              {
+                "task_id": "task-1",
+                "action": "return_to_base",
+                "target_device_id": 3,
+                "route_agent_id": 2,
+                "dispatch": {
+                  "delivered": true,
+                  "endpoint": "http://127.0.0.1:9115",
+                  "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                  "a2a_result": {
+                    "jsonrpc": "2.0",
+                    "id": "50210580-df1e-4693-a850-6e08d421dc83",
+                    "result": {
+                      "id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                      "status": {
+                        "state": "completed"
+                      },
+                      "createdAt": "2026-05-07T08:22:26.349839+00:00",
+                      "updatedAt": "2026-05-07T08:22:26.349839+00:00",
+                      "message": {
+                        "role": "user",
+                        "parts": [
+                          {
+                            "type": "data",
+                            "text": null,
+                            "data": {
+                              "message_type": "task.assign",
+                              "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                              "action": "return_to_base",
+                              "params": {
+                                "action": "return_to_base",
+                                "requested_action": "return_to_base",
+                                "location": {},
+                                "mission_type": "mine_clearance",
+                                "target_device_id": 3
+                              },
+                              "reason": "Generic Mission Proposal",
+                              "alert_id": null,
+                              "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                              "step_id": "step-1",
+                              "task_id": "task-1"
+                            }
+                          }
+                        ]
+                      },
+                      "artifacts": [
+                        {
+                          "name": "result",
+                          "parts": [
+                            {
+                              "type": "data",
+                              "data": {
+                                "acceptance_status": "ACCEPTED",
+                                "task_id": "task-1",
+                                "relayed": true,
+                                "relayed_to_device_id": "3",
+                                "relayed_to_endpoint": "http://127.0.0.1:9111"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "acceptance_status": "ACCEPTED",
+                  "reason": null
+                }
+              }
+            ],
+            "steps": [
+              {
+                "step_id": "step-1",
+                "depends_on": [],
+                "status": "dispatched",
+                "tasks": [
+                  {
+                    "task_id": "task-1",
+                    "logical_task_id": "task-1",
+                    "attempt": 0,
+                    "attempted_device_ids": [
+                      3
+                    ],
+                    "action": "return_to_base",
+                    "target_device_id": 3,
+                    "target_device_name": "작업용 USV",
+                    "route_agent_id": 2,
+                    "route_agent_name": "통제 함정",
+                    "dispatch_status": "dispatched",
+                    "execution_status": "pending",
+                    "dispatch": {
+                      "delivered": true,
+                      "endpoint": "http://127.0.0.1:9115",
+                      "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                      "a2a_result": {
+                        "jsonrpc": "2.0",
+                        "id": "50210580-df1e-4693-a850-6e08d421dc83",
+                        "result": {
+                          "id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                          "status": {
+                            "state": "completed"
+                          },
+                          "createdAt": "2026-05-07T08:22:26.349839+00:00",
+                          "updatedAt": "2026-05-07T08:22:26.349839+00:00",
+                          "message": {
+                            "role": "user",
+                            "parts": [
+                              {
+                                "type": "data",
+                                "text": null,
+                                "data": {
+                                  "message_type": "task.assign",
+                                  "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                                  "action": "return_to_base",
+                                  "params": {
+                                    "action": "return_to_base",
+                                    "requested_action": "return_to_base",
+                                    "location": {},
+                                    "mission_type": "mine_clearance",
+                                    "target_device_id": 3
+                                  },
+                                  "reason": "Generic Mission Proposal",
+                                  "alert_id": null,
+                                  "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                                  "step_id": "step-1",
+                                  "task_id": "task-1"
+                                }
+                              }
+                            ]
+                          },
+                          "artifacts": [
+                            {
+                              "name": "result",
+                              "parts": [
+                                {
+                                  "type": "data",
+                                  "data": {
+                                    "acceptance_status": "ACCEPTED",
+                                    "task_id": "task-1",
+                                    "relayed": true,
+                                    "relayed_to_device_id": "3",
+                                    "relayed_to_endpoint": "http://127.0.0.1:9111"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "acceptance_status": "ACCEPTED",
+                      "reason": null
+                    },
+                    "acceptance_status": "ACCEPTED",
+                    "failure_message": null,
+                    "dispatched_task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1"
+                  }
+                ]
+              }
+            ],
+            "execution_results": [],
+            "execution_result": null,
+            "execution_aggregate_status": "planned",
+            "step_evaluations": {},
+            "replan_history": []
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.363275+00:00",
+          "type": "device_result_reported",
+          "message": "Task result reported by usv-local-agent-1778141816-95942-a96448.",
+          "data": {
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "status": "completed",
+            "device_id": "id-33be642e9ac8",
+            "failure_reason": "Generic Mission Proposal"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.363279+00:00",
+          "type": "task_completed",
+          "message": "Task task-1 completed.",
+          "data": {
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "status": "completed",
+            "device_id": "id-33be642e9ac8",
+            "failure_reason": "Generic Mission Proposal"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.363281+00:00",
+          "type": "agent_judgement",
+          "message": "System Agent updated mission evaluation.",
+          "data": {
+            "at": "2026-05-07T08:22:26.363250+00:00",
+            "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+            "step_id": "step-1",
+            "step_type": "generic_action",
+            "policy": "all_tasks_success_v1",
+            "task_total": 1,
+            "completed_task_count": 1,
+            "failed_task_count": 0,
+            "usable_task_count": 1,
+            "step_execution_status": "completed",
+            "sufficient": true,
+            "decision": "proceed_next_step",
+            "reason": "all tasks completed successfully"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:26.363286+00:00",
+          "type": "mission_completed",
+          "message": "Mission completed.",
+          "data": {
+            "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0"
+          }
+        }
+      ],
+      "logs": [
+        {
+          "timestamp": "2026-05-07T08:22:25.953553+00:00",
+          "type": "mission_created",
+          "message": "Mission created from approved proposal.",
+          "data": {
+            "proposal_id": "proposal-81cce422-34a0-4676-90d0-96540a737d6e",
+            "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:22:25.953562+00:00",
+          "type": "user_approval",
+          "message": "User approval recorded.",
+          "data": {
+            "approval_id": "approval-1f2e940e-b394-4dcd-9870-15aa6a6dec40"
+          }
+        }
+      ],
+      "device_execution_results": [
+        {
+          "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+          "device_id": "id-33be642e9ac8",
+          "reporter": "usv-local-agent-1778141816-95942-a96448",
+          "step_id": "step-1",
+          "task_id": "task-1",
+          "task_status": "completed",
+          "status": "completed",
+          "acceptance_status": null,
+          "started_at": null,
+          "finished_at": null,
+          "success": true,
+          "failure_reason": "Generic Mission Proposal",
+          "failure_category": null,
+          "location": {
+            "latitude": 37.005319061017914,
+            "longitude": 129.41830769712652
+          },
+          "data_summary": "return_to_base completed",
+          "raw_data_ref": [],
+          "device_state_changes": {
+            "last_telemetry": {
+              "device_id": "id-33be642e9ac8",
+              "agent_id": "usv-local-agent-1778141816-95942-a96448",
+              "device_type": "USV",
+              "timestamp": "2026-05-07T08:22:25.839754+00:00",
+              "position": {
+                "latitude": 37.005319061017914,
+                "longitude": 129.41830769712652,
+                "altitude": 0.359567339060935
+              },
+              "motion": {
+                "heading": 143.7662534215505,
+                "speed": 0.5
+              },
+              "battery_percent": 78.45,
+              "sensors": {
+                "gps": {
+                  "status": "ok"
+                },
+                "imu": {
+                  "status": "ok"
+                },
+                "sonar": {
+                  "status": "ok"
+                },
+                "battery": {
+                  "percent": 78.45
+                },
+                "telemetry": {
+                  "status": "ok"
+                },
+                "a2a": {
+                  "status": "ok"
+                }
+              }
+            },
+            "connected": true
+          },
+          "device_agent_judgement": "return_to_base",
+          "payload": {
+            "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+            "source_device_id": "id-33be642e9ac8",
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "action": "return_to_base",
+            "command": {
+              "action": "return_to_base",
+              "params": {
+                "action": "return_to_base",
+                "requested_action": "return_to_base",
+                "location": {},
+                "mission_type": "mine_clearance",
+                "target_device_id": 3
+              },
+              "reason": "Generic Mission Proposal"
+            },
+            "result": {
+              "status": "success",
+              "action": "return_to_base",
+              "result": {
+                "delivered": true,
+                "command": {
+                  "action": "return_to_base",
+                  "params": {
+                    "action": "return_to_base",
+                    "requested_action": "return_to_base",
+                    "location": {},
+                    "mission_type": "mine_clearance",
+                    "target_device_id": 3
+                  },
+                  "reason": "Generic Mission Proposal"
+                },
+                "at": "2026-05-07T08:22:26.349904+00:00"
+              },
+              "reason": "Generic Mission Proposal",
+              "timestamp": "2026-05-07T08:22:26.349908+00:00"
+            },
+            "reported_at": "2026-05-07T08:22:26.350128+00:00",
+            "result_summary": "return_to_base completed",
+            "output_refs": [],
+            "failure_category": null,
+            "failure_message": "Generic Mission Proposal",
+            "location": {
+              "latitude": 37.005319061017914,
+              "longitude": 129.41830769712652
+            },
+            "device_state_changes": {
+              "last_telemetry": {
+                "device_id": "id-33be642e9ac8",
+                "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                "device_type": "USV",
+                "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                "position": {
+                  "latitude": 37.005319061017914,
+                  "longitude": 129.41830769712652,
+                  "altitude": 0.359567339060935
+                },
+                "motion": {
+                  "heading": 143.7662534215505,
+                  "speed": 0.5
+                },
+                "battery_percent": 78.45,
+                "sensors": {
+                  "gps": {
+                    "status": "ok"
+                  },
+                  "imu": {
+                    "status": "ok"
+                  },
+                  "sonar": {
+                    "status": "ok"
+                  },
+                  "battery": {
+                    "percent": 78.45
+                  },
+                  "telemetry": {
+                    "status": "ok"
+                  },
+                  "a2a": {
+                    "status": "ok"
+                  }
+                }
+              },
+              "connected": true
+            },
+            "agent_judgement": "return_to_base",
+            "payload": {
+              "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+              "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+              "alert_id": "",
+              "step_id": "step-1",
+              "task_id": "task-1",
+              "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+              "source_device_id": "id-33be642e9ac8",
+              "location": {
+                "latitude": 37.005319061017914,
+                "longitude": 129.41830769712652
+              }
+            }
+          },
+          "received_at": "2026-05-07T08:22:26.362228+00:00"
+        }
+      ],
+      "final_result": {
+        "status": "completed",
+        "summary": "Mission completed after step step-1."
+      },
+      "metadata": {
+        "location": {},
+        "fingerprint": "generic_mission::",
+        "dispatch_state": {
+          "delivered": true,
+          "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1",
+          "step_id": "step-1",
+          "task_results": [
+            {
+              "task_id": "task-1",
+              "action": "return_to_base",
+              "target_device_id": 3,
+              "route_agent_id": 2,
+              "dispatch": {
+                "delivered": true,
+                "endpoint": "http://127.0.0.1:9115",
+                "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                "a2a_result": {
+                  "jsonrpc": "2.0",
+                  "id": "50210580-df1e-4693-a850-6e08d421dc83",
+                  "result": {
+                    "id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                    "status": {
+                      "state": "completed"
+                    },
+                    "createdAt": "2026-05-07T08:22:26.349839+00:00",
+                    "updatedAt": "2026-05-07T08:22:26.349839+00:00",
+                    "message": {
+                      "role": "user",
+                      "parts": [
+                        {
+                          "type": "data",
+                          "text": null,
+                          "data": {
+                            "message_type": "task.assign",
+                            "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                            "action": "return_to_base",
+                            "params": {
+                              "action": "return_to_base",
+                              "requested_action": "return_to_base",
+                              "location": {},
+                              "mission_type": "mine_clearance",
+                              "target_device_id": 3
+                            },
+                            "reason": "Generic Mission Proposal",
+                            "alert_id": null,
+                            "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                            "step_id": "step-1",
+                            "task_id": "task-1"
+                          }
+                        }
+                      ]
+                    },
+                    "artifacts": [
+                      {
+                        "name": "result",
+                        "parts": [
+                          {
+                            "type": "data",
+                            "data": {
+                              "acceptance_status": "ACCEPTED",
+                              "task_id": "task-1",
+                              "relayed": true,
+                              "relayed_to_device_id": "3",
+                              "relayed_to_endpoint": "http://127.0.0.1:9111"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "acceptance_status": "ACCEPTED",
+                "reason": null
+              }
+            }
+          ],
+          "steps": [
+            {
+              "step_id": "step-1",
+              "depends_on": [],
+              "status": "completed",
+              "tasks": [
+                {
+                  "task_id": "task-1",
+                  "logical_task_id": "task-1",
+                  "attempt": 0,
+                  "attempted_device_ids": [
+                    3
+                  ],
+                  "action": "return_to_base",
+                  "target_device_id": 3,
+                  "target_device_name": "작업용 USV",
+                  "route_agent_id": 2,
+                  "route_agent_name": "통제 함정",
+                  "dispatch_status": "dispatched",
+                  "execution_status": "completed",
+                  "dispatch": {
+                    "delivered": true,
+                    "endpoint": "http://127.0.0.1:9115",
+                    "task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                    "a2a_result": {
+                      "jsonrpc": "2.0",
+                      "id": "50210580-df1e-4693-a850-6e08d421dc83",
+                      "result": {
+                        "id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                        "status": {
+                          "state": "completed"
+                        },
+                        "createdAt": "2026-05-07T08:22:26.349839+00:00",
+                        "updatedAt": "2026-05-07T08:22:26.349839+00:00",
+                        "message": {
+                          "role": "user",
+                          "parts": [
+                            {
+                              "type": "data",
+                              "text": null,
+                              "data": {
+                                "message_type": "task.assign",
+                                "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                                "action": "return_to_base",
+                                "params": {
+                                  "action": "return_to_base",
+                                  "requested_action": "return_to_base",
+                                  "location": {},
+                                  "mission_type": "mine_clearance",
+                                  "target_device_id": 3
+                                },
+                                "reason": "Generic Mission Proposal",
+                                "alert_id": null,
+                                "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                                "step_id": "step-1",
+                                "task_id": "task-1"
+                              }
+                            }
+                          ]
+                        },
+                        "artifacts": [
+                          {
+                            "name": "result",
+                            "parts": [
+                              {
+                                "type": "data",
+                                "data": {
+                                  "acceptance_status": "ACCEPTED",
+                                  "task_id": "task-1",
+                                  "relayed": true,
+                                  "relayed_to_device_id": "3",
+                                  "relayed_to_endpoint": "http://127.0.0.1:9111"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "acceptance_status": "ACCEPTED",
+                    "reason": null
+                  },
+                  "acceptance_status": "ACCEPTED",
+                  "failure_message": null,
+                  "dispatched_task_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0:step-1:task-1",
+                  "execution_result": {
+                    "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                    "device_id": "id-33be642e9ac8",
+                    "reporter": "usv-local-agent-1778141816-95942-a96448",
+                    "step_id": "step-1",
+                    "task_id": "task-1",
+                    "task_status": "completed",
+                    "status": "completed",
+                    "acceptance_status": null,
+                    "started_at": null,
+                    "finished_at": null,
+                    "success": true,
+                    "failure_reason": "Generic Mission Proposal",
+                    "failure_category": null,
+                    "location": {
+                      "latitude": 37.005319061017914,
+                      "longitude": 129.41830769712652
+                    },
+                    "data_summary": "return_to_base completed",
+                    "raw_data_ref": [],
+                    "device_state_changes": {
+                      "last_telemetry": {
+                        "device_id": "id-33be642e9ac8",
+                        "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                        "device_type": "USV",
+                        "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                        "position": {
+                          "latitude": 37.005319061017914,
+                          "longitude": 129.41830769712652,
+                          "altitude": 0.359567339060935
+                        },
+                        "motion": {
+                          "heading": 143.7662534215505,
+                          "speed": 0.5
+                        },
+                        "battery_percent": 78.45,
+                        "sensors": {
+                          "gps": {
+                            "status": "ok"
+                          },
+                          "imu": {
+                            "status": "ok"
+                          },
+                          "sonar": {
+                            "status": "ok"
+                          },
+                          "battery": {
+                            "percent": 78.45
+                          },
+                          "telemetry": {
+                            "status": "ok"
+                          },
+                          "a2a": {
+                            "status": "ok"
+                          }
+                        }
+                      },
+                      "connected": true
+                    },
+                    "device_agent_judgement": "return_to_base",
+                    "payload": {
+                      "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+                      "source_device_id": "id-33be642e9ac8",
+                      "step_id": "step-1",
+                      "task_id": "task-1",
+                      "action": "return_to_base",
+                      "command": {
+                        "action": "return_to_base",
+                        "params": {
+                          "action": "return_to_base",
+                          "requested_action": "return_to_base",
+                          "location": {},
+                          "mission_type": "mine_clearance",
+                          "target_device_id": 3
+                        },
+                        "reason": "Generic Mission Proposal"
+                      },
+                      "result": {
+                        "status": "success",
+                        "action": "return_to_base",
+                        "result": {
+                          "delivered": true,
+                          "command": {
+                            "action": "return_to_base",
+                            "params": {
+                              "action": "return_to_base",
+                              "requested_action": "return_to_base",
+                              "location": {},
+                              "mission_type": "mine_clearance",
+                              "target_device_id": 3
+                            },
+                            "reason": "Generic Mission Proposal"
+                          },
+                          "at": "2026-05-07T08:22:26.349904+00:00"
+                        },
+                        "reason": "Generic Mission Proposal",
+                        "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                      },
+                      "reported_at": "2026-05-07T08:22:26.350128+00:00",
+                      "result_summary": "return_to_base completed",
+                      "output_refs": [],
+                      "failure_category": null,
+                      "failure_message": "Generic Mission Proposal",
+                      "location": {
+                        "latitude": 37.005319061017914,
+                        "longitude": 129.41830769712652
+                      },
+                      "device_state_changes": {
+                        "last_telemetry": {
+                          "device_id": "id-33be642e9ac8",
+                          "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                          "device_type": "USV",
+                          "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                          "position": {
+                            "latitude": 37.005319061017914,
+                            "longitude": 129.41830769712652,
+                            "altitude": 0.359567339060935
+                          },
+                          "motion": {
+                            "heading": 143.7662534215505,
+                            "speed": 0.5
+                          },
+                          "battery_percent": 78.45,
+                          "sensors": {
+                            "gps": {
+                              "status": "ok"
+                            },
+                            "imu": {
+                              "status": "ok"
+                            },
+                            "sonar": {
+                              "status": "ok"
+                            },
+                            "battery": {
+                              "percent": 78.45
+                            },
+                            "telemetry": {
+                              "status": "ok"
+                            },
+                            "a2a": {
+                              "status": "ok"
+                            }
+                          }
+                        },
+                        "connected": true
+                      },
+                      "agent_judgement": "return_to_base",
+                      "payload": {
+                        "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                        "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                        "alert_id": "",
+                        "step_id": "step-1",
+                        "task_id": "task-1",
+                        "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+                        "source_device_id": "id-33be642e9ac8",
+                        "location": {
+                          "latitude": 37.005319061017914,
+                          "longitude": 129.41830769712652
+                        }
+                      }
+                    },
+                    "received_at": "2026-05-07T08:22:26.362228+00:00"
+                  },
+                  "completed_at": "2026-05-07T08:22:26.362241+00:00"
+                }
+              ],
+              "completed_at": "2026-05-07T08:22:26.363235+00:00"
+            }
+          ],
+          "execution_results": [
+            {
+              "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+              "device_id": "id-33be642e9ac8",
+              "reporter": "usv-local-agent-1778141816-95942-a96448",
+              "step_id": "step-1",
+              "task_id": "task-1",
+              "task_status": "completed",
+              "status": "completed",
+              "acceptance_status": null,
+              "started_at": null,
+              "finished_at": null,
+              "success": true,
+              "failure_reason": "Generic Mission Proposal",
+              "failure_category": null,
+              "location": {
+                "latitude": 37.005319061017914,
+                "longitude": 129.41830769712652
+              },
+              "data_summary": "return_to_base completed",
+              "raw_data_ref": [],
+              "device_state_changes": {
+                "last_telemetry": {
+                  "device_id": "id-33be642e9ac8",
+                  "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                  "device_type": "USV",
+                  "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                  "position": {
+                    "latitude": 37.005319061017914,
+                    "longitude": 129.41830769712652,
+                    "altitude": 0.359567339060935
+                  },
+                  "motion": {
+                    "heading": 143.7662534215505,
+                    "speed": 0.5
+                  },
+                  "battery_percent": 78.45,
+                  "sensors": {
+                    "gps": {
+                      "status": "ok"
+                    },
+                    "imu": {
+                      "status": "ok"
+                    },
+                    "sonar": {
+                      "status": "ok"
+                    },
+                    "battery": {
+                      "percent": 78.45
+                    },
+                    "telemetry": {
+                      "status": "ok"
+                    },
+                    "a2a": {
+                      "status": "ok"
+                    }
+                  }
+                },
+                "connected": true
+              },
+              "device_agent_judgement": "return_to_base",
+              "payload": {
+                "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+                "source_device_id": "id-33be642e9ac8",
+                "step_id": "step-1",
+                "task_id": "task-1",
+                "action": "return_to_base",
+                "command": {
+                  "action": "return_to_base",
+                  "params": {
+                    "action": "return_to_base",
+                    "requested_action": "return_to_base",
+                    "location": {},
+                    "mission_type": "mine_clearance",
+                    "target_device_id": 3
+                  },
+                  "reason": "Generic Mission Proposal"
+                },
+                "result": {
+                  "status": "success",
+                  "action": "return_to_base",
+                  "result": {
+                    "delivered": true,
+                    "command": {
+                      "action": "return_to_base",
+                      "params": {
+                        "action": "return_to_base",
+                        "requested_action": "return_to_base",
+                        "location": {},
+                        "mission_type": "mine_clearance",
+                        "target_device_id": 3
+                      },
+                      "reason": "Generic Mission Proposal"
+                    },
+                    "at": "2026-05-07T08:22:26.349904+00:00"
+                  },
+                  "reason": "Generic Mission Proposal",
+                  "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                },
+                "reported_at": "2026-05-07T08:22:26.350128+00:00",
+                "result_summary": "return_to_base completed",
+                "output_refs": [],
+                "failure_category": null,
+                "failure_message": "Generic Mission Proposal",
+                "location": {
+                  "latitude": 37.005319061017914,
+                  "longitude": 129.41830769712652
+                },
+                "device_state_changes": {
+                  "last_telemetry": {
+                    "device_id": "id-33be642e9ac8",
+                    "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                    "device_type": "USV",
+                    "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                    "position": {
+                      "latitude": 37.005319061017914,
+                      "longitude": 129.41830769712652,
+                      "altitude": 0.359567339060935
+                    },
+                    "motion": {
+                      "heading": 143.7662534215505,
+                      "speed": 0.5
+                    },
+                    "battery_percent": 78.45,
+                    "sensors": {
+                      "gps": {
+                        "status": "ok"
+                      },
+                      "imu": {
+                        "status": "ok"
+                      },
+                      "sonar": {
+                        "status": "ok"
+                      },
+                      "battery": {
+                        "percent": 78.45
+                      },
+                      "telemetry": {
+                        "status": "ok"
+                      },
+                      "a2a": {
+                        "status": "ok"
+                      }
+                    }
+                  },
+                  "connected": true
+                },
+                "agent_judgement": "return_to_base",
+                "payload": {
+                  "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                  "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                  "alert_id": "",
+                  "step_id": "step-1",
+                  "task_id": "task-1",
+                  "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+                  "source_device_id": "id-33be642e9ac8",
+                  "location": {
+                    "latitude": 37.005319061017914,
+                    "longitude": 129.41830769712652
+                  }
+                }
+              },
+              "received_at": "2026-05-07T08:22:26.362228+00:00"
+            }
+          ],
+          "execution_result": {
+            "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+            "device_id": "id-33be642e9ac8",
+            "reporter": "usv-local-agent-1778141816-95942-a96448",
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "task_status": "completed",
+            "status": "completed",
+            "acceptance_status": null,
+            "started_at": null,
+            "finished_at": null,
+            "success": true,
+            "failure_reason": "Generic Mission Proposal",
+            "failure_category": null,
+            "location": {
+              "latitude": 37.005319061017914,
+              "longitude": 129.41830769712652
+            },
+            "data_summary": "return_to_base completed",
+            "raw_data_ref": [],
+            "device_state_changes": {
+              "last_telemetry": {
+                "device_id": "id-33be642e9ac8",
+                "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                "device_type": "USV",
+                "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                "position": {
+                  "latitude": 37.005319061017914,
+                  "longitude": 129.41830769712652,
+                  "altitude": 0.359567339060935
+                },
+                "motion": {
+                  "heading": 143.7662534215505,
+                  "speed": 0.5
+                },
+                "battery_percent": 78.45,
+                "sensors": {
+                  "gps": {
+                    "status": "ok"
+                  },
+                  "imu": {
+                    "status": "ok"
+                  },
+                  "sonar": {
+                    "status": "ok"
+                  },
+                  "battery": {
+                    "percent": 78.45
+                  },
+                  "telemetry": {
+                    "status": "ok"
+                  },
+                  "a2a": {
+                    "status": "ok"
+                  }
+                }
+              },
+              "connected": true
+            },
+            "device_agent_judgement": "return_to_base",
+            "payload": {
+              "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+              "source_device_id": "id-33be642e9ac8",
+              "step_id": "step-1",
+              "task_id": "task-1",
+              "action": "return_to_base",
+              "command": {
+                "action": "return_to_base",
+                "params": {
+                  "action": "return_to_base",
+                  "requested_action": "return_to_base",
+                  "location": {},
+                  "mission_type": "mine_clearance",
+                  "target_device_id": 3
+                },
+                "reason": "Generic Mission Proposal"
+              },
+              "result": {
+                "status": "success",
+                "action": "return_to_base",
+                "result": {
+                  "delivered": true,
+                  "command": {
+                    "action": "return_to_base",
+                    "params": {
+                      "action": "return_to_base",
+                      "requested_action": "return_to_base",
+                      "location": {},
+                      "mission_type": "mine_clearance",
+                      "target_device_id": 3
+                    },
+                    "reason": "Generic Mission Proposal"
+                  },
+                  "at": "2026-05-07T08:22:26.349904+00:00"
+                },
+                "reason": "Generic Mission Proposal",
+                "timestamp": "2026-05-07T08:22:26.349908+00:00"
+              },
+              "reported_at": "2026-05-07T08:22:26.350128+00:00",
+              "result_summary": "return_to_base completed",
+              "output_refs": [],
+              "failure_category": null,
+              "failure_message": "Generic Mission Proposal",
+              "location": {
+                "latitude": 37.005319061017914,
+                "longitude": 129.41830769712652
+              },
+              "device_state_changes": {
+                "last_telemetry": {
+                  "device_id": "id-33be642e9ac8",
+                  "agent_id": "usv-local-agent-1778141816-95942-a96448",
+                  "device_type": "USV",
+                  "timestamp": "2026-05-07T08:22:25.839754+00:00",
+                  "position": {
+                    "latitude": 37.005319061017914,
+                    "longitude": 129.41830769712652,
+                    "altitude": 0.359567339060935
+                  },
+                  "motion": {
+                    "heading": 143.7662534215505,
+                    "speed": 0.5
+                  },
+                  "battery_percent": 78.45,
+                  "sensors": {
+                    "gps": {
+                      "status": "ok"
+                    },
+                    "imu": {
+                      "status": "ok"
+                    },
+                    "sonar": {
+                      "status": "ok"
+                    },
+                    "battery": {
+                      "percent": 78.45
+                    },
+                    "telemetry": {
+                      "status": "ok"
+                    },
+                    "a2a": {
+                      "status": "ok"
+                    }
+                  }
+                },
+                "connected": true
+              },
+              "agent_judgement": "return_to_base",
+              "payload": {
+                "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                "mission_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+                "alert_id": "",
+                "step_id": "step-1",
+                "task_id": "task-1",
+                "source_agent_id": "usv-local-agent-1778141816-95942-a96448",
+                "source_device_id": "id-33be642e9ac8",
+                "location": {
+                  "latitude": 37.005319061017914,
+                  "longitude": 129.41830769712652
+                }
+              }
+            },
+            "received_at": "2026-05-07T08:22:26.362228+00:00"
+          },
+          "execution_aggregate_status": "planned",
+          "step_evaluations": {
+            "step-1": {
+              "at": "2026-05-07T08:22:26.363250+00:00",
+              "response_id": "mission-394cf665-37a5-4aac-a338-ce6a881ba3a0",
+              "step_id": "step-1",
+              "step_type": "generic_action",
+              "policy": "all_tasks_success_v1",
+              "task_total": 1,
+              "completed_task_count": 1,
+              "failed_task_count": 0,
+              "usable_task_count": 1,
+              "step_execution_status": "completed",
+              "sufficient": true,
+              "decision": "proceed_next_step",
+              "reason": "all tasks completed successfully"
+            }
+          },
+          "replan_history": []
+        }
+      },
+      "created_at": "2026-05-07T08:22:25.954947+00:00",
+      "updated_at": "2026-05-07T08:22:26.364938+00:00",
+      "approved_at": "2026-05-07T08:22:25.953576+00:00",
+      "started_at": "2026-05-07T08:22:25.959028+00:00",
+      "completed_at": "2026-05-07T08:22:26.363283+00:00"
+    },
+    "mission-8741da05-212e-46c7-b9a9-91d46a98f48f": {
+      "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+      "title": "기뢰 탐지 Proposal",
+      "mission_type": "generic_mission",
+      "goal": "주변 기뢰 모두 탐지",
+      "status": "running",
+      "summary": "Manual trigger activated by user.",
+      "source": "operation_plan_manual_trigger",
+      "alert_id": null,
+      "event_id": null,
+      "operation_plan_id": "op-5b7b8e30-c846-483f-94e2-a603d1b01ae3",
+      "proposal_id": "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f",
+      "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945",
+      "insight_id": "insight-7a382e9c-8ddb-43a3-9cef-9058be533a20",
+      "steps": [
+        {
+          "step_id": "step-1",
+          "step_type": "generic_action",
+          "evaluation_policy": "all_tasks_success_v1",
+          "depends_on": [],
+          "tasks": [
+            {
+              "task_id": "task-1",
+              "logical_task_id": "task-1",
+              "attempt": 0,
+              "attempted_device_ids": [
+                3
+              ],
+              "action": "return_to_base",
+              "requested_action": "return_to_base",
+              "target_device_id": 3,
+              "target_device_name": "작업용 USV",
+              "target_device_type": "USV",
+              "route_agent_id": 2,
+              "route_agent_name": "통제 함정",
+              "route_endpoint": "http://127.0.0.1:9115",
+              "params": {
+                "action": "return_to_base",
+                "requested_action": "return_to_base",
+                "location": {},
+                "mission_type": "mine_clearance",
+                "target_device_id": 3
+              },
+              "dispatch_status": "dispatched",
+              "execution_status": "pending",
+              "completed_at": null
+            }
+          ],
+          "status": "dispatched"
+        }
+      ],
+      "timeline": [
+        {
+          "timestamp": "2026-05-07T08:24:02.524603+00:00",
+          "type": "mission_created",
+          "message": "Mission created from approved proposal.",
+          "data": {
+            "proposal_id": "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f",
+            "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.524616+00:00",
+          "type": "user_approval",
+          "message": "User approval recorded.",
+          "data": {
+            "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.536534+00:00",
+          "type": "mission_started",
+          "message": "Mission execution started.",
+          "data": {
+            "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.971797+00:00",
+          "type": "step_started",
+          "message": "Step step-1 started.",
+          "data": {
+            "step_id": "step-1",
+            "step_type": "generic_action"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.971809+00:00",
+          "type": "task_started",
+          "message": "Task task-1 dispatched for execution.",
+          "data": {
+            "step_id": "step-1",
+            "task_id": "task-1",
+            "target_device_id": 3,
+            "route_agent_id": 2,
+            "dispatch": {
+              "delivered": true,
+              "endpoint": "http://127.0.0.1:9115",
+              "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+              "a2a_result": {
+                "jsonrpc": "2.0",
+                "id": "dcd3cfa9-7073-44d7-8801-e587702ca757",
+                "result": {
+                  "id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1",
+                  "status": {
+                    "state": "completed"
+                  },
+                  "createdAt": "2026-05-07T08:24:02.964194+00:00",
+                  "updatedAt": "2026-05-07T08:24:02.964194+00:00",
+                  "message": {
+                    "role": "user",
+                    "parts": [
+                      {
+                        "type": "data",
+                        "text": null,
+                        "data": {
+                          "message_type": "task.assign",
+                          "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                          "action": "return_to_base",
+                          "params": {
+                            "action": "return_to_base",
+                            "requested_action": "return_to_base",
+                            "location": {},
+                            "mission_type": "mine_clearance",
+                            "target_device_id": 3
+                          },
+                          "reason": "기뢰 탐지 Proposal",
+                          "alert_id": null,
+                          "response_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                          "step_id": "step-1",
+                          "task_id": "task-1"
+                        }
+                      }
+                    ]
+                  },
+                  "artifacts": [
+                    {
+                      "name": "result",
+                      "parts": [
+                        {
+                          "type": "data",
+                          "data": {
+                            "task_id": "task-1",
+                            "status": "completed",
+                            "execution_result": {
+                              "status": "success",
+                              "action": "return_to_base",
+                              "result": {
+                                "delivered": true,
+                                "command": {
+                                  "action": "return_to_base",
+                                  "params": {
+                                    "action": "return_to_base",
+                                    "requested_action": "return_to_base",
+                                    "location": {},
+                                    "mission_type": "mine_clearance",
+                                    "target_device_id": 3
+                                  },
+                                  "reason": "Generic Mission Proposal"
+                                },
+                                "at": "2026-05-07T08:22:26.349904+00:00"
+                              },
+                              "reason": "Generic Mission Proposal",
+                              "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                            },
+                            "relayed": true,
+                            "relayed_to_device_id": "3",
+                            "relayed_to_endpoint": "http://127.0.0.1:9111"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "acceptance_status": "COMPLETED",
+              "reason": null
+            }
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.971815+00:00",
+          "type": "task_dispatched",
+          "message": "Initial mission step dispatched.",
+          "data": {
+            "delivered": true,
+            "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1",
+            "step_id": "step-1",
+            "task_results": [
+              {
+                "task_id": "task-1",
+                "action": "return_to_base",
+                "target_device_id": 3,
+                "route_agent_id": 2,
+                "dispatch": {
+                  "delivered": true,
+                  "endpoint": "http://127.0.0.1:9115",
+                  "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                  "a2a_result": {
+                    "jsonrpc": "2.0",
+                    "id": "dcd3cfa9-7073-44d7-8801-e587702ca757",
+                    "result": {
+                      "id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1",
+                      "status": {
+                        "state": "completed"
+                      },
+                      "createdAt": "2026-05-07T08:24:02.964194+00:00",
+                      "updatedAt": "2026-05-07T08:24:02.964194+00:00",
+                      "message": {
+                        "role": "user",
+                        "parts": [
+                          {
+                            "type": "data",
+                            "text": null,
+                            "data": {
+                              "message_type": "task.assign",
+                              "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                              "action": "return_to_base",
+                              "params": {
+                                "action": "return_to_base",
+                                "requested_action": "return_to_base",
+                                "location": {},
+                                "mission_type": "mine_clearance",
+                                "target_device_id": 3
+                              },
+                              "reason": "기뢰 탐지 Proposal",
+                              "alert_id": null,
+                              "response_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                              "step_id": "step-1",
+                              "task_id": "task-1"
+                            }
+                          }
+                        ]
+                      },
+                      "artifacts": [
+                        {
+                          "name": "result",
+                          "parts": [
+                            {
+                              "type": "data",
+                              "data": {
+                                "task_id": "task-1",
+                                "status": "completed",
+                                "execution_result": {
+                                  "status": "success",
+                                  "action": "return_to_base",
+                                  "result": {
+                                    "delivered": true,
+                                    "command": {
+                                      "action": "return_to_base",
+                                      "params": {
+                                        "action": "return_to_base",
+                                        "requested_action": "return_to_base",
+                                        "location": {},
+                                        "mission_type": "mine_clearance",
+                                        "target_device_id": 3
+                                      },
+                                      "reason": "Generic Mission Proposal"
+                                    },
+                                    "at": "2026-05-07T08:22:26.349904+00:00"
+                                  },
+                                  "reason": "Generic Mission Proposal",
+                                  "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                                },
+                                "relayed": true,
+                                "relayed_to_device_id": "3",
+                                "relayed_to_endpoint": "http://127.0.0.1:9111"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "acceptance_status": "COMPLETED",
+                  "reason": null
+                }
+              }
+            ],
+            "steps": [
+              {
+                "step_id": "step-1",
+                "depends_on": [],
+                "status": "dispatched",
+                "tasks": [
+                  {
+                    "task_id": "task-1",
+                    "logical_task_id": "task-1",
+                    "attempt": 0,
+                    "attempted_device_ids": [
+                      3
+                    ],
+                    "action": "return_to_base",
+                    "target_device_id": 3,
+                    "target_device_name": "작업용 USV",
+                    "route_agent_id": 2,
+                    "route_agent_name": "통제 함정",
+                    "dispatch_status": "dispatched",
+                    "execution_status": "pending",
+                    "dispatch": {
+                      "delivered": true,
+                      "endpoint": "http://127.0.0.1:9115",
+                      "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                      "a2a_result": {
+                        "jsonrpc": "2.0",
+                        "id": "dcd3cfa9-7073-44d7-8801-e587702ca757",
+                        "result": {
+                          "id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1",
+                          "status": {
+                            "state": "completed"
+                          },
+                          "createdAt": "2026-05-07T08:24:02.964194+00:00",
+                          "updatedAt": "2026-05-07T08:24:02.964194+00:00",
+                          "message": {
+                            "role": "user",
+                            "parts": [
+                              {
+                                "type": "data",
+                                "text": null,
+                                "data": {
+                                  "message_type": "task.assign",
+                                  "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                                  "action": "return_to_base",
+                                  "params": {
+                                    "action": "return_to_base",
+                                    "requested_action": "return_to_base",
+                                    "location": {},
+                                    "mission_type": "mine_clearance",
+                                    "target_device_id": 3
+                                  },
+                                  "reason": "기뢰 탐지 Proposal",
+                                  "alert_id": null,
+                                  "response_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                                  "step_id": "step-1",
+                                  "task_id": "task-1"
+                                }
+                              }
+                            ]
+                          },
+                          "artifacts": [
+                            {
+                              "name": "result",
+                              "parts": [
+                                {
+                                  "type": "data",
+                                  "data": {
+                                    "task_id": "task-1",
+                                    "status": "completed",
+                                    "execution_result": {
+                                      "status": "success",
+                                      "action": "return_to_base",
+                                      "result": {
+                                        "delivered": true,
+                                        "command": {
+                                          "action": "return_to_base",
+                                          "params": {
+                                            "action": "return_to_base",
+                                            "requested_action": "return_to_base",
+                                            "location": {},
+                                            "mission_type": "mine_clearance",
+                                            "target_device_id": 3
+                                          },
+                                          "reason": "Generic Mission Proposal"
+                                        },
+                                        "at": "2026-05-07T08:22:26.349904+00:00"
+                                      },
+                                      "reason": "Generic Mission Proposal",
+                                      "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                                    },
+                                    "relayed": true,
+                                    "relayed_to_device_id": "3",
+                                    "relayed_to_endpoint": "http://127.0.0.1:9111"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "acceptance_status": "COMPLETED",
+                      "reason": null
+                    },
+                    "acceptance_status": "COMPLETED",
+                    "failure_message": null,
+                    "dispatched_task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1"
+                  }
+                ]
+              }
+            ],
+            "execution_results": [],
+            "execution_result": null,
+            "execution_aggregate_status": "planned",
+            "step_evaluations": {},
+            "replan_history": []
+          }
+        }
+      ],
+      "logs": [
+        {
+          "timestamp": "2026-05-07T08:24:02.524603+00:00",
+          "type": "mission_created",
+          "message": "Mission created from approved proposal.",
+          "data": {
+            "proposal_id": "proposal-64ab4aac-8935-4e0f-93e5-5c43c821572f",
+            "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945"
+          }
+        },
+        {
+          "timestamp": "2026-05-07T08:24:02.524616+00:00",
+          "type": "user_approval",
+          "message": "User approval recorded.",
+          "data": {
+            "approval_id": "approval-3b71dbdc-7d39-472c-8d72-b26f0a0ea945"
+          }
+        }
+      ],
+      "device_execution_results": [],
+      "final_result": {},
+      "metadata": {
+        "location": {},
+        "fingerprint": "generic_mission:주변 기뢰 모두 탐지:",
+        "dispatch_state": {
+          "delivered": true,
+          "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1",
+          "step_id": "step-1",
+          "task_results": [
+            {
+              "task_id": "task-1",
+              "action": "return_to_base",
+              "target_device_id": 3,
+              "route_agent_id": 2,
+              "dispatch": {
+                "delivered": true,
+                "endpoint": "http://127.0.0.1:9115",
+                "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                "a2a_result": {
+                  "jsonrpc": "2.0",
+                  "id": "dcd3cfa9-7073-44d7-8801-e587702ca757",
+                  "result": {
+                    "id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1",
+                    "status": {
+                      "state": "completed"
+                    },
+                    "createdAt": "2026-05-07T08:24:02.964194+00:00",
+                    "updatedAt": "2026-05-07T08:24:02.964194+00:00",
+                    "message": {
+                      "role": "user",
+                      "parts": [
+                        {
+                          "type": "data",
+                          "text": null,
+                          "data": {
+                            "message_type": "task.assign",
+                            "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                            "action": "return_to_base",
+                            "params": {
+                              "action": "return_to_base",
+                              "requested_action": "return_to_base",
+                              "location": {},
+                              "mission_type": "mine_clearance",
+                              "target_device_id": 3
+                            },
+                            "reason": "기뢰 탐지 Proposal",
+                            "alert_id": null,
+                            "response_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                            "step_id": "step-1",
+                            "task_id": "task-1"
+                          }
+                        }
+                      ]
+                    },
+                    "artifacts": [
+                      {
+                        "name": "result",
+                        "parts": [
+                          {
+                            "type": "data",
+                            "data": {
+                              "task_id": "task-1",
+                              "status": "completed",
+                              "execution_result": {
+                                "status": "success",
+                                "action": "return_to_base",
+                                "result": {
+                                  "delivered": true,
+                                  "command": {
+                                    "action": "return_to_base",
+                                    "params": {
+                                      "action": "return_to_base",
+                                      "requested_action": "return_to_base",
+                                      "location": {},
+                                      "mission_type": "mine_clearance",
+                                      "target_device_id": 3
+                                    },
+                                    "reason": "Generic Mission Proposal"
+                                  },
+                                  "at": "2026-05-07T08:22:26.349904+00:00"
+                                },
+                                "reason": "Generic Mission Proposal",
+                                "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                              },
+                              "relayed": true,
+                              "relayed_to_device_id": "3",
+                              "relayed_to_endpoint": "http://127.0.0.1:9111"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "acceptance_status": "COMPLETED",
+                "reason": null
+              }
+            }
+          ],
+          "steps": [
+            {
+              "step_id": "step-1",
+              "depends_on": [],
+              "status": "dispatched",
+              "tasks": [
+                {
+                  "task_id": "task-1",
+                  "logical_task_id": "task-1",
+                  "attempt": 0,
+                  "attempted_device_ids": [
+                    3
+                  ],
+                  "action": "return_to_base",
+                  "target_device_id": 3,
+                  "target_device_name": "작업용 USV",
+                  "route_agent_id": 2,
+                  "route_agent_name": "통제 함정",
+                  "dispatch_status": "dispatched",
+                  "execution_status": "pending",
+                  "dispatch": {
+                    "delivered": true,
+                    "endpoint": "http://127.0.0.1:9115",
+                    "task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                    "a2a_result": {
+                      "jsonrpc": "2.0",
+                      "id": "dcd3cfa9-7073-44d7-8801-e587702ca757",
+                      "result": {
+                        "id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1",
+                        "status": {
+                          "state": "completed"
+                        },
+                        "createdAt": "2026-05-07T08:24:02.964194+00:00",
+                        "updatedAt": "2026-05-07T08:24:02.964194+00:00",
+                        "message": {
+                          "role": "user",
+                          "parts": [
+                            {
+                              "type": "data",
+                              "text": null,
+                              "data": {
+                                "message_type": "task.assign",
+                                "mission_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                                "action": "return_to_base",
+                                "params": {
+                                  "action": "return_to_base",
+                                  "requested_action": "return_to_base",
+                                  "location": {},
+                                  "mission_type": "mine_clearance",
+                                  "target_device_id": 3
+                                },
+                                "reason": "기뢰 탐지 Proposal",
+                                "alert_id": null,
+                                "response_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f",
+                                "step_id": "step-1",
+                                "task_id": "task-1"
+                              }
+                            }
+                          ]
+                        },
+                        "artifacts": [
+                          {
+                            "name": "result",
+                            "parts": [
+                              {
+                                "type": "data",
+                                "data": {
+                                  "task_id": "task-1",
+                                  "status": "completed",
+                                  "execution_result": {
+                                    "status": "success",
+                                    "action": "return_to_base",
+                                    "result": {
+                                      "delivered": true,
+                                      "command": {
+                                        "action": "return_to_base",
+                                        "params": {
+                                          "action": "return_to_base",
+                                          "requested_action": "return_to_base",
+                                          "location": {},
+                                          "mission_type": "mine_clearance",
+                                          "target_device_id": 3
+                                        },
+                                        "reason": "Generic Mission Proposal"
+                                      },
+                                      "at": "2026-05-07T08:22:26.349904+00:00"
+                                    },
+                                    "reason": "Generic Mission Proposal",
+                                    "timestamp": "2026-05-07T08:22:26.349908+00:00"
+                                  },
+                                  "relayed": true,
+                                  "relayed_to_device_id": "3",
+                                  "relayed_to_endpoint": "http://127.0.0.1:9111"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "acceptance_status": "COMPLETED",
+                    "reason": null
+                  },
+                  "acceptance_status": "COMPLETED",
+                  "failure_message": null,
+                  "dispatched_task_id": "mission-8741da05-212e-46c7-b9a9-91d46a98f48f:step-1:task-1"
+                }
+              ]
+            }
+          ],
+          "execution_results": [],
+          "execution_result": null,
+          "execution_aggregate_status": "planned",
+          "step_evaluations": {},
+          "replan_history": []
+        }
+      },
+      "created_at": "2026-05-07T08:24:02.528583+00:00",
+      "updated_at": "2026-05-07T08:24:02.973633+00:00",
+      "approved_at": "2026-05-07T08:24:02.524635+00:00",
+      "started_at": "2026-05-07T08:24:02.536522+00:00",
+      "completed_at": null
+    }
+  }
+}
