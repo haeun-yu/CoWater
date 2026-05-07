@@ -144,8 +144,12 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return {"relayed": True, "child": child_id}
 
     @app.post("/device-recovery")
-    async def handle_device_recovery(payload: dict[str, Any]) -> dict[str, Any]:
+    async def handle_device_recovery(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         """Device Agent 복구 후 로컬 상태 보고 (Ch.16)"""
+        # P1 원칙: Internal 호출만 허용 (보안)
+        internal_token = request.headers.get("x_cowater_internal", "")
+        if not internal_token or internal_token != runtime.config.get("internal_auth_token"):
+            raise HTTPException(status_code=401, detail="Missing or invalid x_cowater_internal header")
         device_id = str(payload.get("device_id") or "")
         if not device_id:
             raise HTTPException(status_code=400, detail="device_id required")

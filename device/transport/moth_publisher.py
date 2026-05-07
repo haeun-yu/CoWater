@@ -349,9 +349,12 @@ class MothPublisher:
         if not self.enabled:
             return
 
-        device_id = self.state.registry_id
-        if not device_id:
+        # P8 원칙: Telemetry 초기화 보호 - initialize() 호출 후에만 발행
+        if not self.telemetry_url or not self.state.registry_id:
+            logger.debug("Telemetry 발행 준비 미완료: registry_id 또는 telemetry_url 미설정")
             return
+
+        device_id = self.state.registry_id
 
         # Base 페이로드
         base_payload: dict[str, Any] = {
@@ -442,10 +445,21 @@ class MothPublisher:
         - 프론트엔드가 from/to 파싱해 디바이스 간 직접 링크 표시
         """
         if not self.enabled or not self.state.registry_id:
+            self._log_throttled(
+                "a2a_publish_skipped_unavailable",
+                logging.DEBUG,
+                "A2A publish skipped: publisher disabled or device not registered",
+                interval=30.0,
+            )
             return
 
         if not self.track_connected.get("A2A") or self._is_closed(self.track_ws_dict.get("A2A")):
-            logger.debug("A2A 트랙 미연결: A2A 이벤트 발행 건너뜀")
+            self._log_throttled(
+                "a2a_publish_skipped_track",
+                logging.WARNING,
+                "A2A publish skipped: track not connected or closed",
+                interval=10.0,
+            )
             return
 
         event: dict = {

@@ -42,15 +42,18 @@ async def _execute_and_report_task(
                 execution_status=normalized_status,
                 endpoint=report_endpoint,
             )
-        else:
-            await _report_task_result_to_system_agent(
-                runtime=runtime,
-                task_id=task_id,
-                command=command,
-                execution_result=execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
-                execution_status=normalized_status,
-                system_agent_url=report_endpoint,
-            )
+        await _report_task_result_to_system_agent(
+            runtime=runtime,
+            task_id=task_id,
+            command=command,
+            execution_result=execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
+            execution_status=normalized_status,
+            system_agent_url=report_endpoint,
+            mission_id=mission_id or None,
+            alert_id=str(message_data.get("alert_id") or ""),
+            step_id=str(message_data.get("step_id") or ""),
+            response_id=str(message_data.get("response_id") or mission_id or ""),
+        )
 
         if normalized_status == "failed":
             category = execution_result.get("failure_category", "").lower().strip()
@@ -158,6 +161,10 @@ async def _report_task_result_to_system_agent(
     execution_result: dict[str, Any],
     execution_status: str,
     system_agent_url: str = "http://127.0.0.1:9116/message:send",
+    mission_id: str | None = None,
+    alert_id: str | None = None,
+    step_id: str | None = None,
+    response_id: str | None = None,
 ) -> None:
     try:
         normalized_status = "completed" if str(execution_status).lower() == "completed" else "failed"
@@ -169,6 +176,10 @@ async def _report_task_result_to_system_agent(
                     data={
                         "message_type": "task.result",
                         "task_id": task_id,
+                        "mission_id": mission_id,
+                        "response_id": response_id or mission_id or task_id,
+                        "alert_id": alert_id,
+                        "step_id": step_id,
                         "status": normalized_status,
                         "device_id": runtime.state.registry_id,
                         "agent_id": runtime.state.agent_id,

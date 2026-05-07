@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,32 +14,32 @@ def load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def test_device_llm_can_be_disabled_by_environment(monkeypatch) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
+def test_device_llm_requires_ollama(monkeypatch) -> None:
     llm_client = load_module(
         "device_llm_client_for_test",
         ROOT / "device" / "agent" / "llm_client.py",
     )
 
-    client = llm_client.make_llm_client({"enabled": True, "provider": "ollama"})
+    with patch.object(llm_client.urllib.request, "urlopen", side_effect=OSError("connection refused")):
+        with pytest.raises(RuntimeError, match="Ollama is not available"):
+            llm_client.make_llm_client({"provider": "ollama", "endpoint": "http://localhost:11434", "model": "test"})
 
-    assert client.__class__.__name__ == "FallbackClient"
 
-
-def test_system_llm_can_be_disabled_by_environment(monkeypatch) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
+def test_system_llm_requires_ollama(monkeypatch) -> None:
     llm_client = load_module(
         "system_llm_client_for_test",
         ROOT / "server" / "system-agent" / "agent" / "llm_client.py",
     )
 
-    client = llm_client.make_llm_client({"enabled": True, "provider": "ollama"})
-
-    assert client.__class__.__name__ == "FallbackClient"
+    with patch.object(llm_client.urllib.request, "urlopen", side_effect=OSError("connection refused")):
+        with pytest.raises(RuntimeError, match="Ollama is not available"):
+            llm_client.make_llm_client({"provider": "ollama", "endpoint": "http://localhost:11434", "model": "test"})
 
 
 def test_moth_publisher_can_be_disabled_by_environment(monkeypatch) -> None:
@@ -64,10 +67,18 @@ def test_system_fleet_summary_accepts_registry_public_ids(monkeypatch) -> None:
     from agent.decision import DecisionEngine
     from skills.catalog import SkillCatalog
 
-    engine = DecisionEngine(
-        {"llm": {"enabled": False}},
-        SkillCatalog({"actions": ["mission.plan"]}),
-    )
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    with patch("urllib.request.urlopen", return_value=DummyResponse()):
+        engine = DecisionEngine(
+            {"llm": {"provider": "ollama", "endpoint": "http://localhost:11434", "model": "test"}},
+            SkillCatalog({"actions": ["mission.plan"]}),
+        )
 
     summary = engine._fleet_summary(
         [

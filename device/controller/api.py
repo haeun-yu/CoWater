@@ -86,7 +86,13 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     async def command(token: str, request: CommandRequest) -> dict[str, Any]:
         if runtime.state.token and token != runtime.state.token:
             raise HTTPException(status_code=403, detail="token mismatch")
-        return runtime.apply_command(request.model_dump())
+        # P5 원칙: Device Agent가 최종 판단 (입력 검증)
+        command_dict = request.model_dump()
+        action = command_dict.get("action", "")
+        available_actions = runtime.skills.list_actions()
+        if action and action not in available_actions:
+            raise HTTPException(status_code=400, detail=f"Unknown action: {action}. Available: {available_actions}")
+        return runtime.apply_command(command_dict)
 
     @app.post("/children/register")
     async def register_child(child: dict[str, Any]) -> dict[str, Any]:

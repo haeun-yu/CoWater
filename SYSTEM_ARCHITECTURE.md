@@ -215,6 +215,12 @@ System Agent는 CoWater 전체 운영을 판단하고 조율하는 Agent다.
 - 사용자 명령, Operation Plan, Event, Alert는 Mission 생성의 트리거가 될 수 있다.
 - Mission은 Step과 Task로 구성할 수 있다.
 - Task는 Device Agent 또는 Middle-layer Agent에 할당한다.
+- **Task를 Device에 할당할 때, System Agent는 다음을 모두 고려하여 최적의 Device를 선택한다:**
+  - **Device의 가능한 작업 (available_actions) vs Task 요구 작업 (required_action): 매칭 확인**
+  - **Device의 현재 위치 (latitude, longitude) vs Task 수행 위치: 거리 최소화**
+  - **Device의 현재 배터리 상태 (battery_percent): 충분한지 확인**
+  - **Device의 현재 상태 (connected, reservation_status): ONLINE 상태 확인**
+  - Action alias 지원 (예: survey_depth ← scan_area, sonar_scanning)
 - LOST / OFFLINE 상태의 Device Agent에는 신규 Task를 할당하지 않는다.
 - 동일 문제 Alert는 fingerprint 기반으로 중복 생성하지 않는다.
 - 사용자가 거절한 동일 추천은 일정 시간 반복하지 않는다.
@@ -284,7 +290,11 @@ Device Agent는 자기 디바이스를 이해하고, 상태를 관리하며, 할
 ### 규칙
 
 - Device Agent는 등록 시 자기 정보, 센서 목록, 수행 가능 작업, Agent 주소, 계층 정보를 보고한다.
-- 센서 상태 변화가 발생하면 System Agent에 보고한다.
+- **Device Agent는 주기적 (기본: 1초마다) healthcheck를 통해 자신의 위치(latitude, longitude), 배터리 상태(battery_percent)를 Registry에 보고한다.**
+  - 이를 통해 System Agent가 Task 분배 시 Device의 물리적 위치와 배터리 상태를 고려할 수 있게 한다.
+  - Registry는 이 정보를 source of truth로 유지한다.
+- **센서 상태 변화가 발생하면 A2A 메시지로 System Agent에 즉시 보고한다.**
+  - 매번 healthcheck에 센서 상태를 포함하지 않고, 변화가 있을 때만 즉시 전달하여 통신량을 최소화한다.
 - Device Agent는 센서 데이터를 지속적으로 System Agent에 보내지 않는다.
 - Device Agent는 Task를 받으면 ACCEPTED 또는 REJECTED를 반환한다.
 - REJECTED인 경우 reason을 함께 반환한다.
