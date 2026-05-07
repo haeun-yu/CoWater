@@ -5,119 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CoWater Mission Detail</title>
     <style>
-      :root {
-        --bg: #f3f1eb;
-        --card: #fffdfa;
-        --ink: #1e2b2a;
-        --muted: #687370;
-        --line: #dadfd5;
-        --accent: #006d5b;
-        --danger: #aa3131;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "IBM Plex Sans KR", "Noto Sans KR", sans-serif;
-        background:
-          radial-gradient(circle at top right, rgba(0,109,91,0.1), transparent 26%),
-          linear-gradient(180deg, #f7f5ef, #eef1e7);
-        color: var(--ink);
-      }
-      header {
-        padding: 24px 20px;
-        border-bottom: 1px solid var(--line);
-      }
-      h1 { margin: 0; font-size: 28px; }
-      .sub { color: var(--muted); margin-top: 6px; }
-      main {
-        padding: 20px;
-        display: grid;
+      main.page-main-grid {
         grid-template-columns: 1.2fr 0.8fr;
-        gap: 16px;
-      }
-      .stack { display: grid; gap: 16px; }
-      .card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        padding: 16px;
-        box-shadow: 0 10px 24px rgba(30,43,42,0.05);
-      }
-      .card h2 { margin: 0 0 12px; font-size: 18px; }
-      .pill {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #e6f2ef;
-        color: var(--accent);
-        font-size: 11px;
-      }
-      .meta {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .step, .entry, .timeline-item {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 12px;
-        background: rgba(255,255,255,0.75);
-      }
-      .task {
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px dashed var(--line);
-      }
-      .timeline-item {
-        border-left: 4px solid var(--accent);
-      }
-      .event-badge {
-        display: inline-block;
-        padding: 4px 10px;
-        border-radius: 6px;
-        background: var(--accent);
-        color: white;
-        font-size: 11px;
-        font-weight: 600;
-        margin-right: 8px;
-      }
-      .actor-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: #f0f0f0;
-        color: #666;
-        font-size: 10px;
-        margin-left: 4px;
-      }
-      .task-state {
-        display: inline-block;
-        padding: 3px 7px;
-        border-radius: 4px;
-        font-size: 10px;
-        font-weight: 600;
-        margin-left: 4px;
-      }
-      .task-state.pending { background: #e8e8e8; color: #666; }
-      .task-state.assigned { background: #d4e6ff; color: #006d5b; }
-      .task-state.running { background: #fff4e6; color: #c85e00; }
-      .task-state.completed { background: #d4edda; color: #155724; }
-      .task-state.failed { background: #f8d7da; color: #721c24; }
-      .task-state.rejected { background: #f5c6cb; color: #721c24; }
-      pre {
-        white-space: pre-wrap;
-        word-break: break-word;
-        background: #f5f6f2;
-        border-radius: 12px;
-        padding: 10px;
-        overflow: auto;
-      }
-      a { color: var(--accent); text-decoration: none; }
-      .empty { color: var(--muted); }
-      @media (max-width: 900px) {
-        main { grid-template-columns: 1fr; }
       }
     </style>
     <link rel="stylesheet" href="assets/common.css" />
@@ -140,7 +29,7 @@
       <h1 id="title">Mission</h1>
       <div class="sub" id="summary">Loading…</div>
     </header>
-    <main>
+    <main class="page-main-grid">
       <div class="stack">
         <section class="card">
           <h2>Mission Status</h2>
@@ -168,9 +57,10 @@
     </main>
     <script src="assets/common.js"></script>
     <script>
-      const REGISTRY = "http://127.0.0.1:8280";
+      const { registryBase: REGISTRY, mothWsBase: MOTH_BASE } = window.CoWaterUI.config;
       const missionId = new URLSearchParams(location.search).get("id");
       const { escapeHtml } = window.CoWaterUI;
+      const missionSocketState = {};
 
       async function load() {
         if (!missionId) {
@@ -300,14 +190,27 @@
 
       load();
 
-      // WebSocket 구독: 실시간 미션 업데이트
-      const MOTH_BASE = "wss://cobot.center:8287";
+      function scheduleReconnect() {
+        const entry = missionSocketState.mission || (missionSocketState.mission = {});
+        if (entry.timer) return;
+        entry.timer = setTimeout(() => {
+          entry.timer = null;
+          subscribeToMission();
+        }, 5000);
+      }
+
       const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=mission.${missionId}&source=mission-client&track=mission-client`;
       let missionWs = null;
 
       function subscribeToMission() {
         try {
           missionWs = new WebSocket(wsUrl);
+          const entry = missionSocketState.mission || (missionSocketState.mission = {});
+          entry.ws = missionWs;
+          if (entry.timer) {
+            clearTimeout(entry.timer);
+            entry.timer = null;
+          }
 
           missionWs.onopen = () => {
             missionWs.send(JSON.stringify({ type: "subscribe", channel: `mission.${missionId}`, channel_type: "meb" }));
@@ -334,19 +237,27 @@
 
           missionWs.onerror = () => {
             console.warn("[Moth] mission connection error");
-            setTimeout(subscribeToMission, 5000);
+            if (missionSocketState.mission?.ws === missionWs) scheduleReconnect();
           };
 
           missionWs.onclose = () => {
-            setTimeout(subscribeToMission, 5000);
+            if (missionSocketState.mission?.ws === missionWs) scheduleReconnect();
           };
         } catch (err) {
           console.warn("[Moth] Failed to subscribe to mission:", err);
-          setTimeout(subscribeToMission, 5000);
+          scheduleReconnect();
         }
       }
 
       subscribeToMission();
+
+      window.addEventListener("beforeunload", () => {
+        const entry = missionSocketState.mission;
+        if (entry?.timer) clearTimeout(entry.timer);
+        if (missionWs) {
+          try { missionWs.close(); } catch (e) {}
+        }
+      });
     </script>
   </body>
 </html>

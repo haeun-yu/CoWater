@@ -18,7 +18,7 @@
   --warn: #fbbf24;
   --danger: #f87171;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; }
 body {
   background: radial-gradient(ellipse at top, rgba(30,58,138,0.18) 0%, transparent 50%),
               linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
@@ -26,24 +26,31 @@ body {
   font-family: Inter, "Segoe UI", sans-serif;
   min-height: 100vh;
   font-size: 13px;
+  margin: 0;
 }
 .topbar {
-  position: sticky; top: 0; z-index: 100;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 0 24px; height: 56px;
   background: rgba(6,14,28,0.95);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(16px);
 }
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand-icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: grid; place-items: center; font-size: 1rem; }
-.brand h1 { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; }
-.brand span { font-size: 0.7rem; color: var(--muted); margin-left: 6px; }
-.nav { display: flex; gap: 4px; }
-.nav a { padding: 6px 14px; border-radius: 6px; font-size: 0.8rem; color: var(--muted); text-decoration: none; }
-.nav a.active { color: var(--accent); background: rgba(96,165,250,0.08); }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
-.btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 0.78rem; cursor: pointer; transition: all 0.15s; }
+.topbar .nav a {
+  color: var(--muted);
+}
+.topbar .nav a.active,
+.topbar .nav a:hover {
+  color: var(--accent);
+  background: rgba(96,165,250,0.08);
+  border-color: rgba(96,165,250,0.15);
+}
+.btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .wrap { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
 .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
@@ -70,13 +77,16 @@ body {
 .message-item { padding: 8px; background: rgba(20,32,56,0.6); border-radius: 6px; border-left: 3px solid var(--accent); font-size: 0.7rem; }
 .message-ts { color: var(--muted); font-size: 0.65rem; }
 .empty { text-align: center; padding: 30px 16px; color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+}
 </style>
 <link rel="stylesheet" href="assets/common.css">
 </head>
 <body>
 
 <nav class="topbar">
-  <div style="display:flex;align-items:center;gap:20px">
+  <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
     <div class="brand">
       <div class="brand-icon">🌊</div>
       <h1>CoWater<span>디바이스</span></h1>
@@ -149,16 +159,53 @@ body {
 
 <script src="assets/common.js"></script>
 <script>
-const R='http://127.0.0.1:8280';
+const { registryBase: R } = window.CoWaterUI.config;
 const params=new URLSearchParams(window.location.search);
 const deviceId=params.get('id');
 let state={device:null,lastTelem:null,lastDecision:null};
 const { escapeHtml, formatTimestamp } = window.CoWaterUI;
+let refreshTimer = null;
+
+async function fetchJson(url){
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${url}`);
+  return res.json();
+}
+
+function renderMessageList(nodeId, items, emptyText) {
+  const node = document.getElementById(nodeId);
+  if (!node) return;
+  const list = Array.isArray(items) ? items : [];
+  node.innerHTML = list.length
+    ? list.map(item => `
+      <div class="message-item">
+        <div>${escapeHtml(item.summary || item.message || item.action || "메시지")}</div>
+        <div class="message-ts">${escapeHtml(formatTimestamp(item.created_at || item.timestamp || item.received_at))}</div>
+      </div>
+    `).join("")
+    : `<div class="empty">${escapeHtml(emptyText)}</div>`;
+}
+
+function applyAgentState(agentState) {
+  const s = agentState || {};
+  state.lastTelem = s.last_telemetry || state.lastTelem;
+  state.lastDecision = s.last_decision || state.lastDecision;
+  render();
+  renderMessageList('inbox-list', s.inbox || [], '메시지 없음');
+  renderMessageList('outbox-list', s.outbox || [], '메시지 없음');
+}
+
+function stopPolling() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
 
 async function load(){
   if(!deviceId){document.querySelector('.wrap').innerHTML='<div class="empty" style="margin-top:40px">URL에 ?id=디바이스ID를 추가하세요<br>예: device.html?id=id-c2849329bbb0</div>';return}
   try{
-    const dev=await fetch(R+'/devices/'+encodeURIComponent(deviceId)).then(r=>r.json());
+    const dev=await fetchJson(R+'/devices/'+encodeURIComponent(deviceId));
     state.device=dev;
     document.getElementById('device-name').textContent=dev.name||'디바이스';
 
@@ -176,10 +223,8 @@ async function load(){
     const agent=dev.agent||{};
     if(agent.endpoint){
       try{
-        const s=await fetch(agent.endpoint+'/state').then(r=>r.json());
-        state.lastTelem=s.last_telemetry;
-        state.lastDecision=s.last_decision;
-        render();
+        const s=await fetchJson(agent.endpoint+'/state');
+        applyAgentState(s);
       }catch(e){console.error('Agent state fetch failed:',e)}
     }
   }catch(e){console.error('Device fetch failed:',e);document.querySelector('.wrap').innerHTML='<div class="empty" style="margin-top:40px">디바이스를 찾을 수 없습니다</div>'}
@@ -224,7 +269,7 @@ function render(){
   
   const recs=dec.recommendations||[];
   document.getElementById('recommendations').innerHTML=recs.map(r=>`
-    <div style="padding:8px;background:rgba(96,165,250,0.08);border-radius:6px;margin-bottom:6px;border-left:3px solid #60a5fa">
+    <div class="message-item" style="border-left-color:#60a5fa">
       <div style="font-size:0.78rem;font-weight:600">${escapeHtml(r.action)}</div>
       <div style="font-size:0.7rem;color:#64748b;margin-top:2px">신뢰도: ${escapeHtml((r.confidence||0).toFixed(2))}</div>
     </div>
@@ -235,24 +280,36 @@ load();
 
 // 초기 로드 후 agent state는 주기적으로 갱신 (필요시)
 // device.healthcheck 채널을 통해 위치/배터리는 이미 실시간 수신 중
-setInterval(() => {
+refreshTimer = setInterval(() => {
   const dev = state.device || {};
   const agent = dev.agent || {};
   if (agent.endpoint) {
     try {
-      fetch(agent.endpoint + '/state')
-        .then(r => r.json())
-        .then(s => {
-          state.lastTelem = s.last_telemetry || state.lastTelem;
-          state.lastDecision = s.last_decision;
-          render();
-        })
+      fetchJson(agent.endpoint + '/state')
+        .then(applyAgentState)
         .catch(e => console.debug('Agent state update failed:', e));
     } catch (e) {
       console.debug('Agent state fetch error:', e);
     }
   }
 }, 10000);
+
+window.addEventListener('beforeunload', stopPolling);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopPolling();
+  } else if (!refreshTimer) {
+    refreshTimer = setInterval(() => {
+      const dev = state.device || {};
+      const agent = dev.agent || {};
+      if (agent.endpoint) {
+        fetchJson(agent.endpoint + '/state')
+          .then(applyAgentState)
+          .catch(e => console.debug('Agent state update failed:', e));
+      }
+    }, 10000);
+  }
+});
 </script>
 </body>
 </html>

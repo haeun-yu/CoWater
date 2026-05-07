@@ -553,7 +553,7 @@
             📡 디바이스 (<span id="obj-count">0</span>)
           </button>
           <button class="tab-btn" onclick="uiManager.switchTab('links')">
-            🔗 링크 (<span id="link-count">0</span>)
+            🔗 Agent간 통신 (<span id="link-count">0</span>)
           </button>
           <button class="tab-btn" onclick="uiManager.switchTab('alerts')">
             ⚠️ 경보 (<span id="alert-count">0</span>)
@@ -594,8 +594,9 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <script>
-      const REGISTRY_BASE = "http://127.0.0.1:8280";
-      const MOTH_WS_BASE = "wss://cobot.center:8287";
+      const UI_CONFIG = window.CoWaterUI.config;
+      const REGISTRY_BASE = UI_CONFIG.registryBase;
+      const MOTH_WS_BASE = UI_CONFIG.mothWsBase;
       const LOCAL_ALERTS_STORAGE_KEY = "cowater.dashboard.localAlerts";
       const LOCAL_DEVICE_DIRECTORY_KEY = "cowater.dashboard.deviceDirectory";
       const LOCAL_REGISTRY_DEVICES_KEY = "cowater.dashboard.registryDevices";
@@ -1240,11 +1241,12 @@
             id: `link-${parent.id}-${child.id}`,
             source: parent.id,
             target: child.id,
+            kind: "hierarchy",
             type: resolveLinkTypeFromDevice(child),
             status:
               child.connected === false || parent.connected === false
                 ? "down"
-                : "active",
+                : "stable",
             name: `${parent.name} ↔ ${child.name}`,
             packets: [],
             totalMessages: 0,
@@ -1342,6 +1344,40 @@
         return false;
       }
 
+      function getLinkCategory(link) {
+        return (link && link.kind) || (link && link.type === "link_a2a" ? "a2a" : "hierarchy");
+      }
+
+      function getLinkVisualConfig(link) {
+        const category = getLinkCategory(link);
+        if (category === "a2a") {
+          return {
+            color: COLORS.link_a2a,
+            dashed: true,
+            packetColor: COLORS.link_a2a,
+            opacity: 0.45,
+            selectedOpacity: 0.82,
+            weight: 2,
+            dashSize: LINK_DASH_SIZE,
+            gapSize: LINK_GAP_SIZE,
+          };
+        }
+        return {
+          color: COLORS[link?.type] || COLORS.link_rf,
+          dashed: false,
+          packetColor: null,
+          opacity: 0.58,
+          selectedOpacity: 0.9,
+          weight: 3,
+          dashSize: 0,
+          gapSize: 0,
+        };
+      }
+
+      function getLinkCategoryLabel(link) {
+        return getLinkCategory(link) === "a2a" ? "Agent간 통신" : "계층 연결";
+      }
+
       function ensureVirtualSystemObject() {
         const existing = findObjectById(VIRTUAL_SYSTEM_ID);
         if (existing) return existing;
@@ -1385,6 +1421,7 @@
           id: linkId,
           source: srcObj.id,
           target: dstObj.id,
+          kind: "a2a",
           type: "link_a2a",
           status: "idle",
           name: `${srcObj.name} → ${dstObj.name}`,
@@ -1446,6 +1483,11 @@
             (targetObj && targetObj.connected === false)
           ) {
             link.status = "down";
+            return;
+          }
+
+          if ((link.kind || "") === "hierarchy") {
+            link.status = "stable";
             return;
           }
 
@@ -2408,42 +2450,57 @@
         });
 
         state.links.forEach((link) => {
-          const lineMat = new THREE.LineDashedMaterial({
-            color: COLORS[link.type],
-            dashSize: LINK_DASH_SIZE,
-            gapSize: LINK_GAP_SIZE,
-            transparent: true,
-            opacity: 0.45,
-            blending: THREE.AdditiveBlending,
-          });
+          const linkVisual = getLinkVisualConfig(link);
+          const lineMat = linkVisual.dashed
+            ? new THREE.LineDashedMaterial({
+                color: linkVisual.color,
+                dashSize: linkVisual.dashSize,
+                gapSize: linkVisual.gapSize,
+                transparent: true,
+                opacity: linkVisual.opacity,
+                blending: THREE.AdditiveBlending,
+              })
+            : new THREE.LineBasicMaterial({
+                color: linkVisual.color,
+                transparent: true,
+                opacity: linkVisual.opacity,
+                blending: THREE.NormalBlending,
+              });
           const lineGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(),
             new THREE.Vector3(),
           ]);
           const lineMesh = new THREE.Line(lineGeo, lineMat);
-          lineMesh.userData = { id: link.id, isLink: true };
+          lineMesh.userData = {
+            id: link.id,
+            isLink: true,
+            kind: getLinkCategory(link),
+          };
           scene.add(lineMesh);
 
-          const packetGeo = new THREE.CylinderGeometry(
-            LINK_PACKET_RADIUS,
-            LINK_PACKET_RADIUS,
-            LINK_PACKET_LENGTH,
-            8,
-          );
-          packetGeo.rotateX(Math.PI / 2);
-
           const particles = [];
-          const numPackets = LINK_PACKET_COUNT;
-          for (let i = 0; i < numPackets; i++) {
-            const packetMat = new THREE.MeshBasicMaterial({
-              color: 0xffffff,
-              transparent: true,
-              opacity: 0.75,
-              blending: THREE.AdditiveBlending,
-            });
-            const pMesh = new THREE.Mesh(packetGeo, packetMat);
-            scene.add(pMesh);
-            particles.push({ mesh: pMesh, progress: i * (1.0 / numPackets) });
+          if (linkVisual.dashed) {
+            const packetGeo = new THREE.CylinderGeometry(
+              LINK_PACKET_RADIUS,
+              LINK_PACKET_RADIUS,
+              LINK_PACKET_LENGTH,
+              8,
+            );
+            packetGeo.rotateX(Math.PI / 2);
+            for (let i = 0; i < LINK_PACKET_COUNT; i++) {
+              const packetMat = new THREE.MeshBasicMaterial({
+                color: linkVisual.packetColor,
+                transparent: true,
+                opacity: 0.75,
+                blending: THREE.AdditiveBlending,
+              });
+              const pMesh = new THREE.Mesh(packetGeo, packetMat);
+              scene.add(pMesh);
+              particles.push({
+                mesh: pMesh,
+                progress: i * (1.0 / LINK_PACKET_COUNT),
+              });
+            }
           }
 
           link.mesh = lineMesh;
@@ -2577,44 +2634,57 @@
         state.links.forEach((link) => {
           // 동적으로 추가된 링크(A2A 등)에 메쉬가 없으면 lazily 생성
           if (!link.mesh) {
-            const linkColor = COLORS[link.type] || COLORS["link_rf"];
-            const lineMat = new THREE.LineDashedMaterial({
-              color: linkColor,
-              dashSize: LINK_DASH_SIZE,
-              gapSize: LINK_GAP_SIZE,
-              transparent: true,
-              opacity: 0.45,
-              blending: THREE.AdditiveBlending,
-            });
+            const linkVisual = getLinkVisualConfig(link);
+            const lineMat = linkVisual.dashed
+              ? new THREE.LineDashedMaterial({
+                  color: linkVisual.color,
+                  dashSize: linkVisual.dashSize,
+                  gapSize: linkVisual.gapSize,
+                  transparent: true,
+                  opacity: linkVisual.opacity,
+                  blending: THREE.AdditiveBlending,
+                })
+              : new THREE.LineBasicMaterial({
+                  color: linkVisual.color,
+                  transparent: true,
+                  opacity: linkVisual.opacity,
+                  blending: THREE.NormalBlending,
+                });
             const lineGeo = new THREE.BufferGeometry().setFromPoints([
               new THREE.Vector3(),
               new THREE.Vector3(),
             ]);
             const lineMesh = new THREE.Line(lineGeo, lineMat);
-            lineMesh.userData = { id: link.id, isLink: true };
+            lineMesh.userData = {
+              id: link.id,
+              isLink: true,
+              kind: getLinkCategory(link),
+            };
             scene.add(lineMesh);
 
-            const packetGeo = new THREE.CylinderGeometry(
-              LINK_PACKET_RADIUS,
-              LINK_PACKET_RADIUS,
-              LINK_PACKET_LENGTH,
-              8,
-            );
-            packetGeo.rotateX(Math.PI / 2);
             const particles = [];
-            for (let i = 0; i < LINK_PACKET_COUNT; i++) {
-              const packetMat = new THREE.MeshBasicMaterial({
-                color: linkColor,
-                transparent: true,
-                opacity: 0.75,
-                blending: THREE.AdditiveBlending,
-              });
-              const pMesh = new THREE.Mesh(packetGeo, packetMat);
-              scene.add(pMesh);
-              particles.push({
-                mesh: pMesh,
-                progress: i * (1.0 / LINK_PACKET_COUNT),
-              });
+            if (linkVisual.dashed) {
+              const packetGeo = new THREE.CylinderGeometry(
+                LINK_PACKET_RADIUS,
+                LINK_PACKET_RADIUS,
+                LINK_PACKET_LENGTH,
+                8,
+              );
+              packetGeo.rotateX(Math.PI / 2);
+              for (let i = 0; i < LINK_PACKET_COUNT; i++) {
+                const packetMat = new THREE.MeshBasicMaterial({
+                  color: linkVisual.packetColor,
+                  transparent: true,
+                  opacity: 0.75,
+                  blending: THREE.AdditiveBlending,
+                });
+                const pMesh = new THREE.Mesh(packetGeo, packetMat);
+                scene.add(pMesh);
+                particles.push({
+                  mesh: pMesh,
+                  progress: i * (1.0 / LINK_PACKET_COUNT),
+                });
+              }
             }
             link.mesh = lineMesh;
             link.particles = particles;
@@ -2648,42 +2718,51 @@
 
             const isSelected =
               link.id === state.selectedId || link.id === state.hoveredId;
+            const linkVisual = getLinkVisualConfig(link);
             const flowScale =
-              link.status === "active"
-                ? 1
-                : link.status === "degraded"
-                  ? 0.35
-                  : 0.08;
+              getLinkCategory(link) === "a2a"
+                ? link.status === "active"
+                  ? 1
+                  : link.status === "degraded"
+                    ? 0.35
+                    : 0.08
+                : 1;
             link.mesh.material.opacity = isSelected
-              ? 0.82
-              : link.status === "active"
-                ? 0.45
-                : link.status === "degraded"
-                  ? 0.28
-                  : 0.14;
+              ? linkVisual.selectedOpacity
+              : getLinkCategory(link) === "a2a"
+                ? link.status === "active"
+                  ? linkVisual.opacity
+                  : link.status === "degraded"
+                    ? 0.28
+                    : 0.14
+                : linkVisual.opacity;
 
-            link.mesh.material.dashOffset -= simDelta * 11 * flowScale;
+            if ("dashOffset" in link.mesh.material) {
+              link.mesh.material.dashOffset -= simDelta * 11 * flowScale;
+            }
 
-            link.particles.forEach((p) => {
-              p.mesh.visible =
-                isVisible && link.status !== "down" && link.status !== "idle";
-              p.progress += simDelta * 0.15 * flowScale;
-              if (p.progress > 1.0) p.progress = 0;
+            if (getLinkCategory(link) === "a2a") {
+              link.particles.forEach((p) => {
+                p.mesh.visible =
+                  isVisible && link.status !== "down" && link.status !== "idle";
+                p.progress += simDelta * 0.15 * flowScale;
+                if (p.progress > 1.0) p.progress = 0;
 
-              p.mesh.position.lerpVectors(p1, p2, p.progress);
-              p.mesh.lookAt(p2);
+                p.mesh.position.lerpVectors(p1, p2, p.progress);
+                p.mesh.lookAt(p2);
 
-              p.mesh.material.color.setHex(
-                isSelected ? 0xffffff : COLORS[link.type],
-              );
+                p.mesh.material.color.setHex(
+                  isSelected ? 0xffffff : linkVisual.packetColor,
+                );
 
-              const scaleBase = isSelected ? 0.9 : 0.45;
-              p.mesh.scale.set(
-                scaleBase,
-                scaleBase,
-                scaleBase + Math.sin(time * 10) * 0.12,
-              );
-            });
+                const scaleBase = isSelected ? 0.9 : 0.45;
+                p.mesh.scale.set(
+                  scaleBase,
+                  scaleBase,
+                  scaleBase + Math.sin(time * 10) * 0.12,
+                );
+              });
+            }
           }
         });
 
@@ -2787,11 +2866,12 @@
 
         state.links.forEach((link) => {
           const colorStr =
-            "#" + COLORS[link.type].toString(16).padStart(6, "0");
+            "#" + getLinkVisualConfig(link).color.toString(16).padStart(6, "0");
           const polyline = L.polyline([], {
             color: colorStr,
-            weight: 2,
-            dashArray: "5, 5",
+            weight: getLinkCategory(link) === "a2a" ? 2 : 3,
+            opacity: getLinkCategory(link) === "a2a" ? 0.6 : 0.7,
+            dashArray: getLinkCategory(link) === "a2a" ? "5, 5" : null,
           }).addTo(mapState.map);
           mapState.lines[link.id] = polyline;
         });
@@ -2881,13 +2961,14 @@
           if (!mapState.lines[link.id] && mapState.map) {
             const colorStr =
               "#" +
-              (COLORS[link.type] || COLORS["link_rf"])
+              getLinkVisualConfig(link).color
                 .toString(16)
                 .padStart(6, "0");
             const polyline = L.polyline([], {
               color: colorStr,
-              weight: 2,
-              dashArray: "5, 5",
+              weight: getLinkCategory(link) === "a2a" ? 2 : 3,
+              opacity: getLinkCategory(link) === "a2a" ? 0.6 : 0.7,
+              dashArray: getLinkCategory(link) === "a2a" ? "5, 5" : null,
             }).addTo(mapState.map);
             mapState.lines[link.id] = polyline;
           }
@@ -2904,9 +2985,19 @@
               [tLat, tLng],
             ]);
 
+            const isA2A = getLinkCategory(link) === "a2a";
             if (link.id === state.selectedId)
-              polyline.setStyle({ weight: 4, opacity: 1 });
-            else polyline.setStyle({ weight: 2, opacity: 0.6 });
+              polyline.setStyle({
+                weight: isA2A ? 4 : 5,
+                opacity: 1,
+                dashArray: isA2A ? "5, 5" : null,
+              });
+            else
+              polyline.setStyle({
+                weight: isA2A ? 2 : 3,
+                opacity: isA2A ? 0.6 : 0.75,
+                dashArray: isA2A ? "5, 5" : null,
+              });
           }
         });
 
@@ -3024,11 +3115,17 @@
             control_ship: 0,
           };
           const visibleDevices = getVisibleDeviceObjects();
+          const hierarchyLinks = state.links.filter(
+            (link) => getLinkCategory(link) === "hierarchy",
+          );
+          const a2aLinks = state.links.filter(
+            (link) => getLinkCategory(link) === "a2a",
+          );
           visibleDevices.forEach((o) => {
             if (types[o.type] !== undefined) types[o.type]++;
           });
           document.getElementById("stats-container").innerHTML =
-            `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 디바이스:</span> <strong>${visibleDevices.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>전체 디바이스:</span> <strong>${visibleDevices.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>통신 링크:</span> <strong>${state.links.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? "#f87171" : "#4ade80"}">발생 경보: ${state.alerts.length}건</div>`;
+            `<div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>활성 디바이스:</span> <strong>${visibleDevices.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>전체 디바이스:</span> <strong>${visibleDevices.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>계층 연결:</span> <strong>${hierarchyLinks.length}개</strong></div><div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Agent간 통신:</span> <strong>${a2aLinks.length}개</strong></div><div style="font-size:0.85rem; color:#94a3b8; display:grid; grid-template-columns: 1fr 1fr;"><div>함정: ${types.ship}</div><div>드론/USV: ${types.drone + types.usv}</div><div>ROV: ${types.rov}</div><div>AUV: ${types.auv}</div></div><div style="margin-top:10px; color:${state.alerts.length > 0 ? "#f87171" : "#4ade80"}">발생 경보: ${state.alerts.length}건</div>`;
           document.getElementById("link-count").innerText = state.links.length;
         },
         renderObjectList: function () {
@@ -3052,31 +3149,70 @@
             getVisibleDeviceObjects().length;
         },
         renderLinkList: function () {
-          let html = "";
-          state.links.forEach((link) => {
-            const colorStr =
-              "#" + COLORS[link.type].toString(16).padStart(6, "0");
-            const statusText =
-              link.status === "down"
-                ? "링크 끊김"
-                : link.status === "degraded"
-                  ? "A2A 트래픽 감소"
-                  : link.status === "active"
-                    ? "A2A 메시지 수신중"
-                    : "A2A 유휴";
-            const statusColor =
-              link.status === "down"
-                ? "#f87171"
-                : link.status === "degraded"
-                  ? "#f59e0b"
-                  : link.status === "active"
-                    ? "#4ade80"
-                    : "#94a3b8";
-            const lastAge = link.lastMessageAt
-              ? `${((Date.now() - link.lastMessageAt) / 1000).toFixed(1)}s 전`
-              : "수신 없음";
-            html += `<div class="list-item ${link.id === state.selectedId ? "selected" : ""}" style="border-left-color: ${colorStr}" onclick="uiManager.selectObject('${link.id}')"><div class="title"><span>🔗 ${link.name}</span></div><div style="font-size:0.75rem; color:${statusColor};">${statusText} · 누적 ${link.totalMessages || 0} msg · 최근 ${lastAge}</div></div>`;
-          });
+          const hierarchyLinks = state.links.filter(
+            (link) => getLinkCategory(link) === "hierarchy",
+          );
+          const a2aLinks = state.links.filter(
+            (link) => getLinkCategory(link) === "a2a",
+          );
+          const renderGroup = (title, emptyText, links, accent, subtitle) => `
+            <div style="margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin:0 2px 8px 2px; color:#cbd5e1; font-size:0.8rem;">
+                <span>${title}</span>
+                <span style="color:${accent};">${subtitle}</span>
+              </div>
+              ${
+                links.length > 0
+                  ? links
+                      .map((link) => {
+                        const visual = getLinkVisualConfig(link);
+                        const statusText =
+                          getLinkCategory(link) === "hierarchy"
+                            ? link.status === "down"
+                              ? "계층 끊김"
+                              : "계층 연결 유지"
+                            : link.status === "down"
+                              ? "통신 끊김"
+                              : link.status === "degraded"
+                                ? "Agent간 통신 약화"
+                                : link.status === "active"
+                                  ? "Agent간 통신 수신중"
+                                  : "Agent간 통신 유휴";
+                        const statusColor =
+                          link.status === "down"
+                            ? "#f87171"
+                            : link.status === "degraded"
+                              ? "#f59e0b"
+                              : link.status === "active"
+                                ? "#4ade80"
+                                : "#94a3b8";
+                        const lastAge = link.lastMessageAt
+                          ? `${((Date.now() - link.lastMessageAt) / 1000).toFixed(1)}s 전`
+                          : getLinkCategory(link) === "hierarchy"
+                            ? "계층 링크"
+                            : "수신 없음";
+                        return `<div class="list-item ${link.id === state.selectedId ? "selected" : ""}" style="border-left-color: #${visual.color.toString(16).padStart(6, "0")}" onclick="uiManager.selectObject('${link.id}')"><div class="title"><span>${getLinkCategory(link) === "a2a" ? "🔗" : "⎯"} ${link.name}</span></div><div style="font-size:0.75rem; color:${statusColor};">${statusText} · ${getLinkCategoryLabel(link)} · 누적 ${link.totalMessages || 0} msg · 최근 ${lastAge}</div></div>`;
+                      })
+                      .join("")
+                  : `<div class="empty" style="margin: 0 0 12px 0;">${emptyText}</div>`
+              }
+            </div>
+          `;
+          const html =
+            renderGroup(
+              "계층 연결",
+              "계층 연결이 없습니다.",
+              hierarchyLinks,
+              "#60a5fa",
+              `${hierarchyLinks.length}개`,
+            ) +
+            renderGroup(
+              "Agent간 통신",
+              "실시간 A2A 통신이 없습니다.",
+              a2aLinks,
+              "#fbbf24",
+              `${a2aLinks.length}개`,
+            );
           document.getElementById("link-list-container").innerHTML =
             html ||
             '<div style="text-align:center; color:#64748b; padding:20px;">활성 통신 링크가 없습니다.</div>';
@@ -3117,29 +3253,36 @@
             if (linkDetailEl) linkDetailEl.style.display = "block";
             const sObj = findObjectById(link.source);
             const tObj = findObjectById(link.target);
+            const visual = getLinkVisualConfig(link);
             const colorStr =
-              "#" + COLORS[link.type].toString(16).padStart(6, "0");
+              "#" + visual.color.toString(16).padStart(6, "0");
+            const categoryLabel = getLinkCategoryLabel(link);
 
             const packetList = Array.isArray(link.packets) ? link.packets : [];
             const packetHtml =
-              packetList.length > 0
+              getLinkCategory(link) === "a2a" && packetList.length > 0
                 ? packetList
                     .map((p) => `<div class="data-packet">${p}</div>`)
                     .join("")
-                : '<div class="data-packet" style="color:#64748b;">아직 수신된 실시간 데이터가 없습니다.</div>';
+                : getLinkCategory(link) === "a2a"
+                  ? '<div class="data-packet" style="color:#64748b;">아직 수신된 실시간 데이터가 없습니다.</div>'
+                  : '<div class="data-packet" style="color:#64748b;">계층 연결은 구조 링크로 유지됩니다.</div>';
             const lastSeen = link.lastMessageAt
               ? `${new Date(link.lastMessageAt).toLocaleTimeString()} (${((Date.now() - link.lastMessageAt) / 1000).toFixed(1)}s 전)`
-              : "없음";
+              : getLinkCategory(link) === "a2a"
+                ? "없음"
+                : "계층 링크";
 
             if (!linkDetailEl) return;
             linkDetailEl.innerHTML = `
                         <div style="background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 6px; border: 1px solid ${colorStr};">
-                            <h4 style="margin-top:0; color:${colorStr};">📡 ${link.name}</h4>
+                            <h4 style="margin-top:0; color:${colorStr};">${getLinkCategory(link) === "a2a" ? "📡" : "⎯"} ${link.name}</h4>
+                            <div style="font-size:0.8rem; color:#cbd5e1; margin-bottom: 8px;">${categoryLabel}</div>
                             <div style="font-size:0.85rem; margin-bottom: 10px;">
                                 <span style="color:#94a3b8">연결: </span> <strong style="color:white">${sObj ? sObj.name : "Unknown"}</strong> ↔ <strong style="color:white">${tObj ? tObj.name : "Unknown"}</strong>
                             </div>
-                            <div style="font-size:0.8rem; color:#cbd5e1; margin-bottom:8px;">상태: ${link.status || "idle"} · 누적 메시지: ${link.totalMessages || 0} · 최근 채널: ${link.lastChannel || "-"} · 마지막 수신: ${lastSeen}</div>
-                            <div style="color:#94a3b8; font-size: 0.8rem; margin-bottom: 5px;">실시간 A2A 전송 데이터:</div>
+                            <div style="font-size:0.8rem; color:#cbd5e1; margin-bottom:8px;">상태: ${link.status || (getLinkCategory(link) === "hierarchy" ? "stable" : "idle")} · 누적 메시지: ${link.totalMessages || 0} · 최근 채널: ${link.lastChannel || "-"} · 마지막 수신: ${lastSeen}</div>
+                            <div style="color:#94a3b8; font-size: 0.8rem; margin-bottom: 5px;">${getLinkCategory(link) === "a2a" ? "실시간 Agent간 통신 데이터:" : "계층 연결 정보:"}</div>
                             <div style="background: #000; padding: 8px; border-radius: 4px; border: 1px solid #334155; max-height: 100px; overflow-y: auto;">
                                 ${packetHtml}
                             </div>
@@ -3215,7 +3358,7 @@
             if (obj) {
               tooltip.innerHTML = `<strong>${obj.name}</strong><br>Type: ${obj.type}<br>Depth: ${Math.round(obj.position.y)}m`;
             } else if (link) {
-              tooltip.innerHTML = `<strong>🔗 ${link.name}</strong><br>데이터 스트림 확인하기 (Click)`;
+              tooltip.innerHTML = `<strong>${getLinkCategory(link) === "a2a" ? "🔗" : "⎯"} ${link.name}</strong><br>${getLinkCategoryLabel(link)} 확인하기 (Click)`;
             }
           }
         } else {
@@ -3306,8 +3449,7 @@
 
         if (registryDevices.length > 0) {
           state.objects = registryDevices.map(mapRegistryToScenario);
-          // 링크는 실제 A2A 송수신(from/to) 관측 시에만 생성한다.
-          state.links = [];
+          state.links = deriveActiveLinksFromRegistry(registryDevices);
           ensureVirtualSystemObject();
           persistRegistryDevices(registryDevices);
           persistDeviceDirectory(registryDevices);

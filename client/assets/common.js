@@ -1,4 +1,40 @@
 (function () {
+  function normalizeBaseUrl(value, fallback) {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+    return raw.endsWith("/") ? raw.slice(0, -1) : raw;
+  }
+
+  function defaultHttpBase(port) {
+    const hostname = window.location.hostname || "127.0.0.1";
+    const protocol = window.location.protocol === "file:" ? "http:" : window.location.protocol || "http:";
+    return `${protocol}//${hostname}:${port}`;
+  }
+
+  const storedConfig = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("cowater.client.config") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  const runtimeConfig = window.__COWATER_CONFIG__ || {};
+  const config = {
+    registryBase: normalizeBaseUrl(
+      runtimeConfig.registryBase || storedConfig.registryBase || window.localStorage.getItem("cowater.registryBase"),
+      defaultHttpBase(8280),
+    ),
+    systemBase: normalizeBaseUrl(
+      runtimeConfig.systemBase || storedConfig.systemBase || window.localStorage.getItem("cowater.systemBase"),
+      defaultHttpBase(9116),
+    ),
+    mothWsBase: normalizeBaseUrl(
+      runtimeConfig.mothWsBase || storedConfig.mothWsBase || window.localStorage.getItem("cowater.mothWsBase"),
+      "wss://cobot.center:8287",
+    ),
+  };
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -55,6 +91,7 @@
   }
 
   window.CoWaterUI = {
+    config,
     escapeHtml,
     formatTimestamp,
     qs,
@@ -62,5 +99,6 @@
     setHtml,
     apiUrl,
     requestJson,
+    normalizeBaseUrl,
   };
 })();
