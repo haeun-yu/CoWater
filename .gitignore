@@ -68,6 +68,7 @@ redis-data/
 
 # ===== Runtime / Temporary =====
 .runtime/
+.cowater_pids
 
 # ===== Secrets / Certs =====
 *.pem

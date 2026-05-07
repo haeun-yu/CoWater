@@ -1,6 +1,25 @@
 # CoWater 실행 가이드
 
-## 빠른 시작
+## ⚡ 초급 사용자: 한 줄로 실행 & 테스트
+
+```bash
+cd /Users/teamgrit/Documents/CoWater
+./run_full_test.sh
+```
+
+**자동으로 수행되는 작업:**
+1. ✅ 모든 서비스 자동 시작 (이미 실행 중이면 스킵)
+2. ✅ 서비스 상태 확인 (Registry, System Agent, Device Agents)
+3. ✅ API 연결성 테스트
+4. ✅ 통합 테스트 실행 (mine_removal_scenario)
+5. ✅ 테스트 결과 분석 & 리포트 출력
+6. ✅ Client UI 접속 링크 제공
+
+---
+
+## 🎯 표준 실행
+
+서비스 시작:
 
 ```bash
 cd /Users/teamgrit/Documents/CoWater
