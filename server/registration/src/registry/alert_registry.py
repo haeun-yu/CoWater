@@ -181,6 +181,14 @@ class AlertRegistry:
         self._persist_alert(alert)
         return alert
 
+    def complete_alert(self, alert_id: str, notes: Optional[str] = None) -> AlertRecord:
+        alert = self.get_alert(alert_id)
+        alert.touch("completed")
+        if notes:
+            alert.metadata["notes"] = notes
+        self._persist_alert(alert)
+        return alert
+
     def reset(self) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM alerts")

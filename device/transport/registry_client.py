@@ -10,11 +10,21 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def post_json(
+    url: str,
+    body: dict[str, Any],
+    timeout: int = 5,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """POST JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -28,11 +38,21 @@ def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any
         raise
 
 
-def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def put_json(
+    url: str,
+    body: dict[str, Any],
+    timeout: int = 5,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """PUT JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="PUT")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="PUT",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -46,10 +66,20 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]
         raise
 
 
-def patch_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def patch_json(
+    url: str,
+    body: dict[str, Any],
+    timeout: int = 5,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="PATCH")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="PATCH",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = resp.read()
             return json.loads(payload or b"{}")
@@ -64,9 +94,9 @@ def patch_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, An
         raise
 
 
-def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
+def get_json(url: str, timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        req = urllib.request.Request(url, headers={"Accept": "application/json", **(headers or {})}, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -85,6 +115,9 @@ class RegistryClient:
         self.url = str(config.get("url") or "http://127.0.0.1:8280").rstrip("/")
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
+
+    def _internal_headers(self) -> dict[str, str]:
+        return {"X-CoWater-Internal": "system-agent"}
 
     def register_device(
         self,
@@ -187,7 +220,7 @@ class RegistryClient:
             url = f"{self.url}/a2a-logs/ingest"
             if query:
                 url = f"{url}?{query}"
-            post_json(url, payload, timeout=3)
+            post_json(url, payload, timeout=3, headers=self._internal_headers())
         except Exception as e:
             logger.debug(f"A2A 로깅 전송 실패 (non-critical): {e}")
 

@@ -327,6 +327,52 @@ def test_report_task_result_uses_actual_status(monkeypatch) -> None:
         _clear_device_module_cache()
 
 
+def test_device_registry_client_a2a_logs_use_internal_header(monkeypatch) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "device"))
+    try:
+        registry_client_mod = load_module(
+            "device_registry_client_for_test",
+            ROOT / "device" / "transport" / "registry_client.py",
+        )
+
+        client = registry_client_mod.RegistryClient({"url": "http://127.0.0.1:8280"})
+        captured: dict[str, object] = {}
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout=0):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.headers)
+            captured["timeout"] = timeout
+            return DummyResponse()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.log_a2a_message(
+                direction="outbound",
+                from_agent_id="agent-1",
+                to_agent_id="agent-2",
+                message_type="task.assign",
+                task_id="task-1",
+                mission_id=None,
+                payload={"hello": "world"},
+            )
+
+        assert captured["url"].endswith("/a2a-logs/ingest?direction=outbound&from_agent_id=agent-1&to_agent_id=agent-2&message_type=task.assign&task_id=task-1")
+        headers = {str(key).lower(): value for key, value in dict(captured["headers"]).items()}
+        assert headers["x-cowater-internal"] == "system-agent"
+        assert headers["content-type"] == "application/json"
+    finally:
+        _clear_device_module_cache()
+
+
 def test_command_controller_is_pure_executor(monkeypatch) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "device"))
 

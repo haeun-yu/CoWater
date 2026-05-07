@@ -177,6 +177,10 @@ class RegistryClient:
             body["notes"] = notes
         return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
 
+    def complete_alert(self, alert_id: str, notes: str | None = None) -> dict[str, Any]:
+        body = {"notes": notes or "Mission completed"}
+        return post_json(f"{self.url}/alerts/{alert_id}/complete", body)
+
     def list_device_roles(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return get_json(f"{self.url}/device-roles", params={"limit": limit, "offset": offset})
 

@@ -272,6 +272,8 @@ section("Step 5. Registry: Mission Proposal / Mission 기록 확인")
 proposal_wait_seconds = 90
 new_proposals: list[dict[str, Any]] = []
 new_missions: list[dict[str, Any]] = []
+proposal_approval_id: str | None = None
+proposal_approved = False
 
 for _ in range(proposal_wait_seconds):
     proposals = as_list(http("GET", f"{REGISTRY}/mission-proposals"))
@@ -279,12 +281,28 @@ for _ in range(proposal_wait_seconds):
     if alert_id:
         new_proposals = [proposal for proposal in proposals if proposal.get("alert_id") == alert_id]
         new_missions = [mission for mission in missions if mission.get("alert_id") == alert_id]
-        if new_proposals or new_missions:
+        if new_proposals and not proposal_approval_id:
+            latest_pending_proposal = sorted(new_proposals, key=lambda x: x.get("created_at", ""))[-1]
+            proposal_approval_id = str(latest_pending_proposal.get("approval_id") or "")
+            if proposal_approval_id and not proposal_approved:
+                decision = http(
+                    "POST",
+                    f"{SYSTEM_AGENT}/approvals/{proposal_approval_id}/decision",
+                    {
+                        "approved": True,
+                        "decided_by": "scenario_operator",
+                        "notes": "Scenario approval for mine detection response",
+                    },
+                )
+                print(f"  ✅ Proposal 승인 요청 전송 — approval_id={proposal_approval_id[:30]}")
+                print(f"    decision_status={decision.get('status') or decision.get('approved')}")
+                proposal_approved = True
+        if new_missions:
             break
     else:
         new_proposals = proposals[proposals_before:]
         new_missions = missions[missions_before:]
-        if new_proposals or new_missions:
+        if new_missions:
             break
     time.sleep(1)
 

@@ -293,6 +293,17 @@ def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]
         raise HTTPException(status_code=404, detail="alert not found") from exc
 
 
+@app.post("/alerts/{alert_id}/complete")
+def complete_alert(alert_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+    try:
+        notes = str((body or {}).get("notes") or "Mission completed")
+        result = alert_registry.complete_alert(alert_id, notes=notes).to_dict()
+        _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="alert not found") from exc
+
+
 @app.post("/a2a-logs/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_a2a_log(
     direction: str = Query(..., description="inbound or outbound"),

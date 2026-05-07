@@ -2986,6 +2986,12 @@ class AgentRuntime:
                             "data": {"mission_id": mission_id},
                         }
                     )
+                    alert_id = str(mission.get("alert_id") or "")
+                    if alert_id:
+                        try:
+                            self.registry_client.complete_alert(alert_id, notes="Mission completed")
+                        except Exception as exc:
+                            logger.debug(f"Failed to complete alert {alert_id}: {exc}")
                 elif aggregate_status == "failed":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
@@ -3003,6 +3009,12 @@ class AgentRuntime:
                             },
                         }
                     )
+                    alert_id = str(mission.get("alert_id") or "")
+                    if alert_id:
+                        try:
+                            self.registry_client.acknowledge_alert(alert_id, approved=False, notes="Mission failed")
+                        except Exception as exc:
+                            logger.debug(f"Failed to mark alert {alert_id} as failed: {exc}")
                 elif aggregate_status == "needs_review":
                     mission.setdefault("timeline", []).append(
                         {
