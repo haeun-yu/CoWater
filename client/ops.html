@@ -588,10 +588,9 @@
 
       // WebSocket 구독: 실시간 데이터 업데이트
       const MOTH_BASE = "wss://cobot.center:8287";
-      const channels = ["overview", "missions", "approvals", "mission_proposals", "events", "alerts", "insights", "policies"];
       const sockets = {};
 
-      function subscribeToChannel(channel) {
+      function subscribeToMothChannel(channel) {
         const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=${channel}&source=ops-client&track=ops-client`;
         try {
           const ws = new WebSocket(wsUrl);
@@ -607,11 +606,41 @@
               const rawText = typeof e.data === "string" ? e.data : await e.data.text();
               if (!rawText || rawText.trim() === "ping") return;
               const raw = JSON.parse(rawText);
-              const payload = raw.payload || (Array.isArray(raw.data) ? raw : raw.data) || raw;
+              const payload = raw.payload || raw.data || raw;
               if (!payload) return;
 
-              // Update UI with new data
-              loadOverview();
+              // 채널별로 해당 UI 업데이트 (Moth에서 받은 데이터 직접 사용)
+              if (channel === "overview") {
+                const overview = payload;
+                if (overview.devices && overview.device_roles !== undefined) {
+                  renderRoles(overview.devices, overview.device_roles);
+                  renderDeviceConnectivity(overview.devices);
+                  renderSensorMonitoring(overview.devices, window.__lastEvents || []);
+                }
+              } else if (channel === "missions") {
+                renderMissions(Array.isArray(payload) ? payload : [payload]);
+              } else if (channel === "mission_proposals") {
+                renderProposals(Array.isArray(payload) ? payload : [payload]);
+              } else if (channel === "approvals") {
+                renderApprovals(Array.isArray(payload) ? payload : [payload]);
+              } else if (channel === "events") {
+                window.__lastEvents = Array.isArray(payload) ? payload : [payload];
+              } else if (channel === "alerts") {
+                window.__lastAlerts = Array.isArray(payload) ? payload : [payload];
+              } else if (channel === "insights") {
+                window.__lastInsights = Array.isArray(payload) ? payload : [payload];
+              } else if (channel === "policies") {
+                renderPolicies(Array.isArray(payload) ? payload : [payload]);
+              }
+
+              // signals 업데이트 (events, alerts, insights 모두 필요)
+              if (channel === "events" || channel === "alerts" || channel === "insights") {
+                renderSignals(
+                  window.__lastEvents || [],
+                  window.__lastAlerts || [],
+                  window.__lastInsights || []
+                );
+              }
             } catch (err) {
               console.debug(`[Moth] ${channel} parse error:`, err);
             }
@@ -619,19 +648,21 @@
 
           ws.onerror = () => {
             console.warn(`[Moth] ${channel} connection error`);
-            setTimeout(() => subscribeToChannel(channel), 5000);
+            setTimeout(() => subscribeToMothChannel(channel), 5000);
           };
 
           ws.onclose = () => {
-            setTimeout(() => subscribeToChannel(channel), 5000);
+            setTimeout(() => subscribeToMothChannel(channel), 5000);
           };
         } catch (err) {
           console.warn(`[Moth] Failed to subscribe ${channel}:`, err);
-          setTimeout(() => subscribeToChannel(channel), 5000);
+          setTimeout(() => subscribeToMothChannel(channel), 5000);
         }
       }
 
-      channels.forEach(subscribeToChannel);
+      // 모든 채널 구독
+      ["overview", "missions", "approvals", "mission_proposals", "events", "alerts", "insights", "policies"]
+        .forEach(subscribeToMothChannel);
       window.applyRole = applyRole;
       window.decideApproval = decideApproval;
       window.activatePlan = activatePlan;

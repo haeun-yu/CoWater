@@ -228,50 +228,26 @@ function render(){
 
 load();
 
-// WebSocket 구독: 실시간 디바이스 업데이트
-const MOTH_BASE = "wss://cobot.center:8287";
-const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=device.${deviceId}&source=device-client&track=device-client`;
-let deviceWs = null;
-
-function subscribeToDevice() {
-  try {
-    deviceWs = new WebSocket(wsUrl);
-
-    deviceWs.onopen = () => {
-      deviceWs.send(JSON.stringify({ type: "subscribe", channel: `device.${deviceId}`, channel_type: "meb" }));
-      console.log(`[Moth] Subscribed to device.${deviceId}`);
-    };
-
-    deviceWs.onmessage = async (e) => {
-      try {
-        const rawText = typeof e.data === "string" ? e.data : await e.data.text();
-        if (!rawText || rawText.trim() === "ping") return;
-        const raw = JSON.parse(rawText);
-        const payload = raw.payload || raw.data || raw;
-        if (!payload) return;
-
-        // Update UI with new device state
-        load();
-      } catch (err) {
-        console.debug("[Moth] device parse error:", err);
-      }
-    };
-
-    deviceWs.onerror = () => {
-      console.warn("[Moth] device connection error");
-      setTimeout(subscribeToDevice, 5000);
-    };
-
-    deviceWs.onclose = () => {
-      setTimeout(subscribeToDevice, 5000);
-    };
-  } catch (err) {
-    console.warn("[Moth] Failed to subscribe to device:", err);
-    setTimeout(subscribeToDevice, 5000);
+// 초기 로드 후 agent state는 주기적으로 갱신 (필요시)
+// device.healthcheck 채널을 통해 위치/배터리는 이미 실시간 수신 중
+setInterval(() => {
+  const dev = state.device || {};
+  const agent = dev.agent || {};
+  if (agent.endpoint) {
+    try {
+      fetch(agent.endpoint + '/state')
+        .then(r => r.json())
+        .then(s => {
+          state.lastTelem = s.last_telemetry || state.lastTelem;
+          state.lastDecision = s.last_decision;
+          render();
+        })
+        .catch(e => console.debug('Agent state update failed:', e));
+    } catch (e) {
+      console.debug('Agent state fetch error:', e);
+    }
   }
-}
-
-subscribeToDevice();
+}, 10000);
 </script>
 </body>
 </html>

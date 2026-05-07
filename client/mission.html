@@ -306,8 +306,11 @@
               const payload = raw.payload || raw.data || raw;
               if (!payload) return;
 
-              // Update UI with new mission data
-              load();
+              // Moth에서 받은 미션 데이터 직접 렌더링
+              const mission = payload.mission || payload;
+              if (mission && mission.mission_id === missionId) {
+                render(mission);
+              }
             } catch (err) {
               console.debug("[Moth] mission parse error:", err);
             }
