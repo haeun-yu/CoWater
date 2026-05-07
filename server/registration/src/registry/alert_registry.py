@@ -1,22 +1,40 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional
-from uuid import uuid4
 
 from src.core.models import (
     AlertIngestRequest,
     AlertRecord,
-    ResponseIngestRequest,
-    ResponseRecord,
 )
 
 
 class AlertRegistry:
     def __init__(self) -> None:
         self._alerts: Dict[str, AlertRecord] = {}
-        self._responses: Dict[str, ResponseRecord] = {}
 
     def ingest_alert(self, request: AlertIngestRequest) -> AlertRecord:
+        metadata = dict(request.metadata)
+        fingerprint = str(
+            metadata.get("fingerprint")
+            or f"{request.event_id}:{request.alert_type}:{metadata.get('cause') or metadata.get('location') or request.message}"
+        )
+        for existing_alert in self._alerts.values():
+            if str((existing_alert.metadata or {}).get("fingerprint") or "") == fingerprint:
+                existing_alert.source_system = request.source_system
+                existing_alert.event_id = request.event_id
+                existing_alert.source_agent_id = request.source_agent_id
+                existing_alert.source_role = request.source_role
+                existing_alert.alert_type = request.alert_type
+                existing_alert.severity = request.severity
+                existing_alert.message = request.message
+                existing_alert.recommended_action = request.recommended_action
+                existing_alert.target_agent_id = request.target_agent_id
+                existing_alert.requires_user_approval = request.requires_user_approval
+                existing_alert.auto_remediated = request.auto_remediated
+                existing_alert.route_mode = request.route_mode
+                existing_alert.metadata = {**metadata, "fingerprint": fingerprint}
+                existing_alert.touch()
+                return existing_alert
         alert_id = request.alert_id or f"alert-{uuid4()}"
         existing = self._alerts.get(alert_id)
         if existing is None:
@@ -35,7 +53,7 @@ class AlertRegistry:
                 requires_user_approval=request.requires_user_approval,
                 auto_remediated=request.auto_remediated,
                 route_mode=request.route_mode,
-                metadata=dict(request.metadata),
+                metadata={**metadata, "fingerprint": fingerprint},
             )
             self._alerts[alert.alert_id] = alert
             return alert
@@ -52,7 +70,7 @@ class AlertRegistry:
         existing.requires_user_approval = request.requires_user_approval
         existing.auto_remediated = request.auto_remediated
         existing.route_mode = request.route_mode
-        existing.metadata = dict(request.metadata)
+        existing.metadata = {**metadata, "fingerprint": fingerprint}
         existing.touch()
         return existing
 
@@ -72,46 +90,6 @@ class AlertRegistry:
             alert.metadata["notes"] = notes
         return alert
 
-    def ingest_response(self, request: ResponseIngestRequest) -> ResponseRecord:
-        response_id = request.response_id or f"response-{uuid4()}"
-        response = ResponseRecord(
-            response_id=response_id,
-            alert_id=request.alert_id,
-            action=request.action,
-            target_agent_id=request.target_agent_id,
-            target_endpoint=request.target_endpoint,
-            route_mode=request.route_mode,
-            status=request.status,
-            reason=request.reason,
-            task_id=request.task_id,
-            params=dict(request.params),
-            dispatch_result=dict(request.dispatch_result),
-            notes=request.notes,
-        )
-        self._responses[response.response_id] = response
-        
-        # Alert 상태를 response 상태에 따라 업데이트
-        try:
-            alert = self.get_alert(request.alert_id)
-            if response.dispatch_result and response.dispatch_result.get("delivered"):
-                alert.touch("completed")
-            elif request.status == "failed":
-                alert.touch("failed")
-        except KeyError:
-            pass  # Alert가 없으면 무시
-        
-        return response
-
-    def list_responses(self) -> List[ResponseRecord]:
-        return [self._responses[response_id] for response_id in sorted(self._responses)]
-
-    def get_response(self, response_id: str) -> ResponseRecord:
-        response = self._responses.get(response_id)
-        if response is None:
-            raise KeyError(response_id)
-        return response
-
     def reset(self) -> None:
-        """모든 alert와 response 초기화"""
+        """모든 alert 초기화"""
         self._alerts.clear()
-        self._responses.clear()

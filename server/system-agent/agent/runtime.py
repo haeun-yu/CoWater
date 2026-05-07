@@ -7,7 +7,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -60,6 +60,7 @@ class AgentRuntime:
             "remove_mine": ["remove_mine", "grab_object", "precise_manipulation"],
             "return_to_base": ["return_to_base", "surface", "hold_position"],
         }
+        self._recommendation_suppressions: dict[str, str] = {}
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -118,32 +119,23 @@ class AgentRuntime:
             self._restore_device_allocations()
 
     def _restore_device_allocations(self) -> None:
-        """재시작 후 Registry의 active responses에서 device 예약 상태를 복원한다."""
+        """재시작 후 Registry의 active missions에서 device 예약 상태를 복원한다."""
         logger = logging.getLogger(__name__)
-        try:
-            responses = self.registry_client.list_responses()
-        except Exception as exc:
-            logger.warning(f"_restore_device_allocations: failed to list responses: {exc}")
-            return
-
-        ttl_seconds = self._allocation_restore_ttl_seconds()
-        now_ts = time.time()
         restored = 0
-        for response in responses:
-            if not isinstance(response, dict):
+        try:
+            missions = self.registry_client.list_missions()
+        except Exception as exc:
+            logger.warning(f"_restore_device_allocations: failed to list missions: {exc}")
+            missions = []
+        for mission in missions:
+            if not isinstance(mission, dict):
                 continue
-            if str(response.get("status") or "") not in {"planned", "dispatched"}:
+            if str(mission.get("status") or "") not in {"approved", "running", "needs_review"}:
                 continue
-
-            updated_ts = self._parse_iso_ts(str(response.get("updated_at") or response.get("created_at") or ""))
-            if updated_ts and (now_ts - updated_ts) > ttl_seconds:
+            dispatch_state = ((mission.get("metadata") or {}).get("dispatch_state") or {})
+            if not isinstance(dispatch_state, dict):
                 continue
-
-            response_id = str(response.get("response_id") or "")
-            dispatch_result = response.get("dispatch_result") or {}
-            if not isinstance(dispatch_result, dict):
-                continue
-            for step_state in dispatch_result.get("steps") or []:
+            for step_state in dispatch_state.get("steps") or []:
                 if not isinstance(step_state, dict):
                     continue
                 if str(step_state.get("status") or "") in {"completed", "failed"}:
@@ -160,16 +152,16 @@ class AgentRuntime:
                     if device_id and device_id not in self._device_allocations:
                         self._device_allocations[device_id] = {
                             "device_id": device_id,
-                            "response_id": response_id,
+                            "mission_id": str(mission.get("mission_id") or ""),
                             "step_id": str(step_state.get("step_id") or ""),
                             "task_id": str(task_state.get("task_id") or ""),
-                            "reason": "restored_on_restart",
-                            "reserved_at": str(response.get("updated_at") or utc_now()),
+                            "reason": "restored_from_mission_on_restart",
+                            "reserved_at": str(mission.get("updated_at") or utc_now()),
                         }
                         restored += 1
 
         if restored:
-            logger.info(f"Restored {restored} device allocation(s) from active responses")
+            logger.info(f"Restored {restored} device allocation(s) from active missions")
             self.state.remember({"kind": "device_allocations_restored", "at": utc_now(), "count": restored})
 
     def _allocation_restore_ttl_seconds(self) -> int:
@@ -222,6 +214,7 @@ class AgentRuntime:
         if self.state.layer == "system":
             await asyncio.gather(
                 self._alert_processing_loop(),
+                self._operation_plan_loop(),
                 self._registry_keepalive_loop(),
                 self._state_cleanup_loop(),
             )
@@ -333,33 +326,47 @@ class AgentRuntime:
                 await asyncio.sleep(1)
 
     async def _process_waiting_queue(self, devices: list[dict[str, Any]], logger: Any) -> None:
-        if not self._waiting_queue:
-            return
-        ordered_items = sorted(
-            self._waiting_queue.items(),
-            key=lambda item: (
-                self._severity_rank(str((item[1].get("alert") or {}).get("severity") or "INFORMATION")),
-                str(item[1].get("queued_at") or ""),
-            ),
-        )
-        for response_id, queue_item in ordered_items:
-            if not isinstance(queue_item, dict):
-                continue
-            await self._reprocess_waiting_response(response_id, queue_item, devices, logger)
+        return
 
     async def _process_alert(self, alert: dict[str, Any], devices: list[dict[str, Any]], logger: Any) -> dict[str, Any]:
-        """단일 alert를 승인/응답/전파까지 처리한다."""
+        """단일 alert를 insight/proposal/approval 흐름으로 처리한다."""
         # Critical 긴급 상황 — LLM 없이 즉각 에스컬레이션
         if self.decision_engine.is_critical_urgent(alert):
             critical = self.decision_engine.critical_response(alert)
             self.state.remember({"kind": "alert_critical_urgent", "at": utc_now(), "alert": alert.get("alert_type"), "decision": critical})
             logger.warning(f"CRITICAL URGENT alert: {alert.get('alert_type')} — 즉각 에스컬레이션")
-            # 서버 승인 후 종료 (미션 빌드 없음)
             try:
                 self.registry_client.acknowledge_alert(str(alert.get("alert_id")), approved=True, notes="Critical urgent — auto escalated")
             except Exception:
                 pass
-            return critical
+            proposal_bundle = self.generate_mission_proposal(
+                {
+                    "title": f"{str(alert.get('alert_type') or 'Critical').replace('_', ' ').title()} Critical Response",
+                    "goal": str(alert.get("message") or alert.get("alert_type") or "Critical mission"),
+                    "alert_id": str(alert.get("alert_id") or ""),
+                    "event_id": str(alert.get("event_id") or ""),
+                    "severity": str(alert.get("severity") or "CRITICAL"),
+                    "source": "critical_policy",
+                    "summary": "Policy-based critical response was generated automatically.",
+                    "reason_summary": critical.get("reasoning") or "Critical policy auto response.",
+                    "insight_summary": f"Critical policy response for {alert.get('alert_type') or 'alert'}",
+                }
+            )
+            auto_decision = None
+            approval_id = (proposal_bundle.get("approval") or {}).get("approval_id")
+            if approval_id:
+                auto_decision = await self.decide_approval_flow(
+                    str(approval_id),
+                    True,
+                    decided_by="system_policy",
+                    notes="Critical policy auto approval",
+                )
+            return {
+                **critical,
+                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+                "approval_id": approval_id,
+                "mission_id": ((auto_decision or {}).get("mission") or {}).get("mission_id"),
+            }
 
         # LLM 분석을 Lock 외부에서 먼저 수행 (최대 120초 블로킹이 Lock 밖에서 일어남)
         decision = self.decision_engine.decide(self.state, alert)
@@ -372,204 +379,22 @@ class AgentRuntime:
 
             self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
             logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={bool(llm_hint)}")
-
-            response = {
-                "response_id": str(uuid4()),
-                "alert_id": str(alert_id),
-                "action": "mission.assign",
-                "target_agent_id": None,
-                "status": "planned",
-                "reason": f"System Agent response to {alert.get('alert_type')}",
-                "dispatch_result": {},
-            }
-            alert_type = alert.get("alert_type")
-            metadata = alert.get("metadata", {})
-            mission_steps = self._build_mission_steps(alert, devices, llm_hint=llm_hint)
-            dispatch_result = self._build_dispatch_result_from_steps(mission_steps)
-            response["params"] = {
-                "location": metadata.get("location", {}),
-                "steps": mission_steps,
-                "alert_type": alert_type,
-            }
-            response["dispatch_result"] = dispatch_result
-            if mission_steps:
-                response["action"] = "mission.assign"
-                first_task = (mission_steps[0].get("tasks") or [None])[0]
-                if isinstance(first_task, dict):
-                    response["target_agent_id"] = str(first_task["route_agent_id"])
-                    response["target_endpoint"] = first_task["route_endpoint"]
-            else:
-                queue_reason = self._queue_reason_for_alert(alert, devices)
-                if queue_reason is not None:
-                    response["status"] = "queued"
-                    response["notes"] = queue_reason
-                    response["dispatch_result"]["queue"] = {
-                        "reason": queue_reason,
-                        "queued_at": utc_now(),
-                        "revalidation_required": True,
-                    }
-                else:
-                    response["status"] = "failed"
-                    response["notes"] = "no_capable_target_or_available_device"
-
-            try:
-                self.registry_client.ingest_response(response)
-                logger.info(f"Response {response['response_id']} ingested for alert {alert_id}")
-
-                # Mission 생성 (Response와 동시에)
-                try:
-                    event_id = alert.get("event_id") or alert.get("metadata", {}).get("event_id")
-                    if not event_id:
-                        logger.warning(f"Missing event_id for alert {alert_id}, skipping mission creation")
-                    else:
-                        mission = self.registry_client.create_mission(
-                            response_id=response["response_id"],
-                            alert_id=str(alert_id),
-                            event_id=str(event_id),
-                            metadata={"alert_type": alert_type},
-                        )
-                        logger.info(f"Mission {mission.get('mission_id')} created for response {response['response_id']}")
-                        response["mission_id"] = mission.get("mission_id")
-                except Exception as e:
-                    logger.warning(f"Failed to create mission: {e}")
-                    
-            except Exception as e:
-                logger.warning(f"Failed to ingest response: {e}")
-
-            if mission_steps:
-                dispatch = await self._dispatch_next_step(response, mission_steps, devices, logger)
-                response["dispatch_result"] = dispatch
-                if dispatch.get("delivered"):
-                    response["status"] = "planned"
-                    response["task_id"] = dispatch.get("task_id") or response["response_id"]
-                else:
-                    response["status"] = "failed"
-                    response["notes"] = dispatch.get("error")
-                    self._release_response_devices(dispatch, reason="initial_dispatch_failed")
-                try:
-                    self.registry_client.ingest_response(response)
-                except Exception as e:
-                    logger.warning(f"Failed to update response status: {e}")
-            elif response["status"] == "queued":
-                self._waiting_queue[response["response_id"]] = {
-                    "response_id": response["response_id"],
-                    "alert": dict(alert),
-                    "queued_at": utc_now(),
+            proposal_bundle = self.generate_mission_proposal(
+                {
+                    "title": f"{str(alert.get('alert_type') or 'Alert').replace('_', ' ').title()} Proposal",
+                    "goal": str(alert.get("message") or alert.get("alert_type") or "Mission proposal"),
+                    "alert_id": str(alert_id or ""),
+                    "event_id": alert.get("event_id") or (alert.get("metadata") or {}).get("event_id"),
+                    "severity": alert.get("severity") or "INFORMATION",
+                    "source": "alert_processing_loop",
+                    "summary": f"Proposal generated from alert {alert_id}.",
                 }
-                self.state.remember(
-                    {
-                        "kind": "waiting_queue_enqueued",
-                        "at": utc_now(),
-                        "response_id": response["response_id"],
-                        "alert_id": alert_id,
-                        "reason": response.get("notes"),
-                    }
-                )
-            return response
-
-    async def _reprocess_waiting_response(
-        self,
-        response_id: str,
-        queue_item: dict[str, Any],
-        devices: list[dict[str, Any]],
-        logger: Any,
-    ) -> None:
-        async with self._mission_lock:
-            try:
-                response = self.registry_client.get_response(response_id)
-            except Exception:
-                self._waiting_queue.pop(response_id, None)
-                return
-
-            if str(response.get("status") or "") != "queued":
-                self._waiting_queue.pop(response_id, None)
-                return
-
-            alert = dict(queue_item.get("alert") or {})
-            if not self._is_alert_still_valid(alert, queue_item):
-                response["status"] = "failed"
-                response["notes"] = "queue_alert_expired"
-                response["dispatch_result"] = dict(response.get("dispatch_result") or {})
-                response["dispatch_result"]["queue"] = {
-                    **dict(response["dispatch_result"].get("queue") or {}),
-                    "revalidated_at": utc_now(),
-                    "still_valid": False,
-                    "reason": "queue_alert_expired",
-                }
-                self.registry_client.ingest_response(response)
-                self._waiting_queue.pop(response_id, None)
-                self.state.remember(
-                    {
-                        "kind": "waiting_queue_expired",
-                        "at": utc_now(),
-                        "response_id": response_id,
-                        "alert_id": alert.get("alert_id"),
-                    }
-                )
-                return
-            response["dispatch_result"] = dict(response.get("dispatch_result") or {})
-            response["dispatch_result"]["queue"] = {
-                **dict(response["dispatch_result"].get("queue") or {}),
-                "revalidated_at": utc_now(),
+            )
+            return {
+                "alert_id": alert_id,
+                "decision": decision,
+                **proposal_bundle,
             }
-
-            mission_steps = self._build_mission_steps(alert, devices)
-            queue_reason = self._queue_reason_for_alert(alert, devices)
-            if not mission_steps:
-                if queue_reason is not None:
-                    response["notes"] = queue_reason
-                    response["dispatch_result"]["queue"]["reason"] = queue_reason
-                    response["dispatch_result"]["queue"]["still_valid"] = True
-                    self.registry_client.ingest_response(response)
-                    return
-                response["status"] = "failed"
-                response["notes"] = "queue_revalidation_failed"
-                response["dispatch_result"]["queue"]["still_valid"] = False
-                self.registry_client.ingest_response(response)
-                self._waiting_queue.pop(response_id, None)
-                self.state.remember(
-                    {
-                        "kind": "waiting_queue_invalidated",
-                        "at": utc_now(),
-                        "response_id": response_id,
-                    }
-                )
-                return
-
-            response["params"] = {
-                **dict(response.get("params") or {}),
-                "steps": mission_steps,
-            }
-            response["dispatch_result"] = self._build_dispatch_result_from_steps(mission_steps)
-            response["dispatch_result"]["queue"] = {
-                **dict(response["dispatch_result"].get("queue") or {}),
-                "reason": "queue_revalidated_and_rescheduled",
-                "still_valid": True,
-            }
-            first_task = (mission_steps[0].get("tasks") or [None])[0]
-            if isinstance(first_task, dict):
-                response["target_agent_id"] = str(first_task["route_agent_id"])
-                response["target_endpoint"] = first_task["route_endpoint"]
-
-            dispatch = await self._dispatch_next_step(response, mission_steps, devices, logger)
-            response["dispatch_result"] = dispatch
-            if dispatch.get("delivered"):
-                response["status"] = "planned"
-                response["task_id"] = dispatch.get("task_id") or response["response_id"]
-                response["notes"] = "queue_rescheduled"
-                self._waiting_queue.pop(response_id, None)
-                self.state.remember(
-                    {
-                        "kind": "waiting_queue_dispatched",
-                        "at": utc_now(),
-                        "response_id": response_id,
-                    }
-                )
-            else:
-                response["status"] = "failed"
-                response["notes"] = dispatch.get("error") or "queue_dispatch_failed"
-                self._waiting_queue.pop(response_id, None)
-            self.registry_client.ingest_response(response)
 
     def _build_mission_steps(
         self,
@@ -762,14 +587,14 @@ class AgentRuntime:
         ]
 
     def list_manual_interventions(self) -> list[dict[str, Any]]:
-        responses = self.registry_client.list_responses()
+        missions = self.registry_client.list_missions()
         items: list[dict[str, Any]] = []
-        for response in responses:
-            if not isinstance(response, dict):
+        for mission in missions:
+            if not isinstance(mission, dict):
                 continue
-            if str(response.get("status") or "") != "manual_intervention_required":
+            if str(mission.get("status") or "") != "needs_review":
                 continue
-            dispatch_result = response.get("dispatch_result") or {}
+            dispatch_result = ((mission.get("metadata") or {}).get("dispatch_state") or {})
             if not isinstance(dispatch_result, dict):
                 dispatch_result = {}
             intervention = dispatch_result.get("manual_intervention") or {}
@@ -782,16 +607,654 @@ class AgentRuntime:
                 }
             items.append(
                 {
-                    "response_id": response.get("response_id"),
-                    "alert_id": response.get("alert_id"),
-                    "status": response.get("status"),
-                    "reason": response.get("reason"),
-                    "notes": response.get("notes"),
+                    "mission_id": mission.get("mission_id"),
+                    "alert_id": mission.get("alert_id"),
+                    "status": mission.get("status"),
+                    "reason": (mission.get("final_result") or {}).get("reason"),
+                    "notes": mission.get("summary"),
                     "manual_intervention": intervention,
                 }
             )
         items.sort(key=lambda item: str((item.get("manual_intervention") or {}).get("at") or ""), reverse=True)
         return items
+
+    def recommend_device_roles(self, goal: str = "") -> dict[str, Any]:
+        devices = self.registry_client.list_devices()
+        recommendations: list[dict[str, Any]] = []
+        for device in devices:
+            device_type = str(device.get("device_type") or "").upper()
+            layer = str(device.get("layer") or "")
+            role_name = "support"
+            responsibility = "General support role."
+            if device_type == "AUV":
+                role_name = "underwater_survey"
+                responsibility = "Performs underwater scanning, anomaly survey, and area mapping."
+            elif device_type == "ROV":
+                role_name = "precision_intervention"
+                responsibility = "Performs close inspection and manipulation tasks at target locations."
+            elif device_type == "USV":
+                role_name = "surface_patrol"
+                responsibility = "Maintains surface patrol, relay, and safety positioning."
+            elif device_type == "CONTROL_SHIP" and layer == "middle":
+                role_name = "relay_and_safety_host"
+                responsibility = "Relays tasks/results for downstream devices and maintains local failsafe control."
+            elif layer == "middle":
+                role_name = "middle_layer_relay"
+                responsibility = "Relays mission tasks and state between System Agent and downstream devices."
+            recommendations.append(
+                {
+                    "device_id": str(device.get("id") or device.get("registry_id") or ""),
+                    "device_name": device.get("name"),
+                    "device_type": device_type,
+                    "role_name": role_name,
+                    "responsibility": responsibility,
+                    "goal_alignment": goal or None,
+                }
+            )
+        return {
+            "goal": goal,
+            "recommended_at": utc_now(),
+            "recommendations": recommendations,
+        }
+
+    def assign_device_role(self, payload: dict[str, Any], *, decided_by: str = "user") -> dict[str, Any]:
+        device_id = str(payload.get("device_id") or "")
+        if not device_id:
+            raise ValueError("device_id is required")
+        approval = self.registry_client.create_approval(
+            {
+                "target_type": "device_role_assignment",
+                "target_id": device_id,
+                "summary": f"Apply device role to {device_id}",
+                "requested_action": "apply_device_role",
+                "status": "pending",
+                "requested_by": "system_agent",
+                "metadata": {
+                    "role_name": payload.get("role_name"),
+                    "responsibility": payload.get("responsibility"),
+                    "status": payload.get("status") or "active",
+                    "notes": payload.get("notes"),
+                    "metadata": payload.get("metadata") or {},
+                },
+            }
+        )
+        return {"approval": approval, "device_role": None}
+
+    def activate_operation_plan(self, operation_plan_id: str, *, activated_by: str = "user") -> dict[str, Any]:
+        plan = self.registry_client.activate_operation_plan(operation_plan_id)
+        generated: list[dict[str, Any]] = []
+        for trigger in plan.get("triggers") or []:
+            if not isinstance(trigger, dict):
+                continue
+            trigger_type = str(trigger.get("type") or trigger.get("trigger_type") or "").upper()
+            if trigger_type != "MANUAL":
+                continue
+            generated.append(
+                self.generate_mission_proposal(
+                    {
+                        **self._build_plan_proposal_payload(plan, source="operation_plan_manual_trigger"),
+                        "summary": f"Manual trigger activated by {activated_by}.",
+                    }
+                )
+            )
+        return {"operation_plan": plan, "generated": generated}
+
+    def recommend_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        goal = str(payload.get("goal") or "").strip()
+        roles = payload.get("device_roles")
+        if not isinstance(roles, list) or not roles:
+            roles = self.registry_client.list_device_roles()
+        normalized_roles = [role for role in roles if isinstance(role, dict)]
+        mission_type = self._infer_mission_type(goal, payload.get("alert_type"))
+        triggers = payload.get("triggers")
+        if not isinstance(triggers, list) or not triggers:
+            triggers = [{"type": "MANUAL", "summary": "Operator-triggered execution"}]
+            if mission_type == "mine_clearance":
+                triggers.append({"type": "EVENT", "event_type": "mine_detection", "summary": "Generate proposal when a mine-like object is detected"})
+        summary = payload.get("summary") or f"Plan for {goal or mission_type}"
+        mission_template = {
+            "mission_type": mission_type,
+            "goal": goal,
+            "location": payload.get("location") or {},
+            "requires_approval": True,
+        }
+        return {
+            "name": payload.get("name") or f"{mission_type.replace('_', ' ').title()} Plan",
+            "goal": goal,
+            "status": payload.get("status") or "draft",
+            "summary": summary,
+            "triggers": triggers,
+            "device_roles": normalized_roles,
+            "mission_templates": [mission_template],
+            "recommended_by": "system_agent",
+            "metadata": payload.get("metadata") or {},
+        }
+
+    def generate_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        devices = self.registry_client.list_devices()
+        goal = str(payload.get("goal") or "").strip()
+        operation_plan_id = payload.get("operation_plan_id")
+        plan = None
+        if operation_plan_id:
+            try:
+                plan = self.registry_client.get_operation_plan(str(operation_plan_id))
+            except Exception:
+                plan = None
+        alert = None
+        alert_id = payload.get("alert_id")
+        if alert_id:
+            try:
+                alert = self.registry_client.get_alert(str(alert_id))
+            except Exception:
+                alert = None
+        mission_type = self._infer_mission_type(goal or (plan or {}).get("goal") or "", (alert or {}).get("alert_type"))
+        location = payload.get("location") or ((plan or {}).get("mission_templates") or [{}])[0].get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+        suppression_fingerprint = f"{mission_type}:{goal or (plan or {}).get('goal') or ''}:{(alert or {}).get('alert_id') or ''}"
+        suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
+        if suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
+            return {
+                "suppressed": True,
+                "fingerprint": suppression_fingerprint,
+                "suppressed_until": suppressed_until,
+            }
+        synthetic_alert = {
+            "alert_type": "mine_detection" if mission_type == "mine_clearance" else "operator_request",
+            "recommended_action": "survey_depth" if mission_type in {"survey", "mine_clearance"} else "hold_position",
+            "metadata": {"location": location},
+        }
+        steps = self._build_mission_steps(synthetic_alert, devices)
+        if not steps:
+            fallback_step = self._build_generic_steps_for_goal(goal or mission_type, devices, location)
+            steps = fallback_step
+        insight = self.registry_client.create_insight(
+            {
+                "summary": payload.get("insight_summary") or f"Mission proposal prepared for {mission_type}",
+                "reason_summary": payload.get("reason_summary") or "Current device availability, roles, and routing support execution.",
+                "severity": str(payload.get("severity") or ((alert or {}).get("severity") or "INFORMATION")).upper(),
+                "recommended_action": "review_and_approve_mission",
+                "confidence_level": "medium",
+                "related_event_id": payload.get("event_id") or (alert or {}).get("event_id"),
+                "related_alert_id": (alert or {}).get("alert_id"),
+                "metadata": {"goal": goal, "location": location},
+            }
+        )
+        proposal = self.registry_client.create_mission_proposal(
+            {
+                "title": payload.get("title") or f"{mission_type.replace('_', ' ').title()} Proposal",
+                "mission_type": mission_type,
+                "goal": goal or (plan or {}).get("goal") or mission_type,
+                "summary": payload.get("summary") or f"Proposal with {len(steps)} step(s) for operator review.",
+                "source": payload.get("source") or ("operation_plan" if plan else "system_agent"),
+                "alert_id": (alert or {}).get("alert_id"),
+                "event_id": payload.get("event_id") or (alert or {}).get("event_id"),
+                "operation_plan_id": operation_plan_id,
+                "insight_id": insight.get("insight_id"),
+                "steps": steps,
+                "metadata": {"location": location, "fingerprint": suppression_fingerprint},
+            }
+        )
+        approval = self.registry_client.create_approval(
+            {
+                "target_type": "mission_proposal",
+                "target_id": proposal.get("proposal_id"),
+                "summary": f"Approve mission proposal '{proposal.get('title')}'",
+                "requested_action": "approve_mission_proposal",
+                "related_insight_id": insight.get("insight_id"),
+                "metadata": {
+                    "mission_type": mission_type,
+                    "goal": proposal.get("goal"),
+                    "location": location,
+                },
+            }
+        )
+        proposal["approval_id"] = approval.get("approval_id")
+        proposal = self.registry_client.create_mission_proposal(proposal)
+        return {
+            "insight": insight,
+            "proposal": proposal,
+            "approval": approval,
+        }
+
+    async def decide_approval_flow(self, approval_id: str, approved: bool, *, decided_by: str, notes: str | None = None) -> dict[str, Any]:
+        approval = self.registry_client.decide_approval(
+            approval_id,
+            approved=approved,
+            decided_by=decided_by,
+            notes=notes,
+        )
+        if str(approval.get("target_type") or "") == "device_role_assignment":
+            if approved:
+                metadata = dict(approval.get("metadata") or {})
+                role = self.registry_client.upsert_device_role(
+                    str(approval.get("target_id") or ""),
+                    {
+                        "device_id": str(approval.get("target_id") or ""),
+                        "role_name": metadata.get("role_name"),
+                        "responsibility": metadata.get("responsibility"),
+                        "assigned_by": decided_by,
+                        "status": metadata.get("status") or "active",
+                        "metadata": metadata.get("metadata") or {},
+                    },
+                )
+                return {"approval": approval, "device_role": role, "mission": None}
+            return {"approval": approval, "device_role": None, "mission": None}
+        if str(approval.get("target_type") or "") == "mission_reapproval":
+            mission_id = str(approval.get("target_id") or "")
+            mission = self.registry_client.get_mission(mission_id)
+            mission.setdefault("timeline", []).append(
+                {
+                    "timestamp": utc_now(),
+                    "type": "user_reapproval",
+                    "message": "User reapproval recorded.",
+                    "data": {"approval_id": approval_id, "approved": approved},
+                }
+            )
+            if not approved:
+                mission["status"] = "failed"
+                mission["completed_at"] = utc_now()
+                mission["final_result"] = {"status": "failed", "reason": "user rejected mission reapproval"}
+                self.registry_client.replace_mission(mission_id, mission)
+                return {"approval": approval, "mission": mission}
+            dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
+            step_id = str((approval.get("metadata") or {}).get("step_id") or "")
+            recovery_mode = str((approval.get("metadata") or {}).get("recovery_mode") or "retry_same_step")
+            devices = self.registry_client.list_devices()
+            current_step_def = next(
+                (item for item in (mission.get("steps") or []) if isinstance(item, dict) and str(item.get("step_id") or "") == step_id),
+                None,
+            )
+            current_step_state = next(
+                (item for item in (dispatch_state.get("steps") or []) if isinstance(item, dict) and str(item.get("step_id") or "") == step_id),
+                None,
+            )
+            if isinstance(current_step_def, dict) and isinstance(current_step_state, dict):
+                self._prepare_step_recovery(current_step_def, current_step_state, devices, mode=recovery_mode)
+            mission["status"] = "running"
+            mission["completed_at"] = None
+            mission["final_result"] = {}
+            mission = self._sync_mission_from_dispatch_state(mission, dispatch_state)
+            self.registry_client.replace_mission(mission_id, mission)
+            mission = await self._start_mission_execution(mission)
+            return {"approval": approval, "mission": mission}
+        if str(approval.get("target_type") or "") != "mission_proposal":
+            return {"approval": approval, "mission": None}
+        proposal = self.registry_client.get_mission_proposal(str(approval.get("target_id")))
+        proposal["status"] = "approved" if approved else "rejected"
+        proposal = self.registry_client.create_mission_proposal(proposal)
+        if not approved:
+            fingerprint = str((proposal.get("metadata") or {}).get("fingerprint") or "")
+            if fingerprint:
+                self._recommendation_suppressions[fingerprint] = datetime.fromtimestamp(time.time() + 3600, tz=timezone.utc).isoformat()
+            return {"approval": approval, "proposal": proposal, "mission": None}
+        mission = self._mission_from_proposal(proposal, approval_id=str(approval.get("approval_id") or approval_id))
+        mission = self.registry_client.create_mission(mission)
+        mission = await self._start_mission_execution(mission)
+        return {"approval": approval, "proposal": proposal, "mission": mission}
+
+    def _current_hhmm(self) -> str:
+        now = datetime.now()
+        return now.strftime("%H:%M")
+
+    def _condition_snapshot(self) -> dict[str, Any]:
+        try:
+            devices = self.registry_client.list_devices()
+        except Exception:
+            devices = []
+        try:
+            alerts = self.registry_client.list_alerts()
+        except Exception:
+            alerts = []
+        try:
+            missions = self.registry_client.list_missions()
+        except Exception:
+            missions = []
+        return {
+            "devices": devices,
+            "alerts": alerts,
+            "missions": missions,
+            "devices.connected_count": len([device for device in devices if bool(device.get("connected"))]),
+            "alerts.waiting_count": len([alert for alert in alerts if str(alert.get("status") or "") in {"waiting", "registered", "processing"}]),
+            "missions.running_count": len([mission for mission in missions if str(mission.get("status") or "") == "running"]),
+            "missions.needs_review_count": len([mission for mission in missions if str(mission.get("status") or "") == "needs_review"]),
+        }
+
+    def _value_at_path(self, source: dict[str, Any], field_name: str) -> Any:
+        if field_name in source:
+            return source.get(field_name)
+        current: Any = source
+        for key in field_name.split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(key)
+        return current
+
+    def _condition_clause_matches(self, clause: dict[str, Any], source: dict[str, Any]) -> bool:
+        field_name = str(clause.get("field") or "").strip()
+        if not field_name:
+            return False
+        actual = self._value_at_path(source, field_name)
+        if "exists" in clause:
+            exists = bool(actual is not None)
+            if exists != bool(clause.get("exists")):
+                return False
+        if "equals" in clause and actual != clause.get("equals"):
+            return False
+        if "not_equals" in clause and actual == clause.get("not_equals"):
+            return False
+        if "in" in clause:
+            values = clause.get("in") or []
+            if actual not in values:
+                return False
+        if "gte" in clause:
+            try:
+                if float(actual) < float(clause.get("gte")):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        if "lte" in clause:
+            try:
+                if float(actual) > float(clause.get("lte")):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+    def _trigger_matches(
+        self,
+        trigger: dict[str, Any],
+        *,
+        event: dict[str, Any] | None = None,
+        snapshot: dict[str, Any] | None = None,
+    ) -> bool:
+        trigger_type = str(trigger.get("type") or trigger.get("trigger_type") or "").upper()
+        if trigger_type == "MANUAL":
+            return False
+        if trigger_type == "EVENT":
+            if event is None:
+                return False
+            return str(trigger.get("event_type") or "").strip().lower() == str(event.get("event_type") or event.get("type") or "").strip().lower()
+        if trigger_type == "TIME":
+            hhmm = str(trigger.get("time") or trigger.get("at") or "").strip()
+            return bool(hhmm) and hhmm == self._current_hhmm()
+        if trigger_type == "CONDITION":
+            source = snapshot or event or {}
+            if isinstance(trigger.get("all"), list):
+                return all(
+                    isinstance(clause, dict) and self._condition_clause_matches(clause, source)
+                    for clause in trigger.get("all") or []
+                )
+            if isinstance(trigger.get("any"), list):
+                return any(
+                    isinstance(clause, dict) and self._condition_clause_matches(clause, source)
+                    for clause in trigger.get("any") or []
+                )
+            return self._condition_clause_matches(trigger, source)
+        return False
+
+    def _build_plan_proposal_payload(self, plan: dict[str, Any], *, source: str, event: dict[str, Any] | None = None) -> dict[str, Any]:
+        mission_template = ((plan.get("mission_templates") or [{}])[0] if isinstance(plan.get("mission_templates"), list) else {}) or {}
+        metadata = dict(plan.get("metadata") or {})
+        return {
+            "title": f"{plan.get('name') or 'Operation Plan'} Proposal",
+            "goal": mission_template.get("goal") or plan.get("goal") or "",
+            "operation_plan_id": plan.get("operation_plan_id"),
+            "location": mission_template.get("location") or metadata.get("location") or ((event or {}).get("metadata") or {}).get("location") or {},
+            "alert_id": (event or {}).get("alert_id"),
+            "event_id": (event or {}).get("event_id"),
+            "severity": (event or {}).get("severity") or "INFORMATION",
+            "source": source,
+            "summary": f"Proposal generated from operation plan {plan.get('operation_plan_id')}.",
+        }
+
+    async def _operation_plan_loop(self) -> None:
+        logger = logging.getLogger(__name__)
+        last_triggered: dict[str, str] = {}
+        while True:
+            await asyncio.sleep(30)
+            try:
+                plans = self.registry_client.list_operation_plans()
+            except Exception as exc:
+                logger.debug(f"Failed to fetch operation plans: {exc}")
+                continue
+            snapshot = self._condition_snapshot()
+            current_slot = self._current_hhmm()
+            for plan in plans:
+                if str(plan.get("status") or "") != "active":
+                    continue
+                for idx, trigger in enumerate(plan.get("triggers") or []):
+                    if not isinstance(trigger, dict):
+                        continue
+                    if not self._trigger_matches(trigger, snapshot=snapshot):
+                        continue
+                    dedupe_key = f"{plan.get('operation_plan_id')}:{idx}:{current_slot}"
+                    if last_triggered.get(dedupe_key) == current_slot:
+                        continue
+                    self.generate_mission_proposal(self._build_plan_proposal_payload(plan, source="operation_plan_time_trigger"))
+                    last_triggered[dedupe_key] = current_slot
+                    self.state.remember({"kind": "operation_plan_triggered", "at": utc_now(), "operation_plan_id": plan.get("operation_plan_id"), "trigger": trigger})
+
+    def _infer_mission_type(self, goal: str, alert_type: Any) -> str:
+        goal_text = str(goal or "").lower()
+        alert_text = str(alert_type or "").lower()
+        if "mine" in goal_text or alert_text == "mine_detection":
+            return "mine_clearance"
+        if "survey" in goal_text or "scan" in goal_text:
+            return "survey"
+        if "inspect" in goal_text or "intervention" in goal_text:
+            return "inspection"
+        return "generic_mission"
+
+    def _build_generic_steps_for_goal(self, goal: str, devices: list[dict[str, Any]], location: dict[str, Any]) -> list[dict[str, Any]]:
+        action = "survey_depth" if any("survey" in goal.lower() for _ in [0]) else "hold_position"
+        target = self._select_best_device(devices, "survey_depth", location) if action == "survey_depth" else None
+        if target is None:
+            for device in devices:
+                if self._device_is_connected(device) and str(device.get("layer") or "") in {"lower", "middle"}:
+                    target = device
+                    break
+        if target is None:
+            return []
+        return [
+            self._build_step(
+                "step-1",
+                step_type="generic_action",
+                evaluation_policy="all_tasks_success_v1",
+                tasks=[self._build_task("task-1", action, target, location)],
+            )
+        ]
+
+    def _mission_from_proposal(self, proposal: dict[str, Any], *, approval_id: str) -> dict[str, Any]:
+        mission_id = f"mission-{uuid4()}"
+        timeline = [
+            {
+                "timestamp": utc_now(),
+                "type": "mission_created",
+                "message": "Mission created from approved proposal.",
+                "data": {"proposal_id": proposal.get("proposal_id"), "approval_id": approval_id},
+            },
+            {
+                "timestamp": utc_now(),
+                "type": "user_approval",
+                "message": "User approval recorded.",
+                "data": {"approval_id": approval_id},
+            },
+        ]
+        return {
+            "mission_id": mission_id,
+            "title": proposal.get("title") or "Mission",
+            "mission_type": proposal.get("mission_type") or "generic_mission",
+            "goal": proposal.get("goal") or "",
+            "status": "approved",
+            "summary": proposal.get("summary") or "",
+            "source": proposal.get("source") or "system_agent",
+            "alert_id": proposal.get("alert_id"),
+            "event_id": proposal.get("event_id"),
+            "operation_plan_id": proposal.get("operation_plan_id"),
+            "proposal_id": proposal.get("proposal_id"),
+            "approval_id": approval_id,
+            "insight_id": proposal.get("insight_id"),
+            "steps": proposal.get("steps") or [],
+            "timeline": timeline,
+            "logs": list(timeline),
+            "device_execution_results": [],
+            "final_result": {},
+            "metadata": {
+                **dict(proposal.get("metadata") or {}),
+                "dispatch_state": self._build_dispatch_result_from_steps(proposal.get("steps") or []),
+            },
+            "approved_at": utc_now(),
+        }
+
+    def _sync_mission_from_dispatch_state(self, mission: dict[str, Any], dispatch_state: dict[str, Any]) -> dict[str, Any]:
+        step_states = dispatch_state.get("steps") or []
+        mission_steps = mission.get("steps") or []
+        for mission_step in mission_steps:
+            step_id = str(mission_step.get("step_id") or "")
+            step_state = next((item for item in step_states if isinstance(item, dict) and str(item.get("step_id") or "") == step_id), None)
+            if not isinstance(step_state, dict):
+                continue
+            mission_step["status"] = step_state.get("status") or mission_step.get("status") or "pending"
+            task_states = step_state.get("tasks") or []
+            for mission_task in mission_step.get("tasks") or []:
+                state = next((item for item in task_states if isinstance(item, dict) and str(item.get("logical_task_id") or item.get("task_id") or "") == str(mission_task.get("logical_task_id") or mission_task.get("task_id") or "")), None)
+                if not isinstance(state, dict):
+                    continue
+                mission_task["dispatch_status"] = state.get("dispatch_status")
+                mission_task["execution_status"] = state.get("execution_status")
+                mission_task["attempt"] = state.get("attempt", mission_task.get("attempt", 0))
+                mission_task["attempted_device_ids"] = state.get("attempted_device_ids") or mission_task.get("attempted_device_ids") or []
+                mission_task["completed_at"] = state.get("completed_at")
+        mission.setdefault("metadata", {})["dispatch_state"] = dispatch_state
+        mission["device_execution_results"] = list(dispatch_state.get("execution_results") or [])
+        return mission
+
+    def _append_dispatch_timeline_entries(self, mission: dict[str, Any], dispatch: dict[str, Any], mission_steps: list[dict[str, Any]]) -> None:
+        step_id = str(dispatch.get("step_id") or "")
+        if not step_id:
+            return
+        step_def = next(
+            (item for item in mission_steps if isinstance(item, dict) and str(item.get("step_id") or "") == step_id),
+            None,
+        )
+        mission.setdefault("timeline", []).append(
+            {
+                "timestamp": utc_now(),
+                "type": "step_started",
+                "message": f"Step {step_id} started.",
+                "data": {
+                    "step_id": step_id,
+                    "step_type": (step_def or {}).get("step_type"),
+                },
+            }
+        )
+        for task_result in dispatch.get("task_results") or []:
+            if not isinstance(task_result, dict):
+                continue
+            task_id = str(task_result.get("task_id") or "")
+            mission.setdefault("timeline", []).append(
+                {
+                    "timestamp": utc_now(),
+                    "type": "task_started",
+                    "message": f"Task {task_id} dispatched for execution.",
+                    "data": {
+                        "step_id": step_id,
+                        "task_id": task_id,
+                        "target_device_id": task_result.get("target_device_id"),
+                        "route_agent_id": task_result.get("route_agent_id"),
+                        "dispatch": task_result.get("dispatch"),
+                    },
+                }
+            )
+
+    def _normalize_device_execution_entry(
+        self,
+        *,
+        mission_id: str,
+        reporter: str,
+        step_id: str,
+        task_id: str,
+        normalized_status: str,
+        execution_log: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_result = execution_log.get("result") if isinstance(execution_log.get("result"), dict) else {}
+        forwarded_payload = execution_log.get("payload") if isinstance(execution_log.get("payload"), dict) else {}
+        raw_refs = raw_result.get("output_refs") or raw_result.get("raw_data_ref") or raw_result.get("artifacts") or []
+        if isinstance(raw_refs, dict):
+            raw_refs = [raw_refs]
+        if not isinstance(raw_refs, list):
+            raw_refs = [raw_refs]
+        return {
+            "mission_id": mission_id,
+            "device_id": str(
+                execution_log.get("source_device_id")
+                or forwarded_payload.get("source_device_id")
+                or payload.get("source_device_id")
+                or ""
+            ),
+            "reporter": reporter,
+            "step_id": step_id,
+            "task_id": task_id,
+            "task_status": normalized_status,
+            "status": normalized_status,
+            "acceptance_status": raw_result.get("acceptance_status"),
+            "started_at": raw_result.get("started_at") or raw_result.get("accepted_at"),
+            "finished_at": raw_result.get("finished_at") or raw_result.get("reported_at"),
+            "success": normalized_status == "completed",
+            "failure_reason": raw_result.get("reason") or raw_result.get("error") or raw_result.get("failure_message"),
+            "failure_category": raw_result.get("failure_category") or execution_log.get("failure_category") or ("UNKNOWN" if normalized_status != "completed" else None),
+            "location": (
+                raw_result.get("location")
+                or execution_log.get("location")
+                or execution_log.get("command", {}).get("params", {}).get("location")
+                or forwarded_payload.get("location")
+            ),
+            "data_summary": raw_result.get("summary") or raw_result.get("output_summary") or execution_log.get("result_summary"),
+            "raw_data_ref": raw_refs,
+            "device_state_changes": raw_result.get("device_state_changes") or execution_log.get("device_state_changes") or {},
+            "device_agent_judgement": raw_result.get("agent_judgement") or execution_log.get("agent_judgement") or execution_log.get("action"),
+            "payload": execution_log,
+            "received_at": utc_now(),
+        }
+
+    async def _start_mission_execution(self, mission: dict[str, Any]) -> dict[str, Any]:
+        devices = self.registry_client.list_devices()
+        mission["status"] = "running"
+        mission["started_at"] = utc_now()
+        mission.setdefault("timeline", []).append(
+            {
+                "timestamp": utc_now(),
+                "type": "mission_started",
+                "message": "Mission execution started.",
+                "data": {"mission_id": mission.get("mission_id")},
+            }
+        )
+        dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
+        response_like = {
+            "mission_id": mission.get("mission_id"),
+            "response_id": mission.get("mission_id"),
+            "alert_id": mission.get("alert_id"),
+            "reason": mission.get("title"),
+            "dispatch_result": dispatch_state,
+            "params": {"steps": mission.get("steps") or []},
+        }
+        dispatch = await self._dispatch_next_step(response_like, mission.get("steps") or [], devices, logging.getLogger(__name__))
+        mission = self._sync_mission_from_dispatch_state(mission, dispatch)
+        self._append_dispatch_timeline_entries(mission, dispatch, mission.get("steps") or [])
+        mission.setdefault("timeline", []).append(
+            {
+                "timestamp": utc_now(),
+                "type": "task_dispatched" if dispatch.get("delivered") else "dispatch_failed",
+                "message": "Initial mission step dispatched." if dispatch.get("delivered") else "Initial mission dispatch failed.",
+                "data": dispatch,
+            }
+        )
+        if not dispatch.get("delivered"):
+            mission["status"] = "failed"
+            mission["completed_at"] = utc_now()
+            mission["final_result"] = {"status": "failed", "reason": dispatch.get("error") or "dispatch_failed"}
+        self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+        return mission
 
     def _build_task(
         self,
@@ -885,7 +1348,7 @@ class AgentRuntime:
         for device in devices:
             if not self._device_is_connected(device):
                 continue
-            if str(device.get("layer") or "") != "lower":
+            if str(device.get("layer") or "") not in {"lower", "middle"}:
                 continue
             device_id = self._device_id(device)
             if not include_reserved and self._is_device_reserved(device_id):
@@ -986,7 +1449,7 @@ class AgentRuntime:
             device
             for device in devices
             if self._device_is_connected(device)
-            and str(device.get("layer") or "") == "lower"
+            and str(device.get("layer") or "") in {"lower", "middle"}
             and self._device_can_execute(device, action)
             and self._device_id(device) not in excluded
             and not self._is_device_reserved(self._device_id(device))
@@ -1428,6 +1891,8 @@ class AgentRuntime:
                                 )
                             task_state["dispatch"] = dispatch
                             task_state["dispatch_status"] = "dispatched" if dispatch.get("delivered") else "failed"
+                            task_state["acceptance_status"] = dispatch.get("acceptance_status")
+                            task_state["failure_message"] = dispatch.get("reason")
                             task_state["dispatched_task_id"] = (
                                 f"{response['response_id']}:{step['step_id']}:{task['task_id']}"
                             )
@@ -1534,6 +1999,7 @@ class AgentRuntime:
                                 "type": "data",
                                 "data": {
                                     "message_type": "task.assign",
+                                    "mission_id": response.get("mission_id") or response.get("response_id"),
                                     "action": action or response.get("params", {}).get("action", "survey_depth"),
                                     "params": response.get("params", {}),
                                     "reason": response.get("reason", "System Agent assignment"),
@@ -1570,12 +2036,21 @@ class AgentRuntime:
                     return json.loads(resp.read() or b"{}")
 
             result = await asyncio.to_thread(_do_urlopen, rpc_endpoint, data, 15)
-            logger.info(f"A2A task sent to {target_agent_id}: {result.get('result', {}).get('status', 'unknown')}")
+            artifact_data = {}
+            try:
+                artifact_data = (((result.get("result") or {}).get("artifacts") or [])[0].get("parts") or [])[0].get("data") or {}
+            except Exception:
+                artifact_data = {}
+            acceptance = str(artifact_data.get("acceptance_status") or artifact_data.get("status") or "").upper()
+            accepted = acceptance != "REJECTED"
+            logger.info(f"A2A task sent to {target_agent_id}: accepted={accepted} status={acceptance or 'unknown'}")
             return {
-                "delivered": True,
+                "delivered": accepted,
                 "endpoint": endpoint,
                 "task_id": response.get("response_id"),
                 "a2a_result": result,
+                "acceptance_status": acceptance or "ACCEPTED",
+                "reason": artifact_data.get("reason"),
             }
         except urllib.error.HTTPError as e:
             logger.warning(f"HTTP error sending A2A to {target_agent_id}: {e.code}")
@@ -1695,13 +2170,42 @@ class AgentRuntime:
             self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent processing")
         except Exception:
             pass
+        proposal_bundle = self.generate_mission_proposal(
+            {
+                "title": f"{event_type.replace('_', ' ').title()} Mission Proposal",
+                "goal": message,
+                "alert_id": stored_alert.get("alert_id"),
+                "event_id": stored_event.get("event_id"),
+                "severity": severity,
+                "source": "event_report",
+                "summary": f"Proposal generated from alert {stored_alert.get('alert_id')}.",
+            }
+        )
         try:
-            devices = self.registry_client.list_devices()
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._process_alert(stored_alert, devices, logging.getLogger(__name__)))
+            plans = self.registry_client.list_operation_plans()
         except Exception:
-            # fallback: polling loop will process registered alerts
-            pass
+            plans = []
+        for plan in plans:
+            if str(plan.get("status") or "") != "active":
+                continue
+            matched = any(
+                isinstance(trigger, dict) and self._trigger_matches(trigger, event={"event_type": event_type, "type": event_type, "metadata": metadata, "event_id": stored_event.get("event_id"), "alert_id": stored_alert.get("alert_id"), "severity": severity})
+                for trigger in (plan.get("triggers") or [])
+            )
+            if matched:
+                self.generate_mission_proposal(
+                    self._build_plan_proposal_payload(
+                        plan,
+                        source="operation_plan_event_trigger",
+                        event={
+                            "event_type": event_type,
+                            "event_id": stored_event.get("event_id"),
+                            "alert_id": stored_alert.get("alert_id"),
+                            "metadata": metadata,
+                            "severity": severity,
+                        },
+                    )
+                )
 
         self.state.remember(
             {
@@ -1709,6 +2213,7 @@ class AgentRuntime:
                 "at": utc_now(),
                 "event_id": event_id,
                 "alert_id": stored_alert.get("alert_id"),
+                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
                 "event_type": event_type,
                 "severity": severity,
             }
@@ -1718,16 +2223,15 @@ class AgentRuntime:
             "message_type": "event.report",
             "event_id": stored_event.get("event_id"),
             "alert_id": stored_alert.get("alert_id"),
+            "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+            "approval_id": (proposal_bundle.get("approval") or {}).get("approval_id"),
             "severity": severity,
         }
 
     async def handle_task_result(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Device가 Task 실패를 보고할 때 처리.
-        
-        Device가 명령 실행을 시도했으나 실패했을 때 호출됨.
-        실패 원인에 따라 재시도 또는 수동 개입 결정.
-        """
+        """Device가 Task 실패/거절을 보고할 때 mission 상태에 반영한다."""
         task_id = str(payload.get("task_id") or "")
+        mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         device_id = str(payload.get("device_id") or "")
         agent_id = str(payload.get("agent_id") or "")
         status = str(payload.get("status") or "failed").lower()
@@ -1748,74 +2252,96 @@ class AgentRuntime:
             "command": command,
         })
         
-        # Find related response by checking all responses for this task
-        # (This will be connected through mission step execution)
-        response_id = None
-        current_response = None
-        
-        # Find response that has this task in execution
-        for resp in self.registry_client.list_responses():
-            if isinstance(resp.get("dispatch_result"), dict):
-                execution_results = resp.get("dispatch_result", {}).get("execution_results", [])
-                for exec_entry in execution_results:
-                    if exec_entry.get("task_id") == task_id or exec_entry.get("id") == task_id:
-                        response_id = resp.get("response_id")
-                        current_response = resp
+        current_mission = None
+        if mission_id:
+            try:
+                current_mission = self.registry_client.get_mission(mission_id)
+            except Exception:
+                current_mission = None
+        if current_mission is None:
+            for mission in self.registry_client.list_missions():
+                dispatch_state = ((mission.get("metadata") or {}).get("dispatch_state") or {})
+                for step_state in dispatch_state.get("steps") or []:
+                    for task_state in step_state.get("tasks") or []:
+                        if str(task_state.get("task_id") or "") == task_id:
+                            current_mission = mission
+                            mission_id = str(mission.get("mission_id") or "")
+                            break
+                    if current_mission is not None:
                         break
-            if response_id:
-                break
-        
-        if not response_id:
-            # No response found - just log the failure
+                if current_mission is not None:
+                    break
+
+        if not current_mission:
             return {
                 "received": True,
                 "message_type": "task.result",
                 "task_id": task_id,
                 "status": "acknowledged",
-                "note": "No related response found - failure logged"
+                "note": "No related mission found - failure logged"
             }
-        
-        # Update response with task failure
-        dispatch_result = current_response.get("dispatch_result", {}) or {}
-        execution_results = dispatch_result.get("execution_results", [])
-        
-        # Mark the failed task
-        for exec_entry in execution_results:
-            if exec_entry.get("task_id") == task_id or exec_entry.get("id") == task_id:
-                exec_entry["status"] = "failed"
-                exec_entry["error"] = error
-                exec_entry["failed_at"] = utc_now()
-        
-        # Decide: retry or abort
-        # 간단한 재시도 정책: 같은 task 최대 2번까지만 시도
-        retry_count = len([
-            e for e in execution_results 
-            if e.get("task_id") == task_id and e.get("status") == "failed"
-        ])
-        
-        decision = "abort_mission" if retry_count >= 2 else "retry_step"
-        
-        dispatch_result["execution_results"] = execution_results
-        dispatch_result["last_failure"] = {
+
+        dispatch_state = dict((current_mission.get("metadata") or {}).get("dispatch_state") or {})
+        execution_results = list(dispatch_state.get("execution_results") or [])
+        failure_entry = {
+            "mission_id": mission_id,
+            "reporter": agent_id or device_id or "unknown",
+            "step_id": str(payload.get("step_id") or "default"),
+            "task_id": task_id,
+            "status": "failed" if status != "rejected" else "rejected",
+            "payload": execution_result,
+            "received_at": utc_now(),
+            "error": error,
+        }
+        execution_results.append(failure_entry)
+        retry_count = len([e for e in execution_results if str(e.get("task_id") or "") == task_id and str(e.get("status") or "") in {"failed", "rejected"}])
+        decision = "abort_mission" if retry_count >= 2 or status == "rejected" else "retry_step"
+        dispatch_state["execution_results"] = execution_results
+        dispatch_state["last_failure"] = {
             "task_id": task_id,
             "error": error,
             "at": utc_now(),
             "decision": decision
         }
-        
-        # Update response in registry
-        updated_response = dict(current_response)
-        updated_response["dispatch_result"] = dispatch_result
-        updated_response["updated_at"] = utc_now()
+        for step_state in dispatch_state.get("steps") or []:
+            if not isinstance(step_state, dict):
+                continue
+            for task_state in step_state.get("tasks") or []:
+                if not isinstance(task_state, dict):
+                    continue
+                if str(task_state.get("task_id") or "") == task_id:
+                    task_state["execution_status"] = "failed" if status != "rejected" else "rejected"
+                    task_state["failure_message"] = error
+                    task_state["completed_at"] = utc_now()
+                    step_state["status"] = "failed"
+        current_mission["metadata"] = {**dict(current_mission.get("metadata") or {}), "dispatch_state": dispatch_state}
+        current_mission.setdefault("timeline", []).append(
+            {
+                "timestamp": utc_now(),
+                "type": "warning",
+                "message": f"Warning raised for task {task_id}.",
+                "data": {"task_id": task_id, "error": error, "decision": decision},
+            }
+        )
+        current_mission.setdefault("timeline", []).append(
+            {
+                "timestamp": utc_now(),
+                "type": "task_failure",
+                "message": f"Task {task_id} reported {status}.",
+                "data": {"task_id": task_id, "error": error, "decision": decision},
+            }
+        )
+        current_mission["status"] = "failed" if decision == "abort_mission" else "running"
         if decision == "abort_mission":
-            updated_response["status"] = "failed"
-        
-        self.registry_client.ingest_response(updated_response)
+            current_mission["completed_at"] = utc_now()
+            current_mission["final_result"] = {"status": "failed", "reason": error}
+        current_mission = self._sync_mission_from_dispatch_state(current_mission, dispatch_state)
+        self.registry_client.replace_mission(mission_id, current_mission)
         
         self.state.remember({
             "kind": "task_failure_handled",
             "at": utc_now(),
-            "response_id": response_id,
+            "mission_id": mission_id,
             "task_id": task_id,
             "decision": decision,
             "retry_count": retry_count,
@@ -1831,23 +2357,22 @@ class AgentRuntime:
         }
 
     async def handle_mission_result(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """중간/하위 에이전트의 임무 수행 결과를 수신해 response 원장에 최종 반영한다."""
-        response_id = str(payload.get("response_id") or "")
-        alert_id = str(payload.get("alert_id") or "")
+        """중간/하위 에이전트의 임무 수행 결과를 수신해 mission 원장에 최종 반영한다."""
+        mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         reporter = str(payload.get("source_agent_id") or payload.get("reporter") or "unknown")
         step_id = str(payload.get("step_id") or "")
         execution_status = str(payload.get("execution_status") or "completed").lower()
         execution_log = payload.get("execution_log") or {}
 
-        if not response_id:
-            return {"received": False, "message_type": "mission.result", "error": "response_id required"}
+        if not mission_id:
+            return {"received": False, "message_type": "mission.result", "error": "mission_id required"}
 
         normalized_status = "completed" if execution_status == "completed" else "failed"
-        aggregate_status = normalized_status
         async with self._mission_lock:
             devices = self.registry_client.list_devices()
             try:
-                existing = self.registry_client.get_response(response_id)
+                mission = self.registry_client.get_mission(mission_id)
+                dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
                 forwarded_payload = execution_log.get("payload") if isinstance(execution_log, dict) else None
                 if not isinstance(forwarded_payload, dict):
                     forwarded_payload = {}
@@ -1870,8 +2395,7 @@ class AgentRuntime:
                     or payload.get("task_id")
                     or "default"
                 )
-                dispatch_result = dict(existing.get("dispatch_result") or {})
-                existing_results = dispatch_result.get("execution_results") or []
+                existing_results = dispatch_state.get("execution_results") or []
                 if not isinstance(existing_results, list):
                     existing_results = []
                 if any(
@@ -1885,8 +2409,8 @@ class AgentRuntime:
                         {
                             "kind": "mission_result_duplicate_ignored",
                             "at": utc_now(),
-                            "response_id": response_id,
-                            "alert_id": existing.get("alert_id") or alert_id,
+                            "mission_id": mission_id,
+                            "alert_id": mission.get("alert_id"),
                             "reporter": reporter,
                             "step_id": step_id,
                             "task_id": task_id,
@@ -1895,47 +2419,38 @@ class AgentRuntime:
                     return {
                         "received": True,
                         "message_type": "mission.result",
-                        "response_id": response_id,
-                        "status": existing.get("status") or normalized_status,
+                        "mission_id": mission_id,
+                        "status": mission.get("status") or normalized_status,
                         "duplicate": True,
                         "dedup_key": {
-                            "response_id": response_id,
+                            "mission_id": mission_id,
                             "step_id": step_id,
                             "task_id": task_id,
                             "reporter": reporter,
                         },
                     }
 
-                execution_entry = {
-                    "reporter": reporter,
-                    "step_id": step_id,
-                    "task_id": task_id,
-                    "status": normalized_status,
-                    "payload": execution_log,
-                    "received_at": utc_now(),
-                }
+                execution_entry = self._normalize_device_execution_entry(
+                    mission_id=mission_id,
+                    reporter=reporter,
+                    step_id=step_id,
+                    task_id=task_id,
+                    normalized_status=normalized_status,
+                    execution_log=execution_log if isinstance(execution_log, dict) else {},
+                    payload=payload,
+                )
                 execution_results = [*existing_results, execution_entry]
-                aggregate_status = "failed" if any(
-                    item.get("status") == "failed" for item in execution_results if isinstance(item, dict)
-                ) else "completed"
-                dispatch_result["execution_results"] = execution_results
-                dispatch_result["execution_result"] = execution_entry
-                dispatch_result["execution_aggregate_status"] = aggregate_status
+                dispatch_state["execution_results"] = execution_results
+                dispatch_state["execution_result"] = execution_entry
 
-                mission_steps = []
-                params = existing.get("params") or {}
-                if isinstance(params, dict):
-                    mission_steps = params.get("steps") or []
-                if not isinstance(mission_steps, list):
-                    mission_steps = []
-
-                step_states = dispatch_result.get("steps") or []
+                mission_steps = mission.get("steps") or []
+                step_states = dispatch_state.get("steps") or []
                 if not isinstance(step_states, list):
                     step_states = []
-                step_evaluations = dispatch_result.get("step_evaluations") or {}
+                step_evaluations = dispatch_state.get("step_evaluations") or {}
                 if not isinstance(step_evaluations, dict):
                     step_evaluations = {}
-                replan_history = dispatch_result.get("replan_history") or []
+                replan_history = dispatch_state.get("replan_history") or []
                 if not isinstance(replan_history, list):
                     replan_history = []
 
@@ -1977,39 +2492,78 @@ class AgentRuntime:
                 step_evaluation: dict[str, Any] | None = None
                 if isinstance(current_step_state, dict) and isinstance(current_step_def, dict) and self._is_step_terminal(current_step_state):
                     step_evaluation = self._evaluate_step(
-                        existing,
+                        {"response_id": mission_id, "alert_id": mission.get("alert_id")},
                         current_step_def,
                         current_step_state,
                         current_step_results,
                         devices,
                     )
                     step_evaluations[step_id] = step_evaluation
-                    dispatch_result["step_evaluations"] = step_evaluations
+                    dispatch_state["step_evaluations"] = step_evaluations
                     self.state.remember({"kind": "step_evaluation", "at": utc_now(), "evaluation": step_evaluation})
                     if step_evaluation.get("decision") != "proceed_next_step":
                         replan_history.append(
                             {
                                 "at": utc_now(),
-                                "response_id": response_id,
+                                "mission_id": mission_id,
                                 "step_id": step_id,
                                 "decision": step_evaluation.get("decision"),
                                 "reason": step_evaluation.get("reason"),
                             }
                         )
-                        dispatch_result["replan_history"] = replan_history
+                        dispatch_state["replan_history"] = replan_history
+                        mission.setdefault("timeline", []).append(
+                            {
+                                "timestamp": utc_now(),
+                                "type": "plan_changed",
+                                "message": f"Mission plan changed after step {step_id}.",
+                                "data": {
+                                    "step_id": step_id,
+                                    "decision": step_evaluation.get("decision"),
+                                    "reason": step_evaluation.get("reason"),
+                                },
+                            }
+                        )
                     if step_evaluation.get("decision") == "manual_intervention_required":
-                        dispatch_result["manual_intervention"] = self._build_manual_intervention_record(
-                            response_id=response_id,
-                            alert_id=str(existing.get("alert_id") or alert_id),
+                        dispatch_state["manual_intervention"] = self._build_manual_intervention_record(
+                            response_id=mission_id,
+                            alert_id=str(mission.get("alert_id") or ""),
                             step_evaluation=step_evaluation,
                             step_execution_results=current_step_results,
+                        )
+                        reapproval = self.registry_client.create_approval(
+                            {
+                                "target_type": "mission_reapproval",
+                                "target_id": mission_id,
+                                "summary": f"Mission {mission_id} requires user reapproval",
+                                "requested_action": "review_and_resume_mission",
+                                "related_insight_id": mission.get("insight_id"),
+                                "metadata": {
+                                    "mission_id": mission_id,
+                                    "step_id": step_id,
+                                    "recovery_mode": "retry_same_step",
+                                    "reason": step_evaluation.get("reason"),
+                                },
+                            }
+                        )
+                        mission.setdefault("timeline", []).append(
+                            {
+                                "timestamp": utc_now(),
+                                "type": "user_reapproval_requested",
+                                "message": "Mission reapproval requested.",
+                                "data": {
+                                    "approval_id": reapproval.get("approval_id"),
+                                    "step_id": step_id,
+                                    "reason": step_evaluation.get("reason"),
+                                },
+                            }
                         )
                         self.state.remember(
                             {
                                 "kind": "manual_intervention_required",
                                 "at": utc_now(),
-                                "response_id": response_id,
-                                "alert_id": existing.get("alert_id") or alert_id,
+                                "mission_id": mission_id,
+                                "alert_id": mission.get("alert_id"),
                                 "step_id": step_id,
                                 "reason": step_evaluation.get("reason"),
                             }
@@ -2048,16 +2602,16 @@ class AgentRuntime:
                         break
 
                 if next_step is not None:
-                    existing["dispatch_result"] = dispatch_result
+                    mission.setdefault("metadata", {})["dispatch_state"] = dispatch_state
                     next_dispatch = await self._dispatch_next_step(
-                        existing,
+                        {"response_id": mission_id, "alert_id": mission.get("alert_id"), "reason": mission.get("title"), "dispatch_result": dispatch_state, "params": {"steps": mission_steps}},
                         mission_steps,
                         devices,
                         logging.getLogger(__name__),
                         previous_step_results=[
                             {
-                                "response_id": response_id,
-                                "alert_id": existing.get("alert_id") or alert_id,
+                                "response_id": mission_id,
+                                "alert_id": mission.get("alert_id"),
                                 "step_id": step_id,
                                 "task_id": str(item.get("task_id") or ""),
                                 "reporter": str(item.get("reporter") or ""),
@@ -2068,9 +2622,8 @@ class AgentRuntime:
                             if isinstance(item, dict) and str(item.get("step_id") or "") == step_id
                         ],
                     )
-                    dispatch_result = next_dispatch
-                    aggregate_status = "planned" if next_dispatch.get("delivered") else "failed"
-                    dispatch_result["execution_aggregate_status"] = aggregate_status
+                    dispatch_state = next_dispatch
+                    self._append_dispatch_timeline_entries(mission, next_dispatch, mission_steps)
                 elif should_retry_same_step or should_reassign_failed_tasks:
                     recovery_mode = "reassign_failed_tasks" if should_reassign_failed_tasks else "retry_same_step"
                     prepared = self._prepare_step_recovery(
@@ -2080,97 +2633,133 @@ class AgentRuntime:
                         mode=recovery_mode,
                     ) if isinstance(current_step_def, dict) and isinstance(current_step_state, dict) else False
                     if prepared and isinstance(current_step_def, dict):
-                        existing["dispatch_result"] = dispatch_result
+                        mission.setdefault("metadata", {})["dispatch_state"] = dispatch_state
                         retry_dispatch = await self._dispatch_next_step(
-                            existing,
+                            {"response_id": mission_id, "alert_id": mission.get("alert_id"), "reason": mission.get("title"), "dispatch_result": dispatch_state, "params": {"steps": mission_steps}},
                             mission_steps,
                             devices,
                             logging.getLogger(__name__),
                             previous_step_results=self._collect_previous_step_results(current_step_def, execution_results),
                         )
-                        dispatch_result = retry_dispatch
-                        aggregate_status = "planned" if retry_dispatch.get("delivered") else "failed"
-                        dispatch_result["execution_aggregate_status"] = aggregate_status
-                    else:
-                        aggregate_status = "failed"
-                        dispatch_result["execution_aggregate_status"] = aggregate_status
-                else:
-                    planned_step_ids = [
-                        str(item.get("step_id") or "")
-                        for item in mission_steps
-                        if isinstance(item, dict)
-                    ]
-                    proceed_step_ids = {
-                        str(step_key)
-                        for step_key, evaluation in step_evaluations.items()
-                        if isinstance(evaluation, dict) and evaluation.get("decision") == "proceed_next_step"
-                    }
-                    if step_evaluation and step_evaluation.get("decision") == "manual_intervention_required":
-                        aggregate_status = "manual_intervention_required"
-                    elif step_evaluation and step_evaluation.get("decision") == "abort_mission":
-                        aggregate_status = "failed"
-                    elif planned_step_ids and all(step in proceed_step_ids for step in planned_step_ids):
-                        aggregate_status = "completed"
-                    else:
-                        aggregate_status = "planned"
-                    dispatch_result["execution_aggregate_status"] = aggregate_status
+                        dispatch_state = retry_dispatch
+                        self._append_dispatch_timeline_entries(mission, retry_dispatch, mission_steps)
 
-                if step_evaluation and step_evaluation.get("decision") in {"abort_mission", "manual_intervention_required"}:
-                    self._release_response_devices(dispatch_result, reason=str(step_evaluation.get("decision")))
-                elif aggregate_status == "completed":
-                    self._release_response_devices(dispatch_result, reason="mission_completed")
-                    # Mission completed → Registry mission 완료 처리
-                    mission_id = str(existing.get("mission_id") or "")
-                    if not mission_id:
-                        try:
-                            missions = self.registry_client.list_missions()
-                            matched = next(
-                                (m for m in missions if str(m.get("response_id") or "") == response_id),
-                                None,
-                            )
-                            if matched:
-                                mission_id = str(matched.get("mission_id") or "")
-                        except Exception:
-                            pass
-                    if mission_id:
-                        try:
-                            self.registry_client.complete_mission(
-                                mission_id=mission_id,
-                                completion_report={
-                                    "outcome": "completed",
-                                    "final_status": "completed",
-                                    "notes": f"Mission completed via handle_mission_result for response {response_id}",
-                                    "completed_at": utc_now(),
-                                },
-                            )
-                        except Exception as e:
-                            logging.getLogger(__name__).warning(f"Failed to complete mission {mission_id}: {e}")
-
-                response_record = {
-                    "response_id": response_id,
-                    "alert_id": existing.get("alert_id") or alert_id,
-                    "action": existing.get("action") or "task.assign",
-                    "target_agent_id": existing.get("target_agent_id"),
-                    "target_endpoint": existing.get("target_endpoint"),
-                    "route_mode": existing.get("route_mode") or "direct_to_system",
-                    "status": aggregate_status,
-                    "reason": existing.get("reason") or f"Mission result from {reporter}",
-                    "task_id": existing.get("task_id") or response_id,
-                    "params": existing.get("params") or {},
-                    "dispatch_result": dispatch_result,
-                    "notes": (
-                        str(step_evaluation.get("reason"))
-                        if step_evaluation and step_evaluation.get("decision") == "manual_intervention_required"
-                        else f"Mission result from {reporter}"
-                    ),
+                planned_step_ids = [
+                    str(item.get("step_id") or "")
+                    for item in mission_steps
+                    if isinstance(item, dict)
+                ]
+                proceed_step_ids = {
+                    str(step_key)
+                    for step_key, evaluation in step_evaluations.items()
+                    if isinstance(evaluation, dict) and evaluation.get("decision") == "proceed_next_step"
                 }
-                self.registry_client.ingest_response(response_record)
+                aggregate_status = "running"
+                if step_evaluation and step_evaluation.get("decision") == "manual_intervention_required":
+                    aggregate_status = "needs_review"
+                elif step_evaluation and step_evaluation.get("decision") == "abort_mission":
+                    aggregate_status = "failed"
+                elif planned_step_ids and all(step in proceed_step_ids for step in planned_step_ids):
+                    aggregate_status = "completed"
+
+                if aggregate_status in {"failed", "needs_review"}:
+                    self._release_response_devices(dispatch_state, reason=aggregate_status)
+                elif aggregate_status == "completed":
+                    self._release_response_devices(dispatch_state, reason="mission_completed")
+
+                mission.setdefault("timeline", []).append(
+                    {
+                        "timestamp": utc_now(),
+                        "type": "device_result_reported",
+                        "message": f"Task result reported by {reporter}.",
+                        "data": {
+                            "step_id": step_id,
+                            "task_id": task_id,
+                            "status": normalized_status,
+                            "device_id": execution_entry.get("device_id"),
+                            "failure_reason": execution_entry.get("failure_reason"),
+                        },
+                    }
+                )
+                mission.setdefault("timeline", []).append(
+                    {
+                        "timestamp": utc_now(),
+                        "type": "task_completed" if normalized_status == "completed" else "warning",
+                        "message": (
+                            f"Task {task_id} completed."
+                            if normalized_status == "completed"
+                            else f"Task {task_id} reported non-success status."
+                        ),
+                        "data": {
+                            "step_id": step_id,
+                            "task_id": task_id,
+                            "status": normalized_status,
+                            "device_id": execution_entry.get("device_id"),
+                            "failure_reason": execution_entry.get("failure_reason"),
+                        },
+                    }
+                )
+                mission.setdefault("timeline", []).append(
+                    {
+                        "timestamp": utc_now(),
+                        "type": "agent_judgement",
+                        "message": "System Agent updated mission evaluation.",
+                        "data": step_evaluation or {"status": aggregate_status},
+                    }
+                )
+                mission["status"] = aggregate_status
+                if aggregate_status == "completed":
+                    mission["completed_at"] = utc_now()
+                    mission["final_result"] = {
+                        "status": "completed",
+                        "summary": f"Mission completed after step {step_id}.",
+                    }
+                    mission.setdefault("timeline", []).append(
+                        {
+                            "timestamp": utc_now(),
+                            "type": "mission_completed",
+                            "message": "Mission completed.",
+                            "data": {"mission_id": mission_id},
+                        }
+                    )
+                elif aggregate_status == "failed":
+                    mission["completed_at"] = utc_now()
+                    mission["final_result"] = {
+                        "status": "failed",
+                        "reason": (step_evaluation or {}).get("reason") or "task execution failure",
+                    }
+                    mission.setdefault("timeline", []).append(
+                        {
+                            "timestamp": utc_now(),
+                            "type": "mission_failed",
+                            "message": "Mission failed.",
+                            "data": {
+                                "mission_id": mission_id,
+                                "reason": mission["final_result"].get("reason"),
+                            },
+                        }
+                    )
+                elif aggregate_status == "needs_review":
+                    mission.setdefault("timeline", []).append(
+                        {
+                            "timestamp": utc_now(),
+                            "type": "warning",
+                            "message": "Mission requires manual review.",
+                            "data": {
+                                "mission_id": mission_id,
+                                "step_id": step_id,
+                                "reason": (step_evaluation or {}).get("reason"),
+                            },
+                        }
+                    )
+                mission = self._sync_mission_from_dispatch_state(mission, dispatch_state)
+                self.registry_client.replace_mission(mission_id, mission)
             except Exception as exc:
                 self.state.remember(
                     {
                         "kind": "mission_result_update_failed",
                         "at": utc_now(),
-                        "response_id": response_id,
+                        "mission_id": mission_id,
                         "error": str(exc),
                     }
                 )
@@ -2180,22 +2769,22 @@ class AgentRuntime:
             {
                 "kind": "mission_result_received",
                 "at": utc_now(),
-                "response_id": response_id,
-                "alert_id": alert_id,
+                "mission_id": mission_id,
+                "alert_id": mission.get("alert_id"),
                 "reporter": reporter,
                 "step_id": step_id,
                 "task_id": task_id,
-                "status": aggregate_status,
+                "status": mission.get("status"),
             }
         )
         return {
             "received": True,
             "message_type": "mission.result",
-            "response_id": response_id,
-            "status": aggregate_status,
+            "mission_id": mission_id,
+            "status": mission.get("status"),
             "duplicate": False,
             "dedup_key": {
-                "response_id": response_id,
+                "mission_id": mission_id,
                 "step_id": step_id,
                 "task_id": task_id,
                 "reporter": reporter,

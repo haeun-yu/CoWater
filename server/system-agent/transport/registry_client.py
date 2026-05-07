@@ -9,11 +9,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def post_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """POST JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -27,11 +32,16 @@ def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any
         raise
 
 
-def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def put_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """PUT JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="PUT")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="PUT",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -66,6 +76,9 @@ class RegistryClient:
         self.url = str(config.get("url") or "http://127.0.0.1:8280").rstrip("/")
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
+
+    def _internal_headers(self) -> dict[str, str]:
+        return {"X-CoWater-Internal": "system-agent"}
 
     def register_device(
         self,
@@ -158,63 +171,84 @@ class RegistryClient:
             body["notes"] = notes
         return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
 
-    def ingest_response(self, response: dict[str, Any]) -> dict[str, Any]:
-        return post_json(f"{self.url}/responses/ingest", response)
+    def list_device_roles(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/device-roles")
 
-    def list_responses(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/responses")
+    def get_device_role(self, device_id: str | int) -> dict[str, Any]:
+        return get_json(f"{self.url}/device-roles/{device_id}")
 
-    def get_response(self, response_id: str) -> dict[str, Any]:
-        return get_json(f"{self.url}/responses/{response_id}")
+    def upsert_device_role(self, device_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(
+            f"{self.url}/devices/{device_id}/role",
+            payload,
+            headers=self._internal_headers(),
+        )
 
-    # Mission API
-    def create_mission(
-        self,
-        response_id: str,
-        alert_id: str,
-        event_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """새 Mission 생성"""
-        body = {
-            "response_id": response_id,
-            "alert_id": alert_id,
-            "event_id": event_id,
-            "metadata": metadata or {},
+    def get_overview(self) -> dict[str, Any]:
+        return {
+            "devices": self.list_devices(),
+            "device_roles": self.list_device_roles(),
+            "operation_plans": self.list_operation_plans(),
+            "insights": self.list_insights(),
+            "approvals": self.list_approvals(),
+            "mission_proposals": self.list_mission_proposals(),
+            "missions": self.list_missions(),
         }
-        return post_json(f"{self.url}/missions", body)
+
+    def create_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/operation-plans", payload)
+
+    def list_operation_plans(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/operation-plans")
+
+    def get_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/operation-plans/{operation_plan_id}")
+
+    def activate_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
+        return post_json(
+            f"{self.url}/operation-plans/{operation_plan_id}/activate",
+            {},
+            headers=self._internal_headers(),
+        )
+
+    def create_insight(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/insights", payload)
+
+    def list_insights(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/insights")
+
+    def create_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/approvals", payload)
+
+    def list_approvals(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/approvals")
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/approvals/{approval_id}")
+
+    def decide_approval(self, approval_id: str, *, approved: bool, decided_by: str = "user", notes: str | None = None) -> dict[str, Any]:
+        body = {"approved": approved, "decided_by": decided_by}
+        if notes is not None:
+            body["notes"] = notes
+        return post_json(f"{self.url}/approvals/{approval_id}/decision", body)
+
+    def create_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/mission-proposals", payload)
+
+    def list_mission_proposals(self) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/mission-proposals")
+
+    def get_mission_proposal(self, proposal_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/mission-proposals/{proposal_id}")
+
+    def create_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/missions", payload)
 
     def list_missions(self) -> list[dict[str, Any]]:
-        """모든 Mission 목록"""
         return get_json(f"{self.url}/missions")
 
     def get_mission(self, mission_id: str) -> dict[str, Any]:
-        """특정 Mission 조회"""
         return get_json(f"{self.url}/missions/{mission_id}")
 
-    def record_step_execution(
-        self,
-        mission_id: str,
-        step_id: str,
-        execution_result: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Step 실행 결과 기록"""
-        body = {
-            "step_id": step_id,
-            "execution_result": execution_result,
-        }
-        return post_json(f"{self.url}/missions/{mission_id}/step-execution", body)
-
-    def complete_mission(
-        self,
-        mission_id: str,
-        completion_report: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Mission 완료"""
-        body = {"completion_report": completion_report}
-        return post_json(f"{self.url}/missions/{mission_id}/complete", body)
-
-    def abort_mission(self, mission_id: str, reason: str) -> dict[str, Any]:
-        """Mission 실패 처리"""
-        body = {"reason": reason}
-        return post_json(f"{self.url}/missions/{mission_id}/abort", body)
+    def replace_mission(self, mission_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(f"{self.url}/missions/{mission_id}", payload)

@@ -110,6 +110,7 @@ class AgentRuntime:
         self.tools: dict[str, Any] = {}
         self._load_tools()
         self._last_assignment_signature: dict[str, Any] | None = None
+        self._last_parent_registration_signature: dict[str, Any] | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._stopping = False
 
@@ -276,6 +277,7 @@ class AgentRuntime:
         if self._last_assignment_signature != signature:
             self.state.remember({"kind": "layer_assignment", "at": utc_now(), "assignment": assignment})
             self._last_assignment_signature = signature
+            self._last_parent_registration_signature = None
 
     def _refresh_assignment(self) -> None:
         if self.state.registry_id is None:
@@ -298,6 +300,59 @@ class AgentRuntime:
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
         )
+
+    async def _ensure_parent_registration(self) -> None:
+        if self.state.layer != "lower":
+            return
+        if not self.state.parent_endpoint or not self.state.registry_id:
+            return
+        signature = {
+            "parent_endpoint": self.state.parent_endpoint,
+            "registry_id": self.state.registry_id,
+            "agent_id": self.state.agent_id,
+        }
+        if self._last_parent_registration_signature == signature:
+            return
+
+        payload = {
+            "agent_id": self.state.agent_id,
+            "device_id": self.state.registry_id,
+            "name": self.state.name,
+            "layer": self.state.layer,
+            "device_type": self.state.device_type,
+            "endpoint": self.base_url(),
+            "command_endpoint": f"{self.base_url()}/agents/{self.state.token}/command" if self.state.token else None,
+            "parent_id": self.state.parent_id,
+            "registered_at": self.state.registered_at,
+        }
+
+        def _register_with_parent() -> None:
+            import json
+            import urllib.request
+
+            body = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.state.parent_endpoint.rstrip('/')}/children/register",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                return
+
+        try:
+            await asyncio.to_thread(_register_with_parent)
+            self._last_parent_registration_signature = signature
+            self.state.remember(
+                {
+                    "kind": "parent_registration",
+                    "at": utc_now(),
+                    "parent_endpoint": self.state.parent_endpoint,
+                    "parent_id": self.state.parent_id,
+                }
+            )
+        except Exception as exc:
+            logger.debug(f"Parent registration failed: {exc}")
 
     async def simulation_loop(self) -> None:
         """
@@ -361,6 +416,7 @@ class AgentRuntime:
                         self._upsert_agent()
                     except Exception as _ka_err:
                         logger.debug(f"Registry keepalive 실패: {_ka_err}")
+                    await self._ensure_parent_registration()
                 self.state.last_telemetry = telemetry
 
                 # 1-b️⃣ [SYNC GPS] Simulator 위치를 AgentState에 동기화
@@ -543,3 +599,14 @@ class AgentRuntime:
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
+
+    def can_accept_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
+        action = str(command.get("action") or "").strip().lower()
+        if not action:
+            return False, "missing_action"
+        supported = {str(item).strip().lower() for item in self.skills.list_actions()}
+        if action not in supported:
+            return False, "unsupported_action"
+        if not self.state.connected and self.registry_client.required:
+            return False, "device_not_connected"
+        return True, None

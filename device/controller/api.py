@@ -142,28 +142,70 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
     elif msg_type == "task.assign":
+        target_device_id = str(data.get("target_device_id") or (data.get("params") or {}).get("target_device_id") or "")
+        own_device_id = str(runtime.state.registry_id or "")
+        if runtime.state.layer == "middle" and target_device_id and own_device_id and target_device_id != own_device_id:
+            result = await _relay_task_to_child(runtime, request, data)
+            task = build_task(request.taskId, request.message, result)
+            runtime.state.tasks[task["id"]] = task
+            runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
+            runtime.state.remember({
+                "kind": "a2a_received",
+                "at": utc_now(),
+                "message_type": msg_type,
+                "task_id": request.taskId,
+                "result_status": result.get("status") if isinstance(result, dict) else "ok",
+            })
+            return task
         command = {
             "action": str(data.get("action") or data.get("command") or "hold_position"),
             "params": data.get("params") or {},
             "reason": data.get("reason") or f"A2A task {request.taskId}",
         }
-        result = runtime.apply_command(command)
+        accepted, reject_reason = runtime.can_accept_command(command)
+        if not accepted:
+            result = {
+                "status": "REJECTED",
+                "reason": reject_reason or "task_rejected",
+                "task_status": "REJECTED",
+                "task_id": str(data.get("task_id") or request.taskId or ""),
+            }
+        else:
+            accepted_at = utc_now()
+            runtime.state.remember(
+                {
+                    "kind": "task_accepted",
+                    "at": accepted_at,
+                    "task_id": str(data.get("task_id") or request.taskId or ""),
+                    "action": command.get("action"),
+                }
+            )
+            execution_result = runtime.apply_command(command)
+            normalized = "COMPLETED" if str(execution_result.get("status") or "").lower() in {"ok", "success", "completed"} else "FAILED"
+            result = {
+                **execution_result,
+                "acceptance_status": "ACCEPTED",
+                "accepted_at": accepted_at,
+                "task_status": normalized,
+                "started_at": accepted_at,
+                "finished_at": utc_now(),
+            }
 
         # Report mission result back to the upstream endpoint when correlation ids are present.
-        response_id = str(data.get("response_id") or "")
-        if response_id:
+        mission_id = str(data.get("mission_id") or data.get("response_id") or "")
+        if mission_id:
             report_base = str((command.get("params") or {}).get("report_to_endpoint") or "").strip()
             if not report_base:
                 report_base = str(runtime.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116").strip()
             report_endpoint = report_base if report_base.endswith("/message:send") else f"{report_base.rstrip('/')}/message:send"
             execution_status = "failed"
-            if isinstance(result, dict) and str(result.get("status") or "").lower() in {"ok", "success", "completed"}:
+            if isinstance(result, dict) and str(result.get("task_status") or result.get("status") or "").lower() in {"completed", "ok", "success"}:
                 execution_status = "completed"
 
             asyncio.create_task(
                 _report_mission_result_to_endpoint(
                     runtime=runtime,
-                    response_id=response_id,
+                    mission_id=mission_id,
                     alert_id=str(data.get("alert_id") or ""),
                     step_id=str(data.get("step_id") or ""),
                     task_id=str(data.get("task_id") or request.taskId or ""),
@@ -175,7 +217,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             )
 
         # If task execution failed, report to System Agent asynchronously
-        if isinstance(result, dict) and result.get('status') == 'failed':
+        if isinstance(result, dict) and str(result.get('task_status') or result.get('status') or '').lower() in {'failed', 'rejected'}:
             # config에서 system agent URL 조회
             system_agent_url = (
                 runtime.config.get("system_agent", {}).get("url")
@@ -236,6 +278,83 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     return task
 
 
+async def _relay_task_to_child(runtime: AgentRuntime, request: A2ASendRequest, data: dict[str, Any]) -> dict[str, Any]:
+    target_device_id = str(data.get("target_device_id") or (data.get("params") or {}).get("target_device_id") or "")
+    try:
+        child_device = runtime.registry_client.get_device(int(target_device_id))
+    except Exception as exc:
+        return {
+            "status": "REJECTED",
+            "task_status": "REJECTED",
+            "reason": f"child_lookup_failed:{exc}",
+            "task_id": str(data.get("task_id") or request.taskId or ""),
+        }
+
+    agent = child_device.get("agent") or {}
+    endpoint = str(agent.get("endpoint") or "").strip()
+    if not endpoint or not child_device.get("connected"):
+        return {
+            "status": "REJECTED",
+            "task_status": "REJECTED",
+            "reason": "child_unreachable",
+            "task_id": str(data.get("task_id") or request.taskId or ""),
+        }
+
+    relay_payload = {
+        **data,
+        "message_type": "task.assign",
+        "relayed_by_agent_id": runtime.state.agent_id,
+        "relayed_by_device_id": runtime.state.registry_id,
+    }
+
+    def _send_to_child() -> dict[str, Any]:
+        import json
+        import urllib.request
+
+        rpc = {
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": str(request.taskId or data.get("task_id") or ""),
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"type": "data", "data": relay_payload}],
+                },
+                "taskId": request.taskId,
+                "metadata": {
+                    "sender_id": runtime.state.agent_id,
+                    "sender_device_id": str(runtime.state.registry_id or ""),
+                },
+            },
+        }
+        raw = json.dumps(rpc).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=raw, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read() or b"{}")
+
+    try:
+        child_response = await asyncio.to_thread(_send_to_child)
+    except Exception as exc:
+        return {
+            "status": "REJECTED",
+            "task_status": "REJECTED",
+            "reason": f"relay_failed:{exc}",
+            "task_id": str(data.get("task_id") or request.taskId or ""),
+        }
+
+    artifact_data: dict[str, Any] = {}
+    try:
+        artifact_data = (((child_response.get("result") or {}).get("artifacts") or [])[0].get("parts") or [])[0].get("data") or {}
+    except Exception:
+        artifact_data = {}
+    return {
+        **artifact_data,
+        "relayed": True,
+        "relayed_to_device_id": target_device_id,
+        "relayed_to_endpoint": endpoint,
+    }
+
+
 async def _report_task_failure_to_system_agent(
     runtime: AgentRuntime,
     task_id: str | None,
@@ -292,7 +411,7 @@ async def _report_task_failure_to_system_agent(
 
 async def _report_mission_result_to_endpoint(
     runtime: AgentRuntime,
-    response_id: str,
+    mission_id: str,
     alert_id: str,
     step_id: str,
     task_id: str,
@@ -306,9 +425,25 @@ async def _report_mission_result_to_endpoint(
         normalized_status = "completed" if str(execution_status).lower() == "completed" else "failed"
         source_agent_id = str(runtime.state.agent_id or "")
         source_device_id = str(runtime.state.registry_id or "")
+        result_summary = str(
+            execution_result.get("summary")
+            or execution_result.get("output_summary")
+            or execution_result.get("message")
+            or f"{command.get('action')} {normalized_status}"
+        )
+        location = {
+            "latitude": runtime.state.latitude,
+            "longitude": runtime.state.longitude,
+        }
+        raw_refs = execution_result.get("output_refs") or execution_result.get("raw_data_ref") or execution_result.get("artifacts") or []
+        if isinstance(raw_refs, dict):
+            raw_refs = [raw_refs]
+        if not isinstance(raw_refs, list):
+            raw_refs = [raw_refs]
         payload = {
             "message_type": "mission.result",
-            "response_id": response_id,
+            "mission_id": mission_id,
+            "response_id": mission_id,
             "alert_id": alert_id,
             "step_id": step_id or "default",
             "task_id": task_id or "default",
@@ -323,12 +458,25 @@ async def _report_mission_result_to_endpoint(
                 "command": command,
                 "result": execution_result,
                 "reported_at": utc_now(),
+                "result_summary": result_summary,
+                "output_refs": raw_refs,
+                "failure_category": execution_result.get("failure_category") or ("UNKNOWN" if normalized_status != "completed" else None),
+                "failure_message": execution_result.get("reason") or execution_result.get("error") or execution_result.get("failure_message"),
+                "location": location,
+                "device_state_changes": {
+                    "last_telemetry": runtime.state.last_telemetry,
+                    "connected": runtime.state.connected,
+                },
+                "agent_judgement": execution_result.get("agent_judgement") or command.get("action"),
                 "payload": {
-                    "response_id": response_id,
+                    "response_id": mission_id,
+                    "mission_id": mission_id,
                     "alert_id": alert_id,
                     "step_id": step_id or "default",
                     "task_id": task_id or "default",
                     "source_agent_id": source_agent_id,
+                    "source_device_id": source_device_id,
+                    "location": location,
                 },
             },
         }
@@ -339,7 +487,7 @@ async def _report_mission_result_to_endpoint(
         )
         result_request = A2ASendRequest(
             message=result_message,
-            taskId=task_id or response_id,
+            taskId=task_id or mission_id,
             metadata={"sender_id": source_agent_id, "sender_device_id": source_device_id},
         )
 
@@ -355,8 +503,8 @@ async def _report_mission_result_to_endpoint(
         )
         with urllib.request.urlopen(req, timeout=5):
             logger.info(
-                "Mission result reported: response_id=%s step_id=%s task_id=%s status=%s endpoint=%s",
-                response_id,
+                "Mission result reported: mission_id=%s step_id=%s task_id=%s status=%s endpoint=%s",
+                mission_id,
                 step_id or "default",
                 task_id or "default",
                 normalized_status,
@@ -364,8 +512,8 @@ async def _report_mission_result_to_endpoint(
             )
     except Exception as e:
         logger.error(
-            "Failed to report mission result: response_id=%s step_id=%s task_id=%s endpoint=%s error=%s",
-            response_id,
+            "Failed to report mission result: mission_id=%s step_id=%s task_id=%s endpoint=%s error=%s",
+            mission_id,
             step_id,
             task_id,
             endpoint,

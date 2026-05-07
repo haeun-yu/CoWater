@@ -31,7 +31,7 @@
           <a href="devices.html" data-nav-link="devices">Devices</a>
           <a href="register.html" data-nav-link="register">Register</a>
           <a href="alerts.html" data-nav-link="alerts">Alerts</a>
-          <a href="responses.html" data-nav-link="responses">Responses</a>
+          <a href="responses.html" data-nav-link="mission-ops">Mission Ops</a>
           <a href="settings.html" data-nav-link="settings">Settings</a>
         </div>
       </div>
@@ -87,9 +87,12 @@
             <tr><td>GET</td><td>/alerts</td><td>List alerts</td></tr>
             <tr><td>GET</td><td>/alerts/{alertId}</td><td>Read one alert</td></tr>
             <tr><td>POST</td><td>/alerts/{alertId}/ack</td><td>Acknowledge alert</td></tr>
-            <tr><td>POST</td><td>/responses/ingest</td><td>Store canonical response</td></tr>
-            <tr><td>GET</td><td>/responses</td><td>List responses</td></tr>
-            <tr><td>GET</td><td>/responses/{responseId}</td><td>Read one response</td></tr>
+            <tr><td>GET</td><td>/device-roles</td><td>List device roles</td></tr>
+            <tr><td>GET</td><td>/operation-plans</td><td>List operation plans</td></tr>
+            <tr><td>GET</td><td>/mission-proposals</td><td>List mission proposals</td></tr>
+            <tr><td>GET</td><td>/approvals</td><td>List approval records</td></tr>
+            <tr><td>GET</td><td>/missions</td><td>List missions</td></tr>
+            <tr><td>GET</td><td>/missions/{missionId}</td><td>Read one mission</td></tr>
           </tbody>
         </table>
       </div>

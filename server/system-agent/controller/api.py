@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.runtime import AgentRuntime
@@ -114,12 +114,66 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         items = runtime.list_manual_interventions()
         return {"items": items, "count": len(items)}
 
-    @app.get("/manual-interventions/{response_id}")
-    def manual_intervention(response_id: str) -> dict[str, Any]:
+    @app.get("/manual-interventions/{mission_id}")
+    def manual_intervention(mission_id: str) -> dict[str, Any]:
         for item in runtime.list_manual_interventions():
-            if str(item.get("response_id") or "") == response_id:
+            if str(item.get("mission_id") or "") == mission_id:
                 return item
         raise HTTPException(status_code=404, detail="manual intervention not found")
+
+    @app.post("/device-roles/recommend")
+    def recommend_device_roles(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        goal = str(body.get("goal") or "")
+        return runtime.recommend_device_roles(goal)
+
+    @app.post("/device-roles/apply")
+    def apply_device_role(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.assign_device_role(body, decided_by=str(body.get("decided_by") or "user"))
+
+    @app.post("/operation-plans/recommend")
+    def recommend_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.recommend_operation_plan(body)
+
+    @app.post("/operation-plans")
+    def create_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        plan = runtime.recommend_operation_plan(body)
+        merged = {**plan, **body}
+        return runtime.registry_client.create_operation_plan(merged)
+
+    @app.post("/operation-plans/{operation_plan_id}/activate")
+    def activate_operation_plan(operation_plan_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        activated_by = str(body.get("activated_by") or body.get("decided_by") or "user")
+        return runtime.activate_operation_plan(operation_plan_id, activated_by=activated_by)
+
+    @app.post("/mission-proposals/generate")
+    def generate_mission_proposal(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.generate_mission_proposal(body)
+
+    @app.post("/approvals/{approval_id}/decision")
+    async def approval_decision(approval_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        approved = bool(body.get("approved"))
+        decided_by = str(body.get("decided_by") or "user")
+        notes = body.get("notes")
+        return await runtime.decide_approval_flow(approval_id, approved, decided_by=decided_by, notes=notes)
+
+    @app.get("/overview")
+    def overview() -> dict[str, Any]:
+        return {
+            "devices": runtime.registry_client.list_devices(),
+            "device_roles": runtime.registry_client.list_device_roles(),
+            "operation_plans": runtime.registry_client.list_operation_plans(),
+            "insights": runtime.registry_client.list_insights(),
+            "approvals": runtime.registry_client.list_approvals(),
+            "mission_proposals": runtime.registry_client.list_mission_proposals(),
+            "missions": runtime.registry_client.list_missions(),
+        }
 
     return app
 

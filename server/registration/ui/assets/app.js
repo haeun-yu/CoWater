@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8280";
 let selectedAlertId = null;
+let selectedMissionId = null;
 
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEYS.apiBase) || DEFAULT_API_BASE;
@@ -95,7 +96,7 @@ function headerMenuHtml() {
       <a href="devices.html" data-nav-link="devices">Devices</a>
       <a href="register.html" data-nav-link="register">Register</a>
       <a href="alerts.html" data-nav-link="alerts">Alerts</a>
-      <a href="responses.html" data-nav-link="responses">Responses</a>
+      <a href="responses.html" data-nav-link="mission-ops">Mission Ops</a>
       <a href="settings.html" data-nav-link="settings">Settings</a>
     </div>
   `;
@@ -178,8 +179,20 @@ async function loadAlerts() {
   return requestJson("/alerts");
 }
 
-async function loadResponses() {
-  return requestJson("/responses");
+async function loadOperationPlans() {
+  return requestJson("/operation-plans");
+}
+
+async function loadMissionProposals() {
+  return requestJson("/mission-proposals");
+}
+
+async function loadApprovals() {
+  return requestJson("/approvals");
+}
+
+async function loadMissions() {
+  return requestJson("/missions");
 }
 
 function countTracks(devices, kind) {
@@ -232,11 +245,12 @@ function renderDashboardDevices(devices) {
 async function initDashboardPage() {
   bindConfigInputs();
   try {
-    const [meta, devices, alerts, responses] = await Promise.all([
+    const [meta, devices, alerts, approvals, missions] = await Promise.all([
       loadMeta(),
       loadDevices(),
       loadAlerts(),
-      loadResponses(),
+      loadApprovals(),
+      loadMissions(),
     ]);
     setText("meta-host", meta.server.host);
     setText("meta-port", String(meta.server.port));
@@ -249,7 +263,11 @@ async function initDashboardPage() {
     setText("count-video", String(countTracks(devices, "VIDEO")));
     setText("count-actions", String(coreActionsCount(devices)));
     setText("count-alerts", String(alerts.length));
-    setText("count-responses", String(responses.length));
+    setText("count-missions", String(missions.length));
+    setText(
+      "count-pending-approvals",
+      String(approvals.filter((approval) => approval.status === "pending").length),
+    );
     setText(
       "count-open-alerts",
       String(alerts.filter((alert) => alert.status === "waiting").length),
@@ -493,83 +511,110 @@ function renderAlertsTable(alerts, filterText = "") {
   renderAlertDetail(active || null);
 }
 
-function renderResponseDetail(response) {
-  const host = document.getElementById("response-detail");
+function renderMissionDetail(mission) {
+  const host = document.getElementById("mission-detail");
   if (!host) return;
-  if (!response) {
-    host.innerHTML = `<div class="panel"><p class="lead">Select a response to inspect the canonical record.</p></div>`;
+  if (!mission) {
+    host.innerHTML = `<div class="panel"><p class="lead">Select a mission to inspect the canonical record.</p></div>`;
     return;
   }
+  const deviceResults = Array.isArray(mission.device_execution_results)
+    ? mission.device_execution_results.length
+    : 0;
+  const timelineEvents = Array.isArray(mission.timeline) ? mission.timeline.length : 0;
+  const stepCount = Array.isArray(mission.steps) ? mission.steps.length : 0;
   host.innerHTML = `
     <div class="device-card" style="margin-bottom: 12px;">
-      <div class="muted">Response ID</div>
-      <strong>${escapeHtml(response.response_id)}</strong>
+      <div class="muted">Mission ID</div>
+      <strong>${escapeHtml(mission.mission_id)}</strong>
     </div>
     <div class="device-card" style="margin-bottom: 12px;">
-      <div class="muted">Alert ID</div>
-      <strong>${escapeHtml(response.alert_id)}</strong>
+      <div class="muted">Title / Status</div>
+      <strong>${escapeHtml(mission.title || "-")} · ${escapeHtml(mission.status || "-")}</strong>
     </div>
     <div class="device-card" style="margin-bottom: 12px;">
-      <div class="muted">Action / Status</div>
-      <strong>${escapeHtml(response.action)} · ${escapeHtml(response.status)}</strong>
+      <div class="muted">Goal</div>
+      <strong>${escapeHtml(mission.goal || "-")}</strong>
     </div>
     <div class="device-card" style="margin-bottom: 12px;">
-      <div class="muted">Target / Route</div>
-      <strong>${escapeHtml(response.target_agent_id || "-")} · ${escapeHtml(response.route_mode || "-")}</strong>
+      <div class="muted">Steps / Device Results / Timeline</div>
+      <strong>${stepCount} · ${deviceResults} · ${timelineEvents}</strong>
     </div>
     <div class="device-card" style="margin-bottom: 12px;">
       <div class="muted">Created / Updated</div>
-      <strong>${escapeHtml(formatTimestamp(response.created_at))} / ${escapeHtml(formatTimestamp(response.updated_at))}</strong>
+      <strong>${escapeHtml(formatTimestamp(mission.created_at))} / ${escapeHtml(formatTimestamp(mission.updated_at))}</strong>
     </div>
-    <div class="code">${escapeHtml(prettyJson(response))}</div>
+    <div class="code">${escapeHtml(prettyJson(mission))}</div>
   `;
 }
 
-function renderResponsesTable(responses, filterText = "") {
-  const body = document.getElementById("responses-body");
+function renderMissionOpsTable(data, filterText = "") {
+  const body = document.getElementById("missions-body");
   if (!body) return;
+  const plans = data.operationPlans || [];
+  const approvals = data.approvals || [];
+  const proposals = data.proposals || [];
+  const missions = data.missions || [];
   const q = filterText.trim().toLowerCase();
-  const rows = responses.filter((response) => {
+  const rows = missions.filter((mission) => {
     if (!q) return true;
     return (
-      response.response_id.toLowerCase().includes(q) ||
-      response.alert_id.toLowerCase().includes(q) ||
-      (response.action || "").toLowerCase().includes(q) ||
-      (response.status || "").toLowerCase().includes(q) ||
-      (response.target_agent_id || "").toLowerCase().includes(q)
+      String(mission.mission_id || "").toLowerCase().includes(q) ||
+      String(mission.title || "").toLowerCase().includes(q) ||
+      String(mission.goal || "").toLowerCase().includes(q) ||
+      String(mission.status || "").toLowerCase().includes(q) ||
+      String(mission.operation_plan_id || "").toLowerCase().includes(q)
     );
   });
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7" class="muted">No matching responses.</td></tr>`;
-    renderResponseDetail(null);
+    body.innerHTML = `<tr><td colspan="7" class="muted">No matching missions.</td></tr>`;
+    renderMissionDetail(null);
     return;
   }
   body.innerHTML = rows
     .map(
-      (response) => `
-        <tr data-response-row="${escapeHtml(response.response_id)}">
-          <td><strong>${escapeHtml(response.response_id)}</strong></td>
-          <td>${escapeHtml(response.alert_id)}</td>
-          <td>${escapeHtml(response.action)}</td>
-          <td>${escapeHtml(response.status)}</td>
-          <td>${escapeHtml(response.target_agent_id || "-")}</td>
-          <td>${escapeHtml(response.route_mode || "-")}</td>
-          <td>${escapeHtml(formatTimestamp(response.created_at))}</td>
+      (mission) => `
+        <tr class="${mission.mission_id === selectedMissionId ? "selected" : ""}" data-mission-row="${escapeHtml(mission.mission_id)}">
+          <td><strong>${escapeHtml(mission.mission_id)}</strong></td>
+          <td>${escapeHtml(mission.title || "-")}</td>
+          <td>${escapeHtml(mission.status || "-")}</td>
+          <td>${escapeHtml(mission.operation_plan_id || "-")}</td>
+          <td>${Array.isArray(mission.steps) ? mission.steps.length : 0}</td>
+          <td>${Array.isArray(mission.device_execution_results) ? mission.device_execution_results.length : 0}</td>
+          <td>${escapeHtml(formatTimestamp(mission.created_at))}</td>
         </tr>
       `,
     )
     .join("");
 
-  body.querySelectorAll("[data-response-row]").forEach((row) => {
+  body.querySelectorAll("[data-mission-row]").forEach((row) => {
     row.addEventListener("click", () => {
-      const response = responses.find(
-        (item) => item.response_id === row.getAttribute("data-response-row"),
+      selectedMissionId = row.getAttribute("data-mission-row");
+      const mission = missions.find(
+        (item) => item.mission_id === selectedMissionId,
       );
-      renderResponseDetail(response || null);
+      renderMissionOpsTable(data, q);
+      renderMissionDetail(mission || null);
     });
   });
 
-  renderResponseDetail(rows[0] || null);
+  const summary = document.getElementById("mission-ops-summary");
+  if (summary) {
+    summary.innerHTML = `
+      <div class="split">
+        <div class="device-card"><div class="muted">Operation Plans</div><strong>${plans.length}</strong></div>
+        <div class="device-card"><div class="muted">Mission Proposals</div><strong>${proposals.length}</strong></div>
+        <div class="device-card"><div class="muted">Pending Approvals</div><strong>${approvals.filter((approval) => approval.status === "pending").length}</strong></div>
+      </div>
+    `;
+  }
+
+  const active =
+    missions.find((mission) => mission.mission_id === selectedMissionId) || rows[0];
+  if (!selectedMissionId && active) {
+    selectedMissionId = active.mission_id;
+  }
+  renderMissionDetail(active || null);
 }
 
 async function initAlertsPage() {
@@ -593,18 +638,24 @@ async function initAlertsPage() {
   }
 }
 
-async function initResponsesPage() {
+async function initMissionOpsPage() {
   bindConfigInputs();
-  const search = document.getElementById("response-search");
+  const search = document.getElementById("mission-search");
   try {
-    const responses = await loadResponses();
-    renderResponsesTable(responses, search ? search.value : "");
+    const [operationPlans, proposals, approvals, missions] = await Promise.all([
+      loadOperationPlans(),
+      loadMissionProposals(),
+      loadApprovals(),
+      loadMissions(),
+    ]);
+    const data = { operationPlans, proposals, approvals, missions };
+    renderMissionOpsTable(data, search ? search.value : "");
     if (search) {
-      search.oninput = () => renderResponsesTable(responses, search.value);
+      search.oninput = () => renderMissionOpsTable(data, search.value);
     }
     const refresh = document.getElementById("refresh-responses");
     if (refresh) {
-      refresh.onclick = async () => initResponsesPage();
+      refresh.onclick = async () => initMissionOpsPage();
     }
   } catch (error) {
     setHtml(
@@ -852,7 +903,7 @@ function initPage() {
     devices: initDevicesPage,
     register: initRegisterPage,
     alerts: initAlertsPage,
-    responses: initResponsesPage,
+    "mission-ops": initMissionOpsPage,
     device: initDevicePage,
     settings: initSettingsPage,
   };

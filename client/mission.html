@@ -1,612 +1,232 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>CoWater 미션 상세</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater Mission Detail</title>
     <style>
       :root {
-        --bg: #07101e;
-        --surface: rgba(13, 22, 40, 0.95);
-        --border: rgba(96, 165, 250, 0.2);
-        --text: #e2e8f0;
-        --muted: #94a3b8;
-        --accent: #60a5fa;
-        --ok: #4ade80;
-        --danger: #f87171;
-        --warning: #fbbf24;
-        --pending: #94a3b8;
+        --bg: #f3f1eb;
+        --card: #fffdfa;
+        --ink: #1e2b2a;
+        --muted: #687370;
+        --line: #dadfd5;
+        --accent: #006d5b;
+        --danger: #aa3131;
       }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+      * { box-sizing: border-box; }
       body {
-        background: linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
-        color: var(--text);
-        font-family: "Segoe UI", Inter, sans-serif;
-        min-height: 100vh;
-        font-size: 13px;
+        margin: 0;
+        font-family: "IBM Plex Sans KR", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top right, rgba(0,109,91,0.1), transparent 26%),
+          linear-gradient(180deg, #f7f5ef, #eef1e7);
+        color: var(--ink);
       }
-
-      /* ── topbar ── */
-      .topbar {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 0 24px;
-        height: 52px;
-        background: rgba(6,14,28,0.98);
-        border-bottom: 2px solid var(--border);
-        position: sticky;
-        top: 0;
-        z-index: 10;
+      header {
+        padding: 24px 20px;
+        border-bottom: 1px solid var(--line);
       }
-      .back-btn {
-        color: var(--accent);
-        text-decoration: none;
-        font-size: 18px;
-        line-height: 1;
-        padding: 4px 8px;
-        border-radius: 4px;
-        transition: background 0.15s;
-      }
-      .back-btn:hover { background: rgba(96,165,250,0.1); }
-      .topbar-title {
-        font-size: 15px;
-        font-weight: 700;
-        color: var(--accent);
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .ws-dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--pending);
-        flex-shrink: 0;
-      }
-      .ws-dot.connected { background: var(--ok); }
-      .ws-label { font-size: 11px; color: var(--muted); }
-
-      /* ── status badge ── */
-      .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: 600;
-      }
-      .badge-critical  { background: rgba(248,113,113,.2); color: #f87171; }
-      .badge-warning   { background: rgba(251,191,36,.2);  color: #fbbf24; }
-      .badge-ok        { background: rgba(74,222,128,.2);  color: #4ade80; }
-      .badge-pending   { background: rgba(148,163,184,.15); color: #94a3b8; }
-      .badge-progress  { background: rgba(96,165,250,.2);  color: #60a5fa; }
-      .badge-failed    { background: rgba(248,113,113,.2); color: #f87171; }
-
-      /* ── layout ── */
-      .page { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
-
-      /* ── section card ── */
-      .card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 14px;
-      }
-      .card-header {
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: .06em;
-        color: var(--muted);
-        text-transform: uppercase;
-        margin-bottom: 12px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      /* ── kv grid ── */
-      .kv { display: grid; grid-template-columns: 90px 1fr; gap: 5px 10px; align-items: start; }
-      .kv-k { color: var(--muted); font-size: 12px; padding-top: 1px; }
-      .kv-v { color: var(--text); word-break: break-all; }
-
-      /* ── mission header ── */
-      .mission-header {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 16px 20px;
-        margin-bottom: 16px;
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        flex-wrap: wrap;
-      }
-      .mission-id {
-        font-family: monospace;
-        font-size: 12px;
-        color: var(--muted);
-        flex: 1;
-      }
-      .mission-status-badge {
-        font-size: 13px;
-        font-weight: 700;
-        padding: 4px 14px;
-        border-radius: 6px;
-      }
-      .time-range {
-        font-size: 11px;
-        color: var(--muted);
-      }
-
-      /* ── step timeline ── */
-      .step-list { display: flex; flex-direction: column; gap: 12px; }
-      .step {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .step.step-active  { border-color: rgba(96,165,250,.5); }
-      .step.step-done    { border-color: rgba(74,222,128,.4); }
-      .step.step-failed  { border-color: rgba(248,113,113,.4); }
-
-      .step-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 16px;
-        background: rgba(255,255,255,.02);
-        border-bottom: 1px solid var(--border);
-      }
-      .step-num {
-        width: 24px; height: 24px;
-        border-radius: 50%;
-        background: rgba(96,165,250,.15);
-        color: var(--accent);
-        font-size: 11px;
-        font-weight: 700;
-        display: flex; align-items: center; justify-content: center;
-        flex-shrink: 0;
-      }
-      .step-num.done   { background: rgba(74,222,128,.2);  color: var(--ok); }
-      .step-num.failed { background: rgba(248,113,113,.2); color: var(--danger); }
-      .step-num.active { background: rgba(96,165,250,.25); color: var(--accent); }
-
-      .step-title { font-weight: 700; font-size: 13px; flex: 1; }
-      .step-policy { font-size: 10px; color: var(--muted); }
-      .step-dep { font-size: 10px; color: var(--muted); margin-left: auto; }
-
-      .step-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-
-      /* ── task row ── */
-      .task {
+      h1 { margin: 0; font-size: 28px; }
+      .sub { color: var(--muted); margin-top: 6px; }
+      main {
+        padding: 20px;
         display: grid;
-        grid-template-columns: 28px 1fr auto;
-        align-items: center;
-        gap: 10px;
-        padding: 10px 12px;
-        background: rgba(255,255,255,.02);
-        border-radius: 6px;
-        border: 1px solid rgba(255,255,255,.05);
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
       }
-      .task-icon {
-        width: 28px; height: 28px;
-        border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 14px;
-        background: rgba(96,165,250,.1);
-        flex-shrink: 0;
+      .stack { display: grid; gap: 16px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        box-shadow: 0 10px 24px rgba(30,43,42,0.05);
       }
-      .task-info { min-width: 0; }
-      .task-action { font-weight: 600; font-size: 12px; }
-      .task-device { font-size: 11px; color: var(--muted); margin-top: 2px; }
-      .task-params { font-size: 10px; color: var(--muted); margin-top: 3px; font-family: monospace; }
-
-      /* ── exec status bar ── */
-      .exec-status {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 4px;
-        flex-shrink: 0;
+      .card h2 { margin: 0 0 12px; font-size: 18px; }
+      .pill {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e6f2ef;
+        color: var(--accent);
+        font-size: 11px;
       }
-
-      /* ── realtime pulse ── */
-      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
-      .pulse { animation: pulse 1.5s infinite; }
-
-      /* ── empty/loading ── */
-      .empty { color: var(--muted); font-size: 12px; padding: 20px; text-align: center; }
-
-      /* ── confidence bar ── */
-      .conf-bar { height: 4px; background: rgba(255,255,255,.08); border-radius: 2px; margin-top: 4px; overflow: hidden; }
-      .conf-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--ok)); border-radius: 2px; }
-
-      /* ── location box ── */
-      .loc-box {
+      .meta {
         display: flex;
         gap: 8px;
-        padding: 8px 10px;
-        background: rgba(96,165,250,.06);
-        border-radius: 6px;
-        border: 1px solid rgba(96,165,250,.15);
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .step, .entry {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255,255,255,0.75);
+      }
+      .task {
         margin-top: 8px;
-        font-size: 11px;
-        font-family: monospace;
+        padding-top: 8px;
+        border-top: 1px dashed var(--line);
       }
-      .loc-item { display: flex; flex-direction: column; gap: 2px; }
-      .loc-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-
-      /* ── completion report ── */
-      .report {
-        background: rgba(74,222,128,.05);
-        border: 1px solid rgba(74,222,128,.2);
-        border-radius: 8px;
-        padding: 14px 16px;
-        margin-top: 12px;
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #f5f6f2;
+        border-radius: 12px;
+        padding: 10px;
+        overflow: auto;
       }
-      .report-title { font-weight: 700; color: var(--ok); margin-bottom: 10px; font-size: 13px; }
+      a { color: var(--accent); text-decoration: none; }
+      .empty { color: var(--muted); }
+      @media (max-width: 900px) {
+        main { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
-    <div class="topbar">
-      <a class="back-btn" href="ops.html">←</a>
-      <div class="topbar-title" id="topbar-title">미션 상세</div>
-      <div class="ws-dot" id="ws-dot"></div>
-      <div class="ws-label" id="ws-label">연결중…</div>
-    </div>
-
-    <div class="page">
-      <!-- left col -->
-      <div id="left-col">
-        <div class="empty" id="left-loading">로딩 중…</div>
+    <header>
+      <h1 id="title">Mission</h1>
+      <div class="sub" id="summary">Loading…</div>
+    </header>
+    <main>
+      <div class="stack">
+        <section class="card">
+          <h2>Mission Status</h2>
+          <div id="overview"></div>
+        </section>
+        <section class="card">
+          <h2>Steps & Tasks</h2>
+          <div id="steps"></div>
+        </section>
+        <section class="card">
+          <h2>Device Execution Results</h2>
+          <div id="results"></div>
+        </section>
       </div>
-
-      <!-- right col -->
-      <div id="right-col">
-        <div class="mission-header" id="mission-header">
-          <div class="empty">로딩 중…</div>
-        </div>
-        <div id="steps-container"><div class="empty">로딩 중…</div></div>
+      <div class="stack">
+        <section class="card">
+          <h2>Timeline</h2>
+          <div id="timeline"></div>
+        </section>
+        <section class="card">
+          <h2>Final Result</h2>
+          <div id="final-result"></div>
+        </section>
       </div>
-    </div>
-
+    </main>
     <script>
-      const R = "http://127.0.0.1:8280";
-      const params = new URLSearchParams(location.search);
-      const MISSION_ID = params.get("id");
+      const REGISTRY = "http://127.0.0.1:8280";
+      const missionId = new URLSearchParams(location.search).get("id");
 
-      if (!MISSION_ID) {
-        document.body.innerHTML = '<div style="padding:40px;color:#f87171;">미션 ID가 없습니다. ops.html에서 접근해주세요.</div>';
-        throw new Error("no mission id");
-      }
-
-      let state = { mission: null, alert: null, event: null, response: null };
-      let ws = null;
-
-      // ── helpers ──────────────────────────────────────────
-      function fmt(v) { return typeof v === "number" ? v.toFixed(4) : (v || "—"); }
-      function fmtNum(v, digits=1) { return typeof v === "number" ? v.toFixed(digits) : (v ?? "—"); }
-      function fmtTime(iso) {
-        if (!iso) return "—";
-        return new Date(iso).toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit" });
-      }
-      function elapsed(from, to) {
-        if (!from) return "";
-        const ms = new Date(to || new Date()) - new Date(from);
-        if (ms < 0) return "";
-        const s = Math.floor(ms / 1000);
-        if (s < 60) return `${s}초`;
-        return `${Math.floor(s/60)}분 ${s%60}초`;
-      }
-
-      function severityBadge(s) {
-        const map = { CRITICAL:"badge-critical", WARNING:"badge-warning", INFO:"badge-ok", INFORMATION:"badge-ok" };
-        return `<span class="badge ${map[s]||'badge-pending'}">${s||"—"}</span>`;
-      }
-
-      function stepStatusBadge(s) {
-        const map = {
-          dispatched: ["badge-progress","▶ 전달됨"],
-          completed:  ["badge-ok","✓ 완료"],
-          failed:     ["badge-failed","✕ 실패"],
-          pending:    ["badge-pending","○ 대기"],
-          in_progress:["badge-progress","▶ 진행중"],
-        };
-        const [cls, label] = map[s] || ["badge-pending", s || "대기"];
-        return `<span class="badge ${cls}">${label}</span>`;
-      }
-
-      function execStatusBadge(s) {
-        const map = {
-          pending:    ["badge-pending","대기"],
-          in_progress:["badge-progress pulse","실행중"],
-          completed:  ["badge-ok","완료"],
-          failed:     ["badge-failed","실패"],
-        };
-        const [cls, label] = map[s] || ["badge-pending", s || "대기"];
-        return `<span class="badge ${cls}">${label}</span>`;
-      }
-
-      function missionStatusBadge(s) {
-        const map = {
-          pending:    { cls:"badge-pending",  label:"대기중" },
-          in_progress:{ cls:"badge-progress", label:"진행중" },
-          completed:  { cls:"badge-ok",       label:"완료" },
-          failed:     { cls:"badge-failed",   label:"실패" },
-        };
-        const d = map[s] || { cls:"badge-pending", label: s || "—" };
-        return `<span class="badge mission-status-badge ${d.cls}">${d.label}</span>`;
-      }
-
-      function stepNumClass(status) {
-        return status === "completed" ? "done" : status === "failed" ? "failed" : status === "dispatched" || status === "in_progress" ? "active" : "";
-      }
-      function stepCardClass(status) {
-        return status === "completed" ? "step-done" : status === "failed" ? "step-failed" : status === "dispatched" || status === "in_progress" ? "step-active" : "";
-      }
-
-      // ── fetch all ─────────────────────────────────────────
-      async function loadAll() {
-        const mission = await fetch(`${R}/missions/${MISSION_ID}`).then(r=>r.json()).catch(()=>null);
-        if (!mission || mission.detail) { showError("미션을 찾을 수 없습니다: " + MISSION_ID); return; }
-        state.mission = mission;
-
-        const [alertRes, eventRes, responseRes] = await Promise.all([
-          fetch(`${R}/alerts/${mission.alert_id}`).then(r=>r.json()).catch(()=>null),
-          fetch(`${R}/events/${mission.event_id}`).then(r=>r.json()).catch(()=>null),
-          fetch(`${R}/responses/${mission.response_id}`).then(r=>r.json()).catch(()=>null),
-        ]);
-        state.alert    = alertRes?.detail ? null : alertRes;
-        state.event    = eventRes?.detail ? null : eventRes;
-        state.response = responseRes?.detail ? null : responseRes;
-        render();
-      }
-
-      // ── render left col ───────────────────────────────────
-      function renderLeft() {
-        const { event: ev, alert: al } = state;
-        let html = "";
-
-        // event card
-        const rawEv = (ev?.metadata?.raw_event) || {};
-        const loc   = ev?.metadata?.location || al?.metadata?.location || {};
-        const conf  = rawEv.confidence ?? null;
-
-        html += `<div class="card">
-          <div class="card-header">📡 탐지 이벤트</div>
-          <div class="kv">
-            <div class="kv-k">유형</div><div class="kv-v">${ev?.event_type || "—"}</div>
-            <div class="kv-k">심각도</div><div class="kv-v">${severityBadge(ev?.severity)}</div>
-            <div class="kv-k">탐지 장비</div><div class="kv-v">${rawEv.device_type || "—"}</div>
-            <div class="kv-k">설명</div><div class="kv-v" style="font-size:11px;color:var(--muted)">${rawEv.description || "—"}</div>
-            <div class="kv-k">탐지 시각</div><div class="kv-v">${fmtTime(ev?.created_at)}</div>
-          </div>`;
-
-        if (conf !== null) {
-          html += `<div style="margin-top:10px;">
-            <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
-              <span style="color:var(--muted)">신뢰도</span>
-              <span style="font-weight:700;color:var(--accent)">${(conf*100).toFixed(1)}%</span>
-            </div>
-            <div class="conf-bar"><div class="conf-fill" style="width:${(conf*100).toFixed(1)}%"></div></div>
-          </div>`;
-        }
-
-        if (loc.latitude) {
-          html += `<div class="loc-box">
-            <div class="loc-item"><div class="loc-label">위도</div><div>${fmtNum(loc.latitude, 5)}</div></div>
-            <div class="loc-item"><div class="loc-label">경도</div><div>${fmtNum(loc.longitude, 5)}</div></div>
-            ${loc.depth_m != null ? `<div class="loc-item"><div class="loc-label">수심</div><div>${loc.depth_m}m</div></div>` : ""}
-          </div>`;
-        }
-        html += `</div>`;
-
-        // alert card
-        html += `<div class="card">
-          <div class="card-header">🚨 경보</div>
-          <div class="kv">
-            <div class="kv-k">유형</div><div class="kv-v">${al?.alert_type || "—"}</div>
-            <div class="kv-k">심각도</div><div class="kv-v">${severityBadge(al?.severity)}</div>
-            <div class="kv-k">상태</div><div class="kv-v">${renderAlertStatus(al?.status)}</div>
-            <div class="kv-k">권장 조치</div><div class="kv-v" style="font-family:monospace;font-size:11px">${al?.recommended_action || "—"}</div>
-            <div class="kv-k">경보 시각</div><div class="kv-v">${fmtTime(al?.created_at)}</div>
-            <div class="kv-k">대응 시각</div><div class="kv-v">${fmtTime(al?.updated_at)}</div>
-          </div>
-        </div>`;
-
-        // response meta card
-        const rsp = state.response;
-        if (rsp) {
-          html += `<div class="card">
-            <div class="card-header">📋 대응 계획</div>
-            <div class="kv">
-              <div class="kv-k">액션</div><div class="kv-v" style="font-family:monospace;font-size:11px">${rsp.action || "—"}</div>
-              <div class="kv-k">전달</div><div class="kv-v">${(rsp.dispatch_result||{}).delivered ? '<span style="color:var(--ok)">✓ 전달됨</span>' : '<span style="color:var(--muted)">대기</span>'}</div>
-              <div class="kv-k">계획 시각</div><div class="kv-v">${fmtTime(rsp.created_at)}</div>
-            </div>
-          </div>`;
-        }
-
-        document.getElementById("left-col").innerHTML = html;
-      }
-
-      function renderAlertStatus(s) {
-        const map = {
-          registered: ["badge-pending","등록됨"],
-          processing: ["badge-progress","처리중"],
-          completed:  ["badge-ok","대응완료"],
-          failed:     ["badge-failed","실패"],
-        };
-        const [cls, label] = map[s] || ["badge-pending", s || "—"];
-        return `<span class="badge ${cls}">${label}</span>`;
-      }
-
-      // ── render mission header ─────────────────────────────
-      function renderHeader() {
-        const m = state.mission;
-        if (!m) return;
-        const dur = elapsed(m.started_at, m.completed_at);
-        document.getElementById("topbar-title").textContent = `미션 상세 — ${m.mission_id.substring(0,20)}…`;
-        document.getElementById("mission-header").innerHTML = `
-          <div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">MISSION ID</div>
-            <div class="mission-id">${m.mission_id}</div>
-          </div>
-          ${missionStatusBadge(m.status)}
-          <div class="time-range">
-            <div>생성: ${fmtTime(m.created_at)}</div>
-            ${m.started_at ? `<div>시작: ${fmtTime(m.started_at)}</div>` : ""}
-            ${m.completed_at ? `<div>완료: ${fmtTime(m.completed_at)}</div>` : ""}
-            ${dur ? `<div>소요: ${dur}</div>` : ""}
-          </div>`;
-      }
-
-      // ── render steps ──────────────────────────────────────
-      function renderSteps() {
-        const rsp = state.response;
-        const m   = state.mission;
-        if (!rsp && !m) { document.getElementById("steps-container").innerHTML = '<div class="empty">응답 데이터 없음</div>'; return; }
-
-        // steps from response.params.steps (planned) merged with dispatch_result.steps (execution)
-        const plannedSteps  = (rsp?.params?.steps) || [];
-        const dispatchSteps = (rsp?.dispatch_result?.steps) || [];
-
-        // merge: dispatch_result has status/execution info
-        const stepsMap = {};
-        plannedSteps.forEach(s => { stepsMap[s.step_id] = { ...s }; });
-        dispatchSteps.forEach(s => {
-          if (stepsMap[s.step_id]) {
-            stepsMap[s.step_id] = { ...stepsMap[s.step_id], ...s,
-              tasks: mergeTasks(stepsMap[s.step_id].tasks, s.tasks) };
-          } else {
-            stepsMap[s.step_id] = { ...s };
-          }
-        });
-
-        const steps = Object.values(stepsMap);
-        if (!steps.length) {
-          document.getElementById("steps-container").innerHTML = '<div class="empty" style="padding:40px">미션 단계 정보 없음</div>';
+      async function load() {
+        if (!missionId) {
+          document.getElementById("summary").textContent = "Mission ID is missing.";
           return;
         }
-
-        let html = '<div class="step-list">';
-        steps.forEach((step, i) => {
-          const status  = step.status || "pending";
-          const numCls  = stepNumClass(status);
-          const cardCls = stepCardClass(status);
-          const dep     = (step.depends_on||[]).join(", ");
-
-          html += `<div class="step ${cardCls}">
-            <div class="step-header">
-              <div class="step-num ${numCls}">${i+1}</div>
-              <div>
-                <div class="step-title">${step.step_id?.toUpperCase() || `STEP ${i+1}`}</div>
-                <div class="step-policy">${step.step_type || ""} · ${step.evaluation_policy || ""}</div>
-              </div>
-              ${stepStatusBadge(status)}
-              ${dep ? `<div class="step-dep">← ${dep}</div>` : ""}
-            </div>
-            <div class="step-body">`;
-
-          (step.tasks || []).forEach(task => {
-            const execStatus = task.execution_status || "pending";
-            const devIcon = { AUV:"🤿", ROV:"🦾", USV:"🚤", CONTROL_SHIP:"🚢" }[task.target_device_type] || "🔧";
-
-            html += `<div class="task">
-              <div class="task-icon">${devIcon}</div>
-              <div class="task-info">
-                <div class="task-action">${task.action || "—"}</div>
-                <div class="task-device">${task.target_device_name || "—"} (${task.target_device_type || "?"})</div>
-                <div class="task-params">
-                  lat ${fmtNum(task.params?.location?.latitude,5)} · lon ${fmtNum(task.params?.location?.longitude,5)}
-                  ${task.params?.location?.depth_m != null ? ` · 수심 ${task.params.location.depth_m}m` : ""}
-                </div>
-              </div>
-              <div class="exec-status">
-                ${execStatusBadge(execStatus)}
-                ${task.dispatch?.delivered != null ? `<span style="font-size:10px;color:var(--muted)">${task.dispatch.delivered ? "✓ 전달" : "✕ 미전달"}</span>` : ""}
-                ${task.attempt > 0 ? `<span style="font-size:10px;color:var(--muted)">시도 ${task.attempt}회</span>` : ""}
-              </div>
-            </div>`;
-          });
-
-          html += `</div></div>`;
-        });
-        html += "</div>";
-
-        // completion report
-        const report = m?.completion_report;
-        if (report && Object.keys(report).length > 0) {
-          html += `<div class="report">
-            <div class="report-title">📋 완료 보고서</div>
-            <div class="kv">
-              ${Object.entries(report).map(([k,v]) => `<div class="kv-k">${k}</div><div class="kv-v">${JSON.stringify(v)}</div>`).join("")}
-            </div>
-          </div>`;
+        const res = await fetch(`${REGISTRY}/missions/${encodeURIComponent(missionId)}`);
+        if (!res.ok) {
+          document.getElementById("summary").textContent = "Mission not found.";
+          return;
         }
-
-        document.getElementById("steps-container").innerHTML = html;
+        const mission = await res.json();
+        render(mission);
       }
 
-      function mergeTasks(planned, dispatch) {
-        if (!planned) return dispatch || [];
-        if (!dispatch) return planned;
-        return planned.map(p => {
-          const d = dispatch.find(t => t.task_id === p.task_id || t.logical_task_id === p.logical_task_id);
-          return d ? { ...p, ...d } : p;
-        });
+      function pill(text) {
+        return `<span class="pill">${text || "-"}</span>`;
       }
 
-      function render() {
-        renderHeader();
-        renderLeft();
-        renderSteps();
+      function render(mission) {
+        document.getElementById("title").textContent = mission.title || mission.mission_id;
+        document.getElementById("summary").textContent = mission.goal || mission.summary || "";
+        document.getElementById("overview").innerHTML = `
+          <div class="meta">
+            <span>${pill(mission.status)}</span>
+            <span>${mission.mission_id}</span>
+            <span>${mission.mission_type || "-"}</span>
+            <span>Proposal: ${mission.proposal_id || "-"}</span>
+            <span>Approval: ${mission.approval_id || "-"}</span>
+          </div>
+          <pre>${JSON.stringify({
+            created_at: mission.created_at,
+            approved_at: mission.approved_at,
+            started_at: mission.started_at,
+            completed_at: mission.completed_at,
+            operation_plan_id: mission.operation_plan_id,
+            insight_id: mission.insight_id,
+            alert_id: mission.alert_id,
+            event_id: mission.event_id
+          }, null, 2)}</pre>`;
+
+        document.getElementById("steps").innerHTML = (mission.steps || []).map(step => `
+          <div class="step">
+            <strong>${step.step_id}</strong> ${pill(step.status || "pending")}
+            <div class="meta">
+              <span>${step.step_type || "-"}</span>
+              <span>${step.evaluation_policy || "-"}</span>
+            </div>
+            ${(step.tasks || []).map(task => `
+              <div class="task">
+                <div><strong>${task.task_id}</strong> ${pill(task.execution_status || task.dispatch_status || "pending")}</div>
+                <div class="meta">
+                  <span>Action: ${task.action || "-"}</span>
+                  <span>Target: ${task.target_device_name || task.target_device_id || "-"}</span>
+                  <span>Route: ${task.route_agent_name || task.route_agent_id || "-"}</span>
+                </div>
+                <pre>${JSON.stringify({
+                  attempt: task.attempt,
+                  attempted_device_ids: task.attempted_device_ids,
+                  params: task.params,
+                  completed_at: task.completed_at
+                }, null, 2)}</pre>
+              </div>
+            `).join("")}
+          </div>
+        `).join("") || `<div class="empty">No steps.</div>`;
+
+        document.getElementById("results").innerHTML = (mission.device_execution_results || []).map(result => {
+          return `
+            <div class="entry">
+              <strong>${result.task_id}</strong> ${pill(result.task_status || result.status)}
+              <div class="meta">
+                <span>Reporter: ${result.reporter || "-"}</span>
+                <span>Device: ${result.device_id || "-"}</span>
+                <span>Step: ${result.step_id || "-"}</span>
+                <span>Reported: ${result.received_at || "-"}</span>
+              </div>
+              <pre>${JSON.stringify({
+                task_status: result.task_status || result.status,
+                acceptance_status: result.acceptance_status,
+                started_at: result.started_at,
+                finished_at: result.finished_at,
+                success: result.success,
+                failure_reason: result.failure_reason,
+                location: result.location,
+                data_summary: result.data_summary,
+                raw_data_ref: result.raw_data_ref,
+                device_state_changes: result.device_state_changes,
+                device_agent_judgement: result.device_agent_judgement
+              }, null, 2)}</pre>
+            </div>`;
+        }).join("") || `<div class="empty">No execution results yet.</div>`;
+
+        document.getElementById("timeline").innerHTML = (mission.timeline || []).map(item => `
+          <div class="entry">
+            <strong>${item.type || "event"}</strong> ${pill(item.timestamp || "-")}
+            <div>${item.message || ""}</div>
+            <pre>${JSON.stringify(item.data || {}, null, 2)}</pre>
+          </div>
+        `).join("") || `<div class="empty">No timeline entries yet.</div>`;
+
+        document.getElementById("final-result").innerHTML = Object.keys(mission.final_result || {}).length
+          ? `<pre>${JSON.stringify(mission.final_result, null, 2)}</pre>`
+          : `<div class="empty">Mission final result not available yet.</div>`;
       }
 
-      function showError(msg) {
-        document.getElementById("left-col").innerHTML = `<div class="empty" style="color:var(--danger)">${msg}</div>`;
-        document.getElementById("right-col").innerHTML = "";
-      }
-
-      // ── polling (3s fallback) ─────────────────────────────
-      async function pollMission() {
-        const mission = await fetch(`${R}/missions/${MISSION_ID}`).then(r=>r.json()).catch(()=>null);
-        if (!mission || mission.detail) return;
-        state.mission = mission;
-
-        const rsp = await fetch(`${R}/responses/${mission.response_id}`).then(r=>r.json()).catch(()=>null);
-        if (rsp && !rsp.detail) state.response = rsp;
-
-        render();
-      }
-      setInterval(pollMission, 3000);
-
-      // ── WebSocket ─────────────────────────────────────────
-      function connectWS() {
-        ws = new WebSocket(`ws://127.0.0.1:8280/ws/missions`);
-        ws.onopen = () => {
-          document.getElementById("ws-dot").className = "ws-dot connected";
-          document.getElementById("ws-label").textContent = "실시간";
-        };
-        ws.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data);
-            if (msg.mission_id !== MISSION_ID) return;
-            state.mission = msg.mission || state.mission;
-            render();
-          } catch {}
-        };
-        ws.onclose = () => {
-          document.getElementById("ws-dot").className = "ws-dot";
-          document.getElementById("ws-label").textContent = "재연결중…";
-          setTimeout(connectWS, 3000);
-        };
-        ws.onerror = () => ws.close();
-      }
-
-      // ── init ──────────────────────────────────────────────
-      loadAll();
-      connectWS();
+      load();
+      setInterval(load, 5000);
     </script>
   </body>
 </html>

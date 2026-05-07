@@ -38,10 +38,10 @@ cd /Users/teamgrit/Documents/CoWater
 CoWater System
 │
 ├── Registry Server                  포트 8280
-│   └── 디바이스 등록 · Event/Alert/Response/Mission 원장
+│   └── 디바이스 등록 · Event/Alert/Insight/Approval/Mission 원장
 │
 ├── System Agent                     포트 9116
-│   └── LLM 기반 의사결정 · 미션 계획 · Alert 처리
+│   └── 역할 추천 · 운영 계획 추천 · Mission Proposal 생성 · 승인 후 실행
 │
 ├── Device Agents
 │   ├── Control Ship  (layer=middle) 포트 9115
@@ -143,10 +143,12 @@ python device_agent.py --type usv --layer lower --port 9122
 # 등록 디바이스
 curl http://127.0.0.1:8280/devices | jq '.[] | {id, name, layer, device_type, connected}'
 
-# Event / Alert / Response / Mission 원장
+# Event / Alert / Insight / Approval / Mission 원장
 curl http://127.0.0.1:8280/events    | jq .
 curl http://127.0.0.1:8280/alerts    | jq .
-curl http://127.0.0.1:8280/responses | jq .
+curl http://127.0.0.1:8280/insights  | jq .
+curl http://127.0.0.1:8280/approvals | jq .
+curl http://127.0.0.1:8280/mission-proposals | jq .
 curl http://127.0.0.1:8280/missions  | jq .
 
 # System Agent 내부 상태
@@ -173,15 +175,23 @@ registered → processing → completed
 
 ---
 
-## 기뢰 제거 시나리오 스모크 테스트
+## 운영 흐름 스모크 테스트
 
 서비스 전체 기동 후:
 
 ```bash
-python docs/run_mine_removal_scenario.py
+curl -X POST http://127.0.0.1:9116/device-roles/recommend \
+  -H 'Content-Type: application/json' \
+  -d '{"goal":"항만 주변 기뢰 탐지 및 제거"}'
 ```
 
-성공 기준: Event / Alert / Response 각 +1 증가, `delivered: true`.
+이후 `client/ops.html`에서 다음 흐름이 보여야 합니다.
+
+- Device Role 추천
+- Operation Plan 생성
+- Mission Proposal 생성
+- Approval 승인/거절
+- 승인된 Mission의 Step / Task / Timeline 진행
 
 ---
 

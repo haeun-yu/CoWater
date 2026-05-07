@@ -1,1169 +1,439 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>CoWater 운영 관제 - Mission Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater Operations</title>
     <style>
       :root {
-        --bg: #07101e;
-        --surface: rgba(13, 22, 40, 0.92);
-        --text: #e2e8f0;
-        --accent: #60a5fa;
-        --danger: #f87171;
-        --ok: #4ade80;
-        --warning: #fbbf24;
-        --pending: #94a3b8;
+        --bg: #f4f5ef;
+        --card: #fffef8;
+        --ink: #17312c;
+        --muted: #66756f;
+        --line: #d7ddd0;
+        --accent: #006d5b;
+        --warn: #c85e00;
+        --danger: #b03030;
       }
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+      * { box-sizing: border-box; }
       body {
-        background: linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
-        color: var(--text);
-        font-family: "Segoe UI", Inter, sans-serif;
-        min-height: 100vh;
-        font-size: 13px;
+        margin: 0;
+        font-family: "IBM Plex Sans KR", "Noto Sans KR", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(0,109,91,0.12), transparent 28%),
+          linear-gradient(180deg, #f6f7f1, #eef1e7);
+        color: var(--ink);
       }
-      .topbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0 24px;
-        height: 56px;
-        background: rgba(6, 14, 28, 0.98);
-        border-bottom: 2px solid rgba(96, 165, 250, 0.2);
-        position: sticky;
-        top: 0;
-        z-index: 100;
+      header {
+        padding: 24px 20px 14px;
+        border-bottom: 1px solid var(--line);
       }
-      .logo {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-      }
-      .logo-text {
-        font-size: 18px;
-        font-weight: 700;
-        color: #60a5fa;
-      }
-      .nav {
-        display: flex;
+      h1 { margin: 0; font-size: 30px; }
+      .sub { margin-top: 6px; color: var(--muted); }
+      main {
+        padding: 20px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         gap: 16px;
       }
-      .nav a {
-        color: var(--accent);
-        text-decoration: none;
-        font-weight: 500;
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        box-shadow: 0 12px 30px rgba(23,49,44,0.06);
       }
-      .controls {
+      .card h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      input, textarea, select, button {
+        font: inherit;
+      }
+      input, textarea, select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #fff;
+      }
+      textarea { min-height: 92px; resize: vertical; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: var(--accent);
+        color: white;
+        cursor: pointer;
+      }
+      button.secondary { background: #dde7e1; color: var(--ink); }
+      button.warn { background: var(--warn); }
+      button.danger { background: var(--danger); }
+      .list { display: grid; gap: 10px; }
+      .item {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255,255,255,0.7);
+      }
+      .meta {
         display: flex;
         gap: 8px;
-      }
-      button {
-        padding: 6px 14px;
-        background: rgba(96, 165, 250, 0.1);
-        border: 1px solid rgba(96, 165, 250, 0.3);
-        color: var(--text);
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 500;
-        transition: all 0.2s;
-      }
-      button:hover {
-        background: rgba(96, 165, 250, 0.2);
-      }
-      .health {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding: 12px 24px;
         flex-wrap: wrap;
-        background: rgba(6, 14, 28, 0.5);
-        border-bottom: 1px solid rgba(71, 85, 105, 0.2);
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
       }
       .pill {
-        padding: 4px 10px;
-        border-radius: 12px;
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e6f2ef;
+        color: var(--accent);
         font-size: 11px;
-        background: rgba(96, 165, 250, 0.1);
-        color: var(--text);
-        font-weight: 600;
-        border: 1px solid rgba(96, 165, 250, 0.2);
-      }
-      .pill.online {
-        color: var(--ok);
-        background: rgba(74, 222, 128, 0.12);
-        border-color: rgba(74, 222, 128, 0.3);
-      }
-      .pill.offline {
-        color: var(--danger);
-        background: rgba(248, 113, 113, 0.12);
-        border-color: rgba(248, 113, 113, 0.3);
       }
       .stats {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 12px;
-        padding: 12px 24px;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
       }
       .stat {
-        background: linear-gradient(
-          135deg,
-          rgba(96, 165, 250, 0.05),
-          rgba(96, 165, 250, 0)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.2);
-        border-radius: 6px;
-        padding: 14px;
-        text-align: center;
-      }
-      .stat-label {
-        font-size: 11px;
-        color: #94a3b8;
-        font-weight: 500;
-      }
-      .stat-value {
-        font-size: 28px;
-        font-weight: 800;
-        margin-top: 6px;
-        color: #60a5fa;
-      }
-      .content {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
-        padding: 12px 24px;
-        height: calc(100vh - 360px);
-      }
-      .panel {
-        background: linear-gradient(
-          135deg,
-          var(--surface),
-          rgba(13, 22, 40, 0.5)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.2);
-        border-radius: 8px;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-      .panel-header {
-        padding: 14px 16px;
-        border-bottom: 1px solid rgba(96, 165, 250, 0.2);
-        font-weight: 700;
-        background: rgba(96, 165, 250, 0.08);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .panel-header-title {
-        font-size: 13px;
-      }
-      .panel-body {
-        flex: 1;
-        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
         padding: 12px;
       }
-      .card {
-        padding: 10px;
-        margin-bottom: 8px;
-        background: rgba(96, 165, 250, 0.06);
-        border-left: 3px solid var(--accent);
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-      .card:hover {
-        background: rgba(96, 165, 250, 0.12);
-        transform: translateX(2px);
-      }
-      .card-title {
-        font-weight: 600;
-        font-size: 12px;
-      }
-      .card-meta {
-        font-size: 11px;
-        color: #94a3b8;
-        margin-top: 3px;
-      }
-      .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 3px;
-        font-size: 10px;
-        font-weight: 700;
-        margin-right: 4px;
-        text-transform: uppercase;
-      }
-      .badge-pending {
-        background: rgba(148, 163, 184, 0.2);
-        color: var(--pending);
-      }
-      .badge-inprogress {
-        background: rgba(96, 165, 250, 0.2);
-        color: #60a5fa;
-      }
-      .badge-completed {
-        background: rgba(74, 222, 128, 0.2);
-        color: var(--ok);
-      }
-      .badge-failed {
-        background: rgba(248, 113, 113, 0.2);
-        color: var(--danger);
-      }
-      .badge-critical {
-        background: rgba(248, 113, 113, 0.2);
-        color: var(--danger);
-      }
-      .badge-warning {
-        background: rgba(251, 191, 36, 0.2);
-        color: var(--warning);
-      }
-      .badge-ok {
-        background: rgba(74, 222, 128, 0.2);
-        color: var(--ok);
-      }
-      .empty {
-        text-align: center;
-        color: #64748b;
-        padding: 24px;
-      }
-      .detail {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 1000;
-        width: 90%;
-        max-width: 600px;
-        max-height: 80vh;
-        background: linear-gradient(
-          135deg,
-          var(--surface),
-          rgba(13, 22, 40, 0.5)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.3);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-        overflow: hidden;
-        flex-direction: column;
-        pointer-events: none;
-        opacity: 0;
-        visibility: hidden;
-      }
-      #modal-backdrop {
-        display: none;
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 999;
-      }
-      #modal-backdrop.visible {
-        display: block;
-      }
-      .detail.visible {
-        display: flex;
-        pointer-events: auto;
-        opacity: 1;
-        visibility: visible;
-      }
-      .detail-content {
-        overflow-y: auto;
-        flex: 1;
-      }
-      .detail-title {
-        font-weight: 700;
-        font-size: 14px;
-        margin-bottom: 12px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .kv {
-        display: grid;
-        grid-template-columns: 120px 1fr;
-        gap: 8px 16px;
-        font-size: 12px;
-      }
-      .kv-key {
-        color: #94a3b8;
-        font-weight: 600;
-      }
-      .kv-val {
-        color: var(--text);
-      }
-      .step {
-        margin: 8px 0;
-        padding: 10px;
-        background: rgba(96, 165, 250, 0.08);
-        border-left: 3px solid #60a5fa;
-        border-radius: 3px;
-        font-size: 11px;
-      }
-      .progress-bar {
-        width: 100%;
-        height: 4px;
-        background: rgba(96, 165, 250, 0.1);
-        border-radius: 2px;
-        margin-top: 6px;
-        overflow: hidden;
-      }
-      .progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #60a5fa, #3b82f6);
-        border-radius: 2px;
-      }
-      .mission-steps {
-        margin-top: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .mission-step {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11px;
-        padding: 4px 6px;
-        background: rgba(96, 165, 250, 0.06);
-        border-radius: 3px;
-      }
-      .mission-step-status {
-        width: 16px;
-        height: 16px;
-        border-radius: 2px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-        font-weight: 700;
-      }
-      .close-detail {
-        cursor: pointer;
-        color: #94a3b8;
-        font-size: 16px;
-        font-weight: 700;
-      }
-      .close-detail:hover {
-        color: var(--text);
-      }
-      .action-buttons {
-        display: flex;
-        gap: 8px;
-        margin-top: 12px;
-        border-top: 1px solid rgba(96, 165, 250, 0.2);
-        padding-top: 12px;
-      }
-      .action-buttons button {
-        flex: 1;
-        padding: 8px 12px;
-        font-size: 12px;
-      }
-      .btn-retry {
-        background: rgba(251, 191, 36, 0.15);
-        border-color: rgba(251, 191, 36, 0.5);
-        color: #fbbf24;
-      }
-      .btn-retry:hover {
-        background: rgba(251, 191, 36, 0.25);
-      }
-      .btn-abort {
-        background: rgba(248, 113, 113, 0.15);
-        border-color: rgba(248, 113, 113, 0.5);
-        color: #f87171;
-      }
-      .btn-abort:hover {
-        background: rgba(248, 113, 113, 0.25);
-      }
-      .ws-status {
-        font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 3px;
-        background: rgba(74, 222, 128, 0.2);
-        color: #4ade80;
-        font-weight: 700;
-        display: inline-block;
-        margin-left: 8px;
-      }
-      .ws-status.disconnected {
-        background: rgba(248, 113, 113, 0.2);
-        color: #f87171;
-      }
-      .panel-body::-webkit-scrollbar {
-        width: 6px;
-      }
-      .panel-body::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      .panel-body::-webkit-scrollbar-thumb {
-        background: rgba(96, 165, 250, 0.2);
-        border-radius: 3px;
-      }
-      .panel-body::-webkit-scrollbar-thumb:hover {
-        background: rgba(96, 165, 250, 0.4);
+      .stat b { display: block; font-size: 22px; margin-top: 4px; }
+      a { color: var(--accent); text-decoration: none; }
+      .empty { color: var(--muted); font-size: 14px; }
+      @media (max-width: 700px) {
+        .stats, .grid2 { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
-    <div class="topbar">
-      <div class="logo">
-        <div style="font-size: 28px">🌊</div>
-        <div class="logo-text">CoWater</div>
-      </div>
-      <div class="nav">
-        <a href="index.html">🗺️ 3D 맵</a>
-        <a href="ops.html">📊 운영관제</a>
-      </div>
-      <div class="controls">
-        <button onclick="loadData()">🔄 새로고침</button>
-        <button onclick="resetAll()">⚠️ 초기화</button>
-        <div class="ws-status disconnected" id="ws-status">
-          WebSocket: 연결중…
+    <header>
+      <h1>CoWater Mission Operations</h1>
+      <div class="sub">Device Role → Operation Plan → Mission Proposal → Approval → Mission Execution</div>
+    </header>
+    <main>
+      <section class="card">
+        <h2>Overview</h2>
+        <div class="stats" id="stats"></div>
+      </section>
+
+      <section class="card">
+        <h2>Role Assignment</h2>
+        <label for="role-goal">Goal</label>
+        <input id="role-goal" placeholder="예: 항만 주변 기뢰 탐지 및 제거" />
+        <div class="actions">
+          <button id="recommend-roles">Recommend Roles</button>
+          <button class="secondary" id="refresh-overview-1">Refresh</button>
         </div>
-      </div>
-    </div>
+        <div class="list" id="roles"></div>
+      </section>
 
-    <div class="health">
-      <span style="font-weight: 600; font-size: 12px; color: #94a3b8"
-        >🔌 서비스 상태</span
-      >
-      <div class="pill offline" id="svc-registry">Registry</div>
-      <div class="pill offline" id="svc-system">System</div>
-      <div class="pill offline" id="svc-ship">Ship-M</div>
-      <div class="pill offline" id="svc-auv">AUV-L</div>
-      <div class="pill offline" id="svc-rov">ROV-L</div>
-      <div class="pill offline" id="svc-usv">USV-L</div>
-    </div>
-
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-label">📡 이벤트</div>
-        <div class="stat-value" id="st-events">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">⚠️ 경보</div>
-        <div class="stat-value" id="st-alerts">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">🚀 미션</div>
-        <div class="stat-value" id="st-missions">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">⏳ 진행중</div>
-        <div class="stat-value" id="st-in-progress">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">✅ 완료</div>
-        <div class="stat-value" id="st-completed">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">❌ 실패</div>
-        <div class="stat-value" id="st-failed">—</div>
-      </div>
-    </div>
-
-    <div class="content">
-      <!-- Left column: Events & Alerts -->
-      <div style="display: grid; grid-template-rows: 1fr 1fr; gap: 12px">
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-header-title"
-              >📡 이벤트 (<span id="ev-count">0</span>)</span
-            >
+      <section class="card">
+        <h2>Operation Plan</h2>
+        <div class="grid2">
+          <div>
+            <label for="plan-name">Plan Name</label>
+            <input id="plan-name" placeholder="Mine Clearance Plan" />
           </div>
-          <div class="panel-body" id="ev-list">
-            <div class="empty">로딩 중…</div>
+          <div>
+            <label for="plan-goal">Goal</label>
+            <input id="plan-goal" placeholder="임무 목표" />
           </div>
         </div>
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-header-title"
-              >⚠️ 경보 (<span id="al-count">0</span>)</span
-            >
-          </div>
-          <div class="panel-body" id="al-list">
-            <div class="empty">로딩 중…</div>
-          </div>
+        <label for="plan-location">Location JSON</label>
+        <input id="plan-location" placeholder='{"latitude":35.1,"longitude":129.1}' />
+        <div class="actions">
+          <button id="recommend-plan">Recommend Plan</button>
+          <button class="secondary" id="save-plan">Save Plan</button>
         </div>
-      </div>
+        <div class="list" id="plans"></div>
+      </section>
 
-      <!-- Right column: Missions -->
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-header-title"
-            >🚀 미션 추적 (<span id="ms-count">0</span>)</span
-          >
+      <section class="card">
+        <h2>Proposal & Approval</h2>
+        <label for="proposal-goal">Proposal Goal</label>
+        <textarea id="proposal-goal" placeholder="운영자가 검토할 미션 제안 목표"></textarea>
+        <label for="proposal-plan">Operation Plan</label>
+        <select id="proposal-plan"></select>
+        <div class="actions">
+          <button id="generate-proposal">Generate Proposal</button>
+          <button class="secondary" id="refresh-overview-2">Refresh</button>
         </div>
-        <div class="panel-body" id="ms-list">
-          <div class="empty">로딩 중…</div>
-        </div>
-      </div>
-    </div>
+        <div class="list" id="approvals"></div>
+        <div class="list" id="proposals"></div>
+      </section>
 
-    <div id="modal-backdrop" onclick="hideDetail()"></div>
-    <div class="detail" id="detail" onclick="event.stopPropagation()">
-      <div class="detail-title">
-        <span id="detail-title">상세 정보</span>
-        <div class="close-detail" onclick="hideDetail()">✕</div>
-      </div>
-      <div class="detail-content" id="detail-body" style="margin-top: 12px"></div>
-    </div>
+      <section class="card">
+        <h2>Mission Execution</h2>
+        <div class="list" id="missions"></div>
+      </section>
+
+      <section class="card">
+        <h2>Events, Alerts, Insights</h2>
+        <div class="list" id="signals"></div>
+      </section>
+    </main>
 
     <script>
-      const R = "http://127.0.0.1:8280";
-      const WS_URL = "ws://127.0.0.1:8280";
-      let data = { events: [], alerts: [], responses: [], missions: [] };
-      let ws = null;
-      let wsReconnectTimer = null;
+      const REGISTRY = "http://127.0.0.1:8280";
+      const SYSTEM = "http://127.0.0.1:9116";
 
-      // ======================== WebSocket Management ========================
-
-      function connectWebSocket() {
-        try {
-          ws = new WebSocket(WS_URL + "/ws/dashboard");
-
-          ws.onopen = () => {
-            console.log("✅ WebSocket connected");
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 연결됨";
-            document.getElementById("ws-status").className = "ws-status";
-            clearTimeout(wsReconnectTimer);
-          };
-
-          ws.onmessage = async (event) => {
-            try {
-              const msg = JSON.parse(event.data);
-              console.log("📨 WebSocket message:", msg.type);
-
-              if (msg.type === "initial") {
-                data.events = (msg.events || []).reverse();
-                data.alerts = (msg.alerts || []).reverse();
-                data.responses = (msg.responses || []).reverse();
-                data.missions = (msg.missions || []).reverse();
-                console.log(`📦 Initial data: ${data.missions.length} missions`);
-                updateUI();
-              } else if (msg.type === "mission_update" && msg.data) {
-                // Handle real-time mission updates
-                const m = msg.data.mission;
-                const idx = data.missions.findIndex(
-                  (x) => x.mission_id === m.mission_id,
-                );
-                console.log(`🚀 Mission update: ${m.mission_id} → ${m.status}`);
-                if (idx >= 0) {
-                  data.missions[idx] = m;
-                  console.log(`  Updated at index ${idx}`);
-                } else {
-                  data.missions.unshift(m);
-                  console.log(`  Added as new mission`);
-                }
-                updateUI();
-              } else if (msg.type && (msg.type.includes('event') || msg.type.includes('alert'))) {
-                // Other event/alert updates
-                await loadData();
-              }
-            } catch (e) {
-              console.error("❌ WebSocket message error:", e);
-            }
-          };
-
-          ws.onerror = (error) => {
-            console.error("❌ WebSocket error:", error);
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 오류";
-            document.getElementById("ws-status").className =
-              "ws-status disconnected";
-          };
-
-          ws.onclose = () => {
-            console.log("⚠️ WebSocket disconnected");
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 연결끊김";
-            document.getElementById("ws-status").className =
-              "ws-status disconnected";
-            // Attempt reconnection
-            wsReconnectTimer = setTimeout(connectWebSocket, 3000);
-          };
-        } catch (e) {
-          console.error("Failed to connect WebSocket:", e);
-          wsReconnectTimer = setTimeout(connectWebSocket, 3000);
-        }
-      }
-
-      function updateUI() {
-        const inProgress = data.missions.filter(
-          (m) => m.status === "in_progress",
-        ).length;
-        const completed = data.missions.filter(
-          (m) => m.status === "completed",
-        ).length;
-        const failed = data.missions.filter(
-          (m) => m.status === "failed",
-        ).length;
-
-        document.getElementById("st-events").textContent = data.events.length;
-        document.getElementById("ev-count").textContent = data.events.length;
-        document.getElementById("st-alerts").textContent = data.alerts.length;
-        document.getElementById("al-count").textContent = data.alerts.length;
-        document.getElementById("st-missions").textContent =
-          data.missions.length;
-        document.getElementById("ms-count").textContent = data.missions.length;
-        document.getElementById("st-in-progress").textContent = inProgress;
-        document.getElementById("st-completed").textContent = completed;
-        document.getElementById("st-failed").textContent = failed;
-
-        renderEvents();
-        renderAlerts();
-        renderMissions();
-      }
-
-      // ======================== Health & Data Loading ========================
-
-      async function checkHealth() {
-        const checks = {
-          "svc-registry": R + "/health",
-          "svc-system": "http://127.0.0.1:9116/health",
-          "svc-ship": "http://127.0.0.1:9115/health",
-          "svc-auv": "http://127.0.0.1:9112/health",
-          "svc-rov": "http://127.0.0.1:9113/health",
-          "svc-usv": "http://127.0.0.1:9111/health",
-        };
-        for (const [id, url] of Object.entries(checks)) {
-          try {
-            const r = await fetch(url, { signal: AbortSignal.timeout(1000) });
-            document.getElementById(id).className = r.ok
-              ? "pill online"
-              : "pill offline";
-          } catch {
-            document.getElementById(id).className = "pill offline";
-          }
-        }
-      }
-
-      async function loadData() {
-        try {
-          const [events, alerts, responses, missions] = await Promise.all([
-            fetch(R + "/events")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Events error:", e);
-                return [];
-              }),
-            fetch(R + "/alerts")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Alerts error:", e);
-                return [];
-              }),
-            fetch(R + "/responses")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Responses error:", e);
-                return [];
-              }),
-            fetch(R + "/missions")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Missions error:", e);
-                return [];
-              }),
-          ]);
-
-          data.events = (events || []).reverse();
-          data.alerts = (alerts || []).reverse();
-          data.responses = (responses || []).reverse();
-          data.missions = (missions || []).reverse();
-
-          updateUI();
-          await checkHealth();
-        } catch (e) {
-          console.error("Load failed:", e);
-        }
-      }
-
-      function getStatusBadge(status) {
-        const badges = {
-          registered: "badge-pending",
-          processing: "badge-inprogress",
-          completed: "badge-completed",
-          failed: "badge-failed",
-          pending: "badge-pending",
-          in_progress: "badge-inprogress",
-          CRITICAL: "badge-critical",
-          WARNING: "badge-warning",
-        };
-        const label = {
-          registered: "⏳ 등록됨",
-          processing: "▶️ 처리중",
-          completed: "✅ 대응완료",
-          failed: "❌ 실패",
-          pending: "⏳ 대기",
-          in_progress: "▶️ 진행",
-          CRITICAL: "🔴 심각",
-          WARNING: "🟡 경고",
-        };
-        return `<span class="badge ${badges[status] || ""}">${label[status] || status}</span>`;
-      }
-
-      function renderEvents() {
-        const el = document.getElementById("ev-list");
-        if (!data.events.length) {
-          el.innerHTML = '<div class="empty">이벤트 없음</div>';
-          return;
-        }
-        el.innerHTML = data.events
-          .slice(0, 15)
-          .map((e) => {
-            const meta = e.metadata || {};
-            const raw = meta.raw_event || {};
-            return (
-              '<div class="card" onclick="event.stopPropagation();showEvent(\'' +
-              e.event_id +
-              "')\">" +
-              '<div class="card-title">' +
-              getStatusBadge(e.severity) +
-              " " +
-              e.event_type +
-              "</div>" +
-              '<div class="card-meta">신뢰도: ' +
-              ((raw.confidence || 0) * 100).toFixed(0) +
-              "% | " +
-              new Date(e.created_at).toLocaleTimeString("ko-KR") +
-              "</div>" +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function renderAlerts() {
-        const el = document.getElementById("al-list");
-        if (!data.alerts.length) {
-          el.innerHTML = '<div class="empty">경보 없음</div>';
-          return;
-        }
-        el.innerHTML = data.alerts
-          .slice(0, 15)
-          .map((a) => {
-            const relatedResponse = data.responses.find(
-              (r) => r.alert_id === a.alert_id,
-            );
-            const relatedMission = relatedResponse
-              ? data.missions.find(
-                  (m) => m.response_id === relatedResponse.response_id,
-                )
-              : null;
-            return (
-              '<div class="card" onclick="event.stopPropagation();showAlert(\'' +
-              a.alert_id +
-              "')\">" +
-              '<div class="card-title">' +
-              getStatusBadge(a.status) +
-              " " +
-              getStatusBadge(a.severity) +
-              " " +
-              a.alert_type +
-              "</div>" +
-              '<div class="card-meta">' +
-              (relatedMission ? "🚀 " + relatedMission.status : "⏳ 응답대기") +
-              " | " +
-              new Date(a.created_at).toLocaleTimeString("ko-KR") +
-              "</div>" +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function renderMissions() {
-        const el = document.getElementById("ms-list");
-        if (!data.missions.length) {
-          el.innerHTML = '<div class="empty">미션 없음</div>';
-          return;
-        }
-        el.innerHTML = data.missions
-          .slice(0, 20)
-          .map((m) => {
-            const steps = m.step_states || [];
-            const completedSteps = steps.filter(
-              (s) => s.status === "completed",
-            ).length;
-            const progress =
-              steps.length > 0
-                ? Math.round((completedSteps / steps.length) * 100)
-                : 0;
-            const startedTime = m.started_at
-              ? new Date(m.started_at).toLocaleTimeString("ko-KR")
-              : "-";
-
-            return (
-              '<div class="card" onclick="event.stopPropagation();location.href=\'mission.html?id=' +
-              m.mission_id +
-              '\'">' +
-              '<div class="card-title">' +
-              getStatusBadge(m.status) +
-              " " +
-              m.mission_id.substring(0, 16) +
-              "…</div>" +
-              '<div class="card-meta">' +
-              steps.length +
-              "단계 | " +
-              completedSteps +
-              "완료 | " +
-              startedTime +
-              "</div>" +
-              '<div class="progress-bar"><div class="progress-fill" style="width: ' +
-              progress +
-              '%"></div></div>' +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function fmtCoord(v) { return typeof v === "number" ? v.toFixed(4) : (v || "—"); }
-
-      function showEvent(id) {
-        const e = data.events.find((x) => x.event_id === id);
-        if (!e) return;
-        const meta = e.metadata || {};
-        const raw = meta.raw_event || {};
-        const loc = meta.location || {};
-
-        document.getElementById("detail-title").innerHTML =
-          e.event_type + " " + getStatusBadge(e.severity);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">이벤트 ID</div><div class="kv-val">' +
-          e.event_id +
-          "</div>" +
-          '<div class="kv-key">심각도</div><div class="kv-val">' +
-          e.severity +
-          "</div>" +
-          '<div class="kv-key">신뢰도</div><div class="kv-val">' +
-          ((raw.confidence || 0) * 100).toFixed(1) +
-          "%</div>" +
-          '<div class="kv-key">설명</div><div class="kv-val">' +
-          (raw.description || "—") +
-          "</div>" +
-          '<div class="kv-key">위치</div><div class="kv-val">' +
-          fmtCoord(loc.latitude) +
-          ", " +
-          fmtCoord(loc.longitude) +
-          "</div>" +
-          '<div class="kv-key">깊이</div><div class="kv-val">' +
-          (loc.depth_m || "—") +
-          "m</div>" +
-          '<div class="kv-key">생성</div><div class="kv-val">' +
-          new Date(e.created_at).toLocaleTimeString("ko-KR") +
-          "</div>" +
-          "</div>";
-        showDetail();
-      }
-
-      function showAlert(id) {
-        const a = data.alerts.find((x) => x.alert_id === id);
-        if (!a) return;
-        const e = data.events.find((x) => x.event_id === a.event_id);
-        const r = data.responses.find((x) => x.alert_id === a.alert_id);
-        const m = r
-          ? data.missions.find((x) => x.response_id === r.response_id)
-          : null;
-        const meta = e ? e.metadata || {} : (a.metadata || {});
-        const raw = meta.raw_event || {};
-        const loc = meta.location || {};
-
-        let stepsHtml = "";
-        if (r && r.params && r.params.steps) {
-          r.params.steps.forEach((s, i) => {
-            stepsHtml +=
-              '<div class="step"><strong>단계 ' +
-              (i + 1) +
-              ": " +
-              s.step_id.toUpperCase() +
-              "</strong><br/>";
-            if (s.tasks) {
-              s.tasks.forEach((t) => {
-                stepsHtml +=
-                  "→ " + t.action + " (" + t.target_device_name + ")<br/>";
-              });
-            }
-            stepsHtml += "</div>";
-          });
-        }
-
-        document.getElementById("detail-title").innerHTML =
-          a.alert_type +
-          " " +
-          getStatusBadge(a.status) +
-          " " +
-          getStatusBadge(a.severity);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">경보 ID</div><div class="kv-val">' +
-          a.alert_id +
-          "</div>" +
-          '<div class="kv-key">상태</div><div class="kv-val">' +
-          a.status +
-          "</div>" +
-          '<div class="kv-key">심각도</div><div class="kv-val">' +
-          a.severity +
-          "</div>" +
-          '<div class="kv-key">신뢰도</div><div class="kv-val">' +
-          ((raw.confidence || 0) * 100).toFixed(1) +
-          "%</div>" +
-          '<div class="kv-key">위치</div><div class="kv-val">' +
-          fmtCoord(loc.latitude) +
-          ", " +
-          fmtCoord(loc.longitude) +
-          "</div>" +
-          '<div class="kv-key">깊이</div><div class="kv-val">' +
-          (loc.depth_m || "—") +
-          "m</div>" +
-          (m
-            ? '<div class="kv-key">미션</div><div class="kv-val"><a href="javascript:showMission(\'' +
-              m.mission_id +
-              '\')" style="color: #60a5fa; text-decoration: underline; cursor: pointer;">' +
-              m.mission_id.substring(0, 12) +
-              "…</a> (" +
-              m.status +
-              ")</div>"
-            : "") +
-          "</div>" +
-          (stepsHtml
-            ? '<div style="margin-top: 12px;"><strong>📋 미션 단계:</strong>' +
-              stepsHtml +
-              "</div>"
-            : '<div style="margin-top: 12px; color: #94a3b8;">📋 응답 대기 중</div>');
-        showDetail();
-      }
-
-      function showMission(id) {
-        const m = data.missions.find((x) => x.mission_id === id);
-        if (!m) {
-          alert("미션을 찾을 수 없습니다");
-          return;
-        }
-
-        const r = data.responses.find((x) => x.response_id === m.response_id);
-        const a = data.alerts.find((x) => x.alert_id === m.alert_id);
-        const e = data.events.find((x) => x.event_id === m.event_id);
-
-        const steps = m.step_states || [];
-        const completed = steps.filter((s) => s.status === "completed").length;
-        const failed = steps.filter((s) => s.status === "failed").length;
-
-        let stepsHtml = '<div class="mission-steps">';
-        steps.forEach((s, i) => {
-          const statusColor =
-            s.status === "completed"
-              ? "#4ade80"
-              : s.status === "failed"
-                ? "#f87171"
-                : "#94a3b8";
-          const statusIcon =
-            s.status === "completed" ? "✓" : s.status === "failed" ? "✕" : "…";
-          stepsHtml +=
-            '<div class="mission-step">' +
-            '<div class="mission-step-status" style="background: ' +
-            statusColor +
-            '; color: #fff;">' +
-            statusIcon +
-            "</div>" +
-            "<div><strong>" +
-            s.step_id.toUpperCase() +
-            "</strong> - " +
-            (s.status || "pending") +
-            "</div>" +
-            "</div>";
+      async function j(url, opts) {
+        const res = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
         });
-        stepsHtml += "</div>";
-
-        let completionHtml = "";
-        const report = m.completion_report || {};
-        if (report && Object.keys(report).length > 0) {
-          completionHtml =
-            '<div style="margin-top: 12px; padding: 12px; background: rgba(74, 222, 128, 0.1); border-radius: 4px; border-left: 3px solid #4ade80;">' +
-            "<strong>📋 완료 보고서</strong>" +
-            '<div class="kv" style="margin-top: 6px;">' +
-            '<div class="kv-key">총 단계</div><div class="kv-val">' +
-            (report.total_steps || steps.length) +
-            "</div>" +
-            '<div class="kv-key">성공</div><div class="kv-val">' +
-            (report.successful_steps || completed) +
-            "</div>" +
-            '<div class="kv-key">실패</div><div class="kv-val">' +
-            (report.failed_steps || failed) +
-            "</div>" +
-            "</div>" +
-            "</div>";
-        }
-
-        // Manual Intervention buttons
-        let actionButtons = "";
-        if (m.status === "in_progress" || m.status === "pending") {
-          actionButtons =
-            '<div class="action-buttons">' +
-            '<button class="btn-abort" onclick="abortMission(\'' +
-            m.mission_id +
-            "')\">❌ 미션 취소</button>" +
-            "</div>";
-        } else if (m.status === "failed") {
-          actionButtons =
-            '<div class="action-buttons">' +
-            '<button class="btn-retry" onclick="retryMission(\'' +
-            m.mission_id +
-            "')\">🔄 재시도</button>" +
-            "</div>";
-        }
-
-        document.getElementById("detail-title").innerHTML =
-          "Mission " + getStatusBadge(m.status);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">미션 ID</div><div class="kv-val" style="font-family: monospace; font-size: 11px;">' +
-          m.mission_id +
-          "</div>" +
-          '<div class="kv-key">응답 ID</div><div class="kv-val" style="font-family: monospace; font-size: 11px;">' +
-          (m.response_id ? m.response_id.substring(0, 20) + "…" : "—") +
-          "</div>" +
-          '<div class="kv-key">상태</div><div class="kv-val">' +
-          getStatusBadge(m.status) +
-          "</div>" +
-          '<div class="kv-key">진행</div><div class="kv-val">' +
-          completed +
-          "/" +
-          steps.length +
-          " 완료</div>" +
-          '<div class="kv-key">시작</div><div class="kv-val">' +
-          (m.started_at
-            ? new Date(m.started_at).toLocaleTimeString("ko-KR")
-            : "—") +
-          "</div>" +
-          '<div class="kv-key">완료</div><div class="kv-val">' +
-          (m.completed_at
-            ? new Date(m.completed_at).toLocaleTimeString("ko-KR")
-            : "—") +
-          "</div>" +
-          "</div>" +
-          '<div style="margin-top: 12px;"><strong>📊 단계 상태:</strong>' +
-          stepsHtml +
-          "</div>" +
-          (r
-            ? '<div style="margin-top: 12px; padding: 8px; background: rgba(96, 165, 250, 0.08); border-radius: 3px; border-left: 3px solid #60a5fa;">' +
-              "<strong>📍 응답 액션:</strong> " +
-              r.action +
-              "<br/>" +
-              "<strong>원인:</strong> " +
-              r.reason +
-              "</div>"
-            : "") +
-          completionHtml +
-          actionButtons;
-        showDetail();
+        if (!res.ok) throw new Error(`${res.status} ${url}`);
+        return res.json();
       }
 
-      function showDetail() {
-        document.getElementById("detail").className = "detail visible";
-        document.getElementById("modal-backdrop").className = "visible";
-      }
-      function hideDetail() {
-        const detail = document.getElementById("detail");
-        detail.classList.remove("visible");
-        document.getElementById("modal-backdrop").className = "";
+      function parseLocation(input) {
+        const raw = input.trim();
+        if (!raw) return {};
+        try { return JSON.parse(raw); } catch { return {}; }
       }
 
-      // Close detail modal when clicking outside (on overlay)
-      document.addEventListener("click", function (e) {
-        const detail = document.getElementById("detail");
-        // backdrop div이 클릭을 처리하므로 여기선 아무것도 안 함
-      });
-
-      // ======================== Manual Intervention ========================
-
-      async function abortMission(missionId) {
-        if (!confirm("이 미션을 취소하시겠습니까?")) return;
-
-        try {
-          const response = await fetch(
-            R +
-              "/missions/" +
-              missionId +
-              "/abort?reason=Manual%20intervention",
-            {
-              method: "POST",
-            },
-          );
-
-          if (response.ok) {
-            alert("미션 취소 완료");
-            await loadData();
-            hideDetail();
-          } else {
-            alert("미션 취소 실패: " + response.statusText);
-          }
-        } catch (e) {
-          alert("미션 취소 중 오류: " + e.message);
-        }
+      function statusPill(status) {
+        return `<span class="pill">${status || "unknown"}</span>`;
       }
 
-      async function retryMission(missionId) {
-        if (!confirm("이 미션을 재시도하시겠습니까?")) return;
-
-        try {
-          const response = await fetch(R + "/missions/" + missionId, {
-            method: "GET",
-          });
-
-          if (!response.ok) {
-            alert("미션 조회 실패");
-            return;
-          }
-
-          const mission = await response.json();
-
-          // Update mission status to pending for retry
-          const updateResp = await fetch(
-            R + "/missions/" + missionId + "/update-status?status=pending",
-            {
-              method: "POST",
-            },
-          );
-
-          if (updateResp.ok) {
-            alert("미션 재시도 준비 완료");
-            await loadData();
-            hideDetail();
-          } else {
-            alert("미션 상태 업데이트 실패: " + updateResp.statusText);
-          }
-        } catch (e) {
-          alert("미션 재시도 중 오류: " + e.message);
-        }
+      function renderStats(data) {
+        const stats = data.stats || {};
+        const rows = [
+          ["Devices", (data.devices || []).length],
+          ["Plans", (data.operation_plans || []).length],
+          ["Pending Approvals", (data.approvals || []).filter(x => x.status === "pending").length],
+          ["Running Missions", (data.missions || []).filter(x => x.status === "running").length],
+          ["Completed Missions", stats.completed || 0],
+          ["Failed Missions", stats.failed || 0],
+        ];
+        document.getElementById("stats").innerHTML = rows.map(([k, v]) => `<div class="stat"><div>${k}</div><b>${v}</b></div>`).join("");
       }
 
-      // ======================== Initialization ========================
-
-      async function resetAll() {
-        if (!confirm("모든 데이터를 초기화하시겠습니까?")) return;
-        try {
-          await fetch(R + "/admin/reset", { method: "POST" });
-          await new Promise((r) => setTimeout(r, 500));
-          await loadData();
-          alert("초기화 완료");
-        } catch (e) {
-          alert("초기화 실패: " + e.message);
-        }
+      function renderRoles(devices, roles) {
+        const roleMap = new Map((roles || []).map(r => [String(r.device_id), r]));
+        const html = (devices || []).map(device => {
+          const role = roleMap.get(String(device.id)) || roleMap.get(String(device.registry_id));
+          return `
+            <div class="item">
+              <strong>${device.name}</strong> ${statusPill(device.layer || "-")}
+              <div class="meta">
+                <span>${device.device_type || "-"}</span>
+                <span>${role ? role.role_name : "unassigned"}</span>
+              </div>
+              <div>${role ? role.responsibility : "Role not assigned."}</div>
+              <div class="actions">
+                <button class="secondary" onclick="applyRole('${device.id}')">Request Role Approval</button>
+              </div>
+            </div>`;
+        }).join("");
+        document.getElementById("roles").innerHTML = html || `<div class="empty">No devices.</div>`;
       }
 
-      // Initial setup - WebSocket only, no polling
-      connectWebSocket();
-      loadData();
-      // Periodically check health
-      setInterval(checkHealth, 5000);
+      function renderPlans(plans) {
+        const html = (plans || []).map(plan => `
+          <div class="item">
+            <strong>${plan.name}</strong> ${statusPill(plan.status)}
+            <div>${plan.summary || plan.goal || ""}</div>
+            <div class="meta">
+              <span>${plan.operation_plan_id}</span>
+              <span>${(plan.mission_templates || []).length} mission template(s)</span>
+            </div>
+            ${plan.status !== "active" ? `<div class="actions"><button class="secondary" onclick="activatePlan('${plan.operation_plan_id}')">Activate</button></div>` : ""}
+          </div>
+        `).join("");
+        document.getElementById("plans").innerHTML = html || `<div class="empty">No operation plans.</div>`;
+        const select = document.getElementById("proposal-plan");
+        select.innerHTML = `<option value="">No Plan</option>` + (plans || []).map(plan => `<option value="${plan.operation_plan_id}">${plan.name}</option>`).join("");
+      }
+
+      function renderApprovals(approvals) {
+        const html = (approvals || []).map(item => `
+          <div class="item">
+            <strong>Approval</strong> ${statusPill(item.status)}
+            <div>${item.summary}</div>
+            <div class="meta">
+              <span>${item.approval_id}</span>
+              <span>${item.target_type}:${item.target_id}</span>
+            </div>
+            ${item.status === "pending" ? `
+              <div class="actions">
+                <button onclick="decideApproval('${item.approval_id}', true)">Approve</button>
+                <button class="danger" onclick="decideApproval('${item.approval_id}', false)">Reject</button>
+              </div>` : ""}
+          </div>
+        `).join("");
+        document.getElementById("approvals").innerHTML = html || `<div class="empty">No approvals.</div>`;
+      }
+
+      function renderProposals(proposals) {
+        const html = (proposals || []).map(item => `
+          <div class="item">
+            <strong>${item.title}</strong> ${statusPill(item.status)}
+            <div>${item.summary || item.goal}</div>
+            <div class="meta">
+              <span>${item.proposal_id}</span>
+              <span>${item.mission_type}</span>
+              <span>${(item.steps || []).length} step(s)</span>
+            </div>
+          </div>
+        `).join("");
+        document.getElementById("proposals").innerHTML = html || `<div class="empty">No mission proposals.</div>`;
+      }
+
+      function renderMissions(missions) {
+        const html = (missions || []).map(item => `
+          <div class="item">
+            <strong><a href="mission.html?id=${encodeURIComponent(item.mission_id)}">${item.title}</a></strong> ${statusPill(item.status)}
+            <div>${item.goal || item.summary || ""}</div>
+            <div class="meta">
+              <span>${item.mission_id}</span>
+              <span>${item.mission_type}</span>
+              <span>${(item.steps || []).length} step(s)</span>
+              <span>${(item.device_execution_results || []).length} execution result(s)</span>
+            </div>
+          </div>
+        `).join("");
+        document.getElementById("missions").innerHTML = html || `<div class="empty">No missions.</div>`;
+      }
+
+      function renderSignals(events, alerts, insights) {
+        const rows = [
+          ...(insights || []).slice(-3).reverse().map(i => ({ type: "Insight", title: i.summary, body: i.reason_summary, status: i.severity })),
+          ...(alerts || []).slice(-3).reverse().map(a => ({ type: "Alert", title: a.alert_type, body: a.message, status: a.severity })),
+          ...(events || []).slice(-3).reverse().map(e => ({ type: "Event", title: e.event_type, body: e.message, status: e.severity })),
+        ];
+        document.getElementById("signals").innerHTML = rows.map(row => `
+          <div class="item">
+            <strong>${row.type}</strong> ${statusPill(row.status)}
+            <div>${row.title}</div>
+            <div class="meta"><span>${row.body}</span></div>
+          </div>`).join("") || `<div class="empty">No signals.</div>`;
+      }
+
+      async function loadOverview() {
+        const overview = await j(`${SYSTEM}/overview`);
+        const stats = await j(`${REGISTRY}/missions/stats`);
+        const events = await j(`${REGISTRY}/events`);
+        const alerts = await j(`${REGISTRY}/alerts`);
+        const insights = await j(`${REGISTRY}/insights`);
+        const data = { ...overview, stats };
+        renderStats(data);
+        renderRoles(data.devices, data.device_roles);
+        renderPlans(data.operation_plans);
+        renderApprovals(data.approvals);
+        renderProposals(data.mission_proposals);
+        renderMissions(data.missions);
+        renderSignals(events, alerts, insights);
+        window.__overview = data;
+      }
+
+      async function applyRole(deviceId) {
+        const rec = await j(`${SYSTEM}/device-roles/recommend`, {
+          method: "POST",
+          body: JSON.stringify({ goal: document.getElementById("role-goal").value }),
+        });
+        const match = (rec.recommendations || []).find(x => x.device_id === deviceId);
+        if (!match) return;
+        await j(`${SYSTEM}/device-roles/apply`, {
+          method: "POST",
+          body: JSON.stringify({ ...match, decided_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      async function decideApproval(approvalId, approved) {
+        await j(`${SYSTEM}/approvals/${approvalId}/decision`, {
+          method: "POST",
+          body: JSON.stringify({ approved, decided_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      async function activatePlan(operationPlanId) {
+        await j(`${SYSTEM}/operation-plans/${operationPlanId}/activate`, {
+          method: "POST",
+          body: JSON.stringify({ activated_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      document.getElementById("recommend-roles").onclick = async () => {
+        const goal = document.getElementById("role-goal").value;
+        const rec = await j(`${SYSTEM}/device-roles/recommend`, {
+          method: "POST",
+          body: JSON.stringify({ goal }),
+        });
+        const list = rec.recommendations || [];
+        document.getElementById("roles").innerHTML = list.map(item => `
+          <div class="item">
+            <strong>${item.device_name}</strong> ${statusPill(item.role_name)}
+            <div>${item.responsibility}</div>
+            <div class="meta"><span>${item.device_id}</span><span>${item.device_type}</span></div>
+          </div>`).join("");
+      };
+
+      document.getElementById("recommend-plan").onclick = async () => {
+        const body = {
+          name: document.getElementById("plan-name").value,
+          goal: document.getElementById("plan-goal").value,
+          location: parseLocation(document.getElementById("plan-location").value),
+        };
+        const plan = await j(`${SYSTEM}/operation-plans/recommend`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        document.getElementById("plans").innerHTML = `<div class="item"><strong>${plan.name}</strong> ${statusPill(plan.status)}<div>${plan.summary}</div><pre>${JSON.stringify(plan, null, 2)}</pre></div>`;
+      };
+
+      document.getElementById("save-plan").onclick = async () => {
+        const body = {
+          name: document.getElementById("plan-name").value,
+          goal: document.getElementById("plan-goal").value,
+          location: parseLocation(document.getElementById("plan-location").value),
+        };
+        await j(`${SYSTEM}/operation-plans`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        await loadOverview();
+      };
+
+      document.getElementById("generate-proposal").onclick = async () => {
+        const body = {
+          goal: document.getElementById("proposal-goal").value,
+          operation_plan_id: document.getElementById("proposal-plan").value || null,
+        };
+        await j(`${SYSTEM}/mission-proposals/generate`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        await loadOverview();
+      };
+
+      document.getElementById("refresh-overview-1").onclick = loadOverview;
+      document.getElementById("refresh-overview-2").onclick = loadOverview;
+      loadOverview();
+      setInterval(loadOverview, 5000);
+      window.applyRole = applyRole;
+      window.decideApproval = decideApproval;
+      window.activatePlan = activatePlan;
     </script>
   </body>
 </html>

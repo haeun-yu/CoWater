@@ -239,32 +239,6 @@ class EventRecord:
         return asdict(self)
 
 
-@dataclass
-class ResponseRecord:
-    response_id: str
-    alert_id: str
-    action: str
-    target_agent_id: Optional[str] = None
-    target_endpoint: Optional[str] = None
-    route_mode: str = "direct_to_system"
-    status: str = "planned"
-    reason: str = ""
-    task_id: Optional[str] = None
-    params: Dict[str, Any] = field(default_factory=dict)
-    dispatch_result: Dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=utc_now_iso)
-    updated_at: str = field(default_factory=utc_now_iso)
-    notes: Optional[str] = None
-
-    def touch(self, status: Optional[str] = None) -> None:
-        self.updated_at = utc_now_iso()
-        if status:
-            self.status = status
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
 def normalize_severity_value(value: Any) -> str:
     if value is None:
         return "INFORMATION"
@@ -322,21 +296,6 @@ class AlertIngestRequest(BaseModel):
 
 class AlertAckRequest(BaseModel):
     approved: bool = True
-    notes: Optional[str] = None
-
-
-class ResponseIngestRequest(BaseModel):
-    response_id: Optional[str] = None
-    alert_id: str
-    action: str
-    target_agent_id: Optional[str] = None
-    target_endpoint: Optional[str] = None
-    route_mode: str = "direct_to_system"
-    status: str = "planned"
-    reason: str = ""
-    task_id: Optional[str] = None
-    params: Dict[str, Any] = Field(default_factory=dict)
-    dispatch_result: Dict[str, Any] = Field(default_factory=dict)
     notes: Optional[str] = None
 
 

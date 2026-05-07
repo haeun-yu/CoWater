@@ -78,10 +78,13 @@ def test_mission_stats_route_is_reachable_before_dynamic_mission_route() -> None
     assert response.status_code == 200
     assert response.json() == {
         "total": 0,
-        "pending": 0,
-        "in_progress": 0,
+        "pending_approval": 0,
+        "approved": 0,
+        "running": 0,
         "completed": 0,
         "failed": 0,
+        "rejected": 0,
+        "canceled": 0,
     }
 
 
@@ -92,18 +95,23 @@ def test_create_mission_accepts_query_parameters_without_json_body() -> None:
     response = client.post(
         "/missions",
         params={
-            "response_id": "response-1",
             "alert_id": "alert-1",
             "event_id": "event-1",
+        },
+        json={
+            "title": "Test Mission",
+            "mission_type": "generic_mission",
+            "goal": "Test goal",
         },
     )
 
     assert response.status_code == 201
     payload = response.json()
-    assert payload["response_id"] == "response-1"
+    assert payload["title"] == "Test Mission"
+    assert payload["mission_type"] == "generic_mission"
     assert payload["alert_id"] == "alert-1"
     assert payload["event_id"] == "event-1"
-    assert client.get("/missions/stats").json()["pending"] == 1
+    assert client.get("/missions/stats").json()["pending_approval"] == 1
 
 
 def test_main_video_track_update_is_persisted(tmp_path: Path) -> None:
