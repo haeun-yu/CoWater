@@ -30,6 +30,30 @@ LAYERS = Literal["lower", "middle", "system"]
 ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
 EVENT_SEVERITIES = ALERT_SEVERITIES
 
+TASK_STATES = Literal["pending", "assigned", "running", "completed", "failed", "canceled"]
+FAILURE_CATEGORIES = Literal["device", "communication", "sensor", "mission", "policy", "user", "unknown"]
+TIMELINE_EVENT_TYPES = Literal[
+    "mission_created",
+    "mission_approved",
+    "mission_rejected",
+    "mission_updated",
+    "mission_completed",
+    "mission_failed",
+    "mission_canceled",
+    "step_started",
+    "task_assigned",
+    "task_accepted",
+    "task_rejected",
+    "task_running",
+    "task_completed",
+    "task_failed",
+    "task_canceled",
+    "alert_created",
+    "alert_updated",
+    "event_reported",
+    "agent_judgment",
+]
+
 CORE_ACTIONS = Literal[
     "SLAM_NAVIGATION",
     "MAP_NAVIGATION",
@@ -190,6 +214,47 @@ class AlertRecord:
 
 
 @dataclass
+class SensorStatus:
+    """센서 상태 정보 (아키텍처 Ch.15)"""
+    sensor_id: str
+    sensor_type: str
+    status: str  # "healthy", "degraded", "failed"
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TaskResult:
+    """Task 실행 결과 (아키텍처 Ch.10)"""
+    task_id: str
+    status: TASK_STATES
+    result_summary: Optional[str] = None
+    output_refs: List[str] = field(default_factory=list)
+    failure_category: Optional[FAILURE_CATEGORIES] = None
+    failure_message: Optional[str] = None
+    reported_at: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TimelineEvent:
+    """Mission Timeline 이벤트 (아키텍처 Ch.18-20)"""
+    event_type: TIMELINE_EVENT_TYPES
+    timestamp: str
+    actor: Optional[str] = None  # "system", "device_{id}", "user"
+    details: Dict[str, Any] = field(default_factory=dict)
+    related_task_id: Optional[str] = None
+    related_step_index: Optional[int] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class MissionRecord:
     """Mission 라이프사이클을 추적하는 기록 (Response 기반)"""
     mission_id: str
@@ -200,6 +265,7 @@ class MissionRecord:
     step_states: List[Dict[str, Any]] = field(default_factory=list)  # [{step_id, status, tasks, ...}]
     completion_report: Dict[str, Any] = field(default_factory=dict)  # {...}
     metadata: Dict[str, Any] = field(default_factory=dict)
+    timeline: List[TimelineEvent] = field(default_factory=list)
     created_at: str = field(default_factory=utc_now_iso)
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -216,7 +282,14 @@ class MissionRecord:
             self.completed_at = utc_now_iso()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        result["timeline"] = [evt.to_dict() for evt in self.timeline]
+        return result
+
+    def append_timeline_event(self, event: TimelineEvent) -> None:
+        """Timeline 이벤트 추가"""
+        self.timeline.append(event)
+        self.touch()
 
 
 @dataclass
@@ -313,6 +386,8 @@ class DeviceRecord:
     tracks: List[TrackRecord]
     actions: DeviceActionsRecord
     main_video_track_name: Optional[str] = None
+    # ← NEW: Device connectivity status (online | lost | offline)
+    connectivity_status: str = "offline"
     # ← NEW: Device hierarchy & location
     device_type: Optional[str] = None
     layer: Optional[str] = None
@@ -348,6 +423,7 @@ class DeviceRecord:
             "token": self.token,
             "name": self.name,
             "connected": self.connected,
+            "connectivity_status": self.connectivity_status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "main_video_track_name": self.resolved_main_video_track_name(),

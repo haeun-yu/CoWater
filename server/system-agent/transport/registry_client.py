@@ -252,3 +252,89 @@ class RegistryClient:
 
     def replace_mission(self, mission_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return put_json(f"{self.url}/missions/{mission_id}", payload)
+
+    def append_mission_timeline_event(
+        self,
+        mission_id: str,
+        event_type: str,
+        actor: str | None = None,
+        details: dict | None = None,
+        task_id: str | None = None,
+        step_index: str | int | None = None,
+    ) -> dict[str, Any]:
+        """Mission timeline에 이벤트 추가 (Ch.18-20)"""
+        try:
+            body = {
+                "event_type": event_type,
+                "actor": actor or "system",
+                "details": details or {},
+            }
+            if task_id:
+                body["task_id"] = task_id
+            if step_index:
+                body["step_index"] = step_index
+            return post_json(
+                f"{self.url}/missions/{mission_id}/timeline/append",
+                body,
+                headers=self._internal_headers(),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to append mission timeline event: {e}")
+            return {"appended": False, "error": str(e)}
+
+    def log_a2a_message(
+        self,
+        direction: str,
+        from_agent_id: str,
+        to_agent_id: str,
+        message_type: str,
+        task_id: str | None,
+        mission_id: str | None,
+        payload: dict[str, Any],
+    ) -> str:
+        """A2A 메시지 로깅 (Registry Server에 전송)"""
+        try:
+            params = {
+                "direction": direction,
+                "from_agent_id": from_agent_id,
+                "to_agent_id": to_agent_id,
+                "message_type": message_type,
+            }
+            if task_id:
+                params["task_id"] = task_id
+            if mission_id:
+                params["mission_id"] = mission_id
+
+            url = f"{self.url}/a2a-logs/ingest"
+            # Build query string
+            query_params = "&".join(f"{k}={v}" for k, v in params.items() if v)
+            if query_params:
+                url = f"{url}?{query_params}"
+
+            result = post_json(url, payload, headers=self._internal_headers())
+            return result.get("log_id", "")
+        except Exception as e:
+            logger.debug(f"A2A 로깅 전송 실패 (non-critical): {e}")
+            return ""
+
+    def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Event 저장 (Registry Server)"""
+        try:
+            return post_json(
+                f"{self.url}/events/ingest",
+                event,
+            )
+        except Exception as e:
+            logger.debug(f"Event ingestion failed: {e}")
+            return {}
+
+    def update_device_connectivity(self, device_id: str, status: str) -> None:
+        """Device 연결 상태 업데이트"""
+        try:
+            put_json(
+                f"{self.url}/devices/{device_id}/connectivity",
+                {"connectivity_status": status},
+                headers=self._internal_headers(),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to update device connectivity: {e}")

@@ -75,7 +75,7 @@ Physical Device / Vehicle / Sensor
 
 ### P1. Agent 직접 제어 원칙
 
-각 Agent는 자기 숙주만 직접 제어한다.
+각 Agent는 자기 자원만 직접 제어한다.
 
 - System Agent는 디바이스 하드웨어를 직접 제어하지 않는다.
 - Middle-layer Agent는 하위 디바이스를 임의로 직접 제어하지 않는다.

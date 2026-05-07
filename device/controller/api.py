@@ -125,6 +125,81 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     return app
 
 
+async def _execute_and_report_task(
+    runtime: AgentRuntime,
+    task_id: str,
+    command: dict[str, Any],
+    message_data: dict[str, Any],
+    request: A2ASendRequest,
+) -> None:
+    """Execute task asynchronously and report result back to System Agent."""
+    try:
+        # Execute command in thread pool to avoid blocking
+        execution_result = await asyncio.to_thread(runtime.apply_command, command)
+
+        # Determine execution status
+        normalized_status = "completed" if str(execution_result.get("status") or "").lower() in {"ok", "success", "completed"} else "failed"
+
+        # Get report endpoint
+        mission_id = str(message_data.get("mission_id") or message_data.get("response_id") or "")
+        report_base = str((command.get("params") or {}).get("report_to_endpoint") or "").strip()
+        if not report_base:
+            report_base = str(runtime.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116").strip()
+        report_endpoint = report_base if report_base.endswith("/message:send") else f"{report_base.rstrip('/')}/message:send"
+
+        # Report based on whether it's a mission task or standalone task
+        if mission_id:
+            # Mission task: use mission.result endpoint
+            await _report_mission_result_to_endpoint(
+                runtime=runtime,
+                mission_id=mission_id,
+                alert_id=str(message_data.get("alert_id") or ""),
+                step_id=str(message_data.get("step_id") or ""),
+                task_id=task_id,
+                command=command,
+                execution_result=execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
+                execution_status=normalized_status,
+                endpoint=report_endpoint,
+            )
+        else:
+            # Standalone task: send task.result to System Agent
+            await _report_task_failure_to_system_agent(
+                runtime=runtime,
+                task_id=task_id,
+                command=command,
+                error=None,
+                execution_result=execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
+                system_agent_url=report_endpoint,
+            )
+
+        # ✅ Standardize failure_category and failure_message (archi Ch.10)
+        if normalized_status == "failed":
+            category = execution_result.get("failure_category", "").lower().strip()
+            if not category or category not in {"device", "communication", "sensor", "mission", "policy", "user", "unknown"}:
+                category = "device"
+            execution_result["failure_category"] = category
+
+            if "failure_message" not in execution_result:
+                execution_result["failure_message"] = (
+                    execution_result.get("failure_message")
+                    or execution_result.get("error")
+                    or "Task execution failed"
+                )
+
+        # ✅ Record task execution in task_id_store to prevent future duplicates
+        if task_id:
+            result_to_store = {
+                "task_id": task_id,
+                "status": normalized_status,
+                "execution_result": execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
+            }
+            runtime.task_id_store.record(task_id, result_to_store)
+
+        logger.info(f"Task {task_id} executed and reported: {normalized_status}")
+    except Exception as e:
+        logger.error(f"Error executing and reporting task {task_id}: {e}", exc_info=True)
+
+
 async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str, Any]:
     data = extract_message_data(request.message)
     runtime.state.inbox.append({"task_id": request.taskId, "at": utc_now(), "data": data})
@@ -142,6 +217,19 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
     elif msg_type == "task.assign":
+        task_id = str(data.get("task_id") or request.taskId or "")
+
+        # ✅ Check for duplicate task_id (prevent re-execution)
+        if task_id:
+            existing_result = runtime.task_id_store.is_processed(task_id)
+            if existing_result:
+                logger.info(f"Task {task_id} already processed, returning cached result")
+                result = existing_result
+                task = build_task(request.taskId, request.message, result)
+                runtime.state.tasks[task["id"]] = task
+                runtime.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
+                return task
+
         target_device_id = str(data.get("target_device_id") or (data.get("params") or {}).get("target_device_id") or "")
         own_device_id = str(runtime.state.registry_id or "")
         if runtime.state.layer == "middle" and target_device_id and own_device_id and target_device_id != own_device_id:
@@ -167,70 +255,27 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
             result = {
                 "status": "REJECTED",
                 "reason": reject_reason or "task_rejected",
-                "task_status": "REJECTED",
+                "acceptance_status": "REJECTED",
                 "task_id": str(data.get("task_id") or request.taskId or ""),
+                "failure_category": "policy",
+                "failure_message": f"Task rejected: {reject_reason or 'device not ready'}",
             }
         else:
-            accepted_at = utc_now()
-            runtime.state.remember(
-                {
-                    "kind": "task_accepted",
-                    "at": accepted_at,
-                    "task_id": str(data.get("task_id") or request.taskId or ""),
-                    "action": command.get("action"),
-                }
-            )
-            execution_result = runtime.apply_command(command)
-            normalized = "COMPLETED" if str(execution_result.get("status") or "").lower() in {"ok", "success", "completed"} else "FAILED"
+            # ✅ 2-step separation: Return ACCEPTED immediately, execute asynchronously
+            task_id = str(data.get("task_id") or request.taskId or "")
             result = {
-                **execution_result,
                 "acceptance_status": "ACCEPTED",
-                "accepted_at": accepted_at,
-                "task_status": normalized,
-                "started_at": accepted_at,
-                "finished_at": utc_now(),
+                "task_id": task_id,
             }
 
-        # Report mission result back to the upstream endpoint when correlation ids are present.
-        mission_id = str(data.get("mission_id") or data.get("response_id") or "")
-        if mission_id:
-            report_base = str((command.get("params") or {}).get("report_to_endpoint") or "").strip()
-            if not report_base:
-                report_base = str(runtime.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116").strip()
-            report_endpoint = report_base if report_base.endswith("/message:send") else f"{report_base.rstrip('/')}/message:send"
-            execution_status = "failed"
-            if isinstance(result, dict) and str(result.get("task_status") or result.get("status") or "").lower() in {"completed", "ok", "success"}:
-                execution_status = "completed"
-
+            # Spawn async execution and reporting
             asyncio.create_task(
-                _report_mission_result_to_endpoint(
+                _execute_and_report_task(
                     runtime=runtime,
-                    mission_id=mission_id,
-                    alert_id=str(data.get("alert_id") or ""),
-                    step_id=str(data.get("step_id") or ""),
-                    task_id=str(data.get("task_id") or request.taskId or ""),
+                    task_id=task_id,
                     command=command,
-                    execution_result=result if isinstance(result, dict) else {"status": "unknown", "raw": result},
-                    execution_status=execution_status,
-                    endpoint=report_endpoint,
-                )
-            )
-
-        # If task execution failed, report to System Agent asynchronously
-        if isinstance(result, dict) and str(result.get('task_status') or result.get('status') or '').lower() in {'failed', 'rejected'}:
-            # config에서 system agent URL 조회
-            system_agent_url = (
-                runtime.config.get("system_agent", {}).get("url")
-                or "http://127.0.0.1:9116"
-            )
-            asyncio.create_task(
-                _report_task_failure_to_system_agent(
-                    runtime=runtime,
-                    task_id=request.taskId,
-                    command=command,
-                    error=result.get('error'),
-                    execution_result=result,
-                    system_agent_url=f"{system_agent_url.rstrip('/')}/message:send",
+                    message_data=data,
+                    request=request,
                 )
             )
     else:
@@ -250,6 +295,30 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
         "task_id": request.taskId,
         "result_status": result.get("status") if isinstance(result, dict) else "ok"
     })
+
+    # ✅ Log A2A message to Registry Server (archi Ch.14.1)
+    try:
+        from_agent_id = (
+            data.get("from_agent_id")
+            or data.get("sender_agent_id")
+            or data.get("source_agent_id")
+            or data.get("agent_id")
+        )
+        to_agent_id = str(runtime.state.registry_id or runtime.instance_id or "")
+        task_id = str(data.get("task_id") or request.taskId or "")
+        mission_id = str(data.get("mission_id") or data.get("response_id") or "")
+
+        runtime.registry_client.log_a2a_message(
+            direction="inbound",
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            message_type=msg_type,
+            task_id=task_id if task_id else None,
+            mission_id=mission_id if mission_id else None,
+            payload=data,
+        )
+    except Exception as e:
+        logger.debug(f"A2A logging failed (non-critical): {e}")
 
     # A2A 이벤트를 수신 디바이스의 TOPIC 트랙에 발행 (system agent 개입 없음)
     publisher = getattr(runtime, "moth_publisher", None)

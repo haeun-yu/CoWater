@@ -85,6 +85,11 @@ class AgentRuntime:
         # Device Registration Server와의 통신
         self.registry_client = RegistryClient(self.config.get("registry", {}))
 
+        # Task ID 처리 이력 저장소: 중복 실행 방지
+        from agent.task_id_store import TaskIdStore
+        db_path = str(Path(__file__).resolve().parent.parent / ".runtime" / f"{self.instance_id}_tasks.db")
+        self.task_id_store = TaskIdStore(db_path=db_path)
+
         # 의사결정 엔진: Rule 기반 + LLM 분석
         self.decision_engine = DecisionEngine(self.agent_config, self.skills)
 
@@ -599,6 +604,65 @@ class AgentRuntime:
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
+
+    def _check_sensor_health(self, telemetry: dict[str, Any]) -> None:
+        """주기적 센서 상태 확인 및 Event 생성 → Registry 보고 (Ch.15)"""
+        if not hasattr(self, '_last_sensor_check'):
+            self._last_sensor_check = {}
+
+        # Battery 상태 확인
+        battery = telemetry.get("battery", {})
+        if isinstance(battery, dict):
+            current_level = battery.get("charge_percent", 100.0)
+            last_level = self._last_sensor_check.get("battery_level", current_level)
+
+            # 배터리 상태 변화 감지
+            if current_level < 20 and last_level >= 20:
+                # ✅ Event를 Registry에 보고 (Ch.15)
+                event = {
+                    "event_id": str(uuid4()),
+                    "source_system": "device_agent",
+                    "source_agent_id": self.state.registry_id,
+                    "source_role": self.state.role,
+                    "event_type": "sensor_status_changed",
+                    "severity": "WARNING",
+                    "message": f"Battery low: {current_level}%",
+                    "metadata": {
+                        "sensor_type": "battery",
+                        "sensor_id": "battery_main",
+                        "status": "low",
+                        "level": current_level,
+                    },
+                }
+                self.registry_client.ingest_event(event)
+                logger.warning(f"⚠️ Battery low event reported: {current_level}%")
+
+            self._last_sensor_check["battery_level"] = current_level
+
+        # Depth sensor 상태 확인 (AUV)
+        depth = telemetry.get("depth", {})
+        if isinstance(depth, dict):
+            depth_m = depth.get("depth_meters", 0.0)
+            max_depth = 300.0
+            if depth_m > max_depth:
+                # ✅ Event를 Registry에 보고 (Ch.15)
+                event = {
+                    "event_id": str(uuid4()),
+                    "source_system": "device_agent",
+                    "source_agent_id": self.state.registry_id,
+                    "source_role": self.state.role,
+                    "event_type": "sensor_status_changed",
+                    "severity": "CRITICAL",
+                    "message": f"Depth exceeded: {depth_m}m > {max_depth}m",
+                    "metadata": {
+                        "sensor_type": "depth",
+                        "sensor_id": "depth_main",
+                        "status": "max_depth_exceeded",
+                        "depth": depth_m,
+                    },
+                }
+                self.registry_client.ingest_event(event)
+                logger.critical(f"⚠️ Depth exceeded event reported: {depth_m}m")
 
     def can_accept_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
         action = str(command.get("action") or "").strip().lower()

@@ -105,6 +105,16 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
         return {"relayed": True, "child": child_id}
 
+    @app.post("/device-recovery")
+    async def handle_device_recovery(payload: dict[str, Any]) -> dict[str, Any]:
+        """Device Agent 복구 후 로컬 상태 보고 (Ch.16)"""
+        device_id = str(payload.get("device_id") or "")
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+
+        await runtime.handle_device_recovery_report(device_id, payload)
+        return {"processed": True, "device_id": device_id}
+
     @app.get("/tasks")
     def tasks() -> dict[str, Any]:
         return {"tasks": list(runtime.state.tasks.values()), "nextPageToken": ""}

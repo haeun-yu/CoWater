@@ -466,3 +466,28 @@ class DomainRegistry:
         if mission_id not in self._missions:
             raise KeyError(mission_id)
         return self._missions[mission_id]
+
+    def append_mission_timeline_event(
+        self,
+        mission_id: str,
+        event_type: str,
+        actor: str | None = None,
+        details: dict | None = None,
+        task_id: str | None = None,
+        step_index: int | None = None,
+    ) -> None:
+        """Mission timeline에 이벤트 추가 (Ch.18-20)"""
+        try:
+            from src.core.models import TimelineEvent
+            mission = self.get_mission(mission_id)
+            event = TimelineEvent(
+                event_type=event_type,
+                timestamp=utc_now_iso(),
+                actor=actor or "system",
+                details=details or {},
+                related_task_id=task_id,
+                related_step_index=step_index,
+            )
+            mission.append_timeline_event(event)
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Failed to append timeline event: {e}")

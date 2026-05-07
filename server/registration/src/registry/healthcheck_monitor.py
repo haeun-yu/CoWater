@@ -83,9 +83,10 @@ class HealthcheckMonitor:
                     if last_seen.tzinfo is None:
                         last_seen = last_seen.replace(tzinfo=timezone.utc)
                     if last_seen < timeout_threshold:
-                        logger.warning(f"Device {device.id} ({device.name}) marked as offline (no healthcheck)")
+                        logger.warning(f"Device {device.id} ({device.name}) marked as LOST (no healthcheck)")
                         device.connected = False
                         device.agent.connected = False
+                        device.connectivity_status = "lost"
                         device.last_error = f"Healthcheck timeout at {datetime.now(timezone.utc).isoformat()}"
                         device.updated_at = datetime.now(timezone.utc).isoformat()
                         self.registry._persist_device(device)
@@ -261,6 +262,8 @@ class HealthcheckMonitor:
                 if current_status != new_status or location_changed or battery_changed:
                     device.connected = (new_status == "online")
                     device.agent.connected = device.connected
+                    if new_status == "online":
+                        device.connectivity_status = "online"
                     device.updated_at = datetime.now(timezone.utc).isoformat()
                     self.registry._persist_device(device)
                     if current_status != new_status:

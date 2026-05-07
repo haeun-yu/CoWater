@@ -158,3 +158,38 @@ class RegistryClient:
             post_json(f"{self.url}/alerts/ingest", alert, timeout=3)
         except Exception as e:
             logger.debug(f"Alert 전송 실패 (non-critical): {e}")
+
+    def log_a2a_message(
+        self,
+        direction: str,
+        from_agent_id: str,
+        to_agent_id: str,
+        message_type: str,
+        task_id: str | None,
+        mission_id: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        """A2A 메시지 로깅 (Registry Server에 전송)"""
+        try:
+            params = {
+                "direction": direction,
+                "from_agent_id": from_agent_id,
+                "to_agent_id": to_agent_id,
+                "message_type": message_type,
+            }
+            if task_id:
+                params["task_id"] = task_id
+            if mission_id:
+                params["mission_id"] = mission_id
+
+            url = f"{self.url}/a2a-logs/ingest"
+            post_json(url, payload, params=params, timeout=3)
+        except Exception as e:
+            logger.debug(f"A2A 로깅 전송 실패 (non-critical): {e}")
+
+    def ingest_event(self, event: dict[str, Any]) -> None:
+        """Event 저장 (Registry Server) - Ch.15, 16"""
+        try:
+            post_json(f"{self.url}/events/ingest", event, timeout=3)
+        except Exception as e:
+            logger.debug(f"Event ingestion failed (non-critical): {e}")

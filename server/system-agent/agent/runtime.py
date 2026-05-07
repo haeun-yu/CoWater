@@ -321,9 +321,51 @@ class AgentRuntime:
 
                 await self._process_waiting_queue(all_devices, logger)
 
+                # ✅ Policy 평가 및 자동 대응 (Ch.17.1)
+                await self._evaluate_and_apply_policies(all_devices, logger)
+
             except Exception as e:
                 logger.error(f"Alert processing loop error: {e}")
                 await asyncio.sleep(1)
+
+    async def _evaluate_and_apply_policies(self, devices: list[dict[str, Any]], logger: Any) -> None:
+        """Policy를 평가하고 Critical 상황 시 자동 대응 (Ch.17.1)"""
+        try:
+            # Critical 상황 감지 (예: device lost)
+            for device in devices:
+                connectivity_status = device.get("connectivity_status", "offline")
+
+                # Device LOST 상황
+                if connectivity_status == "lost":
+                    # auto_rtb_on_lost 정책 검사
+                    policy = self.registry_client.policy_registry.get_policy("auto_rtb_on_lost")
+                    if policy and policy.get("enabled"):
+                        logger.info(f"🚨 Policy triggered: {policy.get('policy_name')} for device {device.get('id')}")
+                        # 자동 Mission 생성: Return to Base
+                        mission = {
+                            "mission_id": str(uuid4()),
+                            "title": f"Auto Recovery: {device.get('name')} - Return to Base",
+                            "trigger_type": "policy",
+                            "trigger_policy_id": "auto_rtb_on_lost",
+                            "target_device_id": device.get("id"),
+                            "steps": [
+                                {
+                                    "step_id": "recovery_1",
+                                    "step_type": "return_to_base",
+                                    "action": "return_to_base",
+                                    "params": {},
+                                }
+                            ],
+                            "status": "pending_approval",
+                            "created_at": utc_now(),
+                        }
+                        try:
+                            self.registry_client.create_mission(mission)
+                            logger.info(f"✅ Auto Mission created: {mission['mission_id']}")
+                        except Exception as e:
+                            logger.error(f"Failed to create auto mission: {e}")
+        except Exception as e:
+            logger.debug(f"Policy evaluation error: {e}")
 
     async def _process_waiting_queue(self, devices: list[dict[str, Any]], logger: Any) -> None:
         return
@@ -1202,7 +1244,9 @@ class AgentRuntime:
             "finished_at": raw_result.get("finished_at") or raw_result.get("reported_at"),
             "success": normalized_status == "completed",
             "failure_reason": raw_result.get("reason") or raw_result.get("error") or raw_result.get("failure_message"),
-            "failure_category": raw_result.get("failure_category") or execution_log.get("failure_category") or ("UNKNOWN" if normalized_status != "completed" else None),
+            "failure_category": self._standardize_failure_category(
+                raw_result.get("failure_category") or execution_log.get("failure_category") or ("unknown" if normalized_status != "completed" else None)
+            ),
             "location": (
                 raw_result.get("location")
                 or execution_log.get("location")
@@ -1575,6 +1619,60 @@ class AgentRuntime:
             return execution_log.get("result") or {}
         return {}
 
+    def _standardize_failure_category(self, category: Any) -> str | None:
+        """Normalize failure category to lowercase and validate against allowed values."""
+        if not category:
+            return None
+        normalized = str(category).lower().strip()
+        valid_categories = {"device", "communication", "sensor", "mission", "policy", "user", "unknown"}
+        if normalized in valid_categories:
+            return normalized
+        return "unknown"
+
+    async def handle_device_recovery_report(self, device_id: str, report: dict[str, Any]) -> None:
+        """Device Agent 복구 후 로컬 상태 보고 처리 (Ch.16)"""
+        try:
+            logger.info(f"📡 Device {device_id} recovery report received")
+
+            # Device 상태를 "online"으로 복원
+            device = self.registry_client.get_device(device_id)
+            if device and device.get("connectivity_status") == "lost":
+                # Connectivity status를 online으로 변경
+                self.registry_client.update_device_connectivity(device_id, "online")
+                logger.info(f"✅ Device {device_id} marked as online")
+
+            # Task 결과 동기화
+            for task_result in report.get("local_task_results", []):
+                task_id = task_result.get("task_id")
+                if task_id:
+                    # 해당 mission과 task를 찾아 상태 업데이트
+                    try:
+                        missions = self.registry_client.list_missions()
+                        for mission in missions:
+                            # Mission의 step들 중 해당 task를 찾음
+                            for step in mission.get("steps", []):
+                                for task in step.get("tasks", []):
+                                    if task.get("task_id") == task_id:
+                                        # Task 상태 업데이트
+                                        task["execution_status"] = task_result.get("status", "completed")
+                                        task["result"] = task_result
+                                        logger.info(f"✅ Task {task_id} result synced: {task_result.get('status')}")
+                    except Exception as e:
+                        logger.debug(f"Failed to sync task {task_id}: {e}")
+
+            # Event 동기화
+            for event in report.get("local_events", []):
+                try:
+                    self.registry_client.ingest_event(event)
+                    logger.debug(f"✅ Event {event.get('event_id')} synced")
+                except Exception as e:
+                    logger.debug(f"Failed to sync event: {e}")
+
+            logger.info(f"✅ Device {device_id} recovery sync completed")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to handle recovery report for device {device_id}: {e}")
+
     def _is_step_terminal(self, step_state: dict[str, Any]) -> bool:
         task_states = [task for task in (step_state.get("tasks") or []) if isinstance(task, dict)]
         if not task_states:
@@ -1834,6 +1932,20 @@ class AgentRuntime:
                 for dep_step_id in depends_on
             ):
                 continue
+            # ✅ Record step_started timeline event (Ch.18-20)
+            try:
+                self.registry_client.append_mission_timeline_event(
+                    mission_id=mission_id,
+                    event_type="step_started",
+                    actor="system",
+                    details={
+                        "step_type": step.get("step_type", "unknown"),
+                        "num_tasks": len(step.get("tasks") or []),
+                    },
+                    step_index=str(step["step_id"]),
+                )
+            except Exception as e:
+                logger.debug(f"Failed to record step_started timeline: {e}")
             task_results: list[dict[str, Any]] = []
             task_requests: list[tuple[dict[str, Any], dict[str, Any]]] = []
             for task in step.get("tasks") or []:
@@ -1866,6 +1978,7 @@ class AgentRuntime:
                 ]
             )
             delivery_failed = False
+            mission_id = str(response.get("mission_id") or response.get("response_id") or "")
             for (task, _task_response), dispatch in zip(task_requests, dispatches):
                 task_results.append(
                     {
@@ -1889,6 +2002,22 @@ class AgentRuntime:
                                     task_id=str(task["task_id"]),
                                     reason="task_dispatched",
                                 )
+                                # ✅ Record task_assigned timeline event (Ch.18-20)
+                                try:
+                                    self.registry_client.append_mission_timeline_event(
+                                        mission_id=mission_id,
+                                        event_type="task_assigned",
+                                        actor="system",
+                                        details={
+                                            "action": task["action"],
+                                            "target_device_id": str(task["target_device_id"]),
+                                            "route_agent_id": str(task["route_agent_id"]),
+                                        },
+                                        task_id=str(task["task_id"]),
+                                        step_index=str(step["step_id"]),
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Failed to record task_assigned timeline: {e}")
                             task_state["dispatch"] = dispatch
                             task_state["dispatch_status"] = "dispatched" if dispatch.get("delivered") else "failed"
                             task_state["acceptance_status"] = dispatch.get("acceptance_status")
@@ -1901,6 +2030,24 @@ class AgentRuntime:
                 step_state["status"] = "failed" if delivery_failed else "dispatched"
             dispatch_result["steps"] = step_states
             if delivery_failed:
+                # ✅ Record failed task dispatch as task_failed timeline event (Ch.18-20)
+                for (task, _task_response), dispatch in zip(task_requests, dispatches):
+                    if not dispatch.get("delivered"):
+                        try:
+                            self.registry_client.append_mission_timeline_event(
+                                mission_id=mission_id,
+                                event_type="task_failed",
+                                actor="system",
+                                details={
+                                    "dispatch_error": dispatch.get("error", "unknown"),
+                                    "failure_category": "communication",
+                                    "failure_message": f"Task dispatch failed: {dispatch.get('error', 'unknown')}",
+                                },
+                                task_id=str(task["task_id"]),
+                                step_index=str(step["step_id"]),
+                            )
+                        except Exception as e:
+                            logger.debug(f"Failed to record dispatch failure timeline: {e}")
                 return {
                     "delivered": False,
                     "error": "step_dispatch_failed",
@@ -1973,6 +2120,12 @@ class AgentRuntime:
             logger.debug(f"Target agent {target_agent_id} not found in cache, skipping A2A")
             return {"delivered": False, "error": "target_not_found"}
 
+        # Check device connectivity status before dispatching
+        connectivity_status = target_agent.get("connectivity_status", "offline")
+        if connectivity_status != "online":
+            logger.warning(f"Target device {target_agent_id} connectivity_status is '{connectivity_status}', skipping dispatch")
+            return {"delivered": False, "error": f"device_{connectivity_status}"}
+
         # Build A2A message with task details
         try:
             agent_info = target_agent.get("agent") or {}
@@ -2044,6 +2197,44 @@ class AgentRuntime:
             acceptance = str(artifact_data.get("acceptance_status") or artifact_data.get("status") or "").upper()
             accepted = acceptance != "REJECTED"
             logger.info(f"A2A task sent to {target_agent_id}: accepted={accepted} status={acceptance or 'unknown'}")
+
+            # ✅ Record task acceptance/rejection timeline event (Ch.18-20)
+            mission_id = str(response.get("mission_id") or response.get("response_id") or "")
+            task_id = str(response.get("task_id") or "")
+            step_id = str(response.get("step_id") or "")
+            if mission_id:
+                try:
+                    event_type = "task_accepted" if accepted else "task_rejected"
+                    self.registry_client.append_mission_timeline_event(
+                        mission_id=mission_id,
+                        event_type=event_type,
+                        actor=f"device_{target_agent_id}",
+                        details={
+                            "acceptance_status": acceptance,
+                            "reason": artifact_data.get("reason") or "",
+                        },
+                        task_id=task_id if task_id else None,
+                        step_index=step_id if step_id else None,
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to record task acceptance timeline: {e}")
+
+            # ✅ Log A2A message to Registry Server (archi Ch.14.1)
+            try:
+                task_id = str(response.get("task_id") or "")
+                mission_id = str(response.get("mission_id") or response.get("response_id") or "")
+                self.registry_client.log_a2a_message(
+                    direction="outbound",
+                    from_agent_id=self.state.agent_id,
+                    to_agent_id=target_agent_id,
+                    message_type="task.assign",
+                    task_id=task_id if task_id else None,
+                    mission_id=mission_id if mission_id else None,
+                    payload=a2a_message.get("params", {}).get("message", {}),
+                )
+            except Exception as e:
+                logger.debug(f"A2A logging failed (non-critical): {e}")
+
             return {
                 "delivered": accepted,
                 "endpoint": endpoint,
@@ -2464,6 +2655,24 @@ class AgentRuntime:
                                 task_state["execution_result"] = execution_entry
                                 task_state["completed_at"] = utc_now()
                                 self._release_device(int(task_state.get("target_device_id") or 0), reason="task_result_received")
+                                # ✅ Record task completion/failure timeline event (Ch.18-20)
+                                try:
+                                    event_type = "task_completed" if normalized_status == "completed" else "task_failed"
+                                    self.registry_client.append_mission_timeline_event(
+                                        mission_id=mission_id,
+                                        event_type=event_type,
+                                        actor=f"device_{reporter}",
+                                        details={
+                                            "execution_status": normalized_status,
+                                            "result_summary": execution_entry.get("result_summary", ""),
+                                            "failure_category": execution_entry.get("failure_category"),
+                                            "failure_message": execution_entry.get("failure_message"),
+                                        },
+                                        task_id=task_id if task_id else None,
+                                        step_index=step_id if step_id else None,
+                                    )
+                                except Exception as e:
+                                    logging.getLogger(__name__).debug(f"Failed to record task completion timeline: {e}")
                         task_statuses = [
                             str(task_state.get("execution_status") or "pending")
                             for task_state in item.get("tasks") or []

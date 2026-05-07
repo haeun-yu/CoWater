@@ -472,8 +472,10 @@ class DeviceRegistry:
             device.agent.available_actions = list(request.available_actions)
         device.agent.connected = bool(request.connected)
         device.connected = bool(request.connected)
-        if device.agent.connected and device.agent.connected_at is None:
-            device.agent.connected_at = now
+        if device.agent.connected:
+            device.connectivity_status = "online"
+            if device.agent.connected_at is None:
+                device.agent.connected_at = now
         device.agent.last_seen_at = request.last_seen_at or now
         device.updated_at = now
         self._persist_device(device)
@@ -490,6 +492,7 @@ class DeviceRegistry:
         now = utc_now_iso()
         device.agent.connected = False
         device.connected = False
+        device.connectivity_status = "offline"
         device.agent.last_seen_at = now
         device.updated_at = now
         self._persist_device(device)

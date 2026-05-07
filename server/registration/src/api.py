@@ -30,10 +30,12 @@ from src.core.models import (
     TRACK_TYPES,
 )
 from src.core.pubsub import get_pubsub_manager
+from src.registry.a2a_log_registry import A2ALogRegistry
 from src.registry.alert_registry import AlertRegistry
 from src.registry.device_registry import DeviceRegistry
 from src.registry.domain_registry import DomainRegistry, utc_now_iso
 from src.registry.event_registry import EventRegistry
+from src.registry.policy_registry import PolicyRegistry
 from src.transport.moth_subscriber import MothHealthcheckSubscriber
 
 
@@ -69,8 +71,16 @@ registry = DeviceRegistry(
     healthcheck_topic_template=APP_SETTINGS["moth"]["healthcheck_topic_template"],
     telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
 )
-alert_registry = AlertRegistry()
-event_registry = EventRegistry()
+
+# Alert/Event/A2A Log/Policy 저장소: COWATER_STORAGE 환경변수로 제어
+_alert_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/alerts.db"
+_event_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/events.db"
+_a2a_log_db_path = ":memory:" if STORAGE_TYPE == "memory" else ".data/a2a_logs.db"
+
+alert_registry = AlertRegistry(db_path=_alert_db_path)
+event_registry = EventRegistry(db_path=_event_db_path)
+a2a_log_registry = A2ALogRegistry(db_path=_a2a_log_db_path)
+policy_registry = PolicyRegistry()
 domain_registry = DomainRegistry()
 
 moth_subscriber = MothHealthcheckSubscriber(
@@ -225,6 +235,24 @@ def detach_device_agent(device_id: str, secretKey: str) -> dict[str, Any]:
     return device.to_dict()
 
 
+@app.put("/devices/{device_id}/connectivity")
+def update_device_connectivity(
+    device_id: str,
+    body: dict[str, Any],
+    x_cowater_internal: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Device 연결 상태 업데이트 (Ch.16 - 통신 복구 동기화)"""
+    require_internal_caller(x_cowater_internal)
+    try:
+        device = registry.get_device(int(device_id))
+        device.connectivity_status = body.get("connectivity_status", "offline")
+        registry.upsert_device(device)
+        logger.info(f"Device {device_id} connectivity updated to {device.connectivity_status}")
+        return device.to_dict()
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail="device not found") from exc
+
+
 @app.post("/alerts/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
     alert = alert_registry.ingest_alert(request)
@@ -269,6 +297,90 @@ def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]
         return alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="alert not found") from exc
+
+
+@app.post("/a2a-logs/ingest", status_code=status.HTTP_201_CREATED)
+def ingest_a2a_log(
+    direction: str = Query(..., description="inbound or outbound"),
+    from_agent_id: str = Query(None, description="Source agent ID"),
+    to_agent_id: str = Query(None, description="Destination agent ID"),
+    message_type: str = Query(..., description="A2A message type"),
+    task_id: str = Query(None, description="Related task ID"),
+    mission_id: str = Query(None, description="Related mission ID"),
+    payload: dict[str, Any] = Body(..., description="A2A message payload"),
+    x_cowater_internal: str | None = Header(default=None),
+) -> dict[str, str]:
+    """A2A 메시지 로깅 (System Agent 및 Device Agent에서 호출)"""
+    require_internal_caller(x_cowater_internal)
+    log_id = a2a_log_registry.log_message(
+        direction=direction,
+        from_agent_id=from_agent_id,
+        to_agent_id=to_agent_id,
+        message_type=message_type,
+        task_id=task_id,
+        mission_id=mission_id,
+        payload=payload,
+    )
+    return {"log_id": log_id, "message_type": message_type}
+
+
+@app.get("/a2a-logs")
+def get_a2a_logs(
+    mission_id: str | None = Query(None, description="Filter by mission ID"),
+    task_id: str | None = Query(None, description="Filter by task ID"),
+    from_agent_id: str | None = Query(None, description="Filter by source agent ID"),
+    to_agent_id: str | None = Query(None, description="Filter by destination agent ID"),
+    message_type: str | None = Query(None, description="Filter by message type"),
+    direction: str | None = Query(None, description="Filter by direction (inbound/outbound)"),
+    limit: int = Query(1000, description="Max logs to return"),
+) -> list[dict[str, Any]]:
+    """A2A 로그 조회 (필터링 지원)"""
+    return a2a_log_registry.get_logs(
+        mission_id=mission_id,
+        task_id=task_id,
+        from_agent_id=from_agent_id,
+        to_agent_id=to_agent_id,
+        message_type=message_type,
+        direction=direction,
+        limit=limit,
+    )
+
+
+@app.post("/policies", status_code=status.HTTP_201_CREATED)
+def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
+    """정책 생성 (Ch.17.1)"""
+    require_internal_caller(x_cowater_internal)
+    return policy_registry.create_policy(body)
+
+
+@app.get("/policies")
+def list_policies() -> list[dict[str, Any]]:
+    """정책 목록 조회"""
+    return policy_registry.get_policies()
+
+
+@app.get("/policies/{policy_id}")
+def get_policy(policy_id: str) -> dict[str, Any]:
+    """정책 조회"""
+    policy = policy_registry.get_policy(policy_id)
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return policy
+
+
+@app.put("/policies/{policy_id}")
+def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
+    """정책 업데이트"""
+    require_internal_caller(x_cowater_internal)
+    return policy_registry.update_policy(policy_id, body)
+
+
+@app.delete("/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(default=None)) -> Response:
+    """정책 삭제"""
+    require_internal_caller(x_cowater_internal)
+    policy_registry.delete_policy(policy_id)
+    return Response(status_code=204)
 
 
 @app.get("/device-roles")
@@ -557,6 +669,46 @@ def replace_mission(mission_id: str, body: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return mission.to_dict()
+
+
+@app.get("/missions/{mission_id}/timeline")
+def get_mission_timeline(mission_id: str) -> list[dict[str, Any]]:
+    """Mission Timeline 조회 (Ch.18-20)"""
+    try:
+        mission = domain_registry.get_mission(mission_id)
+        timeline = mission.timeline if hasattr(mission, 'timeline') else []
+        return [evt.to_dict() if hasattr(evt, 'to_dict') else evt for evt in timeline]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+
+
+@app.post("/missions/{mission_id}/timeline/append")
+def append_mission_timeline(mission_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+    """Mission Timeline에 이벤트 추가 (Ch.18-20)"""
+    body = body or {}
+    try:
+        event_type = str(body.get("event_type") or "unknown")
+        actor = str(body.get("actor") or "system")
+        details = body.get("details") or {}
+        task_id = body.get("task_id")
+        step_index = body.get("step_index")
+
+        domain_registry.append_mission_timeline_event(
+            mission_id=mission_id,
+            event_type=event_type,
+            actor=actor,
+            details=details,
+            task_id=str(task_id) if task_id else None,
+            step_index=str(step_index) if step_index else None,
+        )
+
+        mission = domain_registry.get_mission(mission_id)
+        return {"appended": True, "mission_id": mission_id, "event_type": event_type}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission not found")
+    except Exception as e:
+        logger.warning(f"Failed to append timeline event: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to append timeline event: {str(e)}")
 
 
 @app.post("/admin/reset", status_code=status.HTTP_204_NO_CONTENT)
