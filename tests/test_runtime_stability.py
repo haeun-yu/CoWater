@@ -55,6 +55,11 @@ def test_moth_publisher_can_be_disabled_by_environment(monkeypatch) -> None:
 
 
 def test_system_fleet_summary_accepts_registry_public_ids(monkeypatch) -> None:
+    import sys
+
+    for name in list(sys.modules):
+        if name == "agent" or name.startswith("agent."):
+            sys.modules.pop(name, None)
     monkeypatch.syspath_prepend(str(ROOT / "server" / "system-agent"))
     from agent.decision import DecisionEngine
     from skills.catalog import SkillCatalog

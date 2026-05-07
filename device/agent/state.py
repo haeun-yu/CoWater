@@ -31,6 +31,8 @@ class AgentState:
     last_seen_at: Optional[str] = None
     last_telemetry: dict[str, Any] = field(default_factory=dict)
     last_decision: dict[str, Any] = field(default_factory=dict)
+    last_command: dict[str, Any] = field(default_factory=dict)
+    mission_state: dict[str, Any] = field(default_factory=dict)
     children: dict[str, dict[str, Any]] = field(default_factory=dict)
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
     inbox: list[dict[str, Any]] = field(default_factory=list)
