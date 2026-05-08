@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
@@ -113,10 +113,23 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return await handle_a2a(runtime, request)
 
     @app.post("/agents/{token}/command")
-    async def command(token: str, request: CommandRequest) -> dict[str, Any]:
+    async def command(
+        token: str,
+        request: CommandRequest,
+        async_mode: bool = Query(default=False),
+    ) -> dict[str, Any]:
         if runtime.state.token and token != runtime.state.token:
             raise HTTPException(status_code=403, detail="token mismatch")
+        if async_mode:
+            return runtime.start_async_command(request.model_dump(), requested_by="user")
         return await runtime.handle_command_with_llm(request.model_dump())
+
+    @app.get("/commands/{request_id}")
+    def get_command_status(request_id: str) -> dict[str, Any]:
+        status = runtime.get_async_command(request_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail="command request not found")
+        return status
 
     @app.post("/children/register")
     async def register_child(child: dict[str, Any]) -> dict[str, Any]:

@@ -117,6 +117,18 @@ def wait_for_mission_status(approval_id: str, timeout_seconds: int = 180, interv
     return mission
 
 
+def wait_for_command_result(request_id: str, timeout_seconds: int = 240, interval_seconds: int = 2) -> dict[str, Any]:
+    deadline = time.time() + timeout_seconds
+    latest: dict[str, Any] = {}
+    while time.time() < deadline:
+        latest = as_dict(http("GET", f"{SYSTEM_AGENT}/commands/{request_id}"))
+        status = str(latest.get("status") or "")
+        if status in {"completed", "failed"}:
+            return latest
+        time.sleep(interval_seconds)
+    return latest
+
+
 def print_mission_execution_results(mission: dict[str, Any]) -> None:
     results = as_list(mission.get("device_execution_results"))
     print(f"  • device_execution_results: {len(results)}개")
@@ -141,7 +153,7 @@ if not token:
     print("\n⛔ System Agent token을 확보하지 못했습니다.")
     raise SystemExit(1)
 
-command_endpoint = f"{SYSTEM_AGENT}/agents/{token}/command"
+command_endpoint = f"{SYSTEM_AGENT}/agents/{token}/command?async_mode=true"
 section("Step 1. LLM 명령 전송")
 command = {
     "action": "37.005, 129.425 좌표의 해역에서 기뢰를 탐지하고 제거해줘",
@@ -156,12 +168,26 @@ command = {
 response = as_dict(http("POST", command_endpoint, command, timeout=180))
 check("명령 엔드포인트 응답 수신", bool(response), json.dumps(response, ensure_ascii=False)[:120])
 
-result_command = as_dict(response.get("command"))
-check("응답이 전달됨", response.get("delivered") is True, "")
-check("LLM 재해석 반영", result_command.get("action") in {"mission.assign", "task.assign", "route_direct", "route_via_middle"}, str(result_command.get("action")))
-check("명령 재해석이 mission.assign으로 수렴", result_command.get("action") == "mission.assign", str(result_command.get("action")))
+request_id = str(response.get("request_id") or "")
+check("명령 비동기 접수", response.get("accepted") is True and bool(request_id), request_id)
 
-mission_bundle = as_dict(response.get("mission_bundle"))
+result_payload: dict[str, Any] = {}
+result_command: dict[str, Any] = {}
+if request_id:
+    command_status = wait_for_command_result(request_id)
+    check("비동기 명령 완료", str(command_status.get("status") or "") == "completed", str(command_status.get("status") or "unknown"))
+    result_payload = as_dict(command_status.get("result"))
+    result_command = as_dict(result_payload.get("command") or result_payload.get("resolved_command"))
+    check("응답이 전달됨", result_payload.get("delivered") is True, "")
+    check("LLM 재해석 반영", result_command.get("action") in {"mission.assign", "task.assign", "route_direct", "route_via_middle"}, str(result_command.get("action")))
+    check("명령 재해석이 mission.assign으로 수렴", result_command.get("action") == "mission.assign", str(result_command.get("action")))
+else:
+    check("비동기 명령 완료", False, "request_id missing")
+    check("응답이 전달됨", False, "")
+    check("LLM 재해석 반영", False, "None")
+    check("명령 재해석이 mission.assign으로 수렴", False, "None")
+
+mission_bundle = as_dict(result_payload.get("mission_bundle"))
 proposal = as_dict(mission_bundle.get("proposal"))
 approval = as_dict(mission_bundle.get("approval"))
 if proposal:

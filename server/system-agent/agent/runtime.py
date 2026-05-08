@@ -88,6 +88,8 @@ class AgentRuntime:
             "return_to_base": ["return_to_base", "surface", "hold_position"],
         }
         self._recommendation_suppressions: dict[str, str] = {}
+        self._command_requests: dict[str, dict[str, Any]] = {}
+        self._command_request_tasks: set[asyncio.Task[Any]] = set()
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -455,7 +457,7 @@ class AgentRuntime:
             # LLM 오류 발생 - Event 기록
             self.event_publisher.publish(
                 create_device_status_change_event(
-                    source_agent_id=self.agent_id,
+                    source_agent_id=self.state.agent_id,
                     device_id=0,  # System-level event
                     device_name="system",
                     old_status="operational",
@@ -2405,6 +2407,89 @@ class AgentRuntime:
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
 
+    def start_async_command(self, command: dict[str, Any], *, requested_by: str = "user") -> dict[str, Any]:
+        request_id = f"cmd-{uuid4()}"
+        now = utc_now()
+        request_record = {
+            "request_id": request_id,
+            "status": "queued",
+            "requested_by": requested_by,
+            "command": command,
+            "result": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+            "started_at": None,
+            "finished_at": None,
+        }
+        self._command_requests[request_id] = request_record
+
+        task = asyncio.create_task(self._run_async_command(request_id, command))
+        self._command_request_tasks.add(task)
+        task.add_done_callback(self._command_request_tasks.discard)
+
+        self.state.remember(
+            {
+                "kind": "command_async_queued",
+                "at": now,
+                "request_id": request_id,
+                "command": command,
+            }
+        )
+
+        return {
+            "accepted": True,
+            "request_id": request_id,
+            "status": "queued",
+            "created_at": now,
+        }
+
+    def get_async_command(self, request_id: str) -> dict[str, Any] | None:
+        item = self._command_requests.get(request_id)
+        if item is None:
+            return None
+        return dict(item)
+
+    async def _run_async_command(self, request_id: str, command: dict[str, Any]) -> None:
+        request = self._command_requests.get(request_id)
+        if request is None:
+            return
+
+        started_at = utc_now()
+        request["status"] = "running"
+        request["started_at"] = started_at
+        request["updated_at"] = started_at
+
+        try:
+            result = await self.handle_command_with_llm(command)
+            finished_at = utc_now()
+            request["status"] = "completed"
+            request["result"] = result
+            request["updated_at"] = finished_at
+            request["finished_at"] = finished_at
+            self.state.remember(
+                {
+                    "kind": "command_async_completed",
+                    "at": finished_at,
+                    "request_id": request_id,
+                }
+            )
+        except Exception as exc:
+            finished_at = utc_now()
+            request["status"] = "failed"
+            request["error"] = str(exc)
+            request["updated_at"] = finished_at
+            request["finished_at"] = finished_at
+            self.state.remember(
+                {
+                    "kind": "command_async_failed",
+                    "at": finished_at,
+                    "request_id": request_id,
+                    "error": str(exc),
+                }
+            )
+            logger.exception("Async command failed: request_id=%s", request_id)
+
     async def handle_command_with_llm(self, command: dict[str, Any]) -> dict[str, Any]:
         """사용자 명령을 LLM으로 해석한 뒤 실행. LLM 불가 시 직접 실행."""
         logger = logging.getLogger(__name__)
@@ -2416,10 +2501,10 @@ class AgentRuntime:
         llm_result, llm_error = await self.decision_engine.analyze_command(command, devices, self.state)
 
         if llm_error:
-            # LLM 오류 발생 - Event 기록
+            # LLM 오류 발생 - Event 기록 후 fallback 정규화 경로 진행
             self.event_publisher.publish(
                 create_device_status_change_event(
-                    source_agent_id=self.agent_id,
+                    source_agent_id=self.state.agent_id,
                     device_id=0,  # System-level event
                     device_name="system",
                     old_status="operational",
@@ -2428,8 +2513,7 @@ class AgentRuntime:
                 )
             )
             logger.warning(f"명령 LLM 해석 실패: {llm_error}")
-            # Fallback: LLM 없이 직접 실행
-            return self.apply_command(command)
+            llm_result = None
 
         if llm_result:
             self.state.remember({
