@@ -1,75 +1,80 @@
 from __future__ import annotations
 
-import math
 import random
-from typing import Any, Optional
+from typing import Any
 
-from agent.state import AgentState, utc_now
+from agent.state import AgentState
+from simulator.base import BaseDeviceSimulator
 
 
-class DeviceSimulator:
-    def __init__(self, simulation_config: dict[str, Any], tracks: list[dict[str, Any]]) -> None:
-        self.config = simulation_config
-        self.tracks = tracks
-        self.position = dict(simulation_config.get("start_position") or {})
-        self.motion = {
-            "heading": random.uniform(0, 360),
-            "speed": random.uniform(*simulation_config.get("speed_range", [0.2, 1.0])),
+class DeviceSimulator(BaseDeviceSimulator):
+    def _platform_telemetry(self, state: AgentState) -> dict[str, Any]:
+        telemetry: dict[str, Any] = {
+            "navigation": {
+                "route_mode": self.mission_state.get("mode"),
+                "target_position": self.mission_state.get("target_position"),
+                "follow_target_id": self.mission_state.get("follow_target_id"),
+            }
         }
-        self.battery = random.uniform(65, 100)
-        # 작업 명령: {'type': 'move_to', 'target': [lat, lon], 'speed': 2.0} 등
-        self.current_task: Optional[dict[str, Any]] = None
-        self._speed_range = simulation_config.get("speed_range", [0.2, 1.0])
-
-    def interval_seconds(self) -> float:
-        return float(self.config.get("interval_seconds") or 2)
-
-    def next_telemetry(self, state: AgentState) -> dict[str, Any]:
-        self._step_position(self.interval_seconds())
-        telemetry = {
-            "device_id": state.registry_id,
-            "agent_id": state.agent_id,
-            "device_type": state.device_type,
-            "timestamp": utc_now(),
-            "position": self.position,
-            "motion": self.motion,
-            "battery_percent": round(self.battery, 2),
-            "sensors": self._sensor_values(),
+        motor_control = getattr(self, "_motor_control", None)
+        route_planner = getattr(self, "_route_planner", None)
+        obstacle_detector = getattr(self, "_obstacle_detector", None)
+        imu_reader = getattr(self, "_imu_reader", None)
+        battery_monitor = getattr(self, "_battery_monitor", None)
+        gps_reader = getattr(self, "_gps_reader", None)
+        if motor_control is not None:
+            telemetry["motor"] = motor_control.get_status()
+        if route_planner is not None:
+            telemetry["route"] = route_planner.get_current_route()
+        if obstacle_detector is not None:
+            telemetry["obstacles"] = obstacle_detector.detect()
+        if imu_reader is not None:
+            telemetry["imu"] = imu_reader.read()
+        if battery_monitor is not None:
+            telemetry["battery"] = battery_monitor.read()
+        if gps_reader is not None:
+            telemetry["gps"] = gps_reader.read()
+        telemetry["children"] = getattr(self, "_children_snapshot", [])
+        telemetry["a2a"] = {
+            "relay_active": self.mission_state.get("relay_active", False),
+            "last_relay": self.mission_state.get("last_relay"),
         }
-        self.battery = max(0, self.battery - random.uniform(0.01, 0.08))
         return telemetry
 
-    def _step_position(self, interval: float) -> None:
-        if not self.position:
-            return
-        speed_min, speed_max = self.config.get("speed_range", [0.2, 1.0])
-        self.motion["speed"] = max(float(speed_min), min(float(speed_max), self.motion["speed"] + random.uniform(-0.1, 0.1)))
-        self.motion["heading"] = (self.motion["heading"] + random.uniform(-8, 8)) % 360
-        meters = self.motion["speed"] * interval
-        self.position["latitude"] = float(self.position["latitude"]) + random.uniform(-1, 1) * meters / 111000
-        self.position["longitude"] = float(self.position["longitude"]) + random.uniform(-1, 1) * meters / 111000
-        altitude_range = self.config.get("altitude_range")
-        if altitude_range:
-            self.position["altitude"] = max(
-                float(altitude_range[0]),
-                min(float(altitude_range[1]), float(self.position.get("altitude", 0)) + random.uniform(-0.3, 0.3)),
-            )
+    def _apply_platform_action(
+        self,
+        action: str,
+        params: dict[str, Any],
+        tools: dict[str, Any],
+        result: dict[str, Any],
+    ) -> bool:
+        self._motor_control = tools.get("motor_control")
+        self._route_planner = tools.get("route_planner")
+        self._obstacle_detector = tools.get("obstacle_detector")
+        self._imu_reader = tools.get("imu_reader")
+        self._battery_monitor = tools.get("battery_monitor")
+        self._gps_reader = tools.get("gps_reader")
 
-    def _sensor_values(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for track in self.tracks:
-            name = track.get("name")
-            if not name:
-                continue
-            if name == "battery":
-                values[name] = {"percent": round(self.battery, 2)}
-            elif name == "pressure":
-                values[name] = {"depth_m": abs(float(self.position.get("altitude", 0)))}
-            elif name == "temperature":
-                values[name] = {"celsius": round(random.uniform(2, 18), 2)}
-            elif name == "camera":
-                values[name] = {"status": "streaming", "light_lux": random.randint(80, 900)}
-            else:
-                values[name] = {"status": "ok"}
-        return values
+        if action == "follow_target":
+            target = self._resolve_target_position(params)
+            if target is not None:
+                self.mission_state["target_position"] = target
+            self.mission_state["follow_target_id"] = str(params.get("target_id") or params.get("target_device_id") or "") or None
+            if self._motor_control is not None:
+                self._motor_control.set_thrust(0.65, random.uniform(-0.15, 0.15))
+            result["artifacts"].append({"type": "target_tracking", "target_id": self.mission_state.get("follow_target_id")})
+            return True
+        if action == "abort_mission":
+            if self._motor_control is not None:
+                self._motor_control.stop()
+            self.mission_state["reason"] = "operator_abort"
+            result["artifacts"].append({"type": "abort_ack"})
+            return True
+        if action == "emergency_stop":
+            if self._motor_control is not None:
+                self._motor_control.stop()
+            self.mission_state["reason"] = "emergency_stop"
+            result["artifacts"].append({"type": "emergency_stop_ack"})
+            return True
+        return False
 

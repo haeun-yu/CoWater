@@ -2,1168 +2,2256 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>CoWater 운영 관제 - Mission Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater 운영 관제</title>
     <style>
-      :root {
-        --bg: #07101e;
-        --surface: rgba(13, 22, 40, 0.92);
-        --text: #e2e8f0;
-        --accent: #60a5fa;
-        --danger: #f87171;
-        --ok: #4ade80;
-        --warning: #fbbf24;
-        --pending: #94a3b8;
+      main.page-main-grid {
+        grid-template-columns: 1fr;
+        align-items: start;
       }
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
+      .card-full {
+        grid-column: 1 / -1;
       }
-      body {
-        background: linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
-        color: var(--text);
-        font-family: "Segoe UI", Inter, sans-serif;
-        min-height: 100vh;
-        font-size: 13px;
+      #stats {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       }
-      .topbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0 24px;
-        height: 56px;
-        background: rgba(6, 14, 28, 0.98);
-        border-bottom: 2px solid rgba(96, 165, 250, 0.2);
-        position: sticky;
-        top: 0;
-        z-index: 100;
-      }
-      .logo {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-      }
-      .logo-text {
-        font-size: 18px;
-        font-weight: 700;
-        color: #60a5fa;
-      }
-      .nav {
-        display: flex;
+      .workflow-shell {
+        display: grid;
         gap: 16px;
       }
-      .nav a {
-        color: var(--accent);
-        text-decoration: none;
-        font-weight: 500;
-      }
-      .controls {
-        display: flex;
-        gap: 8px;
-      }
-      button {
-        padding: 6px 14px;
-        background: rgba(96, 165, 250, 0.1);
-        border: 1px solid rgba(96, 165, 250, 0.3);
-        color: var(--text);
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 500;
-        transition: all 0.2s;
-      }
-      button:hover {
-        background: rgba(96, 165, 250, 0.2);
-      }
-      .health {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding: 12px 24px;
-        flex-wrap: wrap;
-        background: rgba(6, 14, 28, 0.5);
-        border-bottom: 1px solid rgba(71, 85, 105, 0.2);
-      }
-      .pill {
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 11px;
-        background: rgba(96, 165, 250, 0.1);
-        color: var(--text);
-        font-weight: 600;
-        border: 1px solid rgba(96, 165, 250, 0.2);
-      }
-      .pill.online {
-        color: var(--ok);
-        background: rgba(74, 222, 128, 0.12);
-        border-color: rgba(74, 222, 128, 0.3);
-      }
-      .pill.offline {
-        color: var(--danger);
-        background: rgba(248, 113, 113, 0.12);
-        border-color: rgba(248, 113, 113, 0.3);
-      }
-      .stats {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 12px;
-        padding: 12px 24px;
-      }
-      .stat {
-        background: linear-gradient(
-          135deg,
-          rgba(96, 165, 250, 0.05),
-          rgba(96, 165, 250, 0)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.2);
-        border-radius: 6px;
-        padding: 14px;
-        text-align: center;
-      }
-      .stat-label {
-        font-size: 11px;
-        color: #94a3b8;
-        font-weight: 500;
-      }
-      .stat-value {
-        font-size: 28px;
-        font-weight: 800;
-        margin-top: 6px;
-        color: #60a5fa;
-      }
-      .content {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
-        padding: 12px 24px;
-        height: calc(100vh - 360px);
-      }
-      .panel {
-        background: linear-gradient(
-          135deg,
-          var(--surface),
-          rgba(13, 22, 40, 0.5)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.2);
-        border-radius: 8px;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-      .panel-header {
-        padding: 14px 16px;
-        border-bottom: 1px solid rgba(96, 165, 250, 0.2);
-        font-weight: 700;
-        background: rgba(96, 165, 250, 0.08);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .panel-header-title {
+      .workflow-shell .subtle {
+        margin: 0;
+        color: rgba(214, 224, 241, 0.7);
         font-size: 13px;
       }
-      .panel-body {
-        flex: 1;
-        overflow-y: auto;
-        padding: 12px;
+      .workflow-board {
+        display: grid;
+        gap: 18px;
       }
-      .card {
-        padding: 10px;
-        margin-bottom: 8px;
-        background: rgba(96, 165, 250, 0.06);
-        border-left: 3px solid var(--accent);
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s;
+      .flow-index {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       }
-      .card:hover {
-        background: rgba(96, 165, 250, 0.12);
-        transform: translateX(2px);
+      .flow-index-card {
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(120, 140, 170, 0.16);
+        background: rgba(255, 255, 255, 0.02);
+        display: grid;
+        gap: 8px;
       }
-      .card-title {
-        font-weight: 600;
+      .flow-index-card h4 {
+        margin: 0;
+        font-size: 14px;
+      }
+      .flow-index-card .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        color: rgba(214, 224, 241, 0.72);
         font-size: 12px;
       }
-      .card-meta {
-        font-size: 11px;
-        color: #94a3b8;
-        margin-top: 3px;
+      .flow-lane {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+        border: 1px solid rgba(120, 140, 170, 0.18);
+        border-radius: 10px;
+        background: rgba(8, 14, 25, 0.55);
       }
-      .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 3px;
-        font-size: 10px;
-        font-weight: 700;
-        margin-right: 4px;
-        text-transform: uppercase;
-      }
-      .badge-pending {
-        background: rgba(148, 163, 184, 0.2);
-        color: var(--pending);
-      }
-      .badge-inprogress {
-        background: rgba(96, 165, 250, 0.2);
-        color: #60a5fa;
-      }
-      .badge-completed {
-        background: rgba(74, 222, 128, 0.2);
-        color: var(--ok);
-      }
-      .badge-failed {
-        background: rgba(248, 113, 113, 0.2);
-        color: var(--danger);
-      }
-      .badge-critical {
-        background: rgba(248, 113, 113, 0.2);
-        color: var(--danger);
-      }
-      .badge-warning {
-        background: rgba(251, 191, 36, 0.2);
-        color: var(--warning);
-      }
-      .badge-ok {
-        background: rgba(74, 222, 128, 0.2);
-        color: var(--ok);
-      }
-      .empty {
-        text-align: center;
-        color: #64748b;
-        padding: 24px;
-      }
-      .detail {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 1000;
-        width: 90%;
-        max-width: 600px;
-        max-height: 80vh;
-        background: linear-gradient(
-          135deg,
-          var(--surface),
-          rgba(13, 22, 40, 0.5)
-        );
-        border: 1px solid rgba(96, 165, 250, 0.3);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-        overflow: hidden;
-        flex-direction: column;
-        pointer-events: none;
-        opacity: 0;
-        visibility: hidden;
-      }
-      #modal-backdrop {
-        display: none;
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 999;
-      }
-      #modal-backdrop.visible {
-        display: block;
-      }
-      .detail.visible {
-        display: flex;
-        pointer-events: auto;
-        opacity: 1;
-        visibility: visible;
-      }
-      .detail-content {
-        overflow-y: auto;
-        flex: 1;
-      }
-      .detail-title {
-        font-weight: 700;
-        font-size: 14px;
-        margin-bottom: 12px;
+      .flow-lane-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        gap: 12px;
+        align-items: start;
+        flex-wrap: wrap;
       }
-      .kv {
-        display: grid;
-        grid-template-columns: 120px 1fr;
-        gap: 8px 16px;
-        font-size: 12px;
-      }
-      .kv-key {
-        color: #94a3b8;
-        font-weight: 600;
-      }
-      .kv-val {
-        color: var(--text);
-      }
-      .step {
-        margin: 8px 0;
-        padding: 10px;
-        background: rgba(96, 165, 250, 0.08);
-        border-left: 3px solid #60a5fa;
-        border-radius: 3px;
-        font-size: 11px;
-      }
-      .progress-bar {
-        width: 100%;
-        height: 4px;
-        background: rgba(96, 165, 250, 0.1);
-        border-radius: 2px;
-        margin-top: 6px;
-        overflow: hidden;
-      }
-      .progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #60a5fa, #3b82f6);
-        border-radius: 2px;
-      }
-      .mission-steps {
-        margin-top: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .mission-step {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11px;
-        padding: 4px 6px;
-        background: rgba(96, 165, 250, 0.06);
-        border-radius: 3px;
-      }
-      .mission-step-status {
-        width: 16px;
-        height: 16px;
-        border-radius: 2px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-        font-weight: 700;
-      }
-      .close-detail {
-        cursor: pointer;
-        color: #94a3b8;
+      .flow-lane-head h3 {
+        margin: 0;
         font-size: 16px;
-        font-weight: 700;
       }
-      .close-detail:hover {
-        color: var(--text);
+      .flow-lane-head p {
+        margin: 4px 0 0;
+        color: rgba(214, 224, 241, 0.7);
+        font-size: 13px;
       }
-      .action-buttons {
-        display: flex;
+      .flow-stages {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+        align-items: stretch;
+      }
+      .flow-node {
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(120, 140, 170, 0.16);
+        background: rgba(255, 255, 255, 0.02);
+        display: grid;
+        gap: 10px;
+      }
+      .flow-node.flow-node-form {
+        background: rgba(96, 165, 250, 0.08);
+        border-color: rgba(96, 165, 250, 0.24);
+      }
+      .flow-node h4 {
+        margin: 0;
+        font-size: 14px;
+      }
+      .flow-node .node-body {
+        display: grid;
         gap: 8px;
-        margin-top: 12px;
-        border-top: 1px solid rgba(96, 165, 250, 0.2);
-        padding-top: 12px;
+        font-size: 13px;
+        color: rgba(226, 232, 240, 0.92);
       }
-      .action-buttons button {
-        flex: 1;
-        padding: 8px 12px;
+      .flow-node .node-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        color: rgba(214, 224, 241, 0.68);
         font-size: 12px;
       }
-      .btn-retry {
-        background: rgba(251, 191, 36, 0.15);
-        border-color: rgba(251, 191, 36, 0.5);
-        color: #fbbf24;
+      .flow-node .actions {
+        margin-top: 4px;
       }
-      .btn-retry:hover {
-        background: rgba(251, 191, 36, 0.25);
+      .flow-connector {
+        display: none;
       }
-      .btn-abort {
-        background: rgba(248, 113, 113, 0.15);
-        border-color: rgba(248, 113, 113, 0.5);
-        color: #f87171;
+      .workflow-shortcuts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
       }
-      .btn-abort:hover {
-        background: rgba(248, 113, 113, 0.25);
+      .workflow-shortcuts a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
-      .ws-status {
-        font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 3px;
-        background: rgba(74, 222, 128, 0.2);
-        color: #4ade80;
-        font-weight: 700;
-        display: inline-block;
-        margin-left: 8px;
+      .ops-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 14px;
       }
-      .ws-status.disconnected {
-        background: rgba(248, 113, 113, 0.2);
-        color: #f87171;
+      .ops-tab {
+        border: 1px solid rgba(120, 140, 170, 0.18);
+        background: rgba(255, 255, 255, 0.03);
+        color: rgba(226, 232, 240, 0.9);
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
       }
-      .panel-body::-webkit-scrollbar {
-        width: 6px;
+      .ops-tab.active {
+        border-color: rgba(96, 165, 250, 0.6);
+        background: rgba(96, 165, 250, 0.16);
       }
-      .panel-body::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      .panel-body::-webkit-scrollbar-thumb {
-        background: rgba(96, 165, 250, 0.2);
-        border-radius: 3px;
-      }
-      .panel-body::-webkit-scrollbar-thumb:hover {
-        background: rgba(96, 165, 250, 0.4);
+      .ops-panel[hidden] {
+        display: none !important;
       }
     </style>
+    <link rel="stylesheet" href="assets/common.css" />
   </head>
   <body>
-    <div class="topbar">
-      <div class="logo">
-        <div style="font-size: 28px">🌊</div>
-        <div class="logo-text">CoWater</div>
+    <nav class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🌊</div>
+        <h1>CoWater<span>운영 관제</span></h1>
       </div>
       <div class="nav">
-        <a href="index.html">🗺️ 3D 맵</a>
-        <a href="ops.html">📊 운영관제</a>
+        <a href="index.html">3D 지도</a>
+        <a href="alerts.html">알림</a>
+        <a href="ops.html" class="active">운영 관제</a>
+        <a href="mission.html">미션</a>
+        <a href="device.html">디바이스</a>
       </div>
-      <div class="controls">
-        <button onclick="loadData()">🔄 새로고침</button>
-        <button onclick="resetAll()">⚠️ 초기화</button>
-        <div class="ws-status disconnected" id="ws-status">
-          WebSocket: 연결중…
+    </nav>
+
+    <header>
+      <h1>CoWater 미션 운영</h1>
+      <div class="sub">
+        도메인별 상태를 먼저 보고, 필요할 때 흐름 보드로 연결해서 봅니다.
+      </div>
+    </header>
+    <main class="page-main-grid">
+      <section class="card card-full">
+        <h2>개요</h2>
+        <div class="stats" id="stats"></div>
+      </section>
+
+      <section class="card card-full">
+        <div class="ops-tabs" id="ops-tabs">
+          <button class="ops-tab active" type="button" data-domain="workflow">흐름</button>
+          <button class="ops-tab" type="button" data-domain="approvals">승인/제안</button>
+          <button class="ops-tab" type="button" data-domain="alerts">알림</button>
+          <button class="ops-tab" type="button" data-domain="missions">미션</button>
+          <button class="ops-tab" type="button" data-domain="devices">디바이스</button>
+          <button class="ops-tab" type="button" data-domain="policies">정책</button>
+          <button class="ops-tab" type="button" data-domain="all">전체</button>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="health">
-      <span style="font-weight: 600; font-size: 12px; color: #94a3b8"
-        >🔌 서비스 상태</span
-      >
-      <div class="pill offline" id="svc-registry">Registry</div>
-      <div class="pill offline" id="svc-system">System</div>
-      <div class="pill offline" id="svc-ship">Ship-M</div>
-      <div class="pill offline" id="svc-auv">AUV-L</div>
-      <div class="pill offline" id="svc-rov">ROV-L</div>
-      <div class="pill offline" id="svc-usv">USV-L</div>
-    </div>
-
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-label">📡 이벤트</div>
-        <div class="stat-value" id="st-events">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">⚠️ 경보</div>
-        <div class="stat-value" id="st-alerts">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">🚀 미션</div>
-        <div class="stat-value" id="st-missions">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">⏳ 진행중</div>
-        <div class="stat-value" id="st-in-progress">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">✅ 완료</div>
-        <div class="stat-value" id="st-completed">—</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">❌ 실패</div>
-        <div class="stat-value" id="st-failed">—</div>
-      </div>
-    </div>
-
-    <div class="content">
-      <!-- Left column: Events & Alerts -->
-      <div style="display: grid; grid-template-rows: 1fr 1fr; gap: 12px">
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-header-title"
-              >📡 이벤트 (<span id="ev-count">0</span>)</span
-            >
+      <section class="card card-full workflow-shell ops-panel" data-domain="workflow">
+        <div class="flow-lane-head">
+          <div>
+            <h2>연결된 운영 흐름</h2>
+            <p>
+              명령에서 시작한 흐름과 이벤트에서 시작한 흐름을 분리해 표시합니다.
+            </p>
           </div>
-          <div class="panel-body" id="ev-list">
-            <div class="empty">로딩 중…</div>
+          <div class="workflow-shortcuts">
+            <button class="secondary" onclick="location.href = 'alerts.html'">
+              알림 관리
+            </button>
+            <button class="secondary" onclick="location.href = 'mission.html'">
+              미션 보기
+            </button>
+            <button class="secondary" onclick="location.href = 'device.html'">
+              디바이스 보기
+            </button>
           </div>
         </div>
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-header-title"
-              >⚠️ 경보 (<span id="al-count">0</span>)</span
-            >
-          </div>
-          <div class="panel-body" id="al-list">
-            <div class="empty">로딩 중…</div>
-          </div>
-        </div>
-      </div>
+        <div id="workflow-board" class="workflow-board"></div>
+      </section>
 
-      <!-- Right column: Missions -->
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-header-title"
-            >🚀 미션 추적 (<span id="ms-count">0</span>)</span
-          >
+      <section class="card card-full ops-panel" data-domain="workflow">
+        <h2>최근 명령 해석</h2>
+        <div class="list" id="command-insights"></div>
+      </section>
+
+      <section class="card card-full ops-panel" data-domain="workflow">
+        <h2>최근 운영 흐름</h2>
+        <div class="subtle">
+          여러 시나리오의 최근 흐름을 한 번에 보고, 각 흐름의 세부 단계는
+          개별 페이지로 이동해 확인합니다.
         </div>
-        <div class="panel-body" id="ms-list">
-          <div class="empty">로딩 중…</div>
+        <div id="flow-index" class="flow-index"></div>
+      </section>
+
+      <section class="card card-full ops-panel" data-domain="workflow">
+        <h2>흐름 시작</h2>
+        <div class="grid2">
+          <div class="flow-node flow-node-form">
+            <h4>사용자 명령</h4>
+            <div class="node-body">
+              <label for="workflow-goal">목표</label>
+              <input
+                id="workflow-goal"
+                placeholder="예: 항만 주변 기뢰 탐지 및 제거"
+              />
+            </div>
+          </div>
+          <div class="flow-node flow-node-form">
+            <h4>운영 계획</h4>
+            <div class="node-body">
+              <label for="workflow-plan-name">계획 이름</label>
+              <input
+                id="workflow-plan-name"
+                placeholder="Mine Clearance Plan"
+              />
+              <label for="workflow-plan-goal">계획 목표</label>
+              <input id="workflow-plan-goal" placeholder="임무 목표" />
+              <label for="workflow-plan-location">위치 JSON</label>
+              <input
+                id="workflow-plan-location"
+                placeholder='{"latitude":35.1,"longitude":129.1}'
+              />
+            </div>
+            <div class="actions">
+              <button id="workflow-recommend-plan">계획 추천</button>
+              <button class="secondary" id="workflow-save-plan">
+                임시 저장
+              </button>
+              <button class="secondary" id="workflow-generate-proposal">
+                제안 생성
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card card-full ops-panel" data-domain="approvals">
+        <h2>승인 대기</h2>
+        <div class="list" id="approval-queue"></div>
+      </section>
+
+      <section class="card card-full ops-panel" data-domain="missions">
+        <h2>최근 미션</h2>
+        <div class="list" id="mission-queue"></div>
+      </section>
+
+      <section class="card card-full ops-panel" data-domain="workflow">
+        <h2>도메인 바로가기</h2>
+        <div class="workflow-shortcuts">
+          <button class="secondary" onclick="location.href = 'alerts.html'">
+            알림 / 승인 관리
+          </button>
+          <button class="secondary" onclick="location.href = 'mission.html'">
+            미션 세부 보기
+          </button>
+          <button class="secondary" onclick="location.href = 'device.html'">
+            디바이스 세부 보기
+          </button>
+        </div>
+      </section>
+
+      <section class="card ops-panel" data-domain="workflow">
+        <h2>역할 할당</h2>
+        <label for="role-goal">목표</label>
+        <input id="role-goal" placeholder="예: 항만 주변 기뢰 탐지 및 제거" />
+        <div class="actions">
+          <button id="recommend-roles">역할 추천</button>
+          <button class="secondary" id="refresh-overview-1">새로고침</button>
+        </div>
+        <div class="list" id="roles"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="workflow">
+        <h2>운영 계획</h2>
+        <div class="grid2">
+          <div>
+            <label for="plan-name">계획 이름</label>
+            <input id="plan-name" placeholder="Mine Clearance Plan" />
+          </div>
+          <div>
+            <label for="plan-goal">목표</label>
+            <input id="plan-goal" placeholder="임무 목표" />
+          </div>
+        </div>
+        <label for="plan-location">위치 JSON</label>
+        <input
+          id="plan-location"
+          placeholder='{"latitude":35.1,"longitude":129.1}'
+        />
+        <div class="actions">
+          <button id="recommend-plan">계획 추천</button>
+          <button class="secondary" id="save-plan">임시 저장</button>
+        </div>
+        <div class="list" id="plans"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="approvals">
+        <h2>제안 및 승인</h2>
+        <label for="proposal-goal">제안 목표</label>
+        <textarea
+          id="proposal-goal"
+          placeholder="운영자가 검토할 미션 제안 목표"
+        ></textarea>
+        <label for="proposal-plan">운영 계획</label>
+        <select id="proposal-plan"></select>
+        <div class="actions">
+          <button id="generate-proposal">제안 생성</button>
+          <button class="secondary" id="refresh-overview-2">새로고침</button>
+        </div>
+        <div class="list" id="approvals"></div>
+        <div class="list" id="proposals"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="missions">
+        <h2>미션 실행</h2>
+        <div class="list" id="missions"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="alerts">
+        <h2>이벤트, 알림, 인사이트</h2>
+        <div class="list" id="signals"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="devices">
+        <h2>디바이스 연결 상태</h2>
+        <div class="list" id="device-connectivity"></div>
+      </section>
+
+      <section class="card ops-panel" data-domain="policies">
+        <h2>정책 관리</h2>
+        <label for="policy-name">정책 이름</label>
+        <input id="policy-name" placeholder="예: auto_rtb_on_lost" />
+        <label for="policy-trigger">트리거 조건</label>
+        <input
+          id="policy-trigger"
+          placeholder='예: {"event_type":"device_connectivity_changed","new_status":"lost"}'
+        />
+        <div class="actions">
+          <button id="create-policy">정책 생성</button>
+          <button class="secondary" id="refresh-policies">새로고침</button>
+        </div>
+        <div class="list" id="policies"></div>
+      </section>
+    </main>
+
+    <!-- 상세보기 모달 -->
+    <div id="detail-modal" class="modal" style="display: none">
+      <div class="modal-overlay" onclick="closeDetailModal()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="modal-title">상세 정보</h2>
+          <button class="modal-close" onclick="closeDetailModal()">✕</button>
+        </div>
+        <div class="modal-body" id="modal-body">
+          <!-- 동적 콘텐츠 -->
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" onclick="closeDetailModal()">닫기</button>
         </div>
       </div>
     </div>
 
-    <div id="modal-backdrop" onclick="hideDetail()"></div>
-    <div class="detail" id="detail" onclick="event.stopPropagation()">
-      <div class="detail-title">
-        <span id="detail-title">상세 정보</span>
-        <div class="close-detail" onclick="hideDetail()">✕</div>
-      </div>
-      <div class="detail-content" id="detail-body" style="margin-top: 12px"></div>
-    </div>
-
+    <script src="assets/common.js"></script>
     <script>
-      const R = "http://127.0.0.1:8280";
-      const WS_URL = "ws://127.0.0.1:8280";
-      let data = { events: [], alerts: [], responses: [], missions: [] };
-      let ws = null;
-      let wsReconnectTimer = null;
+      // 전역 변수들 (window에 직접 할당)
+      const SYSTEM =
+        window.CoWaterUI?.config?.systemBase || "http://127.0.0.1:9116";
+      const REGISTRY =
+        window.CoWaterUI?.config?.registryBase || "http://127.0.0.1:8280";
+      const MOTH_BASE =
+        window.CoWaterUI?.config?.mothWsBase || "wss://cobot.center:8287";
 
-      // ======================== WebSocket Management ========================
+      // escapeHtml 함수
+      const escapeHtml = (v) =>
+        String(v)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
 
-      function connectWebSocket() {
+      // j() 함수 직접 정의
+      async function j(url, opts) {
+        const res = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
+        if (!res.ok) throw new Error(`${res.status} ${url}`);
+        return res.json();
+      }
+
+      const INTERNAL_HEADERS = { "X-CoWater-Internal": "system-agent" };
+      const socketState = {};
+      let overviewHasLoaded = false;
+
+      function emptyStateLabel(text = "데이터를 불러오는 중…") {
+        return `<div class="empty">${escapeHtml(text)}</div>`;
+      }
+
+      function setOverviewLoadingState() {
+        const loading = emptyStateLabel();
+        document.getElementById("stats").innerHTML = loading;
+        document.getElementById("command-insights").innerHTML = loading;
+        document.getElementById("workflow-board").innerHTML =
+          `<div class="flow-lane"><div class="flow-lane-head"><div><h3>연결된 운영 흐름</h3><p>흐름 데이터를 불러오는 중입니다.</p></div></div><div class="flow-stages"><div class="flow-node flow-node-form"><h4>명령 기반 흐름</h4><div class="node-body">${loading}</div></div><div class="flow-node flow-node-form"><h4>이벤트 대응 흐름</h4><div class="node-body">${loading}</div></div></div></div>`;
+        document.getElementById("approval-queue").innerHTML = loading;
+        document.getElementById("mission-queue").innerHTML = loading;
+        document.getElementById("roles").innerHTML = loading;
+        document.getElementById("plans").innerHTML = loading;
+        document.getElementById("approvals").innerHTML = loading;
+        document.getElementById("proposals").innerHTML = loading;
+        document.getElementById("missions").innerHTML = loading;
+        document.getElementById("signals").innerHTML = loading;
+        document.getElementById("device-connectivity").innerHTML = loading;
+        document.getElementById("policies").innerHTML = loading;
+      }
+
+      // 전역 상태: Moth 부분 업데이트를 merge하여 항상 완전한 데이터 유지
+      const appState = {
+        devices: [],
+        device_roles: [],
+        operation_plans: [],
+        missions: [],
+        approvals: [],
+        mission_proposals: [],
+        insights: [],
+        events: [],
+        alerts: [],
+        policies: [],
+        system_state: {},
+        stats: {},
+      };
+
+      let dataLoadedOnce = false; // 첫 데이터 로드 여부 플래그
+      const _lastRender = {}; // 변경 감지용 캐시
+
+      function _changed(key, data) {
+        const s = JSON.stringify(data);
+        if (_lastRender[key] === s) return false;
+        _lastRender[key] = s;
+        return true;
+      }
+
+      function parseLocation(input) {
+        const raw = input.trim();
+        if (!raw) return {};
         try {
-          ws = new WebSocket(WS_URL + "/ws/dashboard");
+          return JSON.parse(raw);
+        } catch {
+          return {};
+        }
+      }
+
+      function statusPill(status) {
+        return `<span class="pill">${escapeHtml(status || "미정")}</span>`;
+      }
+
+      function safeText(value, fallback = "미정") {
+        if (value === undefined || value === null) return fallback;
+        if (typeof value === "string" && value.trim() === "") return fallback;
+        return String(value);
+      }
+
+      function identityForItem(item) {
+        if (!item || typeof item !== "object") return "";
+        return String(
+          item.mission_id ||
+            item.proposal_id ||
+            item.approval_id ||
+            item.alert_id ||
+            item.event_id ||
+            item.operation_plan_id ||
+            item.policy_id ||
+            item.insight_id ||
+            item.registry_id ||
+            item.device_id ||
+            item.id ||
+            "",
+        );
+      }
+
+      function mergeCollection(current, incoming, identityKeys = []) {
+        const list = Array.isArray(current) ? [...current] : [];
+        const items = Array.isArray(incoming)
+          ? incoming
+          : incoming && typeof incoming === "object"
+            ? [incoming]
+            : [];
+        for (const item of items) {
+          if (!item || typeof item !== "object") continue;
+          const key =
+            identityKeys
+              .map((k) => item[k])
+              .find((value) => value !== undefined && value !== null && String(value).trim() !== "") ||
+            identityForItem(item);
+          const existingIndex = key
+            ? list.findIndex((entry) => {
+                const candidate =
+                  identityKeys
+                    .map((k) => entry?.[k])
+                    .find((value) => value !== undefined && value !== null && String(value).trim() !== "") ||
+                  identityForItem(entry);
+                return candidate && String(candidate) === String(key);
+              })
+            : -1;
+          if (existingIndex >= 0) list[existingIndex] = item;
+          else list.push(item);
+        }
+        return list;
+      }
+
+      function latest(items, predicate = () => true) {
+        const list = (items || []).filter(predicate);
+        if (!list.length) return null;
+        return list[list.length - 1];
+      }
+
+      function formatCompactDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString("ko-KR");
+      }
+
+      function summarizeChainItem(item, fields, fallback = "연결 정보 없음") {
+        if (!item) return fallback;
+        for (const field of fields) {
+          const value = item[field];
+          if (Array.isArray(value)) {
+            if (value.length > 0) return `${field}: ${value.length}`;
+          } else if (
+            value !== undefined &&
+            value !== null &&
+            String(value).trim() !== ""
+          ) {
+            return String(value);
+          }
+        }
+        return fallback;
+      }
+
+      function latestMemoryItem(state, kind) {
+        const memory = Array.isArray(state?.memory) ? state.memory : [];
+        for (let i = memory.length - 1; i >= 0; i -= 1) {
+          const item = memory[i];
+          if (item && typeof item === "object" && item.kind === kind) {
+            return item;
+          }
+        }
+        return null;
+      }
+
+      function renderCommandInsights(systemState) {
+        if (!_changed("command-insights", systemState)) return;
+        const loading = emptyStateLabel();
+        const recent = latestMemoryItem(systemState, "command_llm_interpreted");
+        const bundle = latestMemoryItem(systemState, "command_mission_bundle_created");
+        const lastDecision = systemState?.last_decision || {};
+        const items = [];
+
+        if (recent) {
+          const llm = recent.llm || {};
+          items.push(`
+            <div class="item">
+              <strong>최근 LLM 명령 해석</strong> ${statusPill(llm.action || "미정")}
+              <div>${escapeHtml(safeText(llm.reasoning || recent.original?.reason || "해석 결과 없음"))}</div>
+              <div class="meta">
+                <span>${escapeHtml(safeText(llm.action || recent.original?.action || "미정"))}</span>
+                <span>${escapeHtml(formatCompactDate(recent.at || llm.timestamp || ""))}</span>
+              </div>
+            </div>
+          `);
+        }
+
+        if (lastDecision && Object.keys(lastDecision).length) {
+          const recommendations = Array.isArray(lastDecision.recommendations)
+            ? lastDecision.recommendations
+            : [];
+          items.push(`
+            <div class="item">
+              <strong>최근 판단 상태</strong> ${statusPill(lastDecision.mode || "미정")}
+              <div>${escapeHtml(safeText(lastDecision.reasoning || lastDecision.llm_analysis?.reasoning || "판단 정보 없음"))}</div>
+              <div class="meta">
+                <span>${escapeHtml(safeText(lastDecision.mode || "미정"))}</span>
+                <span>${escapeHtml(recommendations[0]?.action || "추천 없음")}</span>
+              </div>
+            </div>
+          `);
+        }
+
+        if (bundle) {
+          const data = bundle.bundle || {};
+          items.push(`
+            <div class="item">
+              <strong>최근 명령 미션 번들</strong> ${statusPill(data.mission_type || "미정")}
+              <div>${escapeHtml(safeText(data.goal || "명령 기반 미션 제안 없음"))}</div>
+              <div class="meta">
+                <span>proposal: ${escapeHtml(safeText(data.proposal_id || "미정"))}</span>
+                <span>approval: ${escapeHtml(safeText(data.approval_id || "미정"))}</span>
+              </div>
+            </div>
+          `);
+        }
+
+        document.getElementById("command-insights").innerHTML = items.length
+          ? items.join("")
+          : loading;
+      }
+
+      let currentOpsDomain = "workflow";
+
+      function setOpsDomain(domain) {
+        currentOpsDomain = domain || "workflow";
+        document.querySelectorAll(".ops-tab").forEach((button) => {
+          button.classList.toggle(
+            "active",
+            button.dataset.domain === currentOpsDomain,
+          );
+        });
+        document.querySelectorAll(".ops-panel").forEach((panel) => {
+          const panelDomain = panel.dataset.domain || "all";
+          panel.hidden =
+            currentOpsDomain !== "all" &&
+            panelDomain !== currentOpsDomain &&
+            panelDomain !== "all";
+        });
+      }
+
+      function workflowInputValue(primaryId, fallbackId = "") {
+        const primary = document.getElementById(primaryId);
+        if (primary && String(primary.value || "").trim()) {
+          return String(primary.value).trim();
+        }
+        if (!fallbackId) return "";
+        const fallback = document.getElementById(fallbackId);
+        return fallback ? String(fallback.value || "").trim() : "";
+      }
+
+      function workflowInputJson(primaryId, fallbackId = "") {
+        const primary = document.getElementById(primaryId);
+        if (primary && String(primary.value || "").trim()) {
+          return parseLocation(String(primary.value));
+        }
+        if (!fallbackId) return {};
+        const fallback = document.getElementById(fallbackId);
+        return fallback ? parseLocation(String(fallback.value || "")) : {};
+      }
+
+      async function handleWorkflowRecommendPlan() {
+        const name =
+          workflowInputValue("workflow-plan-name", "plan-name") ||
+          "Workflow Plan";
+        const goal =
+          workflowInputValue("workflow-plan-goal", "plan-goal") ||
+          workflowInputValue("workflow-goal", "role-goal");
+        if (!goal) {
+          alert("목표를 입력해주세요");
+          return;
+        }
+        try {
+          const plan = await j(`${SYSTEM}/operation-plans/recommend`, {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              goal,
+              location: workflowInputJson(
+                "workflow-plan-location",
+                "plan-location",
+              ),
+            }),
+          });
+          const targetName = document.getElementById("workflow-plan-name");
+          const targetGoal = document.getElementById("workflow-plan-goal");
+          if (targetName && plan?.name) targetName.value = plan.name;
+          if (targetGoal && plan?.goal) targetGoal.value = plan.goal;
+          await loadOverview();
+        } catch (e) {
+          alert("계획 추천 실패: " + e.message);
+        }
+      }
+
+      async function handleWorkflowSavePlan() {
+        const name =
+          workflowInputValue("workflow-plan-name", "plan-name") ||
+          "Workflow Plan";
+        const goal =
+          workflowInputValue("workflow-plan-goal", "plan-goal") ||
+          workflowInputValue("workflow-goal", "role-goal");
+        if (!name || !goal) {
+          alert("계획 이름과 목표를 입력해주세요");
+          return;
+        }
+        try {
+          await j(`${SYSTEM}/operation-plans`, {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              goal,
+              location: workflowInputJson(
+                "workflow-plan-location",
+                "plan-location",
+              ),
+            }),
+          });
+          await loadOverview();
+        } catch (e) {
+          alert("계획 저장 실패: " + e.message);
+        }
+      }
+
+      async function handleWorkflowGenerateProposal() {
+        const goal =
+          workflowInputValue("workflow-goal", "proposal-goal") ||
+          workflowInputValue("workflow-plan-goal", "proposal-goal");
+        if (!goal) {
+          alert("제안 목표를 입력해주세요");
+          return;
+        }
+        const planId =
+          latest(appState.operation_plans)?.operation_plan_id || "";
+        try {
+          await j(`${SYSTEM}/mission-proposals/generate`, {
+            method: "POST",
+            body: JSON.stringify({
+              goal,
+              operation_plan_id: planId || null,
+            }),
+          });
+          await loadOverview();
+        } catch (e) {
+          alert("제안 생성 실패: " + e.message);
+        }
+      }
+
+      function chainNode(title, item, options = {}) {
+        const {
+          status = item?.status || "미정",
+          summaryFields = ["summary", "goal", "message", "title"],
+          meta = [],
+          actions = "",
+          tone = "",
+        } = options;
+        const summary = summarizeChainItem(
+          item,
+          summaryFields,
+          options.fallback || "대기",
+        );
+        const metaHtml = meta
+          .filter(Boolean)
+          .map((entry) => `<span>${escapeHtml(entry)}</span>`)
+          .join("");
+        return `
+          <section class="flow-node ${tone}">
+            <h4>${escapeHtml(title)}</h4>
+            <div class="node-body">
+              <strong>${escapeHtml(safeText(summary))}</strong>
+              <div class="node-meta">${metaHtml}</div>
+              <div>${escapeHtml(formatCompactDate(item?.created_at || item?.updated_at || item?.timestamp || ""))}</div>
+            </div>
+            ${actions ? `<div class="actions">${actions}</div>` : ""}
+          </section>
+        `;
+      }
+
+      function renderWorkflowBoard() {
+        const currentCommandGoal =
+          document.getElementById("workflow-goal")?.value?.trim() ||
+          "사용자 명령 대기";
+        const currentPlanName =
+          document.getElementById("workflow-plan-name")?.value?.trim() ||
+          "운영 계획 대기";
+        const currentPlanGoal =
+          document.getElementById("workflow-plan-goal")?.value?.trim() ||
+          "계획 목표 대기";
+        const currentPlanLocation =
+          document.getElementById("workflow-plan-location")?.value?.trim() ||
+          "";
+        const latestPlan = latest(appState.operation_plans);
+        const latestProposal =
+          latest(
+            appState.mission_proposals,
+            (proposal) =>
+              !latestPlan ||
+              String(proposal.operation_plan_id || "") ===
+                String(latestPlan.operation_plan_id || latestPlan.id || ""),
+          ) || latest(appState.mission_proposals);
+        const latestApproval =
+          latest(
+            appState.approvals,
+            (approval) =>
+              [
+                latestPlan?.operation_plan_id,
+                latestProposal?.proposal_id,
+                latestProposal?.approval_id,
+              ]
+                .filter(Boolean)
+                .map(String)
+                .includes(String(approval.target_id || "")) ||
+              [latestProposal?.approval_id, latestProposal?.proposal_id]
+                .filter(Boolean)
+                .map(String)
+                .includes(String(approval.approval_id || "")),
+          ) || latest(appState.approvals);
+        const latestMission =
+          latest(appState.missions, (mission) =>
+            [
+              latestProposal?.proposal_id,
+              latestProposal?.approval_id,
+              latestApproval?.approval_id,
+              latestPlan?.operation_plan_id,
+            ]
+              .filter(Boolean)
+              .map(String)
+              .includes(
+                String(
+                  mission.proposal_id ||
+                    mission.approval_id ||
+                    mission.operation_plan_id ||
+                    "",
+                ),
+              ),
+          ) || latest(appState.missions);
+        const latestEvent = latest(appState.events);
+        const latestAlert =
+          latest(
+            appState.alerts,
+            (alert) =>
+              String(alert.event_id || "") ===
+              String(latestEvent?.event_id || ""),
+          ) || latest(appState.alerts);
+        const eventApproval =
+          latest(
+            appState.approvals,
+            (approval) =>
+              [
+                latestAlert?.proposal_id,
+                latestAlert?.mission_id,
+                latestAlert?.alert_id,
+                latestAlert?.event_id,
+              ]
+                .filter(Boolean)
+                .map(String)
+                .includes(String(approval.target_id || "")) ||
+              String(approval.metadata?.event_id || "") ===
+                String(latestAlert?.event_id || latestEvent?.event_id || ""),
+          ) || latestApproval;
+        const eventMission =
+          latest(appState.missions, (mission) =>
+            [
+              latestAlert?.event_id,
+              latestAlert?.alert_id,
+              eventApproval?.approval_id,
+              latestAlert?.proposal_id,
+            ]
+              .filter(Boolean)
+              .map(String)
+              .includes(
+                String(
+                  mission.event_id ||
+                    mission.alert_id ||
+                    mission.approval_id ||
+                    mission.proposal_id ||
+                    "",
+                ),
+              ),
+          ) || latestMission;
+        const completedMission =
+          latest(
+            appState.missions,
+            (mission) =>
+              String(mission.status || "").toLowerCase() === "completed",
+          ) || latestMission;
+        const recentMissions = [...(appState.missions || [])]
+          .filter(Boolean)
+          .sort((a, b) =>
+            String(
+              b.updated_at || b.completed_at || b.started_at || "",
+            ).localeCompare(
+              String(a.updated_at || a.completed_at || a.started_at || ""),
+            ),
+          )
+          .slice(0, 4);
+        const recentDevices = [...(appState.devices || [])]
+          .filter(Boolean)
+          .sort((a, b) =>
+            String(b.last_seen_at || b.updated_at || "").localeCompare(
+              String(a.last_seen_at || a.updated_at || ""),
+            ),
+          )
+          .slice(0, 4);
+
+        const commandApprovalActions =
+          latestApproval &&
+          String(latestApproval.status || "").toLowerCase() === "pending"
+            ? `
+            <button onclick="decideApproval('${escapeHtml(latestApproval.approval_id)}', true)">승인</button>
+            <button class="danger" onclick="decideApproval('${escapeHtml(latestApproval.approval_id)}', false)">거절</button>
+          `
+            : `<button class="secondary" onclick="location.href='alerts.html'">승인 관리</button>`;
+        const eventApprovalActions =
+          eventApproval &&
+          String(eventApproval.status || "").toLowerCase() === "pending"
+            ? `
+            <button onclick="decideApproval('${escapeHtml(eventApproval.approval_id)}', true)">승인</button>
+            <button class="danger" onclick="decideApproval('${escapeHtml(eventApproval.approval_id)}', false)">거절</button>
+          `
+            : `<button class="secondary" onclick="location.href='alerts.html'">알림 페이지</button>`;
+
+        const html = `
+          <div class="flow-lane">
+            <div class="flow-lane-head">
+              <div>
+                <h3>명령 기반 흐름</h3>
+                <p>사용자 명령에서 계획, 제안, 승인, 미션으로 이어지는 경로입니다.</p>
+              </div>
+              <div class="workflow-shortcuts">
+                <button class="secondary" onclick="location.href='mission.html${latestMission?.mission_id ? `?id=${encodeURIComponent(latestMission.mission_id)}` : ""}'">최신 미션</button>
+              </div>
+            </div>
+            <div class="flow-stages">
+              <section class="flow-node flow-node-form">
+                <h4>사용자 명령</h4>
+                <div class="node-body">
+                  <strong>${escapeHtml(currentCommandGoal || "사용자 명령 대기")}</strong>
+                  <div class="node-meta">
+                    <span>${escapeHtml(currentPlanName)}</span>
+                    <span>${escapeHtml(currentPlanGoal)}</span>
+                    ${currentPlanLocation ? `<span>${escapeHtml(currentPlanLocation)}</span>` : ""}
+                  </div>
+                </div>
+                <div class="actions">
+                  <button class="secondary" onclick="document.getElementById('workflow-goal')?.focus()">명령 수정</button>
+                </div>
+              </section>
+              ${chainNode("운영 계획", latestPlan, {
+                status: latestPlan?.status,
+                summaryFields: ["summary", "goal", "name"],
+                meta: [
+                  latestPlan?.operation_plan_id || latestPlan?.id || "",
+                  latestPlan?.mission_templates?.length
+                    ? `${latestPlan.mission_templates.length} 템플릿`
+                    : "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='ops.html#plans'">도메인 관리</button>`,
+              })}
+              ${chainNode("미션 제안", latestProposal, {
+                status: latestProposal?.status,
+                summaryFields: ["summary", "goal", "title"],
+                meta: [
+                  latestProposal?.proposal_id || "",
+                  latestProposal?.operation_plan_id || "",
+                  latestProposal?.event_id || "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='alerts.html'">알림 흐름 보기</button>`,
+              })}
+              ${chainNode("승인", latestApproval, {
+                status: latestApproval?.status,
+                summaryFields: ["summary", "target_type", "target_id"],
+                meta: [
+                  latestApproval?.approval_id || "",
+                  latestApproval?.target_type || "",
+                  latestApproval?.target_id || "",
+                ],
+                actions: commandApprovalActions,
+              })}
+              ${chainNode("미션", latestMission, {
+                status: latestMission?.status,
+                summaryFields: ["title", "goal", "summary"],
+                meta: [
+                  latestMission?.mission_id || "",
+                  latestMission?.event_id || "",
+                  latestMission?.proposal_id || "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='mission.html${latestMission?.mission_id ? `?id=${encodeURIComponent(latestMission.mission_id)}` : ""}'">미션 페이지</button>`,
+              })}
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-lane-head">
+              <div>
+                <h3>이벤트 대응 흐름</h3>
+                <p>이벤트가 알림으로 전환되고, 승인 후 미션으로 이어지는 경로입니다.</p>
+              </div>
+              <div class="workflow-shortcuts">
+                <button class="secondary" onclick="location.href='alerts.html'">알림 페이지</button>
+              </div>
+            </div>
+            <div class="flow-stages">
+              ${chainNode("이벤트", latestEvent, {
+                status: latestEvent?.severity || latestEvent?.status,
+                summaryFields: ["message", "event_type", "summary"],
+                meta: [
+                  latestEvent?.event_id || "",
+                  latestEvent?.severity || "",
+                  latestEvent?.created_at || "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='alerts.html'">이벤트 관리</button>`,
+              })}
+              ${chainNode("알림", latestAlert, {
+                status: latestAlert?.status,
+                summaryFields: ["message", "alert_type", "summary"],
+                meta: [
+                  latestAlert?.alert_id || "",
+                  latestAlert?.event_id || "",
+                  latestAlert?.severity || "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='alerts.html'">알림 관리</button>`,
+              })}
+              ${chainNode("승인", eventApproval, {
+                status: eventApproval?.status,
+                summaryFields: ["summary", "target_type", "target_id"],
+                meta: [
+                  eventApproval?.approval_id || "",
+                  eventApproval?.target_type || "",
+                  eventApproval?.target_id || "",
+                ],
+                actions: eventApprovalActions,
+              })}
+              ${chainNode("미션", eventMission, {
+                status: eventMission?.status,
+                summaryFields: ["title", "goal", "summary"],
+                meta: [
+                  eventMission?.mission_id || "",
+                  eventMission?.event_id || "",
+                  eventMission?.alert_id || "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='mission.html${eventMission?.mission_id ? `?id=${encodeURIComponent(eventMission.mission_id)}` : ""}'">미션 페이지</button>`,
+              })}
+              ${chainNode("완료", completedMission, {
+                status: completedMission?.status,
+                summaryFields: ["title", "goal", "summary"],
+                meta: [
+                  completedMission?.mission_id || "",
+                  completedMission?.completed_at ||
+                    completedMission?.updated_at ||
+                    "",
+                ],
+                actions: `<button class="secondary" onclick="location.href='mission.html${completedMission?.mission_id ? `?id=${encodeURIComponent(completedMission.mission_id)}` : ""}'">완료 보기</button>`,
+              })}
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-lane-head">
+              <div>
+                <h3>최근 미션 목록</h3>
+                <p>미션 탭으로 이동하지 않아도 최근 실행 상태를 바로 볼 수 있습니다.</p>
+              </div>
+              <div class="workflow-shortcuts">
+                <button class="secondary" onclick="location.href='mission.html'">미션 전체</button>
+              </div>
+            </div>
+            <div class="flow-index">
+              ${
+                recentMissions.length
+                  ? recentMissions
+                      .map((mission) => {
+                        const missionId = safeText(mission.mission_id);
+                        const source = sourceLabelForMission(mission);
+                        const status = safeText(mission.status, "대기");
+                        return `
+                          <article class="flow-index-card">
+                            <h4>${escapeHtml(mission.title || mission.goal || missionId)}</h4>
+                            <div>${escapeHtml(mission.goal || mission.summary || "설명 없음")}</div>
+                            <div class="meta">
+                              ${statusPill(status)}
+                              <span>${escapeHtml(source)}</span>
+                            </div>
+                            <div class="meta">
+                              <span>${escapeHtml(missionId)}</span>
+                              <span>${escapeHtml(formatCompactDate(mission.updated_at || mission.completed_at || mission.started_at || ""))}</span>
+                            </div>
+                            <div class="actions">
+                              <button class="secondary" onclick="location.href='mission.html?id=${encodeURIComponent(missionId)}'">미션 보기</button>
+                            </div>
+                          </article>
+                        `;
+                      })
+                      .join("")
+                  : `<div class="empty">최근 미션이 없습니다.</div>`
+              }
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-lane-head">
+              <div>
+                <h3>네트워크 상태</h3>
+                <p>디바이스 연결 상태를 요약해서 먼저 보여줍니다.</p>
+              </div>
+              <div class="workflow-shortcuts">
+                <button class="secondary" onclick="location.href='device.html'">디바이스 전체</button>
+              </div>
+            </div>
+            <div class="flow-index">
+              ${
+                recentDevices.length
+                  ? recentDevices
+                      .map((device) => {
+                        const status =
+                          device.connectivity_status ||
+                          (device.connected ? "online" : "offline");
+                        const statusEmoji =
+                          { online: "🟢", lost: "🟡", offline: "⚫" }[status] ||
+                          "❓";
+                        return `
+                          <article class="flow-index-card">
+                            <h4>${escapeHtml(device.name || device.device_type || "디바이스")}</h4>
+                            <div>${escapeHtml(device.device_type || "unknown")} · ${escapeHtml(device.layer || "unknown")}</div>
+                            <div class="meta">
+                              ${statusPill(status)}
+                              <span>${statusEmoji} ${escapeHtml(String(status).toUpperCase())}</span>
+                            </div>
+                            <div class="meta">
+                              <span>${escapeHtml(safeText(device.device_id || device.registry_id || device.id || ""))}</span>
+                              <span>${device.last_seen_at ? escapeHtml(formatCompactDate(device.last_seen_at)) : "Never"}</span>
+                            </div>
+                            <div class="actions">
+                              <button class="secondary" onclick="location.href='device.html'">디바이스 보기</button>
+                            </div>
+                          </article>
+                        `;
+                      })
+                      .join("")
+                  : `<div class="empty">네트워크 상태가 없습니다.</div>`
+              }
+            </div>
+          </div>
+        `;
+        const board = document.getElementById("workflow-board");
+        if (board && _changed("workflow", html)) {
+          board.innerHTML = html;
+          const recommendPlanBtn = document.getElementById(
+            "workflow-recommend-plan",
+          );
+          const savePlanBtn = document.getElementById("workflow-save-plan");
+          const generateProposalBtn = document.getElementById(
+            "workflow-generate-proposal",
+          );
+          if (recommendPlanBtn)
+            recommendPlanBtn.onclick = handleWorkflowRecommendPlan;
+          if (savePlanBtn) savePlanBtn.onclick = handleWorkflowSavePlan;
+          if (generateProposalBtn)
+            generateProposalBtn.onclick = handleWorkflowGenerateProposal;
+        }
+        renderRecentFlows();
+      }
+
+      function sourceLabelForMission(mission) {
+        if (!mission || typeof mission !== "object") return "기타";
+        if (mission.event_id || mission.alert_id) return "이벤트 대응";
+        if (mission.operation_plan_id) return "명령 기반";
+        if (mission.source) return String(mission.source).replaceAll("_", " ");
+        return "기타";
+      }
+
+      function renderRecentFlows() {
+        const board = document.getElementById("flow-index");
+        if (!board) return;
+        const recentMissions = [...(appState.missions || [])]
+          .filter(Boolean)
+          .sort((a, b) =>
+            String(b.updated_at || b.completed_at || b.started_at || "").localeCompare(
+              String(a.updated_at || a.completed_at || a.started_at || ""),
+            ),
+          )
+          .slice(0, 4);
+        const html = recentMissions.length
+          ? recentMissions
+              .map((mission) => {
+                const missionId = safeText(mission.mission_id);
+                const source = sourceLabelForMission(mission);
+                const status = safeText(mission.status, "대기");
+                const flowTarget = mission.event_id || mission.alert_id || mission.operation_plan_id || mission.proposal_id || "-";
+                return `
+                  <article class="flow-index-card clickable" onclick="location.href='mission.html?id=${encodeURIComponent(missionId)}'">
+                    <h4>${escapeHtml(mission.title || mission.goal || missionId)}</h4>
+                    <div>${escapeHtml(mission.goal || mission.summary || "흐름 정보 없음")}</div>
+                    <div class="meta">
+                      ${statusPill(status)}
+                      <span>${escapeHtml(source)}</span>
+                      <span>${escapeHtml(flowTarget)}</span>
+                    </div>
+                    <div class="meta">
+                      <span>${escapeHtml(missionId)}</span>
+                      <span>${escapeHtml(formatCompactDate(mission.updated_at || mission.completed_at || mission.started_at || ""))}</span>
+                    </div>
+                    <div class="actions">
+                      <button class="secondary" onclick="event.stopPropagation(); location.href='mission.html?id=${encodeURIComponent(missionId)}'">미션 보기</button>
+                    </div>
+                  </article>
+                `;
+              })
+              .join("")
+          : `<div class="empty">최근 운영 흐름이 없습니다.</div>`;
+        if (_changed("flow_index", html)) {
+          board.innerHTML = html;
+        }
+      }
+
+      // 모달 함수들
+      function closeDetailModal() {
+        document.getElementById("detail-modal").style.display = "none";
+      }
+
+      function showDetailModal(title, data) {
+        const modal = document.getElementById("detail-modal");
+        const titleEl = document.getElementById("modal-title");
+        const bodyEl = document.getElementById("modal-body");
+
+        titleEl.textContent = title;
+        bodyEl.innerHTML = Object.entries(data)
+          .map(([k, v]) => {
+            let displayValue = v;
+            if (v === null || v === undefined) {
+              displayValue = "-";
+            } else if (typeof v === "object") {
+              displayValue = `<div class="json-value">${escapeHtml(JSON.stringify(v, null, 2))}</div>`;
+            } else {
+              displayValue = escapeHtml(String(v));
+            }
+            return `
+              <div class="kv-row">
+                <strong>${escapeHtml(k)}</strong>
+                <span>${displayValue}</span>
+              </div>
+            `;
+          })
+          .join("");
+        modal.style.display = "flex";
+      }
+
+      // 상세보기 함수들
+      function showDeviceRoleDetail(idx) {
+        const device = appState.devices[idx];
+        if (!device) return;
+        const roleMap = new Map(
+          (appState.device_roles || []).map((r) => [String(r.device_id), r]),
+        );
+        const role =
+          roleMap.get(String(device.id)) ||
+          roleMap.get(String(device.registry_id));
+        const data = {
+          ...device,
+          assigned_role: role ? role.role_name : "unassigned",
+          role_responsibility: role ? role.responsibility : "N/A",
+        };
+        showDetailModal(`Device: ${device.name || "Unknown"}`, data);
+      }
+
+      function showPlanDetail(idx) {
+        const plan = appState.operation_plans[idx];
+        if (!plan) return;
+        showDetailModal(`Plan: ${plan.name || "Unknown"}`, plan);
+      }
+
+      function showApprovalDetail(idx) {
+        const approval = appState.approvals[idx];
+        if (!approval) return;
+        showDetailModal(
+          `Approval: ${approval.approval_id || "Unknown"}`,
+          approval,
+        );
+      }
+
+      function showProposalDetail(idx) {
+        const proposal = appState.mission_proposals[idx];
+        if (!proposal) return;
+        showDetailModal(
+          `Proposal: ${proposal.title || proposal.proposal_id || "Unknown"}`,
+          proposal,
+        );
+      }
+
+      function showMissionDetail(idx) {
+        const mission = appState.missions[idx];
+        if (!mission) return;
+        showDetailModal(
+          `Mission: ${mission.title || mission.mission_id || "Unknown"}`,
+          mission,
+        );
+      }
+
+      function showSignalDetail(idx) {
+        const signalContainer = document.getElementById("signals");
+        const rows = signalContainer._signalRows || [];
+        const row = rows[idx];
+        if (!row) return;
+        showDetailModal(`${row.type}: ${row.title}`, row.data);
+      }
+
+      function showConnectivityDetail(idx) {
+        const device = appState.devices[idx];
+        if (!device) return;
+        const status =
+          device.connectivity_status ||
+          (device.connected ? "online" : "offline");
+        const data = {
+          ...device,
+          connectivity_status: status,
+        };
+        showDetailModal(`Device Status: ${device.name || "Unknown"}`, data);
+      }
+
+      function showPolicyDetail(idx) {
+        const policy = appState.policies[idx];
+        if (!policy) return;
+        showDetailModal(
+          `Policy: ${policy.policy_name || policy.policy_id || "Unknown"}`,
+          policy,
+        );
+      }
+
+      function renderStats(data) {
+        if (
+          !_changed("stats", {
+            devices: data.devices?.length,
+            plans: data.operation_plans?.length,
+            approvals: data.approvals,
+            missions: data.missions,
+            stats: data.stats,
+            warnings: data.__warnings,
+          })
+        )
+          return;
+        const stats = data.stats || {};
+        const warnings = data.__warnings || [];
+        const rows = [
+          ["디바이스", (data.devices || []).length],
+          ["운영 계획", (data.operation_plans || []).length],
+          [
+            "승인 대기",
+            (data.approvals || []).filter((x) => x.status === "pending").length,
+          ],
+          [
+            "실행 중 미션",
+            (data.missions || []).filter((x) => x.status === "running").length,
+          ],
+          ["완료 미션", stats.completed || 0],
+          ["실패 미션", stats.failed || 0],
+        ];
+        const warningHtml = warnings.length
+          ? `<div class="item" style="grid-column:1/-1;border-left-color:#f59e0b;background:rgba(245,158,11,0.08);margin-bottom:10px;"><strong>로드 오류</strong><div>${escapeHtml(warnings.join(" · "))}</div></div>`
+          : "";
+        document.getElementById("stats").innerHTML =
+          warningHtml +
+          rows
+            .map(
+              ([k, v]) =>
+                `<div class="stat"><div>${escapeHtml(k)}</div><b>${escapeHtml(v)}</b></div>`,
+            )
+            .join("");
+      }
+
+      function renderRoles(devices, roles) {
+        if (!_changed("roles", { devices, roles })) return;
+        const roleMap = new Map(
+          (roles || []).map((r) => [String(r.device_id), r]),
+        );
+        const html = (devices || [])
+          .map((device, idx) => {
+            const role =
+              roleMap.get(String(device.id)) ||
+              roleMap.get(String(device.registry_id));
+            return `
+            <div class="item clickable" onclick="showDeviceRoleDetail(${idx})">
+              <strong>${escapeHtml(safeText(device.name || "디바이스"))}</strong> ${statusPill(device.layer || "미정")}
+              <div class="meta">
+                <span>${escapeHtml(safeText(device.device_type || "미정"))}</span>
+                <span>${escapeHtml(safeText(role ? role.role_name : "미할당"))}</span>
+              </div>
+              <div>${escapeHtml(safeText(role ? role.responsibility : "역할 미할당"))}</div>
+              <div class="actions" onclick="event.stopPropagation()">
+                <button class="secondary" onclick="applyRole('${device.id}')">역할 승인 요청</button>
+              </div>
+            </div>`;
+          })
+          .join("");
+        if (html) document.getElementById("roles").innerHTML = html;
+      }
+
+      function renderDeviceConnectivity(devices) {
+        if (!_changed("connectivity", devices)) return;
+        const html = (devices || [])
+          .map((device, idx) => {
+            const status =
+              device.connectivity_status ||
+              (device.connected ? "online" : "offline");
+            const statusEmoji =
+              { online: "🟢", lost: "🟡", offline: "⚫" }[status] || "❓";
+            return `
+            <div class="item clickable" onclick="showConnectivityDetail(${idx})">
+              <strong>${escapeHtml(safeText(device.name || "디바이스"))}</strong> <span class="pill ${escapeHtml(status || "미정")}">${statusEmoji} ${escapeHtml(safeText(status || "미정").toUpperCase())}</span>
+              <div class="meta">
+                <span>Type: ${escapeHtml(safeText(device.device_type || "unknown"))}</span>
+                <span>Layer: ${escapeHtml(safeText(device.layer || "unknown"))}</span>
+                <span>Last Seen: ${device.last_seen_at ? escapeHtml(new Date(device.last_seen_at).toLocaleString("ko-KR")) : "Never"}</span>
+              </div>
+              ${
+                device.connected === false && status === "lost"
+                  ? `
+                <div style="padding:8px;background:rgba(251,191,36,0.1);border-radius:6px;margin-top:6px;color:#c85e00;font-size:12px;pointer-events:none">
+                  ⚠️ Device lost connection and may have pending tasks
+                </div>
+              `
+              : ""
+            }
+            </div>`;
+          })
+          .join("");
+        document.getElementById("device-connectivity").innerHTML = html
+          ? html
+          : `<div class="empty">네트워크 상태가 없습니다.</div>`;
+      }
+
+      function renderPolicies(policies) {
+        if (!_changed("policies", policies)) return;
+        const html = (policies || [])
+          .map(
+            (policy, idx) => `
+          <div class="item clickable" onclick="showPolicyDetail(${idx})">
+            <strong>${escapeHtml(safeText(policy.policy_name || policy.name || policy.policy_id))}</strong> <span class="pill">${policy.enabled ? "ENABLED" : "DISABLED"}</span>
+            <div>${escapeHtml(safeText(policy.description || "No description"))}</div>
+            <div class="meta">
+              <span>ID: ${escapeHtml(safeText(policy.policy_id || policy.id))}</span>
+              <span>조건: ${escapeHtml(safeText(JSON.stringify(policy.trigger_condition || policy.trigger || {}), "{}"))}</span>
+            </div>
+            <div class="actions" onclick="event.stopPropagation()">
+              <button class="secondary" onclick="togglePolicy('${policy.policy_id || policy.id}')">${policy.enabled ? "비활성화" : "활성화"}</button>
+            </div>
+          </div>
+        `,
+          )
+          .join("");
+        if (html) document.getElementById("policies").innerHTML = html;
+      }
+
+      function renderPlans(plans) {
+        if (!_changed("plans", plans)) return;
+        const html = (plans || [])
+          .map(
+            (plan, idx) => `
+          <div class="item clickable" onclick="showPlanDetail(${idx})">
+            <strong>${escapeHtml(safeText(plan.name || "계획"))}</strong> ${statusPill(plan.status || "미정")}
+            <div>${escapeHtml(safeText(plan.summary || plan.goal || plan.name || "설명 없음"))}</div>
+            <div class="meta">
+              <span>${escapeHtml(safeText(plan.operation_plan_id || "미정"))}</span>
+              <span>${escapeHtml((plan.mission_templates || []).length)} 미션 템플릿</span>
+            </div>
+            ${plan.status !== "active" ? `<div class="actions" onclick="event.stopPropagation()"><button class="secondary" onclick="activatePlan('${plan.operation_plan_id}')">활성화</button></div>` : ""}
+          </div>
+        `,
+          )
+          .join("");
+        if (html) document.getElementById("plans").innerHTML = html;
+        const select = document.getElementById("proposal-plan");
+        select.innerHTML =
+          `<option value="">계획 없음</option>` +
+          (plans || [])
+            .map(
+              (plan) =>
+                `<option value="${escapeHtml(safeText(plan.operation_plan_id, ""))}">${escapeHtml(safeText(plan.name || "Plan"))}</option>`,
+            )
+            .join("");
+      }
+
+      function renderApprovals(approvals) {
+        if (!_changed("approvals", approvals)) return;
+        const html = (approvals || [])
+          .map(
+            (item, idx) => `
+          <div class="item clickable" onclick="showApprovalDetail(${idx})">
+            <strong>승인</strong> ${statusPill(item.status || "미정")}
+            <div>${escapeHtml(safeText(item.summary || item.target_type || "승인 요청"))}</div>
+            <div class="meta">
+              <span>${escapeHtml(safeText(item.approval_id || "미정"))}</span>
+              <span>${escapeHtml(safeText(item.target_type || "대상"))}:${escapeHtml(safeText(item.target_id || "미정"))}</span>
+            </div>
+            ${
+              item.status === "pending"
+                ? `
+              <div class="actions" onclick="event.stopPropagation()">
+                <button onclick="decideApproval('${item.approval_id}', true)">승인</button>
+                <button class="danger" onclick="decideApproval('${item.approval_id}', false)">거절</button>
+              </div>`
+                : ""
+            }
+          </div>
+        `,
+          )
+          .join("");
+        if (html) document.getElementById("approvals").innerHTML = html;
+      }
+
+      function renderProposals(proposals) {
+        if (!_changed("proposals", proposals)) return;
+        const html = (proposals || [])
+          .map(
+            (item, idx) => `
+          <div class="item clickable" onclick="showProposalDetail(${idx})">
+            <strong>${escapeHtml(safeText(item.title || item.goal || "제안"))}</strong> ${statusPill(item.status || "미정")}
+            <div>${escapeHtml(safeText(item.summary || item.goal || item.title || "설명 없음"))}</div>
+            <div class="meta">
+              <span>${escapeHtml(safeText(item.proposal_id || "미정"))}</span>
+              <span>${escapeHtml(safeText(item.mission_type || "미정"))}</span>
+              <span>${escapeHtml((item.steps || []).length)} 단계</span>
+            </div>
+          </div>
+        `,
+          )
+          .join("");
+        if (html) document.getElementById("proposals").innerHTML = html;
+      }
+
+      function renderMissions(missions) {
+        if (!_changed("missions", missions)) return;
+        const html = (missions || [])
+          .map(
+            (item, idx) => `
+          <div class="item clickable" onclick="location.href='mission.html?id=${encodeURIComponent(item.mission_id || "")}'">
+            <strong><a href="mission.html?id=${encodeURIComponent(item.mission_id || "")}" onclick="event.stopPropagation()">${escapeHtml(safeText(item.title || item.goal || "미션"))}</a></strong> ${statusPill(item.status || "미정")}
+            <div>${escapeHtml(safeText(item.goal || item.summary || item.title || "설명 없음"))}</div>
+            <div class="meta">
+              <span>${escapeHtml(safeText(item.mission_id || "미정"))}</span>
+              <span>${escapeHtml(safeText(item.mission_type || "미정"))}</span>
+              <span>${escapeHtml((item.steps || []).length)} 단계</span>
+              <span>${escapeHtml((item.device_execution_results || []).length)} 실행 결과</span>
+            </div>
+            <div class="actions" onclick="event.stopPropagation()">
+              <button class="secondary" onclick="location.href='mission.html?id=${encodeURIComponent(item.mission_id || "")}'">상세 보기</button>
+            </div>
+          </div>
+        `,
+          )
+          .join("");
+        const empty = `<div class="empty">최근 미션이 없습니다.</div>`;
+        const missionQueue = document.getElementById("mission-queue");
+        const missionsNode = document.getElementById("missions");
+        if (missionQueue) missionQueue.innerHTML = html || empty;
+        if (missionsNode) missionsNode.innerHTML = html || empty;
+      }
+
+      function renderSignals(events, alerts, insights) {
+        if (!_changed("signals", { events, alerts, insights })) return;
+        const rows = [
+          ...(insights || [])
+            .slice(-3)
+            .reverse()
+            .map((i, idx) => ({
+              type: "인사이트",
+              title: i.summary || i.reason_summary || "인사이트",
+              body: i.reason_summary || i.summary || "상세 정보 없음",
+              status: i.severity || "INFO",
+              data: i,
+              key: `insight-${idx}`,
+            })),
+          ...(alerts || [])
+            .slice(-3)
+            .reverse()
+            .map((a, idx) => ({
+              type: "알림",
+              title: a.alert_type || a.message || "알림",
+              body: a.message || a.alert_type || "상세 정보 없음",
+              status: a.severity || "INFO",
+              data: a,
+              key: `alert-${idx}`,
+            })),
+          ...(events || [])
+            .slice(-3)
+            .reverse()
+            .map((e, idx) => ({
+              type: "이벤트",
+              title: e.event_type || e.message || "이벤트",
+              body: e.message || e.event_type || "상세 정보 없음",
+              status: e.severity || "INFO",
+              data: e,
+              key: `event-${idx}`,
+            })),
+        ];
+        const html = rows
+          .map(
+            (row, idx) => `
+          <div class="item clickable" onclick="showSignalDetail(${idx})">
+            <strong>${escapeHtml(safeText(row.type || "신호"))}</strong> ${statusPill(row.status || "미정")}
+            <div>${escapeHtml(safeText(row.title || "제목 없음"))}</div>
+            <div class="meta"><span>${escapeHtml(safeText(row.body || "상세 정보 없음"))}</span></div>
+          </div>`,
+          )
+          .join("");
+        if (html) {
+          document.getElementById("signals").innerHTML = html;
+          // 신호 행 데이터 저장
+          document.getElementById("signals")._signalRows = rows;
+        }
+      }
+
+      function settledValue(settledResult, fallback) {
+        return settledResult && settledResult.status === "fulfilled"
+          ? settledResult.value
+          : fallback;
+      }
+
+      async function loadOverview() {
+        try {
+          const settled = await Promise.allSettled([
+            j(`${SYSTEM}/overview`),
+            j(`${SYSTEM}/state`),
+            j(`${REGISTRY}/missions?limit=100&offset=0`),
+            j(`${REGISTRY}/missions/stats`),
+            j(`${REGISTRY}/events`),
+            j(`${REGISTRY}/alerts`),
+            j(`${REGISTRY}/insights`),
+            j(`${REGISTRY}/policies`),
+          ]);
+          const warnings = [];
+          const overview =
+            settled[0].status === "fulfilled" ? settled[0].value : {};
+          const systemState =
+            settled[1].status === "fulfilled" ? settled[1].value : {};
+          const missions =
+            settled[2].status === "fulfilled" ? settled[2].value : [];
+          const stats =
+            settled[3].status === "fulfilled" ? settled[3].value : {};
+          const events =
+            settled[4].status === "fulfilled" ? settled[4].value : [];
+          const alerts =
+            settled[5].status === "fulfilled" ? settled[5].value : [];
+          const insights =
+            settled[6].status === "fulfilled" ? settled[6].value : [];
+          const policies =
+            settled[7].status === "fulfilled" ? settled[7].value : [];
+          const anySuccess = settled.some(
+            (result) => result.status === "fulfilled",
+          );
+          settled.forEach((result, idx) => {
+            if (result.status === "rejected") {
+              warnings.push(
+                [
+                  "overview",
+                  "system",
+                  "missions",
+                  "stats",
+                  "events",
+                  "alerts",
+                  "insights",
+                  "policies",
+                ][idx],
+              );
+            }
+          });
+          // 전역 상태에 저장 (실패한 항목은 기존 상태를 유지)
+          if (settled[0].status === "fulfilled") {
+            appState.devices = overview.devices || [];
+            appState.device_roles = overview.device_roles || [];
+            appState.operation_plans = overview.operation_plans || [];
+            appState.approvals = overview.approvals || [];
+            appState.mission_proposals = overview.mission_proposals || [];
+          }
+          appState.system_state = settledValue(settled[1], appState.system_state);
+          appState.missions = settledValue(settled[2], appState.missions);
+          if (appState.missions.length === 0 && overview.missions) {
+            appState.missions = overview.missions || [];
+          }
+          appState.insights = settledValue(settled[6], appState.insights);
+          appState.events = settledValue(settled[4], appState.events);
+          appState.alerts = settledValue(settled[5], appState.alerts);
+          appState.policies = settledValue(settled[7], appState.policies);
+          appState.stats = settledValue(settled[3], appState.stats);
+          if (anySuccess) {
+            overviewHasLoaded = true;
+            dataLoadedOnce = true;
+
+            // UI 렌더링
+            renderWorkflowBoard();
+            renderCommandInsights(appState.system_state);
+            renderStats({ ...appState, __warnings: warnings });
+            renderRoles(appState.devices, appState.device_roles);
+            renderPlans(appState.operation_plans);
+            renderApprovals(appState.approvals);
+            renderProposals(appState.mission_proposals);
+            renderMissions(appState.missions);
+            renderSignals(appState.events, appState.alerts, appState.insights);
+            renderDeviceConnectivity(appState.devices);
+            renderPolicies(appState.policies);
+          } else if (!overviewHasLoaded) {
+            setOverviewLoadingState();
+          }
+        } catch (e) {
+          console.error("[loadOverview] Error:", e);
+          if (!overviewHasLoaded) {
+            setOverviewLoadingState();
+          }
+        }
+      }
+
+      async function applyRole(deviceId) {
+        const rec = await j(`${SYSTEM}/device-roles/recommend`, {
+          method: "POST",
+          body: JSON.stringify({
+            goal: document.getElementById("role-goal").value,
+          }),
+        });
+        const match = (rec.recommendations || []).find(
+          (x) => String(x.device_id) === String(deviceId),
+        );
+        if (!match) return;
+        await j(`${SYSTEM}/device-roles/apply`, {
+          method: "POST",
+          body: JSON.stringify({ ...match, decided_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      async function decideApproval(approvalId, approved) {
+        await j(`${SYSTEM}/approvals/${approvalId}/decision`, {
+          method: "POST",
+          body: JSON.stringify({ approved, decided_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      async function activatePlan(operationPlanId) {
+        await j(`${SYSTEM}/operation-plans/${operationPlanId}/activate`, {
+          method: "POST",
+          body: JSON.stringify({ activated_by: "user" }),
+        });
+        await loadOverview();
+      }
+
+      document.getElementById("recommend-roles").onclick = async () => {
+        const goal = document.getElementById("role-goal").value;
+        const rec = await j(`${SYSTEM}/device-roles/recommend`, {
+          method: "POST",
+          body: JSON.stringify({ goal }),
+        });
+        const list = rec.recommendations || [];
+        if (!list.length) {
+          document.getElementById("roles").innerHTML = "";
+          return;
+        }
+        document.getElementById("roles").innerHTML = list
+          .map(
+            (item) => `
+          <div class="item clickable" onclick="showRecommendedRoleDetail(this)" data-device-id="${escapeHtml(item.device_id)}" data-role-name="${escapeHtml(item.role_name)}">
+            <strong>${escapeHtml(safeText(item.device_name))}</strong> ${statusPill(safeText(item.role_name, "미정"))}
+            <div>${escapeHtml(safeText(item.responsibility, "책임 정보 없음"))}</div>
+            <div class="meta"><span>${escapeHtml(safeText(item.device_id))}</span><span>${escapeHtml(safeText(item.device_type))}</span></div>
+            <div class="actions" onclick="event.stopPropagation()">
+              <button class="secondary" onclick="applyRoleFromRecommendation('${escapeHtml(item.device_id)}', '${escapeHtml(item.role_name)}')">이 역할 적용</button>
+            </div>
+          </div>`,
+          )
+          .join("");
+      };
+
+      document.getElementById("recommend-plan").onclick = async () => {
+        const name = document.getElementById("plan-name").value.trim();
+        const goal = document.getElementById("plan-goal").value.trim();
+        if (!name || !goal) {
+          alert("계획 이름과 목표를 입력해주세요");
+          return;
+        }
+        try {
+          const body = {
+            name,
+            goal,
+            location: parseLocation(
+              document.getElementById("plan-location").value,
+            ),
+          };
+          const plan = await j(`${SYSTEM}/operation-plans/recommend`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+          if (!plan || !plan.name) {
+            document.getElementById("plans").innerHTML = "";
+            return;
+          }
+          document.getElementById("plans").innerHTML =
+            `<div class="item clickable" onclick="showPlanRecommendationDetail(this)" data-plan-id="${escapeHtml(plan.operation_plan_id || "")}">
+              <strong>${escapeHtml(safeText(plan.name))}</strong> ${statusPill(safeText(plan.status, "초안"))}
+              <div>${escapeHtml(safeText(plan.summary || plan.goal))}</div>
+              <div class="meta"><span>${escapeHtml(safeText(plan.operation_plan_id, "임시"))}</span></div>
+              <div class="actions" onclick="event.stopPropagation()">
+                <button class="secondary" onclick="savePlanFromRecommendation()">이 계획 저장</button>
+              </div>
+            </div>`;
+        } catch (e) {
+          alert("계획 추천 실패: " + e.message);
+        }
+      };
+
+      document.getElementById("save-plan").onclick = async () => {
+        const name = document.getElementById("plan-name").value.trim();
+        const goal = document.getElementById("plan-goal").value.trim();
+        if (!name || !goal) {
+          alert("계획 이름과 목표를 입력해주세요");
+          return;
+        }
+        const body = {
+          name,
+          goal,
+          location: parseLocation(
+            document.getElementById("plan-location").value,
+          ),
+        };
+        try {
+          await j(`${SYSTEM}/operation-plans`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+          document.getElementById("plan-name").value = "";
+          document.getElementById("plan-goal").value = "";
+          document.getElementById("plan-location").value = "";
+          document.getElementById("plans").innerHTML = "";
+          alert("계획이 저장되었습니다");
+          await loadOverview();
+        } catch (e) {
+          alert("계획 저장 실패: " + e.message);
+        }
+      };
+
+      document.getElementById("generate-proposal").onclick = async () => {
+        const goal = document.getElementById("proposal-goal").value.trim();
+        if (!goal) {
+          alert("제안 목표를 입력해주세요");
+          return;
+        }
+        const planId = document.getElementById("proposal-plan").value;
+        const body = {
+          goal,
+          operation_plan_id: planId || null,
+        };
+        try {
+          await j(`${SYSTEM}/mission-proposals/generate`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+          document.getElementById("proposal-goal").value = "";
+          document.getElementById("proposal-plan").value = "";
+          alert("미션 제안이 생성되었습니다");
+          await loadOverview();
+        } catch (e) {
+          alert("제안 생성 실패: " + e.message);
+        }
+      };
+
+      async function togglePolicy(policyId) {
+        try {
+          const policies = await j(`${REGISTRY}/policies`);
+          const policy = policies.find(
+            (p) => p.policy_id === policyId || p.id === policyId,
+          );
+          if (!policy) return;
+          await j(`${REGISTRY}/policies/${policyId}`, {
+            method: "PUT",
+            headers: INTERNAL_HEADERS,
+            body: JSON.stringify({ ...policy, enabled: !policy.enabled }),
+          });
+          await loadOverview();
+        } catch (e) {
+          alert("Failed to toggle policy: " + e.message);
+        }
+      }
+
+      document.getElementById("create-policy").onclick = async () => {
+        const name = document.getElementById("policy-name").value;
+        const trigger = document.getElementById("policy-trigger").value;
+        if (!name || !trigger) {
+          alert("Please fill in all fields");
+          return;
+        }
+        try {
+          const triggerCondition = (() => {
+            try {
+              return JSON.parse(trigger);
+            } catch {
+              const pairs = trigger
+                .split(",")
+                .map((chunk) => chunk.trim())
+                .filter(Boolean);
+              const condition = {};
+              for (const pair of pairs) {
+                const [key, ...rest] = pair.split("=");
+                if (!key || rest.length === 0) continue;
+                condition[key.trim()] = rest.join("=").trim();
+              }
+              return Object.keys(condition).length
+                ? condition
+                : { event_type: trigger };
+            }
+          })();
+          await j(`${REGISTRY}/policies`, {
+            method: "POST",
+            headers: INTERNAL_HEADERS,
+            body: JSON.stringify({
+              policy_id: name
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "_"),
+              policy_name: name,
+              name,
+              trigger_condition: triggerCondition,
+              enabled: true,
+              description: `Auto-created policy: ${name}`,
+            }),
+          });
+          document.getElementById("policy-name").value = "";
+          document.getElementById("policy-trigger").value = "";
+          await loadOverview();
+        } catch (e) {
+          alert("Failed to create policy: " + e.message);
+        }
+      };
+
+      document.getElementById("refresh-policies").onclick = loadOverview;
+      document.getElementById("refresh-overview-1").onclick = loadOverview;
+      document.getElementById("refresh-overview-2").onclick = loadOverview;
+      document.querySelectorAll(".ops-tab").forEach((button) => {
+        button.addEventListener("click", () =>
+          setOpsDomain(button.dataset.domain || "workflow"),
+        );
+      });
+      [
+        "workflow-goal",
+        "workflow-plan-name",
+        "workflow-plan-goal",
+        "workflow-plan-location",
+      ].forEach((id) => {
+        const node = document.getElementById(id);
+        if (node) node.addEventListener("input", renderWorkflowBoard);
+      });
+
+      // 추천된 역할 상세보기
+      window.showRecommendedRoleDetail = function (elem) {
+        const deviceId = elem.dataset.deviceId;
+        const roleName = elem.dataset.roleName;
+        const device = appState.devices.find(
+          (d) =>
+            String(d.id) === String(deviceId) ||
+            String(d.registry_id) === String(deviceId),
+        );
+        if (!device) return;
+        showDetailModal(`${device.name || "디바이스"} - 역할 설정`, {
+          device_id: device.id,
+          device_name: device.name,
+          device_type: device.device_type,
+          추천_역할: roleName,
+          layer: device.layer,
+        });
+      };
+
+      // 추천 역할 적용
+      window.applyRoleFromRecommendation = async function (deviceId, roleName) {
+        try {
+          await j(`${SYSTEM}/device-roles/apply`, {
+            method: "POST",
+            body: JSON.stringify({
+              device_id: deviceId,
+              role_name: roleName,
+              decided_by: "user",
+            }),
+          });
+          closeDetailModal();
+          alert("역할 할당이 완료되었습니다");
+          await loadOverview();
+        } catch (e) {
+          alert("역할 할당 실패: " + e.message);
+        }
+      };
+
+      // 계획 추천 상세보기
+      window.showPlanRecommendationDetail = function (elem) {
+        const planId = elem.dataset.planId;
+        const name = document.getElementById("plan-name").value;
+        const goal = document.getElementById("plan-goal").value;
+        showDetailModal("운영 계획 추천", {
+          계획_이름: name,
+          목표: goal,
+          추천_id: planId || "임시",
+        });
+      };
+
+      // 추천된 계획 저장
+      window.savePlanFromRecommendation = async function () {
+        const name = document.getElementById("plan-name").value.trim();
+        const goal = document.getElementById("plan-goal").value.trim();
+        if (!name || !goal) {
+          alert("계획 이름과 목표를 입력해주세요");
+          return;
+        }
+        try {
+          await j(`${SYSTEM}/operation-plans`, {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              goal,
+              location: parseLocation(
+                document.getElementById("plan-location").value,
+              ),
+            }),
+          });
+          document.getElementById("plan-name").value = "";
+          document.getElementById("plan-goal").value = "";
+          document.getElementById("plan-location").value = "";
+          document.getElementById("plans").innerHTML = "";
+          closeDetailModal();
+          alert("계획이 저장되었습니다");
+          await loadOverview();
+        } catch (e) {
+          alert("계획 저장 실패: " + e.message);
+        }
+      };
+
+      loadOverview();
+
+      // WebSocket 구독: 실시간 데이터 업데이트
+      function clearChannelTimer(channel) {
+        const entry = socketState[channel];
+        if (!entry || !entry.timer) return;
+        clearTimeout(entry.timer);
+        entry.timer = null;
+      }
+
+      function scheduleChannelReconnect(channel) {
+        const entry = socketState[channel] || (socketState[channel] = {});
+        if (entry.timer) return;
+        entry.timer = setTimeout(() => {
+          entry.timer = null;
+          subscribeToMothChannel(channel);
+        }, 5000);
+      }
+
+      function cleanupMothChannels() {
+        Object.entries(socketState).forEach(([channel, entry]) => {
+          if (entry?.timer) {
+            clearTimeout(entry.timer);
+            entry.timer = null;
+          }
+          if (entry?.ws) {
+            try {
+              entry.ws.close();
+            } catch (e) {}
+            entry.ws = null;
+          }
+          delete socketState[channel];
+        });
+      }
+
+      function subscribeToMothChannel(channel) {
+        const wsUrl = `${MOTH_BASE}/pang/ws/meb?channel=instant&name=${channel}&source=ops-client&track=ops-client`;
+        try {
+          const ws = new WebSocket(wsUrl);
+          const entry = socketState[channel] || (socketState[channel] = {});
+          entry.ws = ws;
+          clearChannelTimer(channel);
 
           ws.onopen = () => {
-            console.log("✅ WebSocket connected");
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 연결됨";
-            document.getElementById("ws-status").className = "ws-status";
-            clearTimeout(wsReconnectTimer);
+            ws.send(
+              JSON.stringify({
+                type: "subscribe",
+                channel: channel,
+                channel_type: "meb",
+              }),
+            );
+            console.log(`[Moth] Subscribed to ${channel}`);
           };
 
-          ws.onmessage = async (event) => {
+          ws.onmessage = async (e) => {
             try {
-              const msg = JSON.parse(event.data);
-              console.log("📨 WebSocket message:", msg.type);
+              const rawText =
+                typeof e.data === "string" ? e.data : await e.data.text();
+              if (!rawText || rawText.trim() === "ping") return;
+              const raw = JSON.parse(rawText);
+              const payload = raw.payload || raw.data || raw;
+              if (!payload) return;
 
-              if (msg.type === "initial") {
-                data.events = (msg.events || []).reverse();
-                data.alerts = (msg.alerts || []).reverse();
-                data.responses = (msg.responses || []).reverse();
-                data.missions = (msg.missions || []).reverse();
-                console.log(`📦 Initial data: ${data.missions.length} missions`);
-                updateUI();
-              } else if (msg.type === "mission_update" && msg.data) {
-                // Handle real-time mission updates
-                const m = msg.data.mission;
-                const idx = data.missions.findIndex(
-                  (x) => x.mission_id === m.mission_id,
+              // 첫 데이터 수신 시 플래그 설정
+              if (!overviewHasLoaded) return;
+
+              // 채널별로 appState에 merge하고 UI 업데이트
+              if (channel === "overview") {
+                // overview: 모든 필드가 포함될 것으로 예상
+                if (payload.devices) appState.devices = payload.devices;
+                if (payload.device_roles !== undefined)
+                  appState.device_roles = payload.device_roles;
+                if (payload.operation_plans)
+                  appState.operation_plans = payload.operation_plans;
+                if (payload.missions) appState.missions = payload.missions;
+                if (payload.approvals) appState.approvals = payload.approvals;
+                if (payload.mission_proposals)
+                  appState.mission_proposals = payload.mission_proposals;
+                if (payload.insights) appState.insights = payload.insights;
+                // UI 업데이트는 필요한 부분만
+                renderWorkflowBoard();
+                renderCommandInsights(appState.system_state);
+                renderRoles(appState.devices, appState.device_roles);
+                renderDeviceConnectivity(appState.devices);
+              } else if (channel === "missions") {
+                appState.missions = mergeCollection(
+                  appState.missions,
+                  payload,
+                  ["mission_id", "id"],
                 );
-                console.log(`🚀 Mission update: ${m.mission_id} → ${m.status}`);
-                if (idx >= 0) {
-                  data.missions[idx] = m;
-                  console.log(`  Updated at index ${idx}`);
-                } else {
-                  data.missions.unshift(m);
-                  console.log(`  Added as new mission`);
-                }
-                updateUI();
-              } else if (msg.type && (msg.type.includes('event') || msg.type.includes('alert'))) {
-                // Other event/alert updates
-                await loadData();
+                renderWorkflowBoard();
+                renderMissions(appState.missions);
+              } else if (channel === "mission_proposals") {
+                appState.mission_proposals = mergeCollection(
+                  appState.mission_proposals,
+                  payload,
+                  ["proposal_id", "id"],
+                );
+                renderWorkflowBoard();
+                renderProposals(appState.mission_proposals);
+              } else if (channel === "approvals") {
+                appState.approvals = mergeCollection(
+                  appState.approvals,
+                  payload,
+                  ["approval_id", "id"],
+                );
+                renderWorkflowBoard();
+                renderApprovals(appState.approvals);
+              } else if (channel === "events") {
+                appState.events = mergeCollection(
+                  appState.events,
+                  payload,
+                  ["event_id", "id"],
+                );
+                renderWorkflowBoard();
+              } else if (channel === "alerts") {
+                appState.alerts = mergeCollection(
+                  appState.alerts,
+                  payload,
+                  ["alert_id", "id"],
+                );
+                renderWorkflowBoard();
+              } else if (channel === "insights") {
+                appState.insights = mergeCollection(
+                  appState.insights,
+                  payload,
+                  ["insight_id", "id"],
+                );
+                renderWorkflowBoard();
+              } else if (channel === "policies") {
+                appState.policies = mergeCollection(
+                  appState.policies,
+                  payload,
+                  ["policy_id", "id"],
+                );
+                renderPolicies(appState.policies);
               }
-            } catch (e) {
-              console.error("❌ WebSocket message error:", e);
+              renderCommandInsights(appState.system_state);
+
+              // signals 업데이트 (events, alerts, insights 모두 필요)
+              if (
+                channel === "events" ||
+                channel === "alerts" ||
+                channel === "insights"
+              ) {
+                renderSignals(
+                  appState.events,
+                  appState.alerts,
+                  appState.insights,
+                );
+              }
+            } catch (err) {
+              console.debug(`[Moth] ${channel} parse error:`, err);
             }
           };
 
-          ws.onerror = (error) => {
-            console.error("❌ WebSocket error:", error);
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 오류";
-            document.getElementById("ws-status").className =
-              "ws-status disconnected";
+          ws.onerror = () => {
+            console.warn(`[Moth] ${channel} connection error`);
+            if (socketState[channel]?.ws === ws)
+              scheduleChannelReconnect(channel);
           };
 
           ws.onclose = () => {
-            console.log("⚠️ WebSocket disconnected");
-            document.getElementById("ws-status").textContent =
-              "WebSocket: 연결끊김";
-            document.getElementById("ws-status").className =
-              "ws-status disconnected";
-            // Attempt reconnection
-            wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+            if (socketState[channel]?.ws === ws)
+              scheduleChannelReconnect(channel);
           };
-        } catch (e) {
-          console.error("Failed to connect WebSocket:", e);
-          wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+        } catch (err) {
+          console.warn(`[Moth] Failed to subscribe ${channel}:`, err);
+          scheduleChannelReconnect(channel);
         }
       }
 
-      function updateUI() {
-        const inProgress = data.missions.filter(
-          (m) => m.status === "in_progress",
-        ).length;
-        const completed = data.missions.filter(
-          (m) => m.status === "completed",
-        ).length;
-        const failed = data.missions.filter(
-          (m) => m.status === "failed",
-        ).length;
+      // 모든 채널 구독
+      [
+        "overview",
+        "missions",
+        "approvals",
+        "mission_proposals",
+        "events",
+        "alerts",
+        "insights",
+        "policies",
+      ].forEach(subscribeToMothChannel);
+      window.addEventListener("beforeunload", cleanupMothChannels);
 
-        document.getElementById("st-events").textContent = data.events.length;
-        document.getElementById("ev-count").textContent = data.events.length;
-        document.getElementById("st-alerts").textContent = data.alerts.length;
-        document.getElementById("al-count").textContent = data.alerts.length;
-        document.getElementById("st-missions").textContent =
-          data.missions.length;
-        document.getElementById("ms-count").textContent = data.missions.length;
-        document.getElementById("st-in-progress").textContent = inProgress;
-        document.getElementById("st-completed").textContent = completed;
-        document.getElementById("st-failed").textContent = failed;
+      // 초기 상태는 1회 REST로 채우고, 이후 갱신은 WebSocket과 사용자 액션으로만 처리
+      setOverviewLoadingState();
+      setOpsDomain("workflow");
 
-        renderEvents();
-        renderAlerts();
-        renderMissions();
-      }
-
-      // ======================== Health & Data Loading ========================
-
-      async function checkHealth() {
-        const checks = {
-          "svc-registry": R + "/health",
-          "svc-system": "http://127.0.0.1:9116/health",
-          "svc-ship": "http://127.0.0.1:9115/health",
-          "svc-auv": "http://127.0.0.1:9112/health",
-          "svc-rov": "http://127.0.0.1:9113/health",
-          "svc-usv": "http://127.0.0.1:9111/health",
-        };
-        for (const [id, url] of Object.entries(checks)) {
-          try {
-            const r = await fetch(url, { signal: AbortSignal.timeout(1000) });
-            document.getElementById(id).className = r.ok
-              ? "pill online"
-              : "pill offline";
-          } catch {
-            document.getElementById(id).className = "pill offline";
-          }
-        }
-      }
-
-      async function loadData() {
-        try {
-          const [events, alerts, responses, missions] = await Promise.all([
-            fetch(R + "/events")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Events error:", e);
-                return [];
-              }),
-            fetch(R + "/alerts")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Alerts error:", e);
-                return [];
-              }),
-            fetch(R + "/responses")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Responses error:", e);
-                return [];
-              }),
-            fetch(R + "/missions")
-              .then((r) => r.json())
-              .catch((e) => {
-                console.error("Missions error:", e);
-                return [];
-              }),
-          ]);
-
-          data.events = (events || []).reverse();
-          data.alerts = (alerts || []).reverse();
-          data.responses = (responses || []).reverse();
-          data.missions = (missions || []).reverse();
-
-          updateUI();
-          await checkHealth();
-        } catch (e) {
-          console.error("Load failed:", e);
-        }
-      }
-
-      function getStatusBadge(status) {
-        const badges = {
-          registered: "badge-pending",
-          processing: "badge-inprogress",
-          completed: "badge-completed",
-          failed: "badge-failed",
-          pending: "badge-pending",
-          in_progress: "badge-inprogress",
-          CRITICAL: "badge-critical",
-          WARNING: "badge-warning",
-        };
-        const label = {
-          registered: "⏳ 등록됨",
-          processing: "▶️ 처리중",
-          completed: "✅ 대응완료",
-          failed: "❌ 실패",
-          pending: "⏳ 대기",
-          in_progress: "▶️ 진행",
-          CRITICAL: "🔴 심각",
-          WARNING: "🟡 경고",
-        };
-        return `<span class="badge ${badges[status] || ""}">${label[status] || status}</span>`;
-      }
-
-      function renderEvents() {
-        const el = document.getElementById("ev-list");
-        if (!data.events.length) {
-          el.innerHTML = '<div class="empty">이벤트 없음</div>';
-          return;
-        }
-        el.innerHTML = data.events
-          .slice(0, 15)
-          .map((e) => {
-            const meta = e.metadata || {};
-            const raw = meta.raw_event || {};
-            return (
-              '<div class="card" onclick="event.stopPropagation();showEvent(\'' +
-              e.event_id +
-              "')\">" +
-              '<div class="card-title">' +
-              getStatusBadge(e.severity) +
-              " " +
-              e.event_type +
-              "</div>" +
-              '<div class="card-meta">신뢰도: ' +
-              ((raw.confidence || 0) * 100).toFixed(0) +
-              "% | " +
-              new Date(e.created_at).toLocaleTimeString("ko-KR") +
-              "</div>" +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function renderAlerts() {
-        const el = document.getElementById("al-list");
-        if (!data.alerts.length) {
-          el.innerHTML = '<div class="empty">경보 없음</div>';
-          return;
-        }
-        el.innerHTML = data.alerts
-          .slice(0, 15)
-          .map((a) => {
-            const relatedResponse = data.responses.find(
-              (r) => r.alert_id === a.alert_id,
-            );
-            const relatedMission = relatedResponse
-              ? data.missions.find(
-                  (m) => m.response_id === relatedResponse.response_id,
-                )
-              : null;
-            return (
-              '<div class="card" onclick="event.stopPropagation();showAlert(\'' +
-              a.alert_id +
-              "')\">" +
-              '<div class="card-title">' +
-              getStatusBadge(a.status) +
-              " " +
-              getStatusBadge(a.severity) +
-              " " +
-              a.alert_type +
-              "</div>" +
-              '<div class="card-meta">' +
-              (relatedMission ? "🚀 " + relatedMission.status : "⏳ 응답대기") +
-              " | " +
-              new Date(a.created_at).toLocaleTimeString("ko-KR") +
-              "</div>" +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function renderMissions() {
-        const el = document.getElementById("ms-list");
-        if (!data.missions.length) {
-          el.innerHTML = '<div class="empty">미션 없음</div>';
-          return;
-        }
-        el.innerHTML = data.missions
-          .slice(0, 20)
-          .map((m) => {
-            const steps = m.step_states || [];
-            const completedSteps = steps.filter(
-              (s) => s.status === "completed",
-            ).length;
-            const progress =
-              steps.length > 0
-                ? Math.round((completedSteps / steps.length) * 100)
-                : 0;
-            const startedTime = m.started_at
-              ? new Date(m.started_at).toLocaleTimeString("ko-KR")
-              : "-";
-
-            return (
-              '<div class="card" onclick="event.stopPropagation();location.href=\'mission.html?id=' +
-              m.mission_id +
-              '\'">' +
-              '<div class="card-title">' +
-              getStatusBadge(m.status) +
-              " " +
-              m.mission_id.substring(0, 16) +
-              "…</div>" +
-              '<div class="card-meta">' +
-              steps.length +
-              "단계 | " +
-              completedSteps +
-              "완료 | " +
-              startedTime +
-              "</div>" +
-              '<div class="progress-bar"><div class="progress-fill" style="width: ' +
-              progress +
-              '%"></div></div>' +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function fmtCoord(v) { return typeof v === "number" ? v.toFixed(4) : (v || "—"); }
-
-      function showEvent(id) {
-        const e = data.events.find((x) => x.event_id === id);
-        if (!e) return;
-        const meta = e.metadata || {};
-        const raw = meta.raw_event || {};
-        const loc = meta.location || {};
-
-        document.getElementById("detail-title").innerHTML =
-          e.event_type + " " + getStatusBadge(e.severity);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">이벤트 ID</div><div class="kv-val">' +
-          e.event_id +
-          "</div>" +
-          '<div class="kv-key">심각도</div><div class="kv-val">' +
-          e.severity +
-          "</div>" +
-          '<div class="kv-key">신뢰도</div><div class="kv-val">' +
-          ((raw.confidence || 0) * 100).toFixed(1) +
-          "%</div>" +
-          '<div class="kv-key">설명</div><div class="kv-val">' +
-          (raw.description || "—") +
-          "</div>" +
-          '<div class="kv-key">위치</div><div class="kv-val">' +
-          fmtCoord(loc.latitude) +
-          ", " +
-          fmtCoord(loc.longitude) +
-          "</div>" +
-          '<div class="kv-key">깊이</div><div class="kv-val">' +
-          (loc.depth_m || "—") +
-          "m</div>" +
-          '<div class="kv-key">생성</div><div class="kv-val">' +
-          new Date(e.created_at).toLocaleTimeString("ko-KR") +
-          "</div>" +
-          "</div>";
-        showDetail();
-      }
-
-      function showAlert(id) {
-        const a = data.alerts.find((x) => x.alert_id === id);
-        if (!a) return;
-        const e = data.events.find((x) => x.event_id === a.event_id);
-        const r = data.responses.find((x) => x.alert_id === a.alert_id);
-        const m = r
-          ? data.missions.find((x) => x.response_id === r.response_id)
-          : null;
-        const meta = e ? e.metadata || {} : (a.metadata || {});
-        const raw = meta.raw_event || {};
-        const loc = meta.location || {};
-
-        let stepsHtml = "";
-        if (r && r.params && r.params.steps) {
-          r.params.steps.forEach((s, i) => {
-            stepsHtml +=
-              '<div class="step"><strong>단계 ' +
-              (i + 1) +
-              ": " +
-              s.step_id.toUpperCase() +
-              "</strong><br/>";
-            if (s.tasks) {
-              s.tasks.forEach((t) => {
-                stepsHtml +=
-                  "→ " + t.action + " (" + t.target_device_name + ")<br/>";
-              });
-            }
-            stepsHtml += "</div>";
-          });
-        }
-
-        document.getElementById("detail-title").innerHTML =
-          a.alert_type +
-          " " +
-          getStatusBadge(a.status) +
-          " " +
-          getStatusBadge(a.severity);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">경보 ID</div><div class="kv-val">' +
-          a.alert_id +
-          "</div>" +
-          '<div class="kv-key">상태</div><div class="kv-val">' +
-          a.status +
-          "</div>" +
-          '<div class="kv-key">심각도</div><div class="kv-val">' +
-          a.severity +
-          "</div>" +
-          '<div class="kv-key">신뢰도</div><div class="kv-val">' +
-          ((raw.confidence || 0) * 100).toFixed(1) +
-          "%</div>" +
-          '<div class="kv-key">위치</div><div class="kv-val">' +
-          fmtCoord(loc.latitude) +
-          ", " +
-          fmtCoord(loc.longitude) +
-          "</div>" +
-          '<div class="kv-key">깊이</div><div class="kv-val">' +
-          (loc.depth_m || "—") +
-          "m</div>" +
-          (m
-            ? '<div class="kv-key">미션</div><div class="kv-val"><a href="javascript:showMission(\'' +
-              m.mission_id +
-              '\')" style="color: #60a5fa; text-decoration: underline; cursor: pointer;">' +
-              m.mission_id.substring(0, 12) +
-              "…</a> (" +
-              m.status +
-              ")</div>"
-            : "") +
-          "</div>" +
-          (stepsHtml
-            ? '<div style="margin-top: 12px;"><strong>📋 미션 단계:</strong>' +
-              stepsHtml +
-              "</div>"
-            : '<div style="margin-top: 12px; color: #94a3b8;">📋 응답 대기 중</div>');
-        showDetail();
-      }
-
-      function showMission(id) {
-        const m = data.missions.find((x) => x.mission_id === id);
-        if (!m) {
-          alert("미션을 찾을 수 없습니다");
-          return;
-        }
-
-        const r = data.responses.find((x) => x.response_id === m.response_id);
-        const a = data.alerts.find((x) => x.alert_id === m.alert_id);
-        const e = data.events.find((x) => x.event_id === m.event_id);
-
-        const steps = m.step_states || [];
-        const completed = steps.filter((s) => s.status === "completed").length;
-        const failed = steps.filter((s) => s.status === "failed").length;
-
-        let stepsHtml = '<div class="mission-steps">';
-        steps.forEach((s, i) => {
-          const statusColor =
-            s.status === "completed"
-              ? "#4ade80"
-              : s.status === "failed"
-                ? "#f87171"
-                : "#94a3b8";
-          const statusIcon =
-            s.status === "completed" ? "✓" : s.status === "failed" ? "✕" : "…";
-          stepsHtml +=
-            '<div class="mission-step">' +
-            '<div class="mission-step-status" style="background: ' +
-            statusColor +
-            '; color: #fff;">' +
-            statusIcon +
-            "</div>" +
-            "<div><strong>" +
-            s.step_id.toUpperCase() +
-            "</strong> - " +
-            (s.status || "pending") +
-            "</div>" +
-            "</div>";
-        });
-        stepsHtml += "</div>";
-
-        let completionHtml = "";
-        const report = m.completion_report || {};
-        if (report && Object.keys(report).length > 0) {
-          completionHtml =
-            '<div style="margin-top: 12px; padding: 12px; background: rgba(74, 222, 128, 0.1); border-radius: 4px; border-left: 3px solid #4ade80;">' +
-            "<strong>📋 완료 보고서</strong>" +
-            '<div class="kv" style="margin-top: 6px;">' +
-            '<div class="kv-key">총 단계</div><div class="kv-val">' +
-            (report.total_steps || steps.length) +
-            "</div>" +
-            '<div class="kv-key">성공</div><div class="kv-val">' +
-            (report.successful_steps || completed) +
-            "</div>" +
-            '<div class="kv-key">실패</div><div class="kv-val">' +
-            (report.failed_steps || failed) +
-            "</div>" +
-            "</div>" +
-            "</div>";
-        }
-
-        // Manual Intervention buttons
-        let actionButtons = "";
-        if (m.status === "in_progress" || m.status === "pending") {
-          actionButtons =
-            '<div class="action-buttons">' +
-            '<button class="btn-abort" onclick="abortMission(\'' +
-            m.mission_id +
-            "')\">❌ 미션 취소</button>" +
-            "</div>";
-        } else if (m.status === "failed") {
-          actionButtons =
-            '<div class="action-buttons">' +
-            '<button class="btn-retry" onclick="retryMission(\'' +
-            m.mission_id +
-            "')\">🔄 재시도</button>" +
-            "</div>";
-        }
-
-        document.getElementById("detail-title").innerHTML =
-          "Mission " + getStatusBadge(m.status);
-        document.getElementById("detail-body").innerHTML =
-          '<div class="kv">' +
-          '<div class="kv-key">미션 ID</div><div class="kv-val" style="font-family: monospace; font-size: 11px;">' +
-          m.mission_id +
-          "</div>" +
-          '<div class="kv-key">응답 ID</div><div class="kv-val" style="font-family: monospace; font-size: 11px;">' +
-          (m.response_id ? m.response_id.substring(0, 20) + "…" : "—") +
-          "</div>" +
-          '<div class="kv-key">상태</div><div class="kv-val">' +
-          getStatusBadge(m.status) +
-          "</div>" +
-          '<div class="kv-key">진행</div><div class="kv-val">' +
-          completed +
-          "/" +
-          steps.length +
-          " 완료</div>" +
-          '<div class="kv-key">시작</div><div class="kv-val">' +
-          (m.started_at
-            ? new Date(m.started_at).toLocaleTimeString("ko-KR")
-            : "—") +
-          "</div>" +
-          '<div class="kv-key">완료</div><div class="kv-val">' +
-          (m.completed_at
-            ? new Date(m.completed_at).toLocaleTimeString("ko-KR")
-            : "—") +
-          "</div>" +
-          "</div>" +
-          '<div style="margin-top: 12px;"><strong>📊 단계 상태:</strong>' +
-          stepsHtml +
-          "</div>" +
-          (r
-            ? '<div style="margin-top: 12px; padding: 8px; background: rgba(96, 165, 250, 0.08); border-radius: 3px; border-left: 3px solid #60a5fa;">' +
-              "<strong>📍 응답 액션:</strong> " +
-              r.action +
-              "<br/>" +
-              "<strong>원인:</strong> " +
-              r.reason +
-              "</div>"
-            : "") +
-          completionHtml +
-          actionButtons;
-        showDetail();
-      }
-
-      function showDetail() {
-        document.getElementById("detail").className = "detail visible";
-        document.getElementById("modal-backdrop").className = "visible";
-      }
-      function hideDetail() {
-        const detail = document.getElementById("detail");
-        detail.classList.remove("visible");
-        document.getElementById("modal-backdrop").className = "";
-      }
-
-      // Close detail modal when clicking outside (on overlay)
-      document.addEventListener("click", function (e) {
-        const detail = document.getElementById("detail");
-        // backdrop div이 클릭을 처리하므로 여기선 아무것도 안 함
-      });
-
-      // ======================== Manual Intervention ========================
-
-      async function abortMission(missionId) {
-        if (!confirm("이 미션을 취소하시겠습니까?")) return;
-
-        try {
-          const response = await fetch(
-            R +
-              "/missions/" +
-              missionId +
-              "/abort?reason=Manual%20intervention",
-            {
-              method: "POST",
-            },
-          );
-
-          if (response.ok) {
-            alert("미션 취소 완료");
-            await loadData();
-            hideDetail();
-          } else {
-            alert("미션 취소 실패: " + response.statusText);
-          }
-        } catch (e) {
-          alert("미션 취소 중 오류: " + e.message);
-        }
-      }
-
-      async function retryMission(missionId) {
-        if (!confirm("이 미션을 재시도하시겠습니까?")) return;
-
-        try {
-          const response = await fetch(R + "/missions/" + missionId, {
-            method: "GET",
-          });
-
-          if (!response.ok) {
-            alert("미션 조회 실패");
-            return;
-          }
-
-          const mission = await response.json();
-
-          // Update mission status to pending for retry
-          const updateResp = await fetch(
-            R + "/missions/" + missionId + "/update-status?status=pending",
-            {
-              method: "POST",
-            },
-          );
-
-          if (updateResp.ok) {
-            alert("미션 재시도 준비 완료");
-            await loadData();
-            hideDetail();
-          } else {
-            alert("미션 상태 업데이트 실패: " + updateResp.statusText);
-          }
-        } catch (e) {
-          alert("미션 재시도 중 오류: " + e.message);
-        }
-      }
-
-      // ======================== Initialization ========================
-
-      async function resetAll() {
-        if (!confirm("모든 데이터를 초기화하시겠습니까?")) return;
-        try {
-          await fetch(R + "/admin/reset", { method: "POST" });
-          await new Promise((r) => setTimeout(r, 500));
-          await loadData();
-          alert("초기화 완료");
-        } catch (e) {
-          alert("초기화 실패: " + e.message);
-        }
-      }
-
-      // Initial setup - WebSocket only, no polling
-      connectWebSocket();
-      loadData();
-      // Periodically check health
-      setInterval(checkHealth, 5000);
+      window.applyRole = applyRole;
+      window.decideApproval = decideApproval;
+      window.activatePlan = activatePlan;
+      window.togglePolicy = togglePolicy;
+      window.closeDetailModal = closeDetailModal;
+      window.showDetailModal = showDetailModal;
+      window.showDeviceRoleDetail = showDeviceRoleDetail;
+      window.showPlanDetail = showPlanDetail;
+      window.showApprovalDetail = showApprovalDetail;
+      window.showProposalDetail = showProposalDetail;
+      window.showMissionDetail = showMissionDetail;
+      window.showSignalDetail = showSignalDetail;
+      window.showConnectivityDetail = showConnectivityDetail;
+      window.showPolicyDetail = showPolicyDetail;
+      window.showRecommendedRoleDetail = window.showRecommendedRoleDetail;
+      window.applyRoleFromRecommendation = window.applyRoleFromRecommendation;
+      window.showPlanRecommendationDetail = window.showPlanRecommendationDetail;
+      window.savePlanFromRecommendation = window.savePlanFromRecommendation;
     </script>
   </body>
 </html>

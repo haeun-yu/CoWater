@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Any, Optional
 
@@ -17,18 +16,14 @@ from agent.state import AgentState, utc_now
 from skills.catalog import SkillCatalog
 
 try:
-    from agent.llm_client import make_llm_client
+    from agent.llm_client import make_llm_client, LLMErrorType, LLMErrorContext
 except ImportError:
     make_llm_client = None
+    LLMErrorType = None
+    LLMErrorContext = None
 
 logger = logging.getLogger(__name__)
 
-
-def _env_bool(name: str) -> bool | None:
-    value = os.getenv(name)
-    if value is None or value == "":
-        return None
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 # 생명 안전 — LLM 없이 즉각 에스컬레이션
 CRITICAL_URGENT = {"distress", "collision_risk"}
@@ -38,16 +33,13 @@ class DecisionEngine:
     def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
         self.agent_config = agent_config
         self.skills = skills
-        env_enabled = _env_bool("COWATER_LLM_ENABLED")
-        self.llm_enabled = env_enabled if env_enabled is not None else bool(agent_config.get("llm", {}).get("enabled", False))
-        self.llm_client = None
-
-        if self.llm_enabled and make_llm_client:
-            try:
-                self.llm_client = make_llm_client(agent_config.get("llm", {}))
-            except Exception as e:
-                logger.error(f"System Agent LLM 초기화 실패: {e}")
-                self.llm_enabled = False
+        if not make_llm_client:
+            raise RuntimeError("LLM client factory is unavailable")
+        try:
+            self.llm_client = make_llm_client(agent_config.get("llm", {}))
+        except Exception as e:
+            raise RuntimeError(f"System Agent LLM 초기화 실패: {e}") from e
+        self.llm_enabled = True
 
     # ──────────────────────────────────────────────
     # Critical rule (즉각 대응)
@@ -69,6 +61,21 @@ class DecisionEngine:
             "llm_analysis": None,
         }
         return decision
+
+    def _normalize_llm_error(self, error_ctx: Any) -> dict[str, Any]:
+        if error_ctx is None:
+            return {}
+        if hasattr(error_ctx, "to_dict"):
+            try:
+                return dict(error_ctx.to_dict())
+            except Exception:
+                pass
+        if isinstance(error_ctx, dict):
+            return dict(error_ctx)
+        return {
+            "error_type": "unknown_error",
+            "message": str(error_ctx),
+        }
 
     # ──────────────────────────────────────────────
     # 동기 decide (alert 기록용, 하위 호환)
@@ -121,42 +128,96 @@ class DecisionEngine:
         alert: dict[str, Any],
         devices: list[dict[str, Any]],
         state: AgentState,
-    ) -> Optional[dict[str, Any]]:
-        """Fleet 전체 컨텍스트로 alert 분석 → 디바이스 선정 / 임무 계획"""
-        if not self.llm_enabled or not self.llm_client:
-            return None
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """
+        Fleet 전체 컨텍스트로 alert 분석 → 디바이스 선정 / 임무 계획
+        
+        Returns: (llm_result, error_context)
+        - If successful: (result_dict, None)
+        - If failed: (None, error_dict)
+        """
         try:
             prompt = self._alert_prompt(alert, devices, state)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
-            response = await self.llm_client.generate(prompt=prompt, timeout=timeout)
-            result = self._parse(response)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+            
+            # LLM 오류 처리
+            if error_ctx is not None:
+                error_dict = self._normalize_llm_error(error_ctx)
+                error_type = str(error_dict.get("error_type") or "unknown_error")
+                log_fn = logger.warning if error_type == "circuit_open" else logger.error
+                log_fn(
+                    f"LLM alert 분석 실패 [{error_type}] "
+                    f"(시도 {error_dict.get('attempt_number', 1)}/{error_dict.get('max_attempts', 3)}, "
+                    f"{error_dict.get('elapsed_ms', 0)}ms): {error_dict.get('message', '')}"
+                )
+                return None, error_dict
+            
+            # 응답 파싱
+            result = self._parse(response) if response else None
             if result:
-                logger.info(f"LLM alert 분석: {result.get('reasoning', '')[:80]}")
-            return result
+                logger.info(f"LLM alert 분석 성공: {result.get('reasoning', '')[:80]}")
+            else:
+                logger.warning(f"LLM alert 분석 응답 파싱 실패 (응답: {response[:100] if response else 'empty'})")
+            
+            return result, None
+            
         except Exception as e:
-            logger.debug(f"LLM alert 분석 오류: {e}")
-            return None
+            logger.error(f"LLM alert 분석 중 예기치 않은 오류: {type(e).__name__}: {e}")
+            error_dict = {
+                "error_type": "unknown_error",
+                "message": str(e),
+                "recovery_strategy": "fallback",
+            }
+            return None, error_dict
 
     async def analyze_command(
         self,
         command: dict[str, Any],
         devices: list[dict[str, Any]],
         state: AgentState,
-    ) -> Optional[dict[str, Any]]:
-        """사용자 명령을 Fleet 컨텍스트로 해석 → 실행할 action 결정"""
-        if not self.llm_enabled or not self.llm_client:
-            return None
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """
+        사용자 명령을 Fleet 컨텍스트로 해석 → 실행할 action 결정
+        
+        Returns: (llm_result, error_context)
+        - If successful: (result_dict, None)
+        - If failed: (None, error_dict)
+        """
         try:
             prompt = self._command_prompt(command, devices, state)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
-            response = await self.llm_client.generate(prompt=prompt, timeout=timeout)
-            result = self._parse(response)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+            
+            # LLM 오류 처리
+            if error_ctx is not None:
+                error_dict = self._normalize_llm_error(error_ctx)
+                error_type = str(error_dict.get("error_type") or "unknown_error")
+                log_fn = logger.warning if error_type == "circuit_open" else logger.error
+                log_fn(
+                    f"LLM 명령 해석 실패 [{error_type}] "
+                    f"(시도 {error_dict.get('attempt_number', 1)}/{error_dict.get('max_attempts', 3)}, "
+                    f"{error_dict.get('elapsed_ms', 0)}ms): {error_dict.get('message', '')}"
+                )
+                return None, error_dict
+            
+            # 응답 파싱
+            result = self._parse(response) if response else None
             if result:
-                logger.info(f"LLM 명령 해석: {result.get('reasoning', '')[:80]}")
-            return result
+                logger.info(f"LLM 명령 해석 성공: {result.get('reasoning', '')[:80]}")
+            else:
+                logger.warning(f"LLM 명령 해석 응답 파싱 실패 (응답: {response[:100] if response else 'empty'})")
+            
+            return result, None
+            
         except Exception as e:
-            logger.debug(f"LLM 명령 해석 오류: {e}")
-            return None
+            logger.error(f"LLM 명령 해석 중 예기치 않은 오류: {type(e).__name__}: {e}")
+            error_dict = {
+                "error_type": "unknown_error",
+                "message": str(e),
+                "recovery_strategy": "fallback",
+            }
+            return None, error_dict
 
     # ── alert type semantics ──────────────────────
     _ALERT_CONTEXT = {

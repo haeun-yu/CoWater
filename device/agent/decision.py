@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Any, Optional
 
@@ -29,29 +28,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _env_bool(name: str) -> bool | None:
-    value = os.getenv(name)
-    if value is None or value == "":
-        return None
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 class DecisionEngine:
     def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
         self.agent_config = agent_config
         self.skills = skills
-        env_enabled = _env_bool("COWATER_LLM_ENABLED")
-        self.llm_enabled = env_enabled if env_enabled is not None else bool(agent_config.get("llm", {}).get("enabled", False))
-        self.llm_client = None
         self._cached_decision: Optional[dict[str, Any]] = None
         self._llm_pending: bool = False
 
-        if self.llm_enabled and make_llm_client:
-            try:
-                self.llm_client = make_llm_client(agent_config.get("llm", {}))
-            except Exception as e:
-                logger.error(f"LLM 클라이언트 초기화 실패: {e}")
-                self.llm_enabled = False
+        if not make_llm_client:
+            raise RuntimeError("LLM client factory is unavailable")
+        try:
+            self.llm_client = make_llm_client(agent_config.get("llm", {}))
+        except Exception as e:
+            raise RuntimeError(f"LLM 클라이언트 초기화 실패: {e}") from e
+        self.llm_enabled = True
 
     def decide(
         self,

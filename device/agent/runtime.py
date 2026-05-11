@@ -11,7 +11,7 @@ Device Agent의 생명주기를 관리합니다:
 from __future__ import annotations
 
 import asyncio
-import importlib
+from dataclasses import asdict
 import json
 import logging
 import os
@@ -25,10 +25,12 @@ from agent.decision import DecisionEngine
 from agent.manifest import ManifestBuilder
 from agent.state import AgentState, utc_now
 from controller.commands import CommandController
+from infrastructure.platforms import DevicePlatform, resolve_device_platform
 from skills.catalog import SkillCatalog
 from storage.identity_store import IdentityStore
 from transport.registry_client import RegistryClient
 from transport.moth_publisher import MothPublisher
+from storage.runtime_store import RuntimeStore
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,7 @@ class AgentRuntime:
     Agent 실행 엔진: Device Agent의 생명주기 관리
     """
 
-    def __init__(self, config_path: Path) -> None:
+    def __init__(self, config_path: Path, platform: DevicePlatform | None = None) -> None:
         """
         Agent 초기화: Config, Identity, Skills, Simulator, Tools 설정
 
@@ -55,10 +57,8 @@ class AgentRuntime:
         # Instance ID 생성 또는 로드 (환경변수 or 파일 or auto-generate)
         self.instance_id = self._resolve_instance_id()
 
-        # device_type → tools/simulator 디렉토리명 결정
-        raw_device_type = str(self.agent_config.get("device_type") or "").upper()
-        _type_map = {"USV": "usv", "AUV": "auv", "ROV": "rov", "CONTROL_SHIP": "ship"}
-        self._device_dir = _type_map.get(raw_device_type, raw_device_type.lower() or "usv")
+        # device_type → platform adapter 결정
+        self.platform = platform or resolve_device_platform(self.agent_config.get("device_type"))
 
         # Identity 저장소: agent_id, token 등을 .runtime/{instance_id}.json에 저장
         # .runtime은 device/ 루트에 저장 (configs/ 하위에 생기지 않도록)
@@ -85,31 +85,29 @@ class AgentRuntime:
         # Device Registration Server와의 통신
         self.registry_client = RegistryClient(self.config.get("registry", {}))
 
+        # Task ID 처리 이력 저장소: 중복 실행 방지 (파일 스냅샷)
+        from agent.task_id_store import TaskIdStore
+        task_path = str(Path(__file__).resolve().parent.parent / ".runtime" / f"{self.instance_id}_tasks.json")
+        self.task_id_store = TaskIdStore(path=task_path)
+        self.runtime_store = RuntimeStore(device_root / ".runtime" / f"{self.instance_id}_state.json")
+
         # 의사결정 엔진: Rule 기반 + LLM 분석
         self.decision_engine = DecisionEngine(self.agent_config, self.skills)
 
-        # 텔레메트리 리더: 센서 데이터 정규화 (공통)
-        _telemetry_mod = importlib.import_module("tools.common.telemetry_reader")
-        TelemetryReader = getattr(_telemetry_mod, "TelemetryReader")
-        self.telemetry_reader = TelemetryReader()
-
-        # Device 시뮬레이터: device type별 동적 로드
-        _sim_mod = importlib.import_module(f"simulator.{self._device_dir}")
-        DeviceSimulator = getattr(_sim_mod, "DeviceSimulator")
-        self.simulator = DeviceSimulator(self.config.get("simulation", {}), self.skills.list_tracks())
-
-        # 명령 제어기: device type별 CommandExecutor 동적 로드
-        _cmd_mod = importlib.import_module(f"tools.{self._device_dir}.command_executor")
-        CommandExecutor = getattr(_cmd_mod, "CommandExecutor")
-        self.command_controller = CommandController(CommandExecutor())
+        # 텔레메트리 리더 / 시뮬레이터 / 명령 제어기: 플랫폼 어댑터로 분리
+        self.telemetry_reader = self.platform.build_telemetry_reader()
+        self.simulator = self.platform.build_simulator(self.config.get("simulation", {}), self.skills.list_tracks())
+        self.command_controller = CommandController(self.platform.build_command_executor())
 
         # Moth WebSocket 발행자: Healthcheck 및 Telemetry 발행
         self.moth_publisher = MothPublisher(self.config, self.state)
 
         # 동적 Tool 로드: tools/ 디렉토리에서 센서/제어 클래스 자동 로드
         self.tools: dict[str, Any] = {}
-        self._load_tools()
+        self.tools = self.platform.load_tools(device_root)
+        self._restore_runtime_snapshot(self.runtime_store.load_snapshot(self.instance_id))
         self._last_assignment_signature: dict[str, Any] | None = None
+        self._last_parent_registration_signature: dict[str, Any] | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._stopping = False
 
@@ -119,6 +117,63 @@ class AgentRuntime:
         task.add_done_callback(self._background_tasks.discard)
         return task
 
+    def _runtime_snapshot(self) -> dict[str, Any]:
+        snapshot = asdict(self.state)
+        snapshot["simulator_mission_state"] = dict(getattr(self.simulator, "mission_state", {}) or {})
+        snapshot["simulator_position"] = dict(getattr(self.simulator, "position", {}) or {})
+        snapshot["simulator_motion"] = dict(getattr(self.simulator, "motion", {}) or {})
+        return snapshot
+
+    def _persist_runtime_state(self) -> None:
+        try:
+            self.runtime_store.save_snapshot(self.instance_id, self._runtime_snapshot(), utc_now())
+        except Exception as exc:
+            logger.debug("Runtime snapshot persist skipped: %s", exc)
+
+    def _restore_runtime_snapshot(self, snapshot: dict[str, Any]) -> None:
+        if not snapshot:
+            return
+        state_fields = {
+            "parent_id",
+            "parent_endpoint",
+            "parent_command_endpoint",
+            "route_mode",
+            "force_parent_routing",
+            "token",
+            "registry_id",
+            "latitude",
+            "longitude",
+            "connected",
+            "registered_at",
+            "last_seen_at",
+            "last_telemetry",
+            "last_decision",
+            "last_command",
+            "mission_state",
+            "children",
+            "tasks",
+            "inbox",
+            "outbox",
+            "memory",
+        }
+        for field in state_fields:
+            if field in snapshot:
+                setattr(self.state, field, snapshot[field])
+        simulator_mission = snapshot.get("simulator_mission_state")
+        if isinstance(simulator_mission, dict):
+            self.simulator.mission_state = dict(simulator_mission)
+            self.state.mission_state = dict(simulator_mission)
+        if isinstance(snapshot.get("simulator_position"), dict):
+            self.simulator.position = dict(snapshot["simulator_position"])
+        elif isinstance(self.state.last_telemetry, dict):
+            position = self.state.last_telemetry.get("position")
+            if isinstance(position, dict):
+                self.simulator.position = dict(position)
+        if isinstance(snapshot.get("simulator_motion"), dict):
+            self.simulator.motion = dict(snapshot["simulator_motion"])
+        if self.state.mission_state and not simulator_mission:
+            self.simulator.mission_state = dict(self.state.mission_state)
+
     async def stop(self) -> None:
         self._stopping = True
         for task in list(self._background_tasks):
@@ -126,39 +181,6 @@ class AgentRuntime:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
         await self.moth_publisher.close()
-
-    def _load_tools(self) -> None:
-        """
-        tools/{device_type}/ 및 tools/common/ 에서 센서/제어 클래스를 동적으로 로드.
-
-        device type별 tools만 로드하므로 USV Agent가 AUV sonar 등을 로드하지 않는다.
-        """
-        device_module_prefix = f"tools.{self._device_dir}"
-        scan_targets = [
-            (device_module_prefix, f"tools/{self._device_dir}"),
-            ("tools.common", "tools/common"),
-        ]
-
-        # runtime.py는 device/agent/ 안에 있으므로 device/ 루트를 기준으로 경로 탐색
-        device_root = Path(__file__).resolve().parent.parent
-
-        for module_prefix, rel_dir in scan_targets:
-            tools_dir = device_root / rel_dir
-            if not tools_dir.exists():
-                continue
-            for py_file in tools_dir.glob("*.py"):
-                if py_file.name.startswith("_"):
-                    continue
-                module_name = py_file.stem
-                class_name = "".join(word.capitalize() for word in module_name.split("_"))
-                try:
-                    module = importlib.import_module(f"{module_prefix}.{module_name}")
-                    cls = getattr(module, class_name, None)
-                    if cls:
-                        self.tools[module_name] = cls()
-                        logger.debug(f"Tool 로드됨: {module_name} ({class_name})")
-                except Exception as e:
-                    logger.debug(f"Tool 로드 실패 {module_name}: {e}")
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -174,6 +196,7 @@ class AgentRuntime:
     def register(self) -> None:
         if self.state.layer == "system":
             self.state.connected = True
+            self._persist_runtime_state()
             return
 
         if self.identity.get("registry_id") and self.identity.get("token"):
@@ -188,6 +211,7 @@ class AgentRuntime:
                 self.state.connected = True
                 self.state.last_seen_at = utc_now()
                 logger.info(f"기존 등록 재사용: registry_id={self.state.registry_id}")
+                self._persist_runtime_state()
                 return
             except Exception as exc:
                 # 서버가 일시적으로 내려가 있어도 로컬 캐시로 Moth 초기화 가능
@@ -201,8 +225,10 @@ class AgentRuntime:
                     }
                     self.state.connected = False
                     logger.warning(f"서버 연결 실패, 로컬 캐시로 Moth 초기화: {exc}")
+                    self._persist_runtime_state()
                     return
                 self.state.remember({"kind": "identity_reconnect_failed", "at": utc_now()})
+                self._persist_runtime_state()
 
         created = self.registry_client.register_device(
             self.state.name,
@@ -234,6 +260,10 @@ class AgentRuntime:
                 "telemetry_topics": created.get("telemetry_topics", []),
             }
         )
+        self.state.connected = True
+        self.state.last_seen_at = utc_now()
+        self._persist_runtime_state()
+        logger.info(f"등록 완료: registry_id={self.state.registry_id}")
 
     def _sync_registry_name(self) -> None:
         if not self.state.registry_id or not self._registration_response:
@@ -259,6 +289,7 @@ class AgentRuntime:
                 "telemetry_topics": self._registration_response.get("telemetry_topics", self.identity.get("telemetry_topics", [])),
             }
         )
+        self._persist_runtime_state()
 
     def apply_assignment(self, assignment: dict[str, Any]) -> None:
         signature = {
@@ -276,6 +307,8 @@ class AgentRuntime:
         if self._last_assignment_signature != signature:
             self.state.remember({"kind": "layer_assignment", "at": utc_now(), "assignment": assignment})
             self._last_assignment_signature = signature
+            self._last_parent_registration_signature = None
+        self._persist_runtime_state()
 
     def _refresh_assignment(self) -> None:
         if self.state.registry_id is None:
@@ -284,10 +317,18 @@ class AgentRuntime:
             self.apply_assignment(self.registry_client.get_assignment(self.state.registry_id))
         except Exception as exc:
             self.state.remember({"kind": "assignment_refresh_failed", "at": utc_now(), "error": str(exc)})
+            self._persist_runtime_state()
 
     def _upsert_agent(self) -> None:
         if self.state.registry_id is None or not self.state.token:
             raise RuntimeError("agent identity is not registered")
+        # P3 (보고 기반): 주기적으로 위치, 배터리, 상태를 Registry에 보고
+        battery_percent = None
+        if self.state.last_telemetry:
+            battery_info = self.state.last_telemetry.get("battery", {})
+            if isinstance(battery_info, dict):
+                battery_percent = battery_info.get("percent")
+        
         self.registry_client.upsert_agent(
             self.state.registry_id,
             endpoint=self.base_url(),
@@ -297,7 +338,101 @@ class AgentRuntime:
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
+            latitude=self.state.latitude,
+            longitude=self.state.longitude,
+            battery_percent=battery_percent,
         )
+
+    def register_child(self, child: dict[str, Any]) -> dict[str, Any]:
+        child_id = str(child.get("agent_id") or child.get("id") or "")
+        if not child_id:
+            raise ValueError("child agent_id required")
+        record = dict(child, agent_id=child_id, registered_at=utc_now())
+        self.state.children[child_id] = record
+        self.state.remember({"kind": "child_registered", "at": utc_now(), "child": child_id})
+        self._persist_runtime_state()
+        return record
+
+    def relay_child_healthcheck(self, payload: dict[str, Any]) -> dict[str, Any]:
+        child_id = str(payload.get("agent_id") or payload.get("device_id") or "")
+        if not child_id:
+            raise ValueError("child agent_id/device_id required")
+        now = utc_now()
+        child_state = dict(self.state.children.get(child_id) or {})
+        child_state["last_healthcheck_at"] = now
+        child_state["healthcheck"] = payload
+        child_state.setdefault("agent_id", child_id)
+        self.state.children[child_id] = child_state
+        self._persist_runtime_state()
+        return child_state
+
+    def list_children(self) -> list[dict[str, Any]]:
+        return list(self.state.children.values())
+
+    def list_tasks(self) -> list[dict[str, Any]]:
+        return list(self.state.tasks.values())
+
+    def record_inbox(self, request_id: str | None, data: dict[str, Any]) -> None:
+        self.state.inbox.append({"task_id": request_id, "at": utc_now(), "data": data})
+        self._persist_runtime_state()
+
+    def record_task(self, task: dict[str, Any], result: dict[str, Any]) -> None:
+        self.state.tasks[task["id"]] = task
+        self.state.outbox.append({"task_id": task["id"], "at": utc_now(), "result": result})
+        self._persist_runtime_state()
+
+    async def _ensure_parent_registration(self) -> None:
+        if self.state.layer != "lower":
+            return
+        if not self.state.parent_endpoint or not self.state.registry_id:
+            return
+        signature = {
+            "parent_endpoint": self.state.parent_endpoint,
+            "registry_id": self.state.registry_id,
+            "agent_id": self.state.agent_id,
+        }
+        if self._last_parent_registration_signature == signature:
+            return
+
+        payload = {
+            "agent_id": self.state.agent_id,
+            "device_id": self.state.registry_id,
+            "name": self.state.name,
+            "layer": self.state.layer,
+            "device_type": self.state.device_type,
+            "endpoint": self.base_url(),
+            "command_endpoint": f"{self.base_url()}/agents/{self.state.token}/command" if self.state.token else None,
+            "parent_id": self.state.parent_id,
+            "registered_at": self.state.registered_at,
+        }
+
+        def _register_with_parent() -> None:
+            import json
+            import urllib.request
+
+            body = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.state.parent_endpoint.rstrip('/')}/children/register",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                return
+
+        try:
+            await asyncio.to_thread(_register_with_parent)
+            self._last_parent_registration_signature = signature
+            self.state.remember(
+                {
+                    "kind": "parent_registration",
+                    "at": utc_now(),
+                    "parent_endpoint": self.state.parent_endpoint,
+                    "parent_id": self.state.parent_id,
+                }
+            )
+        except Exception as exc:
+            logger.debug(f"Parent registration failed: {exc}")
 
     async def simulation_loop(self) -> None:
         """
@@ -342,9 +477,16 @@ class AgentRuntime:
             self._create_background_task(self.moth_publisher.healthcheck_loop())
 
             # ===== 메인 simulation loop =====
+            _prev_connected_state = self.state.connected
             while not self._stopping:
                 # 설정된 주기만큼 대기 (interval_seconds, 기본값 2초)
                 await asyncio.sleep(self.simulator.interval_seconds())
+
+                # ✅ Detect recovery from disconnection (Ch.16)
+                if not _prev_connected_state and self.state.connected:
+                    logger.info("🔄 Device recovered from disconnection, reporting recovery state")
+                    await self._report_recovery_to_system()
+                _prev_connected_state = self.state.connected
 
                 # 1️⃣ 센서 데이터 생성 및 정규화
                 telemetry = self.telemetry_reader.normalize(self.simulator.next_telemetry(self.state))
@@ -361,6 +503,7 @@ class AgentRuntime:
                         self._upsert_agent()
                     except Exception as _ka_err:
                         logger.debug(f"Registry keepalive 실패: {_ka_err}")
+                    await self._ensure_parent_registration()
                 self.state.last_telemetry = telemetry
 
                 # 1-b️⃣ [SYNC GPS] Simulator 위치를 AgentState에 동기화
@@ -374,10 +517,12 @@ class AgentRuntime:
                 # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
                 # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
                 self._update_tools_from_telemetry(telemetry)
+                self.state.mission_state = dict(telemetry.get("mission") or self.simulator.mission_state or self.state.mission_state)
 
                 # 3️⃣ 의사결정 (LLM-primary, critical rule override)
                 context = self._build_decision_context(telemetry)
                 decision = self.decision_engine.decide(self.state, telemetry, context)
+                self.state.last_decision = decision
                 self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
                 # 3-b️⃣ Critical rule 발동 시 서버 alert registry에 전송
@@ -391,6 +536,10 @@ class AgentRuntime:
                 # 5️⃣ Moth로 Telemetry 발행
                 # Real-time streaming: server에서 위치 업데이트 받고 dynamic re-binding 판단
                 await self.moth_publisher.publish_telemetry(telemetry)
+
+                # 6️⃣ ✅ Sensor health monitoring (Ch.15)
+                self._check_sensor_health(telemetry)
+                self._persist_runtime_state()
 
         except Exception as e:
             logger.error(f"Simulation loop 에러: {e}", exc_info=True)
@@ -418,14 +567,13 @@ class AgentRuntime:
                     pos.get("altitude", 0.0),
                 )
 
-        # ===== Battery 방전 시뮬레이션 =====
-        if "battery_monitor" in self.tools:
-            # 전력 소비 추정: 기본 0.2% + 모터 부하에 따른 추가 소비
-            motor_status = self.tools.get("motor_control", {}).get_status() if "motor_control" in self.tools else {}
-            thrust_magnitude = abs(motor_status.get("forward_thrust", 0.0)) if motor_status else 0.0
-            # 0.2% (idle) ~ 0.5% (full thrust) per iteration
-            consumption = 0.2 + (thrust_magnitude * 0.3)
-            self.tools["battery_monitor"].discharge(consumption)
+        # ===== Battery 상태 동기화 =====
+        battery_state = telemetry.get("battery")
+        if "battery_monitor" in self.tools and isinstance(battery_state, dict):
+            try:
+                self.tools["battery_monitor"].percent = float(battery_state.get("charge_percent", self.tools["battery_monitor"].percent))
+            except Exception:
+                pass
 
         # ===== IMU 방향 동기화 =====
         if "imu_reader" in self.tools and "motion" in telemetry:
@@ -437,6 +585,12 @@ class AgentRuntime:
                     pitch=motion.get("pitch", 0.0),
                     yaw=float(heading),
                 )
+
+        # ===== AUV depth sensor 동기화 =====
+        if "depth_sensor" in self.tools and "depth" in telemetry:
+            depth_value = telemetry.get("depth")
+            if isinstance(depth_value, (int, float)) and hasattr(self.tools["depth_sensor"], "set_depth"):
+                self.tools["depth_sensor"].set_depth(float(depth_value))
 
         # ===== 장애물 시뮬레이션 (USV/표층) =====
         # 5% 확률로 10~80m 거리에 장애물 발생, 이후 서서히 소거
@@ -542,4 +696,168 @@ class AgentRuntime:
         return ctx
 
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
-        return self.command_controller.apply(self.state, command)
+        execution_result = self.command_controller.execute(command)
+        simulation_result: dict[str, Any] = {}
+        if execution_result.get("status") != "failed" and execution_result.get("delivered", True):
+            try:
+                simulation_result = self.simulator.apply_command(self.state, command, self.tools)
+            except Exception as exc:
+                simulation_result = {
+                    "status": "failed",
+                    "delivered": False,
+                    "usable_output": False,
+                    "failure_reason": f"simulation_apply_failed:{exc}",
+                    "artifacts": [],
+                    "mission_state": dict(self.state.mission_state),
+                }
+        else:
+            simulation_result = {
+                "status": "failed",
+                "delivered": False,
+                "usable_output": False,
+                "failure_reason": execution_result.get("error") or execution_result.get("failure_reason") or "command_execution_failed",
+                "artifacts": [],
+                "mission_state": dict(self.state.mission_state),
+            }
+        result = {**execution_result, **simulation_result}
+        self.state.last_command = dict(command)
+        self.state.mission_state = dict(simulation_result.get("mission_state") or self.state.mission_state)
+        self.state.remember({
+            "kind": "command_apply",
+            "at": utc_now(),
+            "command": command,
+            "result": result,
+        })
+        self._persist_runtime_state()
+        return result
+
+    def _check_sensor_health(self, telemetry: dict[str, Any]) -> None:
+        """주기적 센서 상태 확인 및 Event 생성 → Registry 보고 (Ch.15)"""
+        if not hasattr(self, '_last_sensor_check'):
+            self._last_sensor_check = {}
+
+        # Battery 상태 확인
+        battery = telemetry.get("battery", {})
+        if isinstance(battery, dict):
+            current_level = float(battery.get("charge_percent", 100.0))
+        else:
+            current_level = float(telemetry.get("battery_percent", 100.0))
+        last_level = self._last_sensor_check.get("battery_level", current_level)
+
+        # 배터리 상태 변화 감지
+        if current_level < 20 and last_level >= 20:
+            # ✅ Event를 Registry에 보고 (Ch.15)
+            event = {
+                "event_id": str(uuid4()),
+                "source_system": "device_agent",
+                "source_agent_id": self.state.registry_id,
+                "source_role": self.state.role,
+                "event_type": "sensor_status_changed",
+                "severity": "WARNING",
+                "message": f"Battery low: {current_level}%",
+                "metadata": {
+                    "sensor_type": "battery",
+                    "sensor_id": "battery_main",
+                    "status": "low",
+                    "level": current_level,
+                },
+            }
+            self.registry_client.ingest_event(event)
+            logger.warning(f"⚠️ Battery low event reported: {current_level}%")
+
+        self._last_sensor_check["battery_level"] = current_level
+
+        # Depth sensor 상태 확인 (AUV)
+        depth = telemetry.get("depth", {})
+        if isinstance(depth, dict):
+            depth_m = float(depth.get("depth_meters", 0.0))
+        else:
+            depth_m = float(depth or telemetry.get("depth_sensor", {}).get("depth_meters", 0.0))
+        max_depth = 300.0
+        if depth_m > max_depth:
+            # ✅ Event를 Registry에 보고 (Ch.15)
+            event = {
+                "event_id": str(uuid4()),
+                "source_system": "device_agent",
+                "source_agent_id": self.state.registry_id,
+                "source_role": self.state.role,
+                "event_type": "sensor_status_changed",
+                "severity": "CRITICAL",
+                "message": f"Depth exceeded: {depth_m}m > {max_depth}m",
+                "metadata": {
+                    "sensor_type": "depth",
+                    "sensor_id": "depth_main",
+                    "status": "max_depth_exceeded",
+                    "depth": depth_m,
+                },
+            }
+            self.registry_client.ingest_event(event)
+            logger.critical(f"⚠️ Depth exceeded event reported: {depth_m}m")
+
+    async def _report_recovery_to_system(self) -> None:
+        """Report device recovery to System Agent (Ch.16)"""
+        try:
+            # Build recovery report with local device state
+            recovery_report = {
+                "device_id": str(self.state.registry_id),
+                "agent_id": self.state.agent_id,
+                "recovered_at": utc_now(),
+                "local_state": {
+                    "battery": self.state.last_telemetry.get("battery", {}) if self.state.last_telemetry else {},
+                    "position": self.state.last_telemetry.get("position", {}) if self.state.last_telemetry else {},
+                    "status": self.state.status if hasattr(self.state, 'status') else "active",
+                },
+                "completed_tasks": [],  # Placeholder for task results from task_id_store
+                "pending_events": [],   # Placeholder for local events
+            }
+
+            # Try to get System Agent endpoint from registration response or config
+            system_agent_endpoint = None
+            if hasattr(self, '_registration_response') and self._registration_response:
+                parents = self._registration_response.get("parents") or []
+                for parent in parents:
+                    if parent.get("role") == "system_agent" or parent.get("layer") == "system":
+                        agent_info = parent.get("agent") or {}
+                        system_agent_endpoint = agent_info.get("endpoint")
+                        break
+
+            if not system_agent_endpoint:
+                # Try to get from config
+                system_config = self.config.get("system_agent", {})
+                system_agent_endpoint = system_config.get("endpoint")
+
+            if not system_agent_endpoint:
+                logger.warning("Could not determine System Agent endpoint for recovery report")
+                return
+
+            # POST recovery report to System Agent
+            import urllib.request
+            import json
+            data = json.dumps(recovery_report).encode("utf-8")
+            req = urllib.request.Request(
+                f"{system_agent_endpoint}/device-recovery",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    result = json.loads(resp.read() or b"{}")
+                    logger.info(f"✅ Recovery report sent successfully: {result}")
+                    self.state.remember({"kind": "recovery_reported", "at": utc_now(), "result": result})
+            except Exception as e:
+                logger.warning(f"Failed to send recovery report: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in recovery reporting: {e}", exc_info=True)
+
+    def can_accept_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
+        action = str(command.get("action") or "").strip().lower()
+        if not action:
+            return False, "missing_action"
+        supported = {str(item).strip().lower() for item in self.skills.list_actions()}
+        if action not in supported:
+            return False, "unsupported_action"
+        if not self.state.connected and self.registry_client.required:
+            return False, "device_not_connected"
+        return True, None

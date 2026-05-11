@@ -63,44 +63,46 @@ def as_list(value: Any) -> list[dict[str, Any]]:
 
 
 def poll_latest_completion(
-    response_id: str,
     alert_id: str,
     timeout_seconds: int = 60,
     interval_seconds: int = 2,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     deadline = time.time() + timeout_seconds
-    latest_response: dict[str, Any] = {}
     latest_alert: dict[str, Any] = {}
+    latest_proposal: dict[str, Any] = {}
     latest_mission: dict[str, Any] = {}
 
     while time.time() < deadline:
-        responses = as_list(http("GET", f"{REGISTRY}/responses"))
         alerts = as_list(http("GET", f"{REGISTRY}/alerts"))
+        proposals = as_list(http("GET", f"{REGISTRY}/mission-proposals"))
         missions = as_list(http("GET", f"{REGISTRY}/missions"))
 
-        latest_response = next(
-            (item for item in responses if str(item.get("response_id") or "") == response_id),
-            latest_response,
-        )
         latest_alert = next(
             (item for item in alerts if str(item.get("alert_id") or "") == alert_id),
             latest_alert,
         )
+        latest_proposal = next(
+            (item for item in proposals if str(item.get("alert_id") or "") == alert_id),
+            latest_proposal,
+        )
         latest_mission = next(
-            (item for item in missions if str(item.get("response_id") or "") == response_id),
+            (item for item in missions if str(item.get("alert_id") or "") == alert_id),
             latest_mission,
         )
 
-        dispatch_result = latest_response.get("dispatch_result") or {}
-        aggregate_status = str(dispatch_result.get("execution_aggregate_status") or "")
+        proposal_status = str(latest_proposal.get("status") or "")
         mission_status = str(latest_mission.get("status") or "")
         alert_status = str(latest_alert.get("status") or "")
-        if aggregate_status == "completed" and mission_status == "completed" and alert_status == "completed":
+        if proposal_status in {"approved", "converted", "completed"} and mission_status == "completed" and alert_status == "completed":
             break
 
         time.sleep(interval_seconds)
 
-    return latest_response, latest_alert, latest_mission
+    return latest_alert, latest_proposal, latest_mission, {
+        "proposal_status": proposal_status,
+        "mission_status": mission_status,
+        "alert_status": alert_status,
+    }
 
 
 # ──────────────────────────────────────────────────────────
@@ -142,11 +144,12 @@ auv_device = auv_devices[0] if auv_devices else {}
 auv_id = auv_device.get("id")
 print(f"\n  사용할 AUV: id={auv_id}, name={auv_device.get('name', '')[:30]}")
 
-# 기존 Event/Alert/Response 수 기록
+# 기존 Event/Alert/Mission 수 기록
 events_before = len(as_list(http("GET", f"{REGISTRY}/events")))
 alerts_before = len(as_list(http("GET", f"{REGISTRY}/alerts")))
-responses_before = len(as_list(http("GET", f"{REGISTRY}/responses")))
-print(f"\n  현재 상태: events={events_before}, alerts={alerts_before}, responses={responses_before}")
+proposals_before = len(as_list(http("GET", f"{REGISTRY}/mission-proposals")))
+missions_before = len(as_list(http("GET", f"{REGISTRY}/missions")))
+print(f"\n  현재 상태: events={events_before}, alerts={alerts_before}, proposals={proposals_before}, missions={missions_before}")
 
 # ──────────────────────────────────────────────────────────
 # Step 2. AUV → System Agent: mine_detection event.report
@@ -263,50 +266,61 @@ else:
     alert_id = None
 
 # ──────────────────────────────────────────────────────────
-# Step 5. Registry: Response 기록 확인
+# Step 5. Registry: Mission Proposal / Mission 기록 확인
 # ──────────────────────────────────────────────────────────
-section("Step 5. Registry: Response 기록 확인")
-response_wait_seconds = 90
-new_responses: list[dict[str, Any]] = []
+section("Step 5. Registry: Mission Proposal / Mission 기록 확인")
+proposal_wait_seconds = 90
+new_proposals: list[dict[str, Any]] = []
+new_missions: list[dict[str, Any]] = []
+proposal_approval_id: str | None = None
+proposal_approved = False
 
-for _ in range(response_wait_seconds):
-    responses = as_list(http("GET", f"{REGISTRY}/responses"))
+for _ in range(proposal_wait_seconds):
+    proposals = as_list(http("GET", f"{REGISTRY}/mission-proposals"))
+    missions = as_list(http("GET", f"{REGISTRY}/missions"))
     if alert_id:
-        linked = [r for r in responses if r.get("alert_id") == alert_id]
-        if linked:
-            new_responses = linked
+        new_proposals = [proposal for proposal in proposals if proposal.get("alert_id") == alert_id]
+        new_missions = [mission for mission in missions if mission.get("alert_id") == alert_id]
+        if new_proposals and not proposal_approval_id:
+            latest_pending_proposal = sorted(new_proposals, key=lambda x: x.get("created_at", ""))[-1]
+            proposal_approval_id = str(latest_pending_proposal.get("approval_id") or "")
+            if proposal_approval_id and not proposal_approved:
+                decision = http(
+                    "POST",
+                    f"{SYSTEM_AGENT}/approvals/{proposal_approval_id}/decision",
+                    {
+                        "approved": True,
+                        "decided_by": "scenario_operator",
+                        "notes": "Scenario approval for mine detection response",
+                    },
+                )
+                print(f"  ✅ Proposal 승인 요청 전송 — approval_id={proposal_approval_id[:30]}")
+                print(f"    decision_status={decision.get('status') or decision.get('approved')}")
+                proposal_approved = True
+        if new_missions:
             break
-        new_responses = []
     else:
-        recent_responses = responses[responses_before:]
-        if recent_responses:
-            new_responses = recent_responses
+        new_proposals = proposals[proposals_before:]
+        new_missions = missions[missions_before:]
+        if new_missions:
             break
     time.sleep(1)
 
-if alert_id and new_responses:
-    new_responses = sorted(new_responses, key=lambda x: x.get("created_at", ""))[-1:]
+check("Mission Proposal이 생성됨", len(new_proposals) >= 1, f"{len(new_proposals)}개 추가")
+check("Mission이 생성됨", len(new_missions) >= 1, f"{len(new_missions)}개 추가")
 
-check("Response가 새로 생성됨", len(new_responses) >= 1, f"{len(new_responses)}개 추가")
+if new_proposals:
+    proposal = sorted(new_proposals, key=lambda x: x.get("created_at", ""))[-1]
+    check("proposal.alert_id 연결됨", bool(proposal.get("alert_id")), proposal.get("alert_id", "")[:30])
+    check("proposal.steps 존재", bool(proposal.get("steps")), str(proposal.get("steps", []))[:60])
 
-if new_responses:
-    resp = new_responses[-1]
-    check("alert_id 연결됨", bool(resp.get("alert_id")), resp.get("alert_id", "")[:30])
-    check("dispatch_result 존재", bool(resp.get("dispatch_result")), str(resp.get("dispatch_result", {}))[:60])
-    dispatch = resp.get("dispatch_result") or {}
-    delivered = dispatch.get("delivered")
-    if delivered is None and isinstance(dispatch.get("task_results"), list) and dispatch.get("task_results"):
-        first_task = dispatch["task_results"][0]
-        delivered = (first_task.get("dispatch") or {}).get("delivered")
-    if delivered is None and isinstance(dispatch.get("steps"), list) and dispatch.get("steps"):
-        delivered = any(s.get("status") in ("completed", "dispatched", "in_progress") for s in dispatch["steps"])
-    if delivered is None and dispatch:
-        # dispatch_result 자체가 존재하면 성공으로 간주
-        delivered = True
+if new_missions:
+    mission = sorted(new_missions, key=lambda x: x.get("created_at", ""))[-1]
+    check("mission.alert_id 연결됨", bool(mission.get("alert_id")), mission.get("alert_id", "")[:30])
     check(
-        "초기 dispatch snapshot 확보",
-        bool(dispatch),
-        f"delivered={delivered}, agg={dispatch.get('execution_aggregate_status')}",
+        "mission.timeline 또는 device_execution_results 존재",
+        bool(mission.get("timeline")) or bool(mission.get("device_execution_results")),
+        f"timeline={len(mission.get('timeline', []))}, results={len(mission.get('device_execution_results', []))}",
     )
 
 # ──────────────────────────────────────────────────────────
@@ -336,40 +350,41 @@ section("시나리오 완료 — 최종 Registry 상태")
 
 events_after = as_list(http("GET", f"{REGISTRY}/events"))
 alerts_after = as_list(http("GET", f"{REGISTRY}/alerts"))
-responses_after = as_list(http("GET", f"{REGISTRY}/responses"))
+proposals_after = as_list(http("GET", f"{REGISTRY}/mission-proposals"))
 missions_after = as_list(http("GET", f"{REGISTRY}/missions"))
 
-latest_response: dict[str, Any] = {}
 latest_alert: dict[str, Any] = {}
+latest_proposal: dict[str, Any] = {}
 latest_mission: dict[str, Any] = {}
-if new_responses:
-    response_id = str(new_responses[-1].get("response_id") or "")
-    latest_response, latest_alert, latest_mission = poll_latest_completion(response_id, alert_id)
+status_snapshot: dict[str, Any] = {}
+if alert_id:
+    latest_alert, latest_proposal, latest_mission, status_snapshot = poll_latest_completion(alert_id)
 
-dispatch_result = latest_response.get("dispatch_result") or {}
-aggregate_status = str(dispatch_result.get("execution_aggregate_status") or "")
-mission_status = str(latest_mission.get("status") or "")
-alert_status = str(latest_alert.get("status") or "")
+proposal_status = str(status_snapshot.get("proposal_status") or latest_proposal.get("status") or "")
+mission_status = str(status_snapshot.get("mission_status") or latest_mission.get("status") or "")
+alert_status = str(status_snapshot.get("alert_status") or latest_alert.get("status") or "")
 
 print(f"  Events   : {events_before} → {len(events_after)} (+{len(events_after) - events_before})")
 print(f"  Alerts   : {alerts_before} → {len(alerts_after)} (+{len(alerts_after) - alerts_before})")
-print(f"  Responses: {responses_before} → {len(responses_after)} (+{len(responses_after) - responses_before})")
-print(f"  Missions : {len(missions_after)}개")
+print(f"  Proposals: {proposals_before} → {len(proposals_after)} (+{len(proposals_after) - proposals_before})")
+print(f"  Missions : {missions_before} → {len(missions_after)} (+{len(missions_after) - missions_before})")
 print()
 print("  성공 기준:")
 print("  - Event Registry 기록 ✅" if len(events_after) > events_before else "  - Event Registry 기록 ❌")
 print("  - Alert 생성 (CRITICAL) ✅" if len(alerts_after) > alerts_before else "  - Alert 생성 ❌")
-print("  - Response 연결 ✅" if len(responses_after) > responses_before else "  - Response 연결 ❌")
+print("  - Mission Proposal 생성 ✅" if len(proposals_after) > proposals_before else "  - Mission Proposal 생성 ❌")
+print("  - Mission 생성 ✅" if len(missions_after) > missions_before else "  - Mission 생성 ❌")
 print("  - Alert 최종 완료 ✅" if alert_status == "completed" else f"  - Alert 최종 완료 ❌ ({alert_status or 'unknown'})")
-print("  - Response 최종 완료 ✅" if aggregate_status == "completed" else f"  - Response 최종 완료 ❌ ({aggregate_status or 'unknown'})")
+print("  - Proposal 승인/전환 ✅" if proposal_status in {"approved", "converted", "completed"} else f"  - Proposal 승인/전환 ❌ ({proposal_status or 'unknown'})")
 print("  - Mission 최종 완료 ✅" if mission_status == "completed" else f"  - Mission 최종 완료 ❌ ({mission_status or 'unknown'})")
 
 overall_success = (
     len(events_after) > events_before
     and len(alerts_after) > alerts_before
-    and len(responses_after) > responses_before
+    and len(proposals_after) > proposals_before
+    and len(missions_after) > missions_before
     and alert_status == "completed"
-    and aggregate_status == "completed"
+    and proposal_status in {"approved", "converted", "completed"}
     and mission_status == "completed"
 )
 

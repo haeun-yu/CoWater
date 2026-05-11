@@ -4,16 +4,22 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def post_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """POST JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -27,11 +33,16 @@ def post_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any
         raise
 
 
-def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
+def put_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
     """PUT JSON to server with error handling"""
     try:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="PUT")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="PUT",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
@@ -45,7 +56,12 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5) -> dict[str, Any]
         raise
 
 
-def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
+def get_json(url: str, timeout: int = 5, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    if params:
+        query = urlencode({key: value for key, value in params.items() if value is not None})
+        if query:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{query}"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -66,6 +82,9 @@ class RegistryClient:
         self.url = str(config.get("url") or "http://127.0.0.1:8280").rstrip("/")
         self.secret_key = str(config.get("secret_key") or "server-secret")
         self.required = bool(config.get("required", True))
+
+    def _internal_headers(self) -> dict[str, str]:
+        return {"X-CoWater-Internal": "system-agent"}
 
     def register_device(
         self,
@@ -131,14 +150,14 @@ class RegistryClient:
     def get_device(self, registry_id: int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}")
 
-    def list_devices(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/devices")
+    def list_devices(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/devices", params={"limit": limit, "offset": offset})
 
     def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/events/ingest", event)
 
-    def list_events(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/events")
+    def list_events(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/events", params={"limit": limit, "offset": offset})
 
     def get_event(self, event_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/events/{event_id}")
@@ -146,8 +165,8 @@ class RegistryClient:
     def ingest_alert(self, alert: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/alerts/ingest", alert)
 
-    def list_alerts(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/alerts")
+    def list_alerts(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/alerts", params={"limit": limit, "offset": offset})
 
     def get_alert(self, alert_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/alerts/{alert_id}")
@@ -158,63 +177,179 @@ class RegistryClient:
             body["notes"] = notes
         return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
 
-    def ingest_response(self, response: dict[str, Any]) -> dict[str, Any]:
-        return post_json(f"{self.url}/responses/ingest", response)
+    def complete_alert(self, alert_id: str, notes: str | None = None) -> dict[str, Any]:
+        body = {"notes": notes or "Mission completed"}
+        return post_json(f"{self.url}/alerts/{alert_id}/complete", body)
 
-    def list_responses(self) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/responses")
+    def list_device_roles(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/device-roles", params={"limit": limit, "offset": offset})
 
-    def get_response(self, response_id: str) -> dict[str, Any]:
-        return get_json(f"{self.url}/responses/{response_id}")
+    def get_device_role(self, device_id: str | int) -> dict[str, Any]:
+        return get_json(f"{self.url}/device-roles/{device_id}")
 
-    # Mission API
-    def create_mission(
-        self,
-        response_id: str,
-        alert_id: str,
-        event_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """새 Mission 생성"""
-        body = {
-            "response_id": response_id,
-            "alert_id": alert_id,
-            "event_id": event_id,
-            "metadata": metadata or {},
+    def upsert_device_role(self, device_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(
+            f"{self.url}/devices/{device_id}/role",
+            payload,
+            headers=self._internal_headers(),
+        )
+
+    def get_overview(self, *, limit: int | None = 100, offset: int = 0) -> dict[str, Any]:
+        return {
+            "devices": self.list_devices(limit=limit, offset=offset),
+            "device_roles": self.list_device_roles(limit=limit, offset=offset),
+            "operation_plans": self.list_operation_plans(limit=limit, offset=offset),
+            "insights": self.list_insights(limit=limit, offset=offset),
+            "approvals": self.list_approvals(limit=limit, offset=offset),
+            "mission_proposals": self.list_mission_proposals(limit=limit, offset=offset),
+            "missions": self.list_missions(limit=limit, offset=offset),
         }
-        return post_json(f"{self.url}/missions", body)
 
-    def list_missions(self) -> list[dict[str, Any]]:
-        """모든 Mission 목록"""
-        return get_json(f"{self.url}/missions")
+    def create_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/operation-plans", payload)
+
+    def list_operation_plans(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/operation-plans", params={"limit": limit, "offset": offset})
+
+    def get_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/operation-plans/{operation_plan_id}")
+
+    def activate_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
+        return post_json(
+            f"{self.url}/operation-plans/{operation_plan_id}/activate",
+            {},
+            headers=self._internal_headers(),
+        )
+
+    def create_insight(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/insights", payload)
+
+    def list_insights(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/insights", params={"limit": limit, "offset": offset})
+
+    def list_policies(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/policies", params={"limit": limit, "offset": offset})
+
+    def get_policy(self, policy_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/policies/{policy_id}")
+
+    def create_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/approvals", payload)
+
+    def list_approvals(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/approvals", params={"limit": limit, "offset": offset})
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/approvals/{approval_id}")
+
+    def decide_approval(self, approval_id: str, *, approved: bool, decided_by: str = "user", notes: str | None = None) -> dict[str, Any]:
+        body = {"approved": approved, "decided_by": decided_by}
+        if notes is not None:
+            body["notes"] = notes
+        return post_json(f"{self.url}/approvals/{approval_id}/decision", body)
+
+    def create_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/mission-proposals", payload)
+
+    def list_mission_proposals(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/mission-proposals", params={"limit": limit, "offset": offset})
+
+    def get_mission_proposal(self, proposal_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/mission-proposals/{proposal_id}")
+
+    def create_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/missions", payload)
+
+    def list_missions(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/missions", params={"limit": limit, "offset": offset})
 
     def get_mission(self, mission_id: str) -> dict[str, Any]:
-        """특정 Mission 조회"""
         return get_json(f"{self.url}/missions/{mission_id}")
 
-    def record_step_execution(
+    def replace_mission(self, mission_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(f"{self.url}/missions/{mission_id}", payload)
+
+    def append_mission_timeline_event(
         self,
         mission_id: str,
-        step_id: str,
-        execution_result: dict[str, Any],
+        event_type: str,
+        actor: str | None = None,
+        details: dict | None = None,
+        task_id: str | None = None,
+        step_index: str | int | None = None,
     ) -> dict[str, Any]:
-        """Step 실행 결과 기록"""
-        body = {
-            "step_id": step_id,
-            "execution_result": execution_result,
-        }
-        return post_json(f"{self.url}/missions/{mission_id}/step-execution", body)
+        """Mission timeline에 이벤트 추가 (Ch.18-20)"""
+        try:
+            body = {
+                "event_type": event_type,
+                "actor": actor or "system",
+                "details": details or {},
+            }
+            if task_id:
+                body["task_id"] = task_id
+            if step_index:
+                body["step_index"] = step_index
+            return post_json(
+                f"{self.url}/missions/{mission_id}/timeline/append",
+                body,
+                headers=self._internal_headers(),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to append mission timeline event: {e}")
+            return {"appended": False, "error": str(e)}
 
-    def complete_mission(
+    def log_a2a_message(
         self,
-        mission_id: str,
-        completion_report: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Mission 완료"""
-        body = {"completion_report": completion_report}
-        return post_json(f"{self.url}/missions/{mission_id}/complete", body)
+        direction: str,
+        from_agent_id: str,
+        to_agent_id: str,
+        message_type: str,
+        task_id: str | None,
+        mission_id: str | None,
+        payload: dict[str, Any],
+    ) -> str:
+        """A2A 메시지 로깅 (Registry Server에 전송)"""
+        try:
+            params = {
+                "direction": direction,
+                "from_agent_id": from_agent_id,
+                "to_agent_id": to_agent_id,
+                "message_type": message_type,
+            }
+            if task_id:
+                params["task_id"] = task_id
+            if mission_id:
+                params["mission_id"] = mission_id
 
-    def abort_mission(self, mission_id: str, reason: str) -> dict[str, Any]:
-        """Mission 실패 처리"""
-        body = {"reason": reason}
-        return post_json(f"{self.url}/missions/{mission_id}/abort", body)
+            url = f"{self.url}/a2a-logs/ingest"
+            query_params = urlencode({k: v for k, v in params.items() if v})
+            if query_params:
+                url = f"{url}?{query_params}"
+
+            result = post_json(url, payload, headers=self._internal_headers())
+            return result.get("log_id", "")
+        except Exception as e:
+            logger.debug(f"A2A 로깅 전송 실패 (non-critical): {e}")
+            return ""
+
+    def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Event 저장 (Registry Server)"""
+        try:
+            return post_json(
+                f"{self.url}/events/ingest",
+                event,
+            )
+        except Exception as e:
+            logger.debug(f"Event ingestion failed: {e}")
+            return {}
+
+    def update_device_connectivity(self, device_id: str, status: str) -> None:
+        """Device 연결 상태 업데이트"""
+        try:
+            put_json(
+                f"{self.url}/devices/{device_id}/connectivity",
+                {"connectivity_status": status},
+                headers=self._internal_headers(),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to update device connectivity: {e}")

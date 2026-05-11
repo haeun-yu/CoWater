@@ -1,30 +1,58 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+try:
+    import websockets
+except ImportError:
+    websockets = None
+
 from agent.runtime import AgentRuntime
+from application.bootstrap import build_agent_runtime
 from agent.state import utc_now
 from controller.a2a import A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
 
 
-def create_app(runtime: AgentRuntime) -> FastAPI:
-    app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=runtime.config.get("cors", {}).get("allow_origins", ["*"]),
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+async def _publish_overview_to_moth(data: Any) -> None:
+    """System Agent overview를 Moth에 발행"""
+    if websockets is None:
+        return
+    try:
+        moth_url = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=overview&source=system-agent&track=system-agent"
+        async with websockets.connect(moth_url, ping_interval=None) as ws:
+            message = {
+                "type": "publish",
+                "channel": "overview",
+                "data": data,
+            }
+            await ws.send(json.dumps(message))
+    except Exception:
+        pass  # Silently ignore Moth publish errors
 
-    @app.on_event("startup")
-    async def startup() -> None:
+
+def _schedule_background_task(coro: Any) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        close = getattr(coro, "close", None)
+        if callable(close):
+            close()
+        return
+    loop.create_task(coro)
+
+
+def create_app(runtime: AgentRuntime) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         try:
             runtime.register()
         except Exception as exc:
@@ -32,13 +60,22 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             if runtime.registry_client.required:
                 raise
         app.state.simulation_task = asyncio.create_task(runtime.simulation_loop())
+        try:
+            yield
+        finally:
+            task = getattr(app.state, "simulation_task", None)
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            runtime.runtime_store.close()
 
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        task = getattr(app.state, "simulation_task", None)
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+    app = FastAPI(title=f"CoWater {runtime.state.role}", version="1.0.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=runtime.config.get("cors", {}).get("allow_origins", ["*"]),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -76,10 +113,23 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return await handle_a2a(runtime, request)
 
     @app.post("/agents/{token}/command")
-    async def command(token: str, request: CommandRequest) -> dict[str, Any]:
+    async def command(
+        token: str,
+        request: CommandRequest,
+        async_mode: bool = Query(default=False),
+    ) -> dict[str, Any]:
         if runtime.state.token and token != runtime.state.token:
             raise HTTPException(status_code=403, detail="token mismatch")
+        if async_mode:
+            return runtime.start_async_command(request.model_dump(), requested_by="user")
         return await runtime.handle_command_with_llm(request.model_dump())
+
+    @app.get("/commands/{request_id}")
+    def get_command_status(request_id: str) -> dict[str, Any]:
+        status = runtime.get_async_command(request_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail="command request not found")
+        return status
 
     @app.post("/children/register")
     async def register_child(child: dict[str, Any]) -> dict[str, Any]:
@@ -97,13 +147,28 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     async def relay_child_healthcheck(payload: dict[str, Any]) -> dict[str, Any]:
         child_id = str(payload.get("agent_id") or payload.get("device_id"))
         now = utc_now()
-        child_state = runtime.state.children.setdefault(child_id, {})
+        child_state = runtime.state.children.get(child_id, {})
         child_state["last_healthcheck_at"] = now
         child_state["healthcheck"] = payload
+        runtime.state.children[child_id] = child_state
         publisher = getattr(runtime, "moth_publisher", None)
         if publisher is not None:
             await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
         return {"relayed": True, "child": child_id}
+
+    @app.post("/device-recovery")
+    async def handle_device_recovery(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+        """Device Agent 복구 후 로컬 상태 보고 (Ch.16)"""
+        # P1 원칙: Internal 호출만 허용 (보안)
+        internal_token = request.headers.get("x_cowater_internal", "")
+        if not internal_token or internal_token != runtime.config.get("internal_auth_token"):
+            raise HTTPException(status_code=401, detail="Missing or invalid x_cowater_internal header")
+        device_id = str(payload.get("device_id") or "")
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+
+        await runtime.handle_device_recovery_report(device_id, payload)
+        return {"processed": True, "device_id": device_id}
 
     @app.get("/tasks")
     def tasks() -> dict[str, Any]:
@@ -114,12 +179,86 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         items = runtime.list_manual_interventions()
         return {"items": items, "count": len(items)}
 
-    @app.get("/manual-interventions/{response_id}")
-    def manual_intervention(response_id: str) -> dict[str, Any]:
+    @app.get("/manual-interventions/{mission_id}")
+    def manual_intervention(mission_id: str) -> dict[str, Any]:
         for item in runtime.list_manual_interventions():
-            if str(item.get("response_id") or "") == response_id:
+            if str(item.get("mission_id") or "") == mission_id:
                 return item
         raise HTTPException(status_code=404, detail="manual intervention not found")
+
+    @app.post("/device-roles/recommend")
+    def recommend_device_roles(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        goal = str(body.get("goal") or "")
+        return runtime.recommend_device_roles(goal)
+
+    @app.post("/device-roles/apply")
+    def apply_device_role(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.assign_device_role(body, decided_by=str(body.get("decided_by") or "user"))
+
+    @app.post("/operation-plans/recommend")
+    def recommend_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.recommend_operation_plan(body)
+
+    @app.post("/operation-plans")
+    def create_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        plan = runtime.recommend_operation_plan(body)
+        merged = {**plan, **body}
+        merged.setdefault("status", "draft")
+        saved_plan = runtime.registry_client.create_operation_plan(merged)
+        try:
+            runtime.registry_client.create_approval(
+                {
+                    "target_type": "operation_plan",
+                    "target_id": saved_plan.get("operation_plan_id") or saved_plan.get("id") or "",
+                    "summary": f"Approve operation plan: {saved_plan.get('name') or 'Operation Plan'}",
+                    "requested_action": "approve_operation_plan",
+                    "requested_by": "system_agent",
+                    "metadata": {
+                        "operation_plan_id": saved_plan.get("operation_plan_id") or saved_plan.get("id"),
+                        "goal": saved_plan.get("goal"),
+                    },
+                }
+            )
+        except Exception as exc:
+            runtime.state.remember({"kind": "operation_plan_approval_create_failed", "at": utc_now(), "error": str(exc)})
+        return saved_plan
+
+    @app.post("/operation-plans/{operation_plan_id}/activate")
+    def activate_operation_plan(operation_plan_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        activated_by = str(body.get("activated_by") or body.get("decided_by") or "user")
+        return runtime.activate_operation_plan(operation_plan_id, activated_by=activated_by)
+
+    @app.post("/mission-proposals/generate")
+    def generate_mission_proposal(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        return runtime.generate_mission_proposal(body)
+
+    @app.post("/approvals/{approval_id}/decision")
+    async def approval_decision(approval_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        body = body or {}
+        approved = bool(body.get("approved"))
+        decided_by = str(body.get("decided_by") or "user")
+        notes = body.get("notes")
+        return await runtime.decide_approval_flow(approval_id, approved, decided_by=decided_by, notes=notes)
+
+    @app.get("/overview")
+    def overview(
+        limit: int = Query(default=100, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        result = runtime.registry_client.get_overview(limit=limit, offset=offset)
+        result["meta"] = {
+            "limit": limit,
+            "offset": offset,
+        }
+        # Publish to Moth in background
+        _schedule_background_task(_publish_overview_to_moth(result))
+        return result
 
     return app
 
@@ -158,7 +297,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     return task
 
 
-def run(default_config_path: Path) -> None:
+def run(default_config_path: Path, runtime: AgentRuntime | None = None) -> None:
     import argparse
     import os
 
@@ -168,7 +307,7 @@ def run(default_config_path: Path) -> None:
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
     config_path = (args.config or default_config_path).resolve()
-    runtime = AgentRuntime(config_path)
+    runtime = runtime or build_agent_runtime(config_path)
     host = args.host or runtime.server.get("host") or "127.0.0.1"
     port = args.port or int(os.getenv("COWATER_AGENT_PORT") or runtime.server.get("port") or 9010)
     runtime.server["host"] = host

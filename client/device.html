@@ -1,216 +1,532 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CoWater 디바이스</title>
-<style>
-:root {
-  --bg: #07101e;
-  --surface: rgba(13, 22, 40, 0.92);
-  --surface2: rgba(20, 32, 56, 0.72);
-  --border: rgba(71, 85, 105, 0.5);
-  --border-accent: rgba(96, 165, 250, 0.3);
-  --text: #e2e8f0;
-  --muted: #64748b;
-  --accent: #60a5fa;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --danger: #f87171;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  background: radial-gradient(ellipse at top, rgba(30,58,138,0.18) 0%, transparent 50%),
-              linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
-  color: var(--text);
-  font-family: Inter, "Segoe UI", sans-serif;
-  min-height: 100vh;
-  font-size: 13px;
-}
-.topbar {
-  position: sticky; top: 0; z-index: 100;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 0 24px; height: 56px;
-  background: rgba(6,14,28,0.95);
-  border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(16px);
-}
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand-icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: grid; place-items: center; font-size: 1rem; }
-.brand h1 { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; }
-.brand span { font-size: 0.7rem; color: var(--muted); margin-left: 6px; }
-.nav { display: flex; gap: 4px; }
-.nav a { padding: 6px 14px; border-radius: 6px; font-size: 0.8rem; color: var(--muted); text-decoration: none; }
-.nav a.active { color: var(--accent); background: rgba(96,165,250,0.08); }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
-.btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 0.78rem; cursor: pointer; transition: all 0.15s; }
-.btn:hover { border-color: var(--accent); color: var(--accent); }
-.wrap { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
-.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.header h1 { font-size: 1.4rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
-.status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(74,222,128,0.15); color: var(--ok); font-size: 0.75rem; font-weight: 600; }
-.status-badge.offline { background: rgba(248,113,113,0.15); color: var(--danger); }
-.grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-.panel h2 { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-.panel-title { font-size: 0.85rem; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-.kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin-bottom: 14px; }
-.kv-key { font-size: 0.75rem; color: var(--muted); }
-.kv-val { font-size: 0.8rem; color: var(--text); word-break: break-all; font-weight: 500; }
-.progress-bar { width: 100%; height: 6px; background: rgba(100,116,139,0.2); border-radius: 999px; overflow: hidden; margin-top: 4px; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, #60a5fa, #3b82f6); }
-.sensor-list { display: flex; flex-direction: column; gap: 8px; }
-.sensor-item { display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(20,32,56,0.6); border-radius: 8px; border: 1px solid var(--border); }
-.sensor-name { font-size: 0.78rem; font-weight: 600; }
-.sensor-status { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: rgba(74,222,128,0.12); color: var(--ok); }
-.sensor-status.alert { background: rgba(248,113,113,0.12); color: var(--danger); }
-.message-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
-.message-item { padding: 8px; background: rgba(20,32,56,0.6); border-radius: 6px; border-left: 3px solid var(--accent); font-size: 0.7rem; }
-.message-ts { color: var(--muted); font-size: 0.65rem; }
-.empty { text-align: center; padding: 30px 16px; color: var(--muted); font-size: 0.8rem; }
-</style>
-</head>
-<body>
-
-<nav class="topbar">
-  <div style="display:flex;align-items:center;gap:20px">
-    <div class="brand">
-      <div class="brand-icon">🌊</div>
-      <h1>CoWater<span>디바이스</span></h1>
-    </div>
-    <div class="nav">
-      <a href="index.html">3D 지도</a>
-      <a href="ops.html">운영 관제</a>
-      <a href="device.html" class="active">디바이스</a>
-    </div>
-  </div>
-  <div class="topbar-right">
-    <button class="btn" onclick="location.href='ops.html'">← 돌아가기</button>
-  </div>
-</nav>
-
-<div class="wrap">
-
-  <div class="header">
-    <div>
-      <h1 id="device-name">디바이스 선택 필요</h1>
-      <div class="status-badge offline" id="device-status">오프라인</div>
-    </div>
-  </div>
-
-  <div class="grid">
-    <div>
-      <!-- 텔레메트리 -->
-      <div class="panel">
-        <h2>📊 원격측정 (Telemetry)</h2>
-        <div class="panel-title">위치 & 상태</div>
-        <div class="kv-grid" id="telem-position"></div>
-        <div class="panel-title">배터리 & 센서</div>
-        <div class="kv-grid" id="telem-battery"></div>
-        <div class="panel-title">센서 상태</div>
-        <div class="sensor-list" id="sensor-status"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater 디바이스</title>
+    <style>
+      :root {
+        --bg: #060e1c;
+        --surface: rgba(15, 23, 42, 0.88);
+        --surface2: rgba(30, 41, 59, 0.86);
+        --border: rgba(71, 85, 105, 0.52);
+        --border-accent: rgba(96, 165, 250, 0.3);
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+        --ok: #4ade80;
+        --warn: #fbbf24;
+        --danger: #f87171;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background:
+          radial-gradient(
+            ellipse at top,
+            rgba(30, 58, 138, 0.18) 0%,
+            transparent 50%
+          ),
+          linear-gradient(180deg, #060e1c 0%, #0a1628 100%);
+        color: var(--text);
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        min-height: 100vh;
+        font-size: 13px;
+        margin: 0;
+      }
+      .topbar {
+        background: rgba(6, 14, 28, 0.95);
+        border-bottom: 1px solid var(--border);
+      }
+      .topbar .nav a {
+        color: var(--muted);
+      }
+      .topbar .nav a.active,
+      .topbar .nav a:hover {
+        color: var(--accent);
+        background: rgba(96, 165, 250, 0.08);
+        border-color: rgba(96, 165, 250, 0.15);
+      }
+      .btn {
+        padding: 6px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--text);
+        font-size: 0.78rem;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .wrap {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px 24px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .header h1 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: rgba(74, 222, 128, 0.15);
+        color: var(--ok);
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .status-badge.offline {
+        background: rgba(248, 113, 113, 0.15);
+        color: var(--danger);
+      }
+      .status-badge.lost {
+        background: rgba(251, 191, 36, 0.15);
+        color: var(--warn);
+      }
+      .connectivity-info {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        font-size: 0.8rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 16px;
+      }
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+      }
+      .panel h2 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .panel-title {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .kv-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 5px 14px;
+        margin-bottom: 14px;
+      }
+      .kv-key {
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .kv-val {
+        font-size: 0.8rem;
+        color: var(--text);
+        word-break: break-all;
+        font-weight: 500;
+      }
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        background: rgba(100, 116, 139, 0.2);
+        border-radius: 999px;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #60a5fa, #3b82f6);
+      }
+      .sensor-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sensor-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px;
+        background: rgba(20, 32, 56, 0.6);
+        border-radius: 8px;
+        border: 1px solid var(--border);
+      }
+      .sensor-name {
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      .sensor-status {
+        font-size: 0.7rem;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--ok);
+      }
+      .sensor-status.alert {
+        background: rgba(248, 113, 113, 0.12);
+        color: var(--danger);
+      }
+      .message-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .message-item {
+        padding: 8px;
+        background: rgba(20, 32, 56, 0.6);
+        border-radius: 6px;
+        border-left: 3px solid var(--accent);
+        font-size: 0.7rem;
+      }
+      .message-ts {
+        color: var(--muted);
+        font-size: 0.65rem;
+      }
+      .empty {
+        text-align: center;
+        padding: 30px 16px;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+      .panel,
+      .message-item,
+      .sensor-item,
+      .connectivity-info {
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+      }
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+    <link rel="stylesheet" href="assets/common.css" />
+  </head>
+  <body>
+    <nav class="topbar">
+      <div
+        style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap"
+      >
+        <div class="brand">
+          <div class="brand-icon">🌊</div>
+          <h1>CoWater<span>디바이스</span></h1>
+        </div>
+        <div class="nav">
+          <a href="index.html">3D 지도</a>
+          <a href="alerts.html">알림</a>
+          <a href="ops.html">운영 관제</a>
+          <a href="device.html" class="active">디바이스</a>
+        </div>
       </div>
-
-      <!-- LLM 분석 -->
-      <div class="panel" style="margin-top:16px">
-        <h2>🤖 LLM 분석</h2>
-        <div class="panel-title">최신 결정</div>
-        <div class="kv-grid" id="llm-analysis"></div>
-        <div class="panel-title">권장사항</div>
-        <div id="recommendations"></div>
+      <div class="topbar-right">
+        <button class="btn" onclick="location.href = 'ops.html'">
+          ← 돌아가기
+        </button>
       </div>
-    </div>
+    </nav>
 
-    <!-- 우측: 메시지 & 작업 -->
-    <div>
-      <!-- 받은 메시지 -->
-      <div class="panel">
-        <h2>📬 받은 메시지 (Inbox)</h2>
-        <div class="message-list" id="inbox-list">
-          <div class="empty">메시지 없음</div>
+    <div class="wrap">
+      <div class="header">
+        <div>
+          <h1 id="device-name">디바이스 선택 필요</h1>
+          <div class="status-badge offline" id="device-status">오프라인</div>
         </div>
       </div>
 
-      <!-- 보낸 메시지 -->
-      <div class="panel" style="margin-top:16px">
-        <h2>📤 보낸 메시지 (Outbox)</h2>
-        <div class="message-list" id="outbox-list">
-          <div class="empty">메시지 없음</div>
+      <div class="grid">
+        <div>
+          <!-- 텔레메트리 -->
+          <div class="panel">
+            <h2>📊 원격측정 (Telemetry)</h2>
+            <div class="panel-title">위치 & 상태</div>
+            <div class="kv-grid" id="telem-position"></div>
+            <div class="panel-title">배터리 & 센서</div>
+            <div class="kv-grid" id="telem-battery"></div>
+            <div class="panel-title">센서 상태</div>
+            <div class="sensor-list" id="sensor-status"></div>
+          </div>
+
+          <!-- LLM 분석 -->
+          <div class="panel" style="margin-top: 16px">
+            <h2>🤖 LLM 분석</h2>
+            <div class="panel-title">최신 결정</div>
+            <div class="kv-grid" id="llm-analysis"></div>
+            <div class="panel-title">권장사항</div>
+            <div id="recommendations"></div>
+          </div>
+        </div>
+
+        <!-- 우측: 메시지 & 작업 -->
+        <div>
+          <!-- 받은 메시지 -->
+          <div class="panel">
+            <h2>📬 받은 메시지 (Inbox)</h2>
+            <div class="message-list" id="inbox-list">
+              <div class="empty">메시지 없음</div>
+            </div>
+          </div>
+
+          <!-- 보낸 메시지 -->
+          <div class="panel" style="margin-top: 16px">
+            <h2>📤 보낸 메시지 (Outbox)</h2>
+            <div class="message-list" id="outbox-list">
+              <div class="empty">메시지 없음</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-</div>
+    <script src="assets/common.js"></script>
+    <script>
+      const { registryBase: R } = window.CoWaterUI.config;
+      const params = new URLSearchParams(window.location.search);
+      const deviceId = params.get("id");
+      let state = { device: null, lastTelem: null, lastDecision: null };
+      const { escapeHtml, formatTimestamp } = window.CoWaterUI;
+      let refreshTimer = null;
 
-<script>
-const R='http://127.0.0.1:8280';
-const params=new URLSearchParams(window.location.search);
-const deviceId=params.get('id');
-let state={device:null,lastTelem:null,lastDecision:null};
+      async function fetchJson(url) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status} ${url}`);
+        return res.json();
+      }
 
-async function load(){
-  if(!deviceId){document.querySelector('.wrap').innerHTML='<div class="empty" style="margin-top:40px">URL에 ?id=디바이스ID를 추가하세요<br>예: device.html?id=id-c2849329bbb0</div>';return}
-  try{
-    const dev=await fetch(R+'/devices/'+encodeURIComponent(deviceId)).then(r=>r.json());
-    state.device=dev;
-    document.getElementById('device-name').textContent=dev.name||'디바이스';
-    document.getElementById('device-status').className='status-badge '+(dev.connected?'':'offline');
-    document.getElementById('device-status').textContent=dev.connected?'온라인':'오프라인';
-    
-    const agent=dev.agent||{};
-    if(agent.endpoint){
-      try{
-        const s=await fetch(agent.endpoint+'/state').then(r=>r.json());
-        state.lastTelem=s.last_telemetry;
-        state.lastDecision=s.last_decision;
+      function extractMessageTitle(item) {
+        const data = item && typeof item === "object" ? item.data || {} : {};
+        const result =
+          item && typeof item === "object" ? item.result || {} : {};
+
+        return (
+          data.message_type ||
+          data.type ||
+          item.summary ||
+          item.message ||
+          item.action ||
+          result.message_type ||
+          (result.assigned ? "assignment.result" : "") ||
+          "메시지"
+        );
+      }
+
+      function extractMessageMeta(item) {
+        const data = item && typeof item === "object" ? item.data || {} : {};
+        const result =
+          item && typeof item === "object" ? item.result || {} : {};
+
+        const parts = [];
+        if (item?.task_id) parts.push(`task=${item.task_id}`);
+        if (data.device_name || data.device_id)
+          parts.push(`target=${data.device_name || data.device_id}`);
+        if (data.route_mode || result.route_mode)
+          parts.push(`route=${data.route_mode || result.route_mode}`);
+        if (result.assigned === true) parts.push("assigned=true");
+
+        return parts.join(" · ");
+      }
+
+      function extractMessageTimestamp(item) {
+        return formatTimestamp(
+          item?.at ||
+            item?.created_at ||
+            item?.timestamp ||
+            item?.received_at ||
+            (item?.data || {}).timestamp ||
+            (item?.result || {}).timestamp,
+        );
+      }
+
+      function renderMessageList(nodeId, items, emptyText) {
+        const node = document.getElementById(nodeId);
+        if (!node) return;
+        const list = Array.isArray(items) ? items : [];
+        node.innerHTML = list.length
+          ? list
+              .map(
+                (item) => `
+      <div class="message-item">
+        <div>${escapeHtml(extractMessageTitle(item))}</div>
+        <div class="message-ts">${escapeHtml(extractMessageMeta(item) || "메타 정보 없음")}</div>
+        <div class="message-ts">시간: ${escapeHtml(extractMessageTimestamp(item))}</div>
+      </div>
+    `,
+              )
+              .join("")
+          : `<div class="empty">${escapeHtml(emptyText)}</div>`;
+      }
+
+      function applyAgentState(agentState) {
+        const s = agentState || {};
+        state.lastTelem = s.last_telemetry || state.lastTelem;
+        state.lastDecision = s.last_decision || state.lastDecision;
         render();
-      }catch(e){console.error('Agent state fetch failed:',e)}
-    }
-  }catch(e){console.error('Device fetch failed:',e);document.querySelector('.wrap').innerHTML='<div class="empty" style="margin-top:40px">디바이스를 찾을 수 없습니다</div>'}
-}
+        renderMessageList("inbox-list", s.inbox || [], "메시지 없음");
+        renderMessageList("outbox-list", s.outbox || [], "메시지 없음");
+      }
 
-function render(){
-  const t=state.lastTelem||{};
-  const pos=t.position||{};
-  document.getElementById('telem-position').innerHTML=`
-    <div class="kv-key">위도</div><div class="kv-val">${pos.latitude?.toFixed(6)||'—'}</div>
-    <div class="kv-key">경도</div><div class="kv-val">${pos.longitude?.toFixed(6)||'—'}</div>
-    <div class="kv-key">깊이</div><div class="kv-val">${t.depth?.toFixed(2)||'—'} m</div>
-    <div class="kv-key">속도</div><div class="kv-val">${(t.motion?.speed||0).toFixed(2)} m/s</div>
+      function stopPolling() {
+        if (refreshTimer) {
+          clearInterval(refreshTimer);
+          refreshTimer = null;
+        }
+      }
+
+      function startPolling() {
+        stopPolling();
+        const dev = state.device || {};
+        const agent = dev.agent || {};
+        if (!agent.endpoint) return;
+        refreshTimer = setInterval(() => {
+          fetchJson(agent.endpoint + "/state")
+            .then(applyAgentState)
+            .catch((e) => console.debug("Agent state update failed:", e));
+        }, 10000);
+      }
+
+      async function load() {
+        if (!deviceId) {
+          stopPolling();
+          document.querySelector(".wrap").innerHTML =
+            '<div class="empty" style="margin-top:40px">URL에 ?id=디바이스ID를 추가하세요<br>예: device.html?id=id-c2849329bbb0</div>';
+          return;
+        }
+        try {
+          const dev = await fetchJson(
+            R + "/devices/" + encodeURIComponent(deviceId),
+          );
+          state.device = dev;
+          document.getElementById("device-name").textContent =
+            dev.name || "디바이스";
+
+          // Support both old (connected) and new (connectivity_status) format
+          const connStatus =
+            dev.connectivity_status || (dev.connected ? "online" : "offline");
+          const statusText =
+            {
+              online: "🟢 온라인",
+              lost: "🟡 연결 끊김",
+              offline: "⚫ 오프라인",
+            }[connStatus] || "❓ 알 수 없음";
+
+          document.getElementById("device-status").className =
+            "status-badge " + connStatus;
+          document.getElementById("device-status").textContent = statusText;
+
+          const agent = dev.agent || {};
+          if (agent.endpoint) {
+            try {
+              const s = await fetchJson(agent.endpoint + "/state");
+              applyAgentState(s);
+            } catch (e) {
+              console.error("Agent state fetch failed:", e);
+            }
+          }
+          startPolling();
+        } catch (e) {
+          console.error("Device fetch failed:", e);
+          document.querySelector(".wrap").innerHTML =
+            '<div class="empty" style="margin-top:40px">디바이스를 찾을 수 없습니다</div>';
+        }
+      }
+
+      function render() {
+        const t = state.lastTelem || {};
+        const pos = t.position || {};
+        const dev = state.device || {};
+        const connStatus =
+          dev.connectivity_status || (dev.connected ? "online" : "offline");
+
+        document.getElementById("telem-position").innerHTML =
+          `
+    <div class="kv-key">위도</div><div class="kv-val">${escapeHtml(pos.latitude?.toFixed(6) || "—")}</div>
+    <div class="kv-key">경도</div><div class="kv-val">${escapeHtml(pos.longitude?.toFixed(6) || "—")}</div>
+    <div class="kv-key">깊이</div><div class="kv-val">${escapeHtml(t.depth?.toFixed(2) || "—")} m</div>
+    <div class="kv-key">속도</div><div class="kv-val">${escapeHtml((t.motion?.speed || 0).toFixed(2))} m/s</div>
+  ` +
+          `<div class="connectivity-info">
+    <div><strong>연결 상태:</strong> ${["online", "lost", "offline"].includes(connStatus) ? { online: "🟢 온라인", lost: "🟡 연결 끊김", offline: "⚫ 오프라인" }[connStatus] : "❓ " + escapeHtml(connStatus)}</div>
+    <div><strong>마지막 업데이트:</strong> ${escapeHtml(formatTimestamp(dev.last_seen_at))}</div>
+  </div>
   `;
-  
-  const batt=t.battery_percent||0;
-  document.getElementById('telem-battery').innerHTML=`
-    <div class="kv-key">배터리</div><div class="kv-val">${batt.toFixed(1)}%<div class="progress-bar" style="margin-top:4px"><div class="progress-fill" style="width:${batt}%"></div></div></div>
-    <div class="kv-key">타임스탬프</div><div class="kv-val">${new Date(t.timestamp).toLocaleString('ko-KR')}</div>
+
+        const batt = t.battery_percent || 0;
+        document.getElementById("telem-battery").innerHTML = `
+    <div class="kv-key">배터리</div><div class="kv-val">${escapeHtml(batt.toFixed(1))}%<div class="progress-bar" style="margin-top:4px"><div class="progress-fill" style="width:${batt}%"></div></div></div>
+    <div class="kv-key">타임스탬프</div><div class="kv-val">${escapeHtml(formatTimestamp(t.timestamp))}</div>
   `;
-  
-  const sensors=t.sensors||{};
-  document.getElementById('sensor-status').innerHTML=Object.entries(sensors).map(([k,v])=>`
+
+        const sensors = t.sensors || {};
+        document.getElementById("sensor-status").innerHTML =
+          Object.entries(sensors)
+            .map(
+              ([k, v]) => `
     <div class="sensor-item">
-      <span class="sensor-name">${k}</span>
-      <span class="sensor-status ${v.status==='ok'?'':'alert'}">${v.status||'—'}</span>
+      <span class="sensor-name">${escapeHtml(k)}</span>
+      <span class="sensor-status ${v.status === "ok" ? "" : "alert"}">${escapeHtml(v.status || "—")}</span>
     </div>
-  `).join('')||'<div class="empty">센서 없음</div>';
-  
-  const dec=state.lastDecision||{};
-  document.getElementById('llm-analysis').innerHTML=`
-    <div class="kv-key">모드</div><div class="kv-val">${dec.mode||'—'}</div>
-    <div class="kv-key">시간</div><div class="kv-val">${new Date(dec.at).toLocaleString('ko-KR')}</div>
-  `;
-  
-  const recs=dec.recommendations||[];
-  document.getElementById('recommendations').innerHTML=recs.map(r=>`
-    <div style="padding:8px;background:rgba(96,165,250,0.08);border-radius:6px;margin-bottom:6px;border-left:3px solid #60a5fa">
-      <div style="font-size:0.78rem;font-weight:600">${r.action}</div>
-      <div style="font-size:0.7rem;color:#64748b;margin-top:2px">신뢰도: ${(r.confidence||0).toFixed(2)}</div>
-    </div>
-  `).join('')||'<div class="empty">권장사항 없음</div>';
-}
+  `,
+            )
+            .join("") || '<div class="empty">센서 없음</div>';
 
-load();
-setInterval(load, 5000);
-</script>
-</body>
+        const dec = state.lastDecision || {};
+        document.getElementById("llm-analysis").innerHTML = `
+    <div class="kv-key">모드</div><div class="kv-val">${escapeHtml(dec.mode || "—")}</div>
+    <div class="kv-key">시간</div><div class="kv-val">${escapeHtml(formatTimestamp(dec.at))}</div>
+  `;
+
+        const recs = dec.recommendations || [];
+        document.getElementById("recommendations").innerHTML =
+          recs
+            .map(
+              (r) => `
+    <div class="message-item" style="border-left-color:#60a5fa">
+      <div style="font-size:0.78rem;font-weight:600">${escapeHtml(r.action)}</div>
+      <div style="font-size:0.7rem;color:#64748b;margin-top:2px">신뢰도: ${escapeHtml((r.confidence || 0).toFixed(2))}</div>
+    </div>
+  `,
+            )
+            .join("") || '<div class="empty">권장사항 없음</div>';
+      }
+
+      load();
+
+      window.addEventListener("beforeunload", stopPolling);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          stopPolling();
+        } else if (!refreshTimer) {
+          startPolling();
+        }
+      });
+    </script>
+  </body>
 </html>

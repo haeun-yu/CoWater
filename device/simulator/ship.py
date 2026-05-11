@@ -1,71 +1,101 @@
 from __future__ import annotations
 
-import random
 from typing import Any
 
-from agent.state import AgentState, utc_now
+from agent.state import AgentState
+from simulator.base import BaseDeviceSimulator
 
 
-class DeviceSimulator:
-    def __init__(self, simulation_config: dict[str, Any], tracks: list[dict[str, Any]]) -> None:
-        self.config = simulation_config
-        self.tracks = tracks
-        self.position = dict(simulation_config.get("start_position") or {})
-        self.motion = {
-            "heading": random.uniform(0, 360),
-            "speed": random.uniform(*simulation_config.get("speed_range", [0.2, 1.0])),
-        }
-        self.battery = random.uniform(65, 100)
-
-    def interval_seconds(self) -> float:
-        return float(self.config.get("interval_seconds") or 2)
-
-    def next_telemetry(self, state: AgentState) -> dict[str, Any]:
-        self._step_position(self.interval_seconds())
+class DeviceSimulator(BaseDeviceSimulator):
+    def _platform_telemetry(self, state: AgentState) -> dict[str, Any]:
+        child_registry = getattr(self, "_child_registry", None)
+        tether = getattr(self, "_rov_tether_controller", None)
+        wired = getattr(self, "_wired_link_monitor", None)
         telemetry = {
-            "device_id": state.registry_id,
-            "agent_id": state.agent_id,
-            "device_type": state.device_type,
-            "timestamp": utc_now(),
-            "position": self.position,
-            "motion": self.motion,
-            "battery_percent": round(self.battery, 2),
-            "sensors": self._sensor_values(),
+            "navigation": {
+                "route_mode": self.mission_state.get("mode"),
+                "target_position": self.mission_state.get("target_position"),
+            },
+            "children": child_registry.list_children() if child_registry is not None else [],
+            "tether": tether.get_tether_info() if tether is not None else {"current_length_meters": 0.0, "tension_status": "normal"},
+            "wired_link": wired.check_link_health() if wired is not None else {"connected": False, "status": "degraded"},
+            "mission": dict(self.mission_state),
         }
-        self.battery = max(0, self.battery - random.uniform(0.01, 0.08))
         return telemetry
 
-    def _step_position(self, interval: float) -> None:
-        if not self.position:
-            return
-        speed_min, speed_max = self.config.get("speed_range", [0.2, 1.0])
-        self.motion["speed"] = max(float(speed_min), min(float(speed_max), self.motion["speed"] + random.uniform(-0.1, 0.1)))
-        self.motion["heading"] = (self.motion["heading"] + random.uniform(-8, 8)) % 360
-        meters = self.motion["speed"] * interval
-        self.position["latitude"] = float(self.position["latitude"]) + random.uniform(-1, 1) * meters / 111000
-        self.position["longitude"] = float(self.position["longitude"]) + random.uniform(-1, 1) * meters / 111000
-        altitude_range = self.config.get("altitude_range")
-        if altitude_range:
-            self.position["altitude"] = max(
-                float(altitude_range[0]),
-                min(float(altitude_range[1]), float(self.position.get("altitude", 0)) + random.uniform(-0.3, 0.3)),
-            )
+    def _apply_platform_action(
+        self,
+        action: str,
+        params: dict[str, Any],
+        tools: dict[str, Any],
+        result: dict[str, Any],
+    ) -> bool:
+        self._child_registry = tools.get("child_registry")
+        self._rov_tether_controller = tools.get("rov_tether_controller")
+        self._wired_link_monitor = tools.get("wired_link_monitor")
+        self._video_processor = tools.get("video_processor") or tools.get("camera_controller") or tools.get("high_def_camera")
+        self._a2a_router = tools.get("a2a_router")
 
-    def _sensor_values(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for track in self.tracks:
-            name = track.get("name")
-            if not name:
-                continue
-            if name == "battery":
-                values[name] = {"percent": round(self.battery, 2)}
-            elif name == "pressure":
-                values[name] = {"depth_m": abs(float(self.position.get("altitude", 0)))}
-            elif name == "temperature":
-                values[name] = {"celsius": round(random.uniform(2, 18), 2)}
-            elif name == "camera":
-                values[name] = {"status": "streaming", "light_lux": random.randint(80, 900)}
+        if action == "manage_tether_length":
+            length = float(params.get("length_m") or params.get("tether_length_m") or 0.0)
+            if self._rov_tether_controller is not None:
+                self._rov_tether_controller.set_tether_length(length)
+            tension = "critical" if length > 800 else "warning" if length > 500 else "normal"
+            self.mission_state.update({"mode": "tether_management", "status": "adjusting", "active_action": action, "tether_length_m": length, "tether_tension": tension})
+            result["artifacts"].append({"type": "tether_update", "length_m": length, "tension": tension})
+            return True
+        if action == "coordinate_children":
+            children = self._child_registry.list_children() if self._child_registry is not None else []
+            self.mission_state.update({"mode": "coordination", "status": "coordinating", "active_action": action, "child_count": len(children)})
+            self._children_snapshot = children
+            if self._a2a_router is not None:
+                for child in children:
+                    child_id = child.get("id") or child.get("device_id")
+                    endpoint = child.get("endpoint")
+                    if child_id is not None and endpoint:
+                        try:
+                            self._a2a_router.update_route(int(child_id), str(endpoint))
+                        except Exception:
+                            continue
+            result["artifacts"].append({"type": "child_coordination", "children": children})
+            return True
+        if action == "manage_rov_power":
+            power_budget = float(params.get("budget_percent") or 100.0)
+            self.mission_state.update({"mode": "power_management", "status": "balancing", "active_action": action, "rov_power_budget": power_budget})
+            result["artifacts"].append({"type": "power_budget", "budget_percent": power_budget})
+            return True
+        if action == "capture_video":
+            self.mission_state.update({"mode": "video_capture", "status": "capturing", "active_action": action})
+            if self._video_processor is not None:
+                if params.get("recording", True) and hasattr(self._video_processor, "start_recording"):
+                    self._video_processor.start_recording()
+                frame = None
+                if hasattr(self._video_processor, "capture_frame"):
+                    frame = self._video_processor.capture_frame()
+                if params.get("recording") is False and hasattr(self._video_processor, "stop_recording"):
+                    self._video_processor.stop_recording()
+                result["artifacts"].append(
+                    {
+                        "type": "video_frame",
+                        "captured": frame is not None,
+                        "camera_status": self._video_processor.get_status() if hasattr(self._video_processor, "get_status") else {},
+                    }
+                )
             else:
-                values[name] = {"status": "ok"}
-        return values
-
+                result["status"] = "failed"
+                result["usable_output"] = False
+                result["failure_reason"] = "video_processor_unavailable"
+                result["artifacts"].append({"type": "video_frame", "captured": False})
+            return True
+        if action == "relay_data":
+            if self._wired_link_monitor is not None:
+                self._wired_link_monitor.connected = True
+            self.mission_state.update({"mode": "relay", "status": "relaying", "active_action": action, "relay_active": True, "last_relay": params.get("channel") or "general"})
+            result["artifacts"].append({"type": "relay_ack", "channel": params.get("channel") or "general"})
+            return True
+        if action in {"route_move", "hold_position", "slow_down", "return_to_base", "abort_mission", "emergency_stop"}:
+            if action == "abort_mission":
+                self.mission_state["route_canceled"] = True
+            result["artifacts"].append({"type": "ship_navigation", "action": action})
+            return False
+        return False
