@@ -20,7 +20,13 @@ DEFAULT_CORS_ORIGINS = ["*"]
 
 # ← NEW: Healthcheck & Re-binding
 DEFAULT_HEALTHCHECK_INTERVAL_SECONDS = 1
-DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS = 3
+DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS = 20  # ← UPDATED: 3s → 20s (device-type default)
+DEFAULT_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE = {
+    "usv": 20,      # Surface vehicle: 20 seconds
+    "auv": 30,      # Underwater vehicle: 30 seconds (slow telemetry)
+    "rov": 25,      # Tethered vehicle: 25 seconds (tether lag)
+    "ship": 15,     # Surface ship: 15 seconds (fast comms)
+}
 DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS = 500
 DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS = 1
 
@@ -135,6 +141,20 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
         healthcheck_cfg.get("timeout_seconds"),
         DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS,
     ))
+    # ← NEW: Device-type specific timeouts
+    healthcheck_timeout_by_device_type = pick(
+        "COWATER_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE",
+        healthcheck_cfg.get("timeout_by_device_type"),
+        DEFAULT_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE,
+    )
+    if isinstance(healthcheck_timeout_by_device_type, str):
+        try:
+            import json as json_module
+            healthcheck_timeout_by_device_type = json_module.loads(healthcheck_timeout_by_device_type)
+        except:
+            healthcheck_timeout_by_device_type = DEFAULT_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE
+    if not isinstance(healthcheck_timeout_by_device_type, dict):
+        healthcheck_timeout_by_device_type = DEFAULT_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE
 
     # ← NEW: Re-binding
     rebinding_threshold = int(pick(
@@ -187,6 +207,7 @@ def load_runtime_config(config_path: Path) -> dict[str, Any]:
         "healthcheck": {
             "interval_seconds": healthcheck_interval,
             "timeout_seconds": healthcheck_timeout,
+            "timeout_by_device_type": healthcheck_timeout_by_device_type,
         },
         "rebinding": {
             "distance_delta_threshold_meters": rebinding_threshold,

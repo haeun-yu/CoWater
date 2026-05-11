@@ -24,7 +24,8 @@
       "endpoint": "http://localhost:11434",
       "model": "gemma4:e2b",
       "enabled": true,
-      "timeout_seconds": 120
+      "timeout_seconds": 30,
+      "max_retries": 1
     },
     "capabilities": {
       "skills": [

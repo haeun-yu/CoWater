@@ -167,6 +167,10 @@ class DeviceAgentInformationRecord:
     connected: bool = False
     connected_at: Optional[str] = None
     last_seen_at: Optional[str] = None
+    # P3 (보고 기반): Device가 주기적으로 보고한 위치와 배터리 정보
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    battery_percent: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -182,6 +186,10 @@ class DeviceAgentRegistrationRequest(BaseModel):
     available_actions: List[str] = Field(default_factory=list)
     connected: bool = True
     last_seen_at: Optional[str] = None
+    # P3 (보고 기반): Device가 주기적으로 보고한 위치와 배터리
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    battery_percent: Optional[float] = None
 
 
 @dataclass

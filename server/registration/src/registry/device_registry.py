@@ -46,6 +46,7 @@ class DeviceRegistry:
         agent_command_path_prefix: str,
         healthcheck_interval_seconds: int = 1,
         healthcheck_timeout_seconds: int = 3,
+        healthcheck_timeout_by_device_type: Optional[Dict[str, int]] = None,
         healthcheck_topic_template: str = "device.healthcheck",
         telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
         db_path: Optional[Path] = None,
@@ -66,6 +67,7 @@ class DeviceRegistry:
             registry=self,
             interval_seconds=healthcheck_interval_seconds,
             timeout_seconds=healthcheck_timeout_seconds,
+            timeout_by_device_type=healthcheck_timeout_by_device_type or {},
         )
 
         # SQLite 영구 저장소
@@ -482,6 +484,21 @@ class DeviceRegistry:
             if device.agent.connected_at is None:
                 device.agent.connected_at = now
         device.agent.last_seen_at = request.last_seen_at or now
+        
+        # P3 (보고 기반): Device가 주기적으로 보고한 위치와 배터리 정보를 저장
+        if request.latitude is not None:
+            device.agent.latitude = request.latitude
+            device.latitude = request.latitude
+            device.last_location_update = now
+        if request.longitude is not None:
+            device.agent.longitude = request.longitude
+            device.longitude = request.longitude
+            device.last_location_update = now
+        if request.battery_percent is not None:
+            device.agent.battery_percent = request.battery_percent
+            device.last_battery_percent = request.battery_percent
+            device.last_battery_update = now
+        
         device.updated_at = now
         self._persist_device(device)
         assignments = [self._routing_assignment(device)]

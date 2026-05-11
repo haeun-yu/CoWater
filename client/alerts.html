@@ -1,12 +1,35 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CoWater Alerts</title>
+    <title>CoWater 알림</title>
     <style>
+      body {
+        min-height: 100vh;
+      }
       main.page-main-grid {
-        grid-template-columns: 1.2fr 0.8fr;
+        grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+        align-items: stretch;
+        min-height: calc(100vh - 56px);
+      }
+      main.page-main-grid > .stack {
+        align-content: start;
+        max-height: none;
+        min-height: 0;
+      }
+      .stack {
+        max-height: none;
+      }
+      .card {
+        height: 100%;
+      }
+      #alerts,
+      #approvals,
+      #insights,
+      #events,
+      #stats {
+        min-height: 0;
       }
     </style>
     <link rel="stylesheet" href="assets/common.css" />
@@ -15,7 +38,7 @@
     <nav class="topbar">
       <div class="brand">
         <div class="brand-icon">🌊</div>
-        <h1>CoWater<span>Alerts</span></h1>
+        <h1>CoWater<span>알림</span></h1>
       </div>
       <div class="nav">
         <a href="index.html">3D 지도</a>
@@ -29,18 +52,18 @@
     <main class="page-main-grid">
       <div class="stack">
         <section class="card">
-          <h2>Signal Overview</h2>
+          <h2>신호 개요</h2>
           <div class="stats" id="stats"></div>
         </section>
 
         <section class="card">
-          <h2>Alerts</h2>
+          <h2>알림</h2>
           <div class="toolbar">
-            <button class="active" data-filter="all">All</button>
-            <button data-filter="registered">Registered</button>
-            <button data-filter="processing">Processing</button>
-            <button data-filter="completed">Completed</button>
-            <button data-filter="failed">Failed</button>
+            <button class="active" data-filter="all">전체</button>
+            <button data-filter="registered">등록됨</button>
+            <button data-filter="processing">처리중</button>
+            <button data-filter="completed">완료</button>
+            <button data-filter="failed">실패</button>
           </div>
           <div class="list" id="alerts"></div>
         </section>
@@ -48,17 +71,17 @@
 
       <div class="stack">
         <section class="card">
-          <h2>Approvals</h2>
+          <h2>승인</h2>
           <div class="list" id="approvals"></div>
         </section>
 
         <section class="card">
-          <h2>Insights</h2>
+          <h2>인사이트</h2>
           <div class="list" id="insights"></div>
         </section>
 
         <section class="card">
-          <h2>Events</h2>
+          <h2>이벤트</h2>
           <div class="list" id="events"></div>
         </section>
       </div>
@@ -68,20 +91,54 @@
     <script>
       const { registryBase: REGISTRY } = window.CoWaterUI.config;
       const { escapeHtml } = window.CoWaterUI;
-      let state = { alerts: [], approvals: [], insights: [], events: [], filter: "all" };
+      let hasLoadedOnce = false;
+      let state = {
+        alerts: [],
+        approvals: [],
+        insights: [],
+        events: [],
+        filter: "all",
+      };
+
+      function setLoadingState() {
+        const loading = '<div class="empty">데이터를 불러오는 중…</div>';
+        document.getElementById("stats").innerHTML = loading;
+        document.getElementById("alerts").innerHTML = loading;
+        document.getElementById("approvals").innerHTML = loading;
+        document.getElementById("insights").innerHTML = loading;
+        document.getElementById("events").innerHTML = loading;
+      }
 
       async function load() {
         const settled = await Promise.allSettled([
-          fetch(`${REGISTRY}/alerts`).then(r => r.json()),
-          fetch(`${REGISTRY}/approvals`).then(r => r.json()),
-          fetch(`${REGISTRY}/insights`).then(r => r.json()),
-          fetch(`${REGISTRY}/events`).then(r => r.json()),
+          fetch(`${REGISTRY}/alerts`).then((r) => r.json()),
+          fetch(`${REGISTRY}/approvals`).then((r) => r.json()),
+          fetch(`${REGISTRY}/insights`).then((r) => r.json()),
+          fetch(`${REGISTRY}/events`).then((r) => r.json()),
         ]);
-        const alerts = settled[0].status === "fulfilled" ? settled[0].value : [];
-        const approvals = settled[1].status === "fulfilled" ? settled[1].value : [];
-        const insights = settled[2].status === "fulfilled" ? settled[2].value : [];
-        const events = settled[3].status === "fulfilled" ? settled[3].value : [];
-        state = { ...state, alerts, approvals, insights, events };
+        const anySuccess = settled.some(
+          (result) => result.status === "fulfilled",
+        );
+        if (!anySuccess) {
+          if (!hasLoadedOnce) setLoadingState();
+          return;
+        }
+        state = {
+          ...state,
+          alerts:
+            settled[0].status === "fulfilled" ? settled[0].value : state.alerts,
+          approvals:
+            settled[1].status === "fulfilled"
+              ? settled[1].value
+              : state.approvals,
+          insights:
+            settled[2].status === "fulfilled"
+              ? settled[2].value
+              : state.insights,
+          events:
+            settled[3].status === "fulfilled" ? settled[3].value : state.events,
+        };
+        hasLoadedOnce = true;
         render();
       }
 
@@ -94,16 +151,26 @@
         const approvals = state.approvals || [];
         const rows = [
           ["Alerts", alerts.length],
-          ["Pending", alerts.filter(a => a.status === "registered").length],
+          ["Pending", alerts.filter((a) => a.status === "registered").length],
           ["Approvals", approvals.length],
-          ["Waiting", approvals.filter(a => a.status === "pending").length],
+          ["Waiting", approvals.filter((a) => a.status === "pending").length],
         ];
-        document.getElementById("stats").innerHTML = rows.map(([k, v]) => `<div class="stat"><div>${escapeHtml(k)}</div><b>${escapeHtml(v)}</b></div>`).join("");
+        document.getElementById("stats").innerHTML = rows
+          .map(
+            ([k, v]) =>
+              `<div class="stat"><div>${escapeHtml(k)}</div><b>${escapeHtml(v)}</b></div>`,
+          )
+          .join("");
       }
 
       function renderAlerts() {
-        const alerts = (state.alerts || []).filter(alert => state.filter === "all" ? true : alert.status === state.filter);
-        document.getElementById("alerts").innerHTML = alerts.map(alert => `
+        const alerts = (state.alerts || []).filter((alert) =>
+          state.filter === "all" ? true : alert.status === state.filter,
+        );
+        document.getElementById("alerts").innerHTML =
+          alerts
+            .map(
+              (alert) => `
           <div class="item">
             <strong>${escapeHtml(alert.alert_type)}</strong> ${pill(alert.severity, alert.severity === "CRITICAL" ? "critical" : alert.severity === "WARNING" ? "warning" : "")} ${pill(alert.status)}
             <div>${escapeHtml(alert.message)}</div>
@@ -116,28 +183,42 @@
               ${alert.status === "registered" ? `<button class="action" onclick="ackAlert('${alert.alert_id}')">Claim</button>` : ""}
             </div>
           </div>
-        `).join("") || `<div class="empty">No alerts.</div>`;
+        `,
+            )
+            .join("") || `<div class="empty">No alerts.</div>`;
       }
 
       function renderApprovals() {
-        document.getElementById("approvals").innerHTML = (state.approvals || []).map(item => `
+        document.getElementById("approvals").innerHTML =
+          (state.approvals || [])
+            .map(
+              (item) => `
           <div class="item">
             <strong>${escapeHtml(item.summary)}</strong> ${pill(item.status, item.status === "pending" ? "pending" : "")}
             <div class="meta">
               <span>${escapeHtml(item.approval_id)}</span>
               <span>${escapeHtml(item.target_type)}:${escapeHtml(item.target_id)}</span>
             </div>
-            ${item.status === "pending" ? `
+            ${
+              item.status === "pending"
+                ? `
               <div class="actions">
                 <button class="action" onclick="decideApproval('${item.approval_id}', true)">Approve</button>
                 <button class="action danger" onclick="decideApproval('${item.approval_id}', false)">Reject</button>
-              </div>` : ""}
+              </div>`
+                : ""
+            }
           </div>
-        `).join("") || `<div class="empty">No approvals.</div>`;
+        `,
+            )
+            .join("") || `<div class="empty">No approvals.</div>`;
       }
 
       function renderInsights() {
-        document.getElementById("insights").innerHTML = (state.insights || []).map(item => `
+        document.getElementById("insights").innerHTML =
+          (state.insights || [])
+            .map(
+              (item) => `
           <div class="item">
             <strong>${escapeHtml(item.summary)}</strong> ${pill(item.severity)}
             <div>${escapeHtml(item.reason_summary || "")}</div>
@@ -146,11 +227,18 @@
               <span>${escapeHtml(item.recommended_action || "-")}</span>
             </div>
           </div>
-        `).join("") || `<div class="empty">No insights.</div>`;
+        `,
+            )
+            .join("") || `<div class="empty">No insights.</div>`;
       }
 
       function renderEvents() {
-        document.getElementById("events").innerHTML = (state.events || []).slice(-8).reverse().map(item => `
+        document.getElementById("events").innerHTML =
+          (state.events || [])
+            .slice(-8)
+            .reverse()
+            .map(
+              (item) => `
           <div class="item">
             <strong>${escapeHtml(item.event_type)}</strong> ${pill(item.severity)}
             <div>${escapeHtml(item.message)}</div>
@@ -159,7 +247,9 @@
               <span>${escapeHtml(item.created_at || "")}</span>
             </div>
           </div>
-        `).join("") || `<div class="empty">No events.</div>`;
+        `,
+            )
+            .join("") || `<div class="empty">No events.</div>`;
       }
 
       function render() {
@@ -174,23 +264,31 @@
         await fetch(`${REGISTRY}/alerts/${encodeURIComponent(alertId)}/ack`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved: true, notes: "claimed from alerts page" }),
+          body: JSON.stringify({
+            approved: true,
+            notes: "claimed from alerts page",
+          }),
         });
         await load();
       }
 
       async function decideApproval(approvalId, approved) {
-        await fetch(`${REGISTRY}/approvals/${encodeURIComponent(approvalId)}/decision`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved, decided_by: "user" }),
-        });
+        await fetch(
+          `${REGISTRY}/approvals/${encodeURIComponent(approvalId)}/decision`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ approved, decided_by: "user" }),
+          },
+        );
         await load();
       }
 
-      document.querySelectorAll("[data-filter]").forEach(btn => {
+      document.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          document.querySelectorAll("[data-filter]").forEach(item => item.classList.remove("active"));
+          document
+            .querySelectorAll("[data-filter]")
+            .forEach((item) => item.classList.remove("active"));
           btn.classList.add("active");
           state.filter = btn.dataset.filter;
           renderAlerts();
@@ -199,6 +297,7 @@
 
       window.ackAlert = ackAlert;
       window.decideApproval = decideApproval;
+      setLoadingState();
       load();
     </script>
   </body>

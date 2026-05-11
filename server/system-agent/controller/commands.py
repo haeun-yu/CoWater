@@ -11,6 +11,7 @@ from tools.command_executor import CommandExecutor
 class CommandRequest(BaseModel):
     action: str
     reason: Optional[str] = None
+    goal: Optional[str] = None
     priority: str = "normal"
     params: dict[str, Any] = Field(default_factory=dict)
 

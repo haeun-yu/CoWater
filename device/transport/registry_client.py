@@ -161,20 +161,31 @@ class RegistryClient:
         skills: list[str],
         actions: list[str],
         last_seen_at: str | None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        battery_percent: float | None = None,
     ) -> dict[str, Any]:
+        payload = {
+            "secretKey": self.secret_key,
+            "endpoint": endpoint,
+            "commandEndpoint": command_endpoint,
+            "role": role,
+            "llm_enabled": llm_enabled,
+            "skills": skills,
+            "available_actions": actions,
+            "connected": True,
+            "last_seen_at": last_seen_at,
+        }
+        # P3 (보고 기반 운영): Device가 주기적으로 위치와 배터리 상태 보고
+        if latitude is not None:
+            payload["latitude"] = latitude
+        if longitude is not None:
+            payload["longitude"] = longitude
+        if battery_percent is not None:
+            payload["battery_percent"] = battery_percent
         return put_json(
             f"{self.url}/devices/{registry_id}/agent",
-            {
-                "secretKey": self.secret_key,
-                "endpoint": endpoint,
-                "commandEndpoint": command_endpoint,
-                "role": role,
-                "llm_enabled": llm_enabled,
-                "skills": skills,
-                "available_actions": actions,
-                "connected": True,
-                "last_seen_at": last_seen_at,
-            },
+            payload,
         )
 
     def get_assignment(self, registry_id: int) -> dict[str, Any]:

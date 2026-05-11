@@ -322,6 +322,13 @@ class AgentRuntime:
     def _upsert_agent(self) -> None:
         if self.state.registry_id is None or not self.state.token:
             raise RuntimeError("agent identity is not registered")
+        # P3 (보고 기반): 주기적으로 위치, 배터리, 상태를 Registry에 보고
+        battery_percent = None
+        if self.state.last_telemetry:
+            battery_info = self.state.last_telemetry.get("battery", {})
+            if isinstance(battery_info, dict):
+                battery_percent = battery_info.get("percent")
+        
         self.registry_client.upsert_agent(
             self.state.registry_id,
             endpoint=self.base_url(),
@@ -331,6 +338,9 @@ class AgentRuntime:
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
+            latitude=self.state.latitude,
+            longitude=self.state.longitude,
+            battery_percent=battery_percent,
         )
 
     def register_child(self, child: dict[str, Any]) -> dict[str, Any]:

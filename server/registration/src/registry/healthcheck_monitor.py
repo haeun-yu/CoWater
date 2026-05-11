@@ -37,11 +37,13 @@ class HealthcheckMonitor:
         registry: Any,
         interval_seconds: int = 10,
         timeout_seconds: int = 3,
+        timeout_by_device_type: Optional[dict[str, int]] = None,
         distance_calculator: Optional[Callable] = None,
     ):
         self.registry = registry
         self.interval_seconds = interval_seconds
         self.timeout_seconds = timeout_seconds
+        self.timeout_by_device_type = timeout_by_device_type or {}
         self.distance_calculator = distance_calculator or self._default_distance
         self.is_running = False
 
@@ -75,15 +77,21 @@ class HealthcheckMonitor:
 
     async def _check_all_devices(self) -> None:
         try:
-            timeout_threshold = datetime.now(timezone.utc) - timedelta(seconds=self.timeout_seconds)
-
             for device in list(self.registry.list_devices()):
                 if device.connected and device.agent.last_seen_at:
+                    # ← NEW: Get device-type-specific timeout
+                    device_type = getattr(device, 'device_type', '').lower()
+                    timeout_seconds = self.timeout_by_device_type.get(device_type, self.timeout_seconds)
+                    timeout_threshold = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+                    
                     last_seen = datetime.fromisoformat(device.agent.last_seen_at.replace("Z", "+00:00"))
                     if last_seen.tzinfo is None:
                         last_seen = last_seen.replace(tzinfo=timezone.utc)
                     if last_seen < timeout_threshold:
-                        logger.warning(f"Device {device.id} ({device.name}) marked as LOST (no healthcheck)")
+                        logger.warning(
+                            f"Device {device.id} ({device.name}) [type={device_type}] "
+                            f"marked as LOST (timeout={timeout_seconds}s, no healthcheck)"
+                        )
                         device.connected = False
                         device.agent.connected = False
                         device.connectivity_status = "lost"

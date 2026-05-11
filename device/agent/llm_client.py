@@ -6,10 +6,11 @@ Shared LLM Client - supports Ollama and other LLM providers
 
 import asyncio
 import logging
-import os
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
+import urllib.error
+import urllib.request
 
 try:
     import httpx
@@ -17,13 +18,6 @@ except ImportError:
     httpx = None
 
 logger = logging.getLogger(__name__)
-
-
-def _env_bool(name: str) -> bool | None:
-    value = os.getenv(name)
-    if value is None or value == "":
-        return None
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class LLMClient(ABC):
@@ -102,24 +96,24 @@ class FallbackClient(LLMClient):
         return "LLM unavailable - using fallback"
 
 
+def _ensure_ollama_available(endpoint: str, timeout_seconds: float = 3.0) -> None:
+    url = f"{endpoint.rstrip('/')}/api/version"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
+            if getattr(response, "status", 200) != 200:
+                raise RuntimeError(f"Ollama returned HTTP {getattr(response, 'status', 'unknown')}")
+    except Exception as exc:
+        raise RuntimeError(f"Ollama is not available at {endpoint}") from exc
+
+
 def make_llm_client(config: dict[str, Any]) -> LLMClient:
     """Factory function to create LLM client"""
-    env_enabled = _env_bool("COWATER_LLM_ENABLED")
-    enabled = env_enabled if env_enabled is not None else bool(config.get("enabled", False))
-    if not enabled:
-        logger.info("LLM disabled in config")
-        return FallbackClient()
-
     provider = config.get("provider", "ollama").lower()
 
     if provider == "ollama":
         endpoint = config.get("endpoint", "http://localhost:11434")
         model = config.get("model", "gemma4:e2b")
-        try:
-            return OllamaClient(endpoint=endpoint, model=model)
-        except Exception as e:
-            logger.error(f"Failed to create OllamaClient: {e}")
-            return FallbackClient()
+        _ensure_ollama_available(endpoint)
+        return OllamaClient(endpoint=endpoint, model=model)
 
-    logger.warning(f"Unknown provider: {provider}")
-    return FallbackClient()
+    raise RuntimeError(f"Unsupported LLM provider: {provider}")

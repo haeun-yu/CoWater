@@ -462,7 +462,22 @@ class DomainRegistry:
         return record
 
     def list_missions(self, limit: int | None = None, offset: int = 0) -> list[MissionRecord]:
-        return self._list("missions", MissionRecord, limit=limit, offset=offset)
+        records = self._list("missions", MissionRecord)
+
+        def sort_key(record: MissionRecord) -> tuple[str, str, str, str]:
+            return (
+                record.updated_at or "",
+                record.completed_at or "",
+                record.started_at or "",
+                record.created_at or "",
+            )
+
+        records.sort(key=sort_key, reverse=True)
+        if offset:
+            records = records[offset:]
+        if limit is not None:
+            records = records[:limit]
+        return records
 
     def get_mission(self, mission_id: str) -> MissionRecord:
         return self._load("missions", str(mission_id), MissionRecord)

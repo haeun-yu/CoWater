@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
@@ -113,10 +113,23 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return await handle_a2a(runtime, request)
 
     @app.post("/agents/{token}/command")
-    async def command(token: str, request: CommandRequest) -> dict[str, Any]:
+    async def command(
+        token: str,
+        request: CommandRequest,
+        async_mode: bool = Query(default=False),
+    ) -> dict[str, Any]:
         if runtime.state.token and token != runtime.state.token:
             raise HTTPException(status_code=403, detail="token mismatch")
+        if async_mode:
+            return runtime.start_async_command(request.model_dump(), requested_by="user")
         return await runtime.handle_command_with_llm(request.model_dump())
+
+    @app.get("/commands/{request_id}")
+    def get_command_status(request_id: str) -> dict[str, Any]:
+        status = runtime.get_async_command(request_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail="command request not found")
+        return status
 
     @app.post("/children/register")
     async def register_child(child: dict[str, Any]) -> dict[str, Any]:
@@ -144,8 +157,12 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return {"relayed": True, "child": child_id}
 
     @app.post("/device-recovery")
-    async def handle_device_recovery(payload: dict[str, Any]) -> dict[str, Any]:
+    async def handle_device_recovery(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         """Device Agent 복구 후 로컬 상태 보고 (Ch.16)"""
+        # P1 원칙: Internal 호출만 허용 (보안)
+        internal_token = request.headers.get("x_cowater_internal", "")
+        if not internal_token or internal_token != runtime.config.get("internal_auth_token"):
+            raise HTTPException(status_code=401, detail="Missing or invalid x_cowater_internal header")
         device_id = str(payload.get("device_id") or "")
         if not device_id:
             raise HTTPException(status_code=400, detail="device_id required")

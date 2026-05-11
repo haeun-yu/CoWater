@@ -46,6 +46,7 @@ def build_registry_components() -> RegistryComponents:
         agent_command_path_prefix=APP_SETTINGS["agent"]["command_path_prefix"],
         healthcheck_interval_seconds=APP_SETTINGS["healthcheck"]["interval_seconds"],
         healthcheck_timeout_seconds=APP_SETTINGS["healthcheck"]["timeout_seconds"],
+        healthcheck_timeout_by_device_type=APP_SETTINGS["healthcheck"].get("timeout_by_device_type", {}),
         healthcheck_topic_template=APP_SETTINGS["moth"]["healthcheck_topic_template"],
         telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
     )

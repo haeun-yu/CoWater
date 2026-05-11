@@ -67,7 +67,6 @@ def test_platform_loader_discovers_mismatched_class_names(monkeypatch) -> None:
 
 
 def test_runtime_child_state_roundtrip(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
     monkeypatch.syspath_prepend(str(ROOT / "device"))
     try:
         runtime_mod = load_module(
@@ -81,7 +80,15 @@ def test_runtime_child_state_roundtrip(monkeypatch, tmp_path) -> None:
         config_path = tmp_path / "device-config.json"
         config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
-        runtime = runtime_mod.AgentRuntime(config_path)
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=DummyResponse()):
+            runtime = runtime_mod.AgentRuntime(config_path)
         child = runtime.register_child({"agent_id": "child-1", "name": "Child"})
         updated = runtime.relay_child_healthcheck({"agent_id": "child-1", "status": "ok"})
 
@@ -93,7 +100,6 @@ def test_runtime_child_state_roundtrip(monkeypatch, tmp_path) -> None:
 
 
 def test_runtime_state_persists_across_restore(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
     monkeypatch.setenv("COWATER_INSTANCE_ID", "persist-device")
     monkeypatch.syspath_prepend(str(ROOT / "device"))
     try:
@@ -112,7 +118,15 @@ def test_runtime_state_persists_across_restore(monkeypatch, tmp_path) -> None:
         config_path = tmp_path / "device-config.json"
         config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
-        runtime = runtime_mod.AgentRuntime(config_path)
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=DummyResponse()):
+            runtime = runtime_mod.AgentRuntime(config_path)
         runtime.runtime_store = storage_mod.RuntimeStore(tmp_path / "runtime.json")
         runtime.register_child({"agent_id": "child-1", "name": "Child"})
         runtime.state.mission_state = {"mode": "route_move", "status": "navigating", "target_position": {"latitude": 37.1, "longitude": 129.1}}
@@ -120,7 +134,8 @@ def test_runtime_state_persists_across_restore(monkeypatch, tmp_path) -> None:
         runtime.simulator.position = {"latitude": 37.0, "longitude": 129.0}
         runtime._persist_runtime_state()
 
-        restored = runtime_mod.AgentRuntime(config_path)
+        with patch("urllib.request.urlopen", return_value=DummyResponse()):
+            restored = runtime_mod.AgentRuntime(config_path)
         restored.runtime_store = storage_mod.RuntimeStore(tmp_path / "runtime.json")
         restored._restore_runtime_snapshot(restored.runtime_store.load_snapshot("persist-device"))
 
@@ -133,7 +148,6 @@ def test_runtime_state_persists_across_restore(monkeypatch, tmp_path) -> None:
 
 
 def test_rov_video_command_updates_simulated_state(monkeypatch) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
     monkeypatch.syspath_prepend(str(ROOT / "device"))
     from agent.state import AgentState
     try:
@@ -177,7 +191,6 @@ def test_rov_video_command_updates_simulated_state(monkeypatch) -> None:
 
 
 def test_ship_capture_video_uses_video_processor(monkeypatch) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
     monkeypatch.syspath_prepend(str(ROOT / "device"))
     from agent.state import AgentState
 
@@ -222,7 +235,6 @@ def test_ship_capture_video_uses_video_processor(monkeypatch) -> None:
 
 
 def test_route_move_advances_through_waypoints(monkeypatch) -> None:
-    monkeypatch.setenv("COWATER_LLM_ENABLED", "false")
     monkeypatch.syspath_prepend(str(ROOT / "device"))
     from agent.state import AgentState
 

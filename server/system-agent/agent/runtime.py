@@ -13,8 +13,17 @@ from typing import Any
 from uuid import uuid4
 
 from agent.decision import DecisionEngine
+from agent.event_system import (
+    EventPublisher,
+    create_step_evaluation_event,
+    create_recovery_action_event,
+    create_mission_state_change_event,
+    create_device_status_change_event,
+)
 from agent.manifest import ManifestBuilder
+from agent.policy_evaluator import PolicyEvaluator
 from agent.state import AgentState, utc_now
+from agent.task_dispatcher import TaskDispatcher
 from controller.commands import CommandController
 from simulator.device import DeviceSimulator
 from skills.catalog import SkillCatalog
@@ -23,6 +32,9 @@ from storage.runtime_store import PersistentLog, PersistentMapping, RuntimeStore
 from tools.command_executor import CommandExecutor
 from tools.telemetry_reader import TelemetryReader
 from transport.registry_client import RegistryClient
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
@@ -39,6 +51,7 @@ class AgentRuntime:
         self.runtime_store = RuntimeStore(config_path.parent / ".runtime" / f"{self.instance_id}.db")
         self.skills = SkillCatalog(self.capabilities)
         self.manifest_builder = ManifestBuilder(self.config, self.skills)
+        self.policy_evaluator = PolicyEvaluator(self)
         configured_name = str(self.agent_config.get("name") or "CoWater Agent").strip()
         self.state = AgentState(
             agent_id=self.identity.get("agent_id") or f"{self.agent_config.get('id', 'agent')}-{self.instance_id}",
@@ -49,7 +62,9 @@ class AgentRuntime:
             name=self.identity.get("name") or configured_name or "CoWater Agent",
         )
         self.registry_client = RegistryClient(self.config.get("registry", {}))
+        self.event_publisher = EventPublisher(self.registry_client)
         self.decision_engine = DecisionEngine(self.agent_config, self.skills)
+        self.task_dispatcher = TaskDispatcher(self.registry_client, enable_logging=True)
         self.telemetry_reader = TelemetryReader()
         self.simulator = DeviceSimulator(self.config.get("simulation", {}), self.skills.list_tracks())
         self.command_controller = CommandController(CommandExecutor())
@@ -73,6 +88,8 @@ class AgentRuntime:
             "return_to_base": ["return_to_base", "surface", "hold_position"],
         }
         self._recommendation_suppressions: dict[str, str] = {}
+        self._command_requests: dict[str, dict[str, Any]] = {}
+        self._command_request_tasks: set[asyncio.Task[Any]] = set()
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -296,6 +313,8 @@ class AgentRuntime:
 
                 try:
                     all_devices = self.registry_client.list_devices()
+                    # P3 (보고 기반): Agent가 보고한 위치/배터리 정보를 device dict에 반영
+                    all_devices = [self._normalize_device_from_registry(d) for d in all_devices]
                 except Exception as e:
                     logger.debug(f"Failed to fetch device list: {e}")
 
@@ -429,15 +448,31 @@ class AgentRuntime:
 
         # LLM 분석을 Lock 외부에서 먼저 수행 (최대 120초 블로킹이 Lock 밖에서 일어남)
         decision = self.decision_engine.decide(self.state, alert)
-        llm_hint = await self.decision_engine.analyze_alert(alert, devices, self.state)
-        if llm_hint:
-            decision["llm_analysis"] = llm_hint
+        llm_result, llm_error = await self.decision_engine.analyze_alert(alert, devices, self.state)
+        
+        # LLM 결과 처리
+        if llm_result:
+            decision["llm_analysis"] = llm_result
+        if llm_error:
+            # LLM 오류 발생 - Event 기록
+            self.event_publisher.publish(
+                create_device_status_change_event(
+                    source_agent_id=self.state.agent_id,
+                    device_id=0,  # System-level event
+                    device_name="system",
+                    old_status="operational",
+                    new_status="degraded",
+                    reason=f"LLM error: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
+                )
+            )
+            decision["llm_error"] = llm_error
+            logger.warning(f"Alert {alert.get('alert_id')} processing with LLM error: {llm_error}")
 
         async with self._mission_lock:
             alert_id = alert.get("alert_id")
 
             self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
-            logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={bool(llm_hint)}")
+            logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={'success' if llm_result else ('error' if llm_error else 'disabled')}")
             proposal_bundle = self.generate_mission_proposal(
                 {
                     "title": f"{str(alert.get('alert_type') or 'Alert').replace('_', ' ').title()} Proposal",
@@ -789,7 +824,7 @@ class AgentRuntime:
             "metadata": payload.get("metadata") or {},
         }
 
-    def generate_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
         operation_plan_id = payload.get("operation_plan_id")
@@ -810,7 +845,7 @@ class AgentRuntime:
         location = payload.get("location") or ((plan or {}).get("mission_templates") or [{}])[0].get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         suppression_fingerprint = f"{mission_type}:{goal or (plan or {}).get('goal') or ''}:{(alert or {}).get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
-        if suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
+        if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
             return {
                 "suppressed": True,
                 "fingerprint": suppression_fingerprint,
@@ -873,6 +908,18 @@ class AgentRuntime:
             "proposal": proposal,
             "approval": approval,
         }
+
+    def _command_proposal_title(self, goal: str, mission_type: str) -> str:
+        goal_text = str(goal or "").strip()
+        if goal_text:
+            if any(keyword in goal_text for keyword in ["기뢰", "mine"]):
+                return "기뢰 탐지 및 제거 미션 제안"
+            if any(keyword in goal_text for keyword in ["수색", "survey", "탐사"]):
+                return "기뢰 수색 미션 제안"
+            if any(keyword in goal_text for keyword in ["복귀", "return to base", "rtb"]):
+                return "안전 복귀 미션 제안"
+        normalized = str(mission_type or "mission").replace("_", " ").strip().title()
+        return f"{normalized} Mission Proposal"
 
     async def decide_approval_flow(self, approval_id: str, approved: bool, *, decided_by: str, notes: str | None = None) -> dict[str, Any]:
         approval = self.registry_client.decide_approval(
@@ -1124,9 +1171,9 @@ class AgentRuntime:
     def _infer_mission_type(self, goal: str, alert_type: Any) -> str:
         goal_text = str(goal or "").lower()
         alert_text = str(alert_type or "").lower()
-        if "mine" in goal_text or alert_text == "mine_detection":
+        if "mine" in goal_text or "기뢰" in goal_text or alert_text == "mine_detection":
             return "mine_clearance"
-        if "survey" in goal_text or "scan" in goal_text:
+        if "survey" in goal_text or "scan" in goal_text or "탐지" in goal_text:
             return "survey"
         if "inspect" in goal_text or "intervention" in goal_text:
             return "inspection"
@@ -1309,6 +1356,19 @@ class AgentRuntime:
 
     async def _start_mission_execution(self, mission: dict[str, Any]) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
+        steps = mission.get("steps") or []
+        if not steps:
+            mission["status"] = "failed"
+            mission["completed_at"] = utc_now()
+            mission["final_result"] = {"status": "failed", "reason": "no_steps_generated"}
+            mission.setdefault("timeline", []).append({
+                "timestamp": utc_now(),
+                "type": "dispatch_failed",
+                "message": "Mission has no steps — no capable device found.",
+                "data": {"mission_id": mission.get("mission_id")},
+            })
+            self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+            return mission
         mission["status"] = "running"
         mission["started_at"] = utc_now()
         mission.setdefault("timeline", []).append(
@@ -1319,18 +1379,18 @@ class AgentRuntime:
                 "data": {"mission_id": mission.get("mission_id")},
             }
         )
-        dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
+        dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(steps))
         response_like = {
             "mission_id": mission.get("mission_id"),
             "response_id": mission.get("mission_id"),
             "alert_id": mission.get("alert_id"),
             "reason": mission.get("title"),
             "dispatch_result": dispatch_state,
-            "params": {"steps": mission.get("steps") or []},
+            "params": {"steps": steps},
         }
-        dispatch = await self._dispatch_next_step(response_like, mission.get("steps") or [], devices, logging.getLogger(__name__))
+        dispatch = await self._dispatch_next_step(response_like, steps, devices, logging.getLogger(__name__))
         mission = self._sync_mission_from_dispatch_state(mission, dispatch)
-        self._append_dispatch_timeline_entries(mission, dispatch, mission.get("steps") or [])
+        self._append_dispatch_timeline_entries(mission, dispatch, steps)
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
@@ -1534,6 +1594,32 @@ class AgentRuntime:
         exclude_ids: set[int] | None = None,
         preferred_id: str | None = None,
     ) -> dict[str, Any] | None:
+        """
+        다중 요소 기반 device 선택 (Phase 2, Step 3 최적화)
+        
+        Scoring Factors:
+        - Distance (25%): 목표까지의 거리
+        - Battery (20%): 배터리 수준
+        - Capability (20%): action 수행 능력
+        - Reliability (15%): 역사적 성공률
+        - Workload (15%): 현재 작업 부하
+        - Availability (5%): 유휴 시간
+        """
+        try:
+            # TaskDispatcher 활용
+            selected = self.task_dispatcher.select_best_device(
+                devices=devices,
+                action=action,
+                location=location,
+                exclude_ids=exclude_ids,
+                preferred_id=preferred_id,
+            )
+            if selected is not None:
+                return selected
+        except Exception as e:
+            logger.error(f"TaskDispatcher error, falling back to distance-based selection: {e}")
+
+        # Fallback: alias-aware 기존 거리 기반 선택
         excluded = exclude_ids or set()
         candidates = [
             device
@@ -1653,6 +1739,25 @@ class AgentRuntime:
         lon_delta = device_lon - lon
         return lat_delta * lat_delta + lon_delta * lon_delta
 
+    def _normalize_device_from_registry(self, device: dict[str, Any]) -> dict[str, Any]:
+        """
+        P3 (보고 기반): Registry로부터 받은 device dict를 정규화
+        
+        Agent가 주기적으로 보고한 위치와 배터리 정보를 최상위 수준에 반영하여,
+        Task 분배 시 최신 정보를 사용하도록 함
+        """
+        # Agent가 보고한 위치가 더 최신이면 device 최상위 수준에 반영
+        agent = device.get("agent") or {}
+        if isinstance(agent, dict):
+            if agent.get("latitude") is not None:
+                device["latitude"] = agent["latitude"]
+            if agent.get("longitude") is not None:
+                device["longitude"] = agent["longitude"]
+            # Agent가 보고한 배터리 정보도 함께 반영
+            if agent.get("battery_percent") is not None:
+                device["battery_percent"] = agent["battery_percent"]
+        return device
+
     def _extract_task_result(self, execution_entry: dict[str, Any]) -> dict[str, Any]:
         payload = execution_entry.get("payload") or {}
         if not isinstance(payload, dict):
@@ -1743,60 +1848,51 @@ class AgentRuntime:
         step_execution_results: list[dict[str, Any]],
         devices: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        policy = str(step.get("evaluation_policy") or "all_tasks_success_v1")
-        step_type = str(step.get("step_type") or "generic_action")
-        task_total = len([task for task in (step_state.get("tasks") or []) if isinstance(task, dict)])
-        completed_results = [item for item in step_execution_results if str(item.get("status")) == "completed"]
-        failed_results = [item for item in step_execution_results if str(item.get("status")) == "failed"]
-        usable_results = [
-            item for item in completed_results
-            if self._extract_task_result(item).get("usable_output", True) is not False
-        ]
-
-        if policy == "survey_sufficiency_v1":
-            sufficient = bool(usable_results)
-            if sufficient:
-                decision = "proceed_next_step"
-                reason = "usable survey output available"
-            elif self._can_reassign_failed_tasks(step, step_state, devices):
-                decision = "reassign_failed_tasks"
-                reason = "no usable survey output yet; reassign failed tasks to alternate devices"
-            elif self._can_retry_failed_tasks(step_state):
-                decision = "retry_same_step"
-                reason = "no usable survey output yet; retry failed tasks on same devices"
-            else:
-                decision = "manual_intervention_required"
-                reason = "no usable survey output available and no automated recovery path"
-        else:
-            sufficient = task_total > 0 and len(completed_results) == task_total and not failed_results
-            if sufficient:
-                decision = "proceed_next_step"
-                reason = "all tasks completed successfully"
-            elif self._can_retry_failed_tasks(step_state):
-                decision = "retry_same_step"
-                reason = "one or more required tasks failed; retry available"
-            elif self._can_reassign_failed_tasks(step, step_state, devices):
-                decision = "reassign_failed_tasks"
-                reason = "one or more required tasks failed; alternate capable device available"
-            else:
-                decision = "abort_mission"
-                reason = "one or more required tasks failed and no automated recovery path"
-
-        return {
-            "at": utc_now(),
-            "response_id": response.get("response_id"),
-            "step_id": step.get("step_id"),
-            "step_type": step_type,
-            "policy": policy,
-            "task_total": task_total,
-            "completed_task_count": len(completed_results),
-            "failed_task_count": len(failed_results),
-            "usable_task_count": len(usable_results),
-            "step_execution_status": step_state.get("status"),
-            "sufficient": sufficient,
-            "decision": decision,
-            "reason": reason,
-        }
+        """
+        Step 평가: PolicyEvaluator를 사용하여 의사결정 (P3 보고 기반, P9 기록)
+        
+        이 메서드는 PolicyEvaluator로 위임하여 정책 관리를 중앙화합니다.
+        새로운 정책 추가 시 PolicyEvaluator에만 추가하면 됩니다.
+        
+        평가 결과를 Event로 기록하여 P9 (기록 가능성) 원칙을 준수합니다.
+        
+        Args:
+            response: Mission response 정보
+            step: Step 정의
+            step_state: Step 실행 상태
+            step_execution_results: Task 실행 결과 목록
+            devices: 사용 가능한 device 목록
+        
+        Returns:
+            평가 결과 (decision, sufficient, reason 등 포함)
+        """
+        # P3 (보고 기반): PolicyEvaluator가 정책에 따라 의사결정
+        evaluation = self.policy_evaluator.evaluate(
+            response, step, step_state, step_execution_results, devices
+        )
+        
+        # P9 (기록 가능성): 평가 결과를 Event로 기록
+        try:
+            event = create_step_evaluation_event(
+                source_agent_id=self.state.registry_id or self.state.agent_id,
+                response_id=response.get("response_id", ""),
+                step_id=step.get("step_id", ""),
+                policy=evaluation.get("policy", ""),
+                decision=evaluation.get("decision", ""),
+                sufficient=evaluation.get("sufficient", False),
+                metrics={
+                    "task_total": evaluation.get("task_total", 0),
+                    "completed_task_count": evaluation.get("completed_task_count", 0),
+                    "failed_task_count": evaluation.get("failed_task_count", 0),
+                    "usable_task_count": evaluation.get("usable_task_count", 0),
+                },
+                reason=evaluation.get("reason", ""),
+            )
+            self.event_publisher.publish(event)
+        except Exception as e:
+            logger.debug(f"Failed to publish step evaluation event: {e}")
+        
+        return evaluation
 
     def _max_step_retries(self) -> int:
         rules = self.agent_config.get("rules") or {}
@@ -2311,6 +2407,89 @@ class AgentRuntime:
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         return self.command_controller.apply(self.state, command)
 
+    def start_async_command(self, command: dict[str, Any], *, requested_by: str = "user") -> dict[str, Any]:
+        request_id = f"cmd-{uuid4()}"
+        now = utc_now()
+        request_record = {
+            "request_id": request_id,
+            "status": "queued",
+            "requested_by": requested_by,
+            "command": command,
+            "result": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+            "started_at": None,
+            "finished_at": None,
+        }
+        self._command_requests[request_id] = request_record
+
+        task = asyncio.create_task(self._run_async_command(request_id, command))
+        self._command_request_tasks.add(task)
+        task.add_done_callback(self._command_request_tasks.discard)
+
+        self.state.remember(
+            {
+                "kind": "command_async_queued",
+                "at": now,
+                "request_id": request_id,
+                "command": command,
+            }
+        )
+
+        return {
+            "accepted": True,
+            "request_id": request_id,
+            "status": "queued",
+            "created_at": now,
+        }
+
+    def get_async_command(self, request_id: str) -> dict[str, Any] | None:
+        item = self._command_requests.get(request_id)
+        if item is None:
+            return None
+        return dict(item)
+
+    async def _run_async_command(self, request_id: str, command: dict[str, Any]) -> None:
+        request = self._command_requests.get(request_id)
+        if request is None:
+            return
+
+        started_at = utc_now()
+        request["status"] = "running"
+        request["started_at"] = started_at
+        request["updated_at"] = started_at
+
+        try:
+            result = await self.handle_command_with_llm(command)
+            finished_at = utc_now()
+            request["status"] = "completed"
+            request["result"] = result
+            request["updated_at"] = finished_at
+            request["finished_at"] = finished_at
+            self.state.remember(
+                {
+                    "kind": "command_async_completed",
+                    "at": finished_at,
+                    "request_id": request_id,
+                }
+            )
+        except Exception as exc:
+            finished_at = utc_now()
+            request["status"] = "failed"
+            request["error"] = str(exc)
+            request["updated_at"] = finished_at
+            request["finished_at"] = finished_at
+            self.state.remember(
+                {
+                    "kind": "command_async_failed",
+                    "at": finished_at,
+                    "request_id": request_id,
+                    "error": str(exc),
+                }
+            )
+            logger.exception("Async command failed: request_id=%s", request_id)
+
     async def handle_command_with_llm(self, command: dict[str, Any]) -> dict[str, Any]:
         """사용자 명령을 LLM으로 해석한 뒤 실행. LLM 불가 시 직접 실행."""
         logger = logging.getLogger(__name__)
@@ -2319,7 +2498,22 @@ class AgentRuntime:
         except Exception:
             devices = []
 
-        llm_result = await self.decision_engine.analyze_command(command, devices, self.state)
+        llm_result, llm_error = await self.decision_engine.analyze_command(command, devices, self.state)
+
+        if llm_error:
+            # LLM 오류 발생 - Event 기록 후 fallback 정규화 경로 진행
+            self.event_publisher.publish(
+                create_device_status_change_event(
+                    source_agent_id=self.state.agent_id,
+                    device_id=0,  # System-level event
+                    device_name="system",
+                    old_status="operational",
+                    new_status="degraded",
+                    reason=f"LLM error during command: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
+                )
+            )
+            logger.warning(f"명령 LLM 해석 실패: {llm_error}")
+            llm_result = None
 
         if llm_result:
             self.state.remember({
@@ -2344,7 +2538,98 @@ class AgentRuntime:
         else:
             resolved = command
 
-        return self.command_controller.apply(self.state, resolved)
+        command_goal_text = " ".join(
+            str(part or "")
+            for part in [
+                command.get("goal"),
+                command.get("reason"),
+                llm_result.get("reasoning") if llm_result else "",
+                json.dumps(command.get("params") or {}, ensure_ascii=False),
+            ]
+        ).strip().lower()
+        command_action = str(resolved.get("action") or "").strip()
+        if any(keyword in command_goal_text for keyword in ["기뢰", "mine", "mine_clearance", "mine_survey"]):
+            command_action = "mission.assign"
+            resolved["action"] = "mission.assign"
+            resolved.setdefault("params", {})
+            resolved["params"]["mission_type"] = "mine_clearance"
+            resolved["params"]["requested_mission_type"] = "mine_clearance"
+            if "desired_outcome" not in resolved["params"]:
+                resolved["params"]["desired_outcome"] = "mine_clearance"
+        command_result = self.command_controller.apply(self.state, resolved)
+        if isinstance(command_result, dict):
+            command_result["command"] = resolved
+            command_result["resolved_command"] = resolved
+            if "action" in resolved:
+                command_result["action"] = resolved.get("action")
+        if llm_result is not None:
+            self.state.remember(
+                {
+                    "kind": "command_llm_interpreted_normalized",
+                    "at": utc_now(),
+                    "original": command,
+                    "llm": {
+                        **dict(llm_result),
+                        "normalized_action": command_action,
+                        "normalized_goal": command.get("goal") or command.get("reason") or llm_result.get("reasoning"),
+                    },
+                    "resolved_command": resolved,
+                }
+            )
+        proposal_bundle: dict[str, Any] | None = None
+        if command_action in {"mission.assign", "task.assign", "approve_response"}:
+            base_goal = command.get("goal") or command.get("reason") or (llm_result or {}).get("reasoning") or ""
+            goal = str(base_goal).strip() if base_goal else str(command.get("action") or "operator command").strip()
+            params_mission_type = str((command.get("params") or {}).get("mission_type") or (command.get("params") or {}).get("desired_outcome") or "").strip()
+            mission_type = self._infer_mission_type(goal, None)
+            if mission_type == "generic_mission" and params_mission_type:
+                mission_type = self._infer_mission_type(params_mission_type, None)
+            proposal_bundle = self.generate_mission_proposal(
+                {
+                    "title": command.get("title") or self._command_proposal_title(goal, mission_type),
+                    "goal": goal,
+                    "summary": f"LLM interpreted operator command as {command_action}.",
+                    "reason_summary": llm_result.get("reasoning") if llm_result else "Operator command interpreted by system agent.",
+                    "source": "user_command",
+                    "operation_plan_id": command.get("operation_plan_id"),
+                    "location": (command.get("params") or {}).get("location") or {},
+                    "insight_summary": f"Command-driven response for {command_action}",
+                    "severity": "INFORMATION",
+                },
+                allow_suppression=False,
+            )
+            self.state.remember(
+                {
+                    "kind": "command_mission_proposal_created",
+                    "at": utc_now(),
+                    "command": command,
+                    "resolved": resolved,
+                    "proposal": proposal_bundle,
+                }
+            )
+            proposal = proposal_bundle.get("proposal") if isinstance(proposal_bundle, dict) else {}
+            approval = proposal_bundle.get("approval") if isinstance(proposal_bundle, dict) else {}
+            self.state.remember(
+                {
+                    "kind": "command_mission_bundle_created",
+                    "at": utc_now(),
+                    "command": command,
+                    "resolved": resolved,
+                    "bundle": {
+                        "proposal_id": str((proposal or {}).get("proposal_id") or ""),
+                        "approval_id": str((approval or {}).get("approval_id") or ""),
+                        "mission_type": str((proposal or {}).get("mission_type") or ""),
+                        "goal": str((proposal or {}).get("goal") or goal),
+                    },
+                }
+            )
+
+        return {
+            **command_result,
+            "resolved_command": resolved,
+            "llm_analysis": llm_result,
+            "mission_bundle": proposal_bundle,
+        }
 
     def classify_event_severity(self, event: dict[str, Any]) -> str:
         raw = str(event.get("severity") or "").strip().upper()
@@ -2526,6 +2811,45 @@ class AgentRuntime:
                 "status": "acknowledged",
                 "note": "No related mission found - failure logged"
             }
+
+        if status in {"completed", "success", "ok"}:
+            mission_result_payload = {
+                "mission_id": mission_id,
+                "response_id": mission_id,
+                "alert_id": current_mission.get("alert_id"),
+                "step_id": str(payload.get("step_id") or "default"),
+                "task_id": task_id,
+                "source_agent_id": agent_id or device_id or "unknown",
+                "execution_status": "completed",
+                "execution_log": {
+                    "source_agent_id": agent_id or device_id or "unknown",
+                    "source_device_id": device_id,
+                    "step_id": str(payload.get("step_id") or "default"),
+                    "task_id": task_id,
+                    "action": command.get("action"),
+                    "command": command,
+                    "result": execution_result,
+                    "reported_at": utc_now(),
+                    "result_summary": execution_result.get("summary") or execution_result.get("output_summary") or execution_result.get("message") or "task completed",
+                    "output_refs": execution_result.get("output_refs") or execution_result.get("raw_data_ref") or execution_result.get("artifacts") or [],
+                    "failure_category": None,
+                    "failure_message": None,
+                    "location": execution_result.get("location") or execution_result.get("position") or {},
+                    "device_state_changes": execution_result.get("device_state_changes") or {},
+                    "agent_judgement": execution_result.get("agent_judgement") or command.get("action"),
+                    "payload": {
+                        "response_id": mission_id,
+                        "mission_id": mission_id,
+                        "alert_id": current_mission.get("alert_id"),
+                        "step_id": str(payload.get("step_id") or "default"),
+                        "task_id": task_id,
+                        "source_agent_id": agent_id or device_id or "unknown",
+                        "source_device_id": device_id,
+                        "location": execution_result.get("location") or execution_result.get("position") or {},
+                    },
+                },
+            }
+            return await self.handle_mission_result(mission_result_payload)
 
         dispatch_state = dict((current_mission.get("metadata") or {}).get("dispatch_state") or {})
         execution_results = list(dispatch_state.get("execution_results") or [])
@@ -2908,6 +3232,10 @@ class AgentRuntime:
                         dispatch_state = retry_dispatch
                         self._append_dispatch_timeline_entries(mission, retry_dispatch, mission_steps)
 
+                all_step_states_completed = bool(step_states) and all(
+                    isinstance(item, dict) and str(item.get("status") or "").lower() == "completed"
+                    for item in step_states
+                )
                 planned_step_ids = [
                     str(item.get("step_id") or "")
                     for item in mission_steps
@@ -2923,6 +3251,8 @@ class AgentRuntime:
                     aggregate_status = "needs_review"
                 elif step_evaluation and step_evaluation.get("decision") == "abort_mission":
                     aggregate_status = "failed"
+                elif all_step_states_completed:
+                    aggregate_status = "completed"
                 elif planned_step_ids and all(step in proceed_step_ids for step in planned_step_ids):
                     aggregate_status = "completed"
 
