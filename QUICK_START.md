@@ -1,264 +1,279 @@
-# 🚀 CoWater 5분 안에 시작하기
+# CoWater 실행 가이드
 
-## 📦 한 번에 모든 것 실행 & 테스트
+## ⚡ 초급 사용자: 한 줄로 실행 & 테스트
 
 ```bash
 cd /Users/teamgrit/Documents/CoWater
 ./run_full_test.sh
 ```
 
-이 한 줄 명령으로:
-- ✅ 서비스 상태 확인
-- ✅ API 연결성 테스트
-- ✅ 통합 테스트 실행
-- ✅ 결과 분석 & 리포트 출력
+**자동으로 수행되는 작업:**
+1. ✅ 모든 서비스 자동 시작 (이미 실행 중이면 스킵)
+2. ✅ 서비스 상태 확인 (Registry, System Agent, Device Agents)
+3. ✅ API 연결성 테스트
+4. ✅ 통합 테스트 실행 (mine_removal_scenario)
+5. ✅ 테스트 결과 분석 & 리포트 출력
+6. ✅ Client UI 접속 링크 제공
 
 ---
 
-## 📊 테스트 실행 결과
+## 🎯 표준 실행
 
-```
-╔════════════════════════════════════════════════════════════╗
-║         CoWater 통합 테스트 (Full Integration Test)       ║
-╚════════════════════════════════════════════════════════════╝
+서비스 시작:
 
-[1/4] 서비스 상태 확인 중...
-✅ Registry
-✅ System Agent
-✅ AUV
-✅ ROV
-✅ Ship
-
-[2/4] API 연결성 테스트 중...
-✅ Registry Devices API
-✅ Registry Missions API
-✅ System Agent Overview API
-
-[3/4] 통합 테스트 실행 중...
-  • mine_detection 이벤트 전송
-  • Event 기록 확인
-  • Alert 생성 확인
-  • Mission 생성 확인
-  • A2A 메시지 발송 확인
-
-[4/4] 테스트 결과 분석
-📊 아키텍처 동기화: 100% 완료
-🎯 테스트 성공도: 6/6 ✅
-
-═══ 상세 결과 ═══
-✅ Event 기록: 성공
-✅ Alert 생성: 성공
-✅ Mission 생성: 성공
-✅ A2A 메시지: 성공
-✅ Device 메시지 수신: 성공
-
-═══ 시스템 메트릭 ═══
-📊 Events:  3
-⚠️  Alerts:  451
-🎯 Missions: 3
-```
-
----
-
-## 🌐 Client UI 접속
-
-테스트 완료 후 다음 링크로 접속하세요:
-
-### 1. **3D 지도 대시보드** (실시간 위치 추적)
-```
-http://127.0.0.1:8000/index.html
-```
-- 디바이스 위치 실시간 표시
-- 미션 진행 상황 시각화
-- 연결 상태 표시 (🟢 온라인, 🟡 연결 끊김, ⚫ 오프라인)
-
-### 2. **운영 관제 대시보드** (전체 시스템 관리)
-```
-http://127.0.0.1:8000/ops.html
-```
-- 디바이스 상태 모니터링
-- 역할 할당 (Role Assignment)
-- 운영 계획 추천
-- 미션 제안 생성 & 승인
-- 정책 관리 (Policy Management)
-- 센서 모니터링
-
-### 3. **미션 상세 추적**
-```
-http://127.0.0.1:8000/mission.html?id=<mission_id>
-```
-- 미션 단계(Step) & 작업(Task) 확인
-- 실시간 타임라인 이벤트
-- 실행 결과 조회
-
-### 4. **디바이스 상세 정보**
-```
-http://127.0.0.1:8000/device.html?id=<device_id>
-```
-- 디바이스 텔레메트리
-- 배터리/센서 상태
-- 통신 상태 (3단계: online/lost/offline)
-
----
-
-## 📋 주요 기능 체크리스트
-
-테스트 실행 후 다음을 확인하세요:
-
-### ✅ 아키텍처 동기화
-- [x] 타임라인 기록 (Task state transitions)
-- [x] 디바이스 복구 보고 (Recovery synchronization)
-- [x] 센서 헬스 모니터링 (Battery, Depth)
-- [x] 사용자 승인 추적 (User decisions audit trail)
-- [x] A2A 메시지 로깅 (Complete message history)
-- [x] 정책 기반 자동 응답 (Policy engine)
-
-### ✅ 데이터 영속성
-- [x] Alert/Event SQLite 저장
-- [x] A2A 로그 저장
-- [x] Task 히스토리 저장
-- [x] 타임라인 이벤트 저장
-
-### ✅ 3단계 디바이스 연결 상태
-- [x] 🟢 online: 정상 연결
-- [x] 🟡 lost: 예상치 못한 두절
-- [x] ⚫ offline: 정상 종료
-
----
-
-## 🔧 명령어 치트시트
-
-### 서비스 제어
 ```bash
-# 모든 서비스 시작
+cd /Users/teamgrit/Documents/CoWater
 ./cowaterctl.sh start
+```
 
-# 모든 서비스 종료
+중지 / 재시작 / 상태:
+
+```bash
 ./cowaterctl.sh stop
-
-# 서비스 상태 확인
+./cowaterctl.sh restart
 ./cowaterctl.sh status
+```
 
-# 특정 서비스 로그 실시간 보기
+로그 실시간 보기:
+
+```bash
 ./cowaterctl.sh logs Registry
 ./cowaterctl.sh logs System-Agent
 ./cowaterctl.sh logs AUV-Lower
-
-# 가능한 서비스: Registry | System-Agent | Ship-Middle | USV-Lower | AUV-Lower | ROV-Lower
+# 가능한 이름: Registry | System-Agent | Ship-Middle | USV-Lower | AUV-Lower | ROV-Lower
 ```
 
-### API 조회
-```bash
-# 등록된 모든 디바이스
-curl http://127.0.0.1:8280/devices | jq .
+브라우저에서 열기:
 
-# 모든 미션 조회
-curl http://127.0.0.1:8280/missions | jq .
+- **3D 대시보드**: `file:///Users/teamgrit/Documents/CoWater/client/index.html`
+- **운영 관제**: `file:///Users/teamgrit/Documents/CoWater/client/ops.html`
+- **미션 상세**: `file:///Users/teamgrit/Documents/CoWater/client/mission.html?id=<mission_id>`
 
-# 특정 미션 상세
-curl http://127.0.0.1:8280/missions/{mission_id} | jq .
+---
 
-# 미션 타임라인
-curl http://127.0.0.1:8280/missions/{mission_id}/timeline | jq .
+## 서비스 구조
 
-# 정책 목록
-curl http://127.0.0.1:8280/policies | jq .
-
-# A2A 메시지 로그
-curl http://127.0.0.1:8280/a2a-logs | jq .
+```
+CoWater System
+│
+├── Registry Server                  포트 8280
+│   └── 디바이스 등록 · Event/Alert/Insight/Approval/Mission 원장
+│
+├── System Agent                     포트 9116
+│   └── 역할 추천 · 운영 계획 추천 · Mission Proposal 생성 · 승인 후 실행
+│
+├── Device Agents
+│   ├── Control Ship  (layer=middle) 포트 9115
+│   ├── USV           (layer=lower)  포트 9111
+│   ├── AUV           (layer=lower)  포트 9112
+│   └── ROV           (layer=lower)  포트 9113
+│
+├── Moth Broker (외부)               wss://cobot.center:8287
+│   └── Pub/Sub 텔레메트리 스트림
+│
+└── Client
+    ├── index.html   — 3D 실시간 시각화
+    ├── ops.html     — 운영 관제 대시보드
+    └── mission.html — 미션 상세 추적
 ```
 
-### 테스트
-```bash
-# 한 번에 전체 테스트 & 결과 분석
-./run_full_test.sh
+### 포트 정리
 
-# 개별 시나리오 테스트
-python3 docs/run_mine_removal_scenario.py
+| 포트   | 서비스                    |
+| ------ | ------------------------- |
+| `8280` | Registry Server           |
+| `9111` | USV Lower Agent           |
+| `9112` | AUV Lower Agent           |
+| `9113` | ROV Lower Agent           |
+| `9115` | Control Ship Middle Agent |
+| `9116` | System Agent              |
+
+---
+
+## 수동 실행 순서
+
+venv 활성화:
+
+```bash
+cd /Users/teamgrit/Documents/CoWater
+source .venv/bin/activate
+```
+
+### 1. Registry Server
+
+```bash
+cd server/registration
+python device_registration_server.py
+```
+
+```bash
+curl http://127.0.0.1:8280/health
+```
+
+### 2. System Agent
+
+```bash
+cd server/system-agent
+python system_agent.py
+```
+
+```bash
+curl http://127.0.0.1:9116/health
+```
+
+### 3. Middle Agent
+
+```bash
+cd device
+python device_agent.py --type ship --layer middle
+```
+
+### 4. Lower Agents
+
+```bash
+cd device
+python device_agent.py --type usv --layer lower
+python device_agent.py --type auv --layer lower
+python device_agent.py --type rov --layer lower
+```
+
+같은 타입을 여러 개 띄울 때는 `--port`로 구분:
+
+```bash
+python device_agent.py --type usv --layer lower --port 9121
+python device_agent.py --type usv --layer lower --port 9122
+```
+
+### device_agent.py 옵션
+
+| 옵션       | 필수 | 설명                                           |
+| ---------- | ---- | ---------------------------------------------- |
+| `--type`   | ✅   | 디바이스 타입: `usv` / `auv` / `rov` / `ship`  |
+| `--layer`  | ✅   | 에이전트 계층: `lower` / `middle`              |
+| `--port`   |      | 포트 오버라이드 (기본값: config.json)          |
+| `--host`   |      | 호스트 오버라이드                              |
+| `--config` |      | 커스텀 config.json 경로                        |
+
+---
+
+## 상태 확인
+
+```bash
+# 등록 디바이스
+curl http://127.0.0.1:8280/devices | jq '.[] | {id, name, layer, device_type, connected}'
+
+# Event / Alert / Insight / Approval / Mission 원장
+curl http://127.0.0.1:8280/events    | jq .
+curl http://127.0.0.1:8280/alerts    | jq .
+curl http://127.0.0.1:8280/insights  | jq .
+curl http://127.0.0.1:8280/approvals | jq .
+curl http://127.0.0.1:8280/mission-proposals | jq .
+curl http://127.0.0.1:8280/missions  | jq .
+
+# System Agent 내부 상태
+curl http://127.0.0.1:9116/state | jq .
+
+# 디바이스 에이전트 상태
+curl http://127.0.0.1:9112/state | jq '.last_telemetry'  # AUV
+curl http://127.0.0.1:9113/state | jq '.last_telemetry'  # ROV
+```
+
+### Alert 상태 흐름
+
+```
+registered → processing → completed
+                        ↘ failed
+```
+
+| 상태         | 의미                              |
+| ------------ | --------------------------------- |
+| `registered` | 레지스트리에 기록됨               |
+| `processing` | System Agent 인지 · 미션 진행 중  |
+| `completed`  | 디바이스에 대응 완료              |
+| `failed`     | 대응 불가                         |
+
+---
+
+## 운영 흐름 스모크 테스트
+
+서비스 전체 기동 후:
+
+```bash
+curl -X POST http://127.0.0.1:9116/device-roles/recommend \
+  -H 'Content-Type: application/json' \
+  -d '{"goal":"항만 주변 기뢰 탐지 및 제거"}'
+```
+
+이후 `client/ops.html`에서 다음 흐름이 보여야 합니다.
+
+- Device Role 추천
+- Operation Plan 생성
+- Mission Proposal 생성
+- Approval 승인/거절
+- 승인된 Mission의 Step / Task / Timeline 진행
+
+---
+
+## 로그 위치
+
+```
+.logs/
+├── Registry.log
+├── System-Agent.log
+├── Ship-Middle.log
+├── USV-Lower.log
+├── AUV-Lower.log
+└── ROV-Lower.log
 ```
 
 ---
 
-## 🐛 트러블슈팅
+## 주요 설정 파일
 
-### 서비스가 시작되지 않음
+| 파일                               | 역할                    |
+| ---------------------------------- | ----------------------- |
+| `device/configs/ship-middle.json`  | Control Ship 설정       |
+| `device/configs/usv-lower.json`    | USV 설정                |
+| `device/configs/auv-lower.json`    | AUV 설정 (LLM 포함)     |
+| `device/configs/rov-lower.json`    | ROV 설정                |
+| `server/system-agent/config.json`  | System Agent · LLM 설정 |
+
+모든 에이전트의 `registry.url` 기본값: `http://127.0.0.1:8280`
+
+---
+
+## 문제 해결
+
+**포트 충돌**
+
 ```bash
-# 포트 충돌 확인
 lsof -i :8280
 lsof -i :9116
-
-# 포트 점유 프로세스 강제 종료
 kill -9 <PID>
-
-# 전체 재시작
-./cowaterctl.sh restart
 ```
 
-### Client UI에 디바이스가 보이지 않음
+**디바이스가 Registry에 등록 안 될 때**
+
 ```bash
-# 1. 디바이스 등록 확인
-curl http://127.0.0.1:8280/devices | jq '.[] | {id, name, layer}'
-
-# 2. 브라우저 콘솔(F12) 열어서 네트워크 오류 확인
-
-# 3. 서비스 재시작
-./cowaterctl.sh restart
+curl http://127.0.0.1:8280/devices | jq .
+# device/configs/{type}-{layer}.json > registry.url 확인
 ```
 
-### 테스트 실패
+**Moth 연결 실패**
+
+- 외부 서버 `wss://cobot.center:8287` 접근 가능 여부 확인
+- Moth 비활성화 데모 실행: `COWATER_LLM_ENABLED=false ./cowaterctl.sh start`
+
+**3D 대시보드에 디바이스가 안 보일 때**
+
+1. 브라우저 콘솔(F12) 열기
+2. Registry 응답 확인: `curl http://127.0.0.1:8280/devices`
+3. Moth WebSocket 구독 메시지 콘솔 확인
+
+**미션이 `waiting_for_survey_device`로 막힐 때**
+
+이전 실행의 stale 응답이 AUV를 점유한 경우. 전체 재시작으로 해결:
+
 ```bash
-# 로그 확인
-tail -100 .logs/Registry.log
-tail -100 .logs/SystemAgent.log
-
-# 전체 재시작 후 테스트
 ./cowaterctl.sh restart
-sleep 5
-./run_full_test.sh
 ```
-
----
-
-## 📊 성능 메트릭
-
-일반적인 시스템 성능:
-
-| 지표 | 값 |
-|------|-----|
-| Registry 응답 시간 | <50ms |
-| A2A 메시지 전달 | <100ms |
-| Device 등록 | <1s |
-| Mission 생성 | <2s |
-| 타임라인 기록 | <10ms |
-
----
-
-## 🎓 다음 단계
-
-### 1. 시스템 이해하기
-- [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) 읽기
-- 아키텍처 다이어그램 학습
-
-### 2. 커스터마이징
-- `device/configs/*.json` 수정해서 디바이스 설정 변경
-- `server/system-agent/config.json`에서 정책 추가
-
-### 3. 확장 기능 개발
-- 새로운 device_agent 타입 추가
-- 커스텀 Skills 구현
-- 새로운 미션 타입 정의
-
----
-
-## 📞 지원
-
-문제가 발생하면:
-
-1. **로그 확인**: `.logs/` 디렉토리의 로그 파일 확인
-2. **테스트 실행**: `./run_full_test.sh`로 기본 상태 확인
-3. **상태 조회**: `./cowaterctl.sh status`로 각 서비스 확인
-4. **API 테스트**: 위의 curl 명령으로 API 정상 여부 확인
-
----
-
-**Happy Testing! 🚀**
