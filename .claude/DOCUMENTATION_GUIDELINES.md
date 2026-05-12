@@ -57,6 +57,10 @@ graph TD
 3. 그 결정에 따라 `docs/core/` 및 `docs/scenarios/` 업데이트
 4. 관련 다른 ADR 참고 표시
 
+> **Maintainer 주의**: `docs/adr/ADR-007-data-generalization.md`가 존재하지만
+> `docs/adr/ADR-000-index.md`에 등재되지 않았습니다.
+> ADR을 추가하거나 편집할 때 반드시 index 파일도 갱신하세요.
+
 ---
 
 ## 보너스: "추후 반영" 항목 처리
@@ -78,7 +82,7 @@ graph TD
 **시나리오**: "Operation에 priority 필드 추가하고 싶어"
 
 ```
-1. docs/adr/ADR-002 작성
+1. docs/adr/ADR-00X` 작성  (다음 번호 사용 — 현재 최신: ADR-006)
    - 상황: Operation 우선순위 관리 필요
    - 결정: priority 필드 추가 (int, 1-5)
    - 결과: 작업 실행 순서를 동적으로 변경 가능
