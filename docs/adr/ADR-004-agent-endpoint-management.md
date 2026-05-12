@@ -147,10 +147,10 @@ function createAgentConnection(
 
 ---
 
-### 4️⃣ **Endpoint 검증 및 갱신**
+### 4️⃣ **Endpoint 변경 시 처리 규칙**
 
 ```typescript
-// Agent 갱신 시 endpoint 변경 가능
+// Agent endpoint 변경 (권장하지 않음 - 모든 Connection에 영향)
 PUT /api/agents/{agent_id}
 {
   "endpoint": {
@@ -159,9 +159,31 @@ PUT /api/agents/{agent_id}
   }
 }
 
-// 변경 후 영향받는 AgentConnection 자동 갱신
-// → AgentConnection.profile의 endpoint_a/b도 함께 갱신
+// 변경 처리 단계:
+// Step 1: 해당 Agent이 참여한 모든 활성 AgentConnection 찾기
+SELECT * FROM agent_connections 
+WHERE (agent_a_id = '{agent_id}' OR agent_b_id = '{agent_id}')
+  AND deleted_at IS NULL
+
+// Step 2: 각 Connection의 profile 재계산 (endpoint 갱신)
+AgentConnection {
+  agent_a_id: "agent-rov-1",
+  agent_b_id: "agent-usv-1",
+  profile: {
+    endpoint_a: "http://192.168.1.101:8080/agent",  // ← 새로운 IP로 갱신
+    endpoint_b: "http://192.168.1.50:8080/agent"    // ← 그대로
+  }
+}
+
+// Step 3: Task 전달 시점별 처리
+// - 아직 배정되지 않은 Task: 새 endpoint 사용
+// - 진행 중인 Task: 기존 endpoint 유지 (Task 완료까지)
+// - 다음 Task부터: 새 endpoint 사용
 ```
+
+**⚠️ 주의사항**:
+- endpoint 변경은 **진행 중인 Task에 영향을 줄 수 있으므로** 가능한 한 **변경하지 않기**를 권장
+- 변경이 불가피하면 진행 중인 Mission이 완료된 후 변경할 것
 
 ---
 

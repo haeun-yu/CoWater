@@ -106,11 +106,11 @@ if (device.status !== 'OFFLINE') {
 
 #### **Step 2: AgentConnection 확인**
 ```typescript
-// 해당 Device의 Agent가 참여한 모든 Connection 조회
+// 해당 Device의 Agent가 참여한 모든 Connection 조회 (활성만)
 SELECT * FROM agent_connections 
-WHERE agent_a_id = '{device_agent_id}' 
-   OR agent_b_id = '{device_agent_id}'
-AND status != 'REMOVED'
+WHERE (agent_a_id = '{device_agent_id}' 
+   OR agent_b_id = '{device_agent_id}')
+AND deleted_at IS NULL
 ```
 
 **경우 1: AgentConnection이 없음**
@@ -128,7 +128,7 @@ AND status != 'REMOVED'
 해결:
   a) 대체 Agent가 있는가? (다른 선박이 Relay 가능?)
   b) 없으면 제거 거부 (협력 관계 유지 필수)
-  c) 있으면 기존 Connection REMOVED 처리, 새 Connection 생성
+  c) 있으면 기존 Connection deleted_at 처리, 새 Connection 생성
 ```
 
 #### **Step 3: 현재 작업 확인**
@@ -164,12 +164,11 @@ WHERE id = '{device_agent_id}'
 UPDATE sensors SET removed_at = NOW()
 WHERE device_id = '{device_id}'
 
-// AgentConnection REMOVED/EXPIRED 처리
-UPDATE agent_connections SET status = 'REMOVED',
-       expires_at = NOW()
+// AgentConnection 소프트 삭제 (status 제거, deleted_at 추가)
+UPDATE agent_connections SET deleted_at = NOW()
 WHERE (agent_a_id = '{device_agent_id}' 
     OR agent_b_id = '{device_agent_id}')
-AND status != 'REMOVED'
+AND deleted_at IS NULL
 ```
 
 #### **Step 5: Event 기록**
@@ -246,13 +245,13 @@ Mission {
 - Mission의 "READY" = 시스템이 실행 준비를 완료함 (첫 명령을 어떤 Device에 전달할 준비가 됨)
 
 **액션**:
-- Mission 생성
-- ProposalTask → Task 일괄 변환
+- Mission 생성 (status = READY)
+- ProposalTask → Task 일괄 변환 (모든 Task는 **PENDING** 상태로 생성)
 - Task status: PENDING으로 초기화 (아직 Device에 전달 X)
 - 모든 Task가 "실행 대기" 상태로 준비됨
 
 **다음**:
-- 첫 Task를 Device Agent에 전달 → Task: ASSIGNED → IN_PROGRESS
+- 첫 Task를 Device Agent에 전달 → Task: PENDING → IN_PROGRESS (Device 수신 및 실행 시작)
 - Mission도 동시에 IN_PROGRESS로 전이
 - 사용자가 취소 → CANCELLED로 전이
 
@@ -262,6 +261,10 @@ Task-1: PENDING   ← Device에 아직 전달 안 됨
 Task-2: PENDING   ← 아직 준비만 된 상태
 Task-3: PENDING   ← 실행할 차례 아직 아님
 ```
+
+**Task 상태 변이 (READY 단계에서)**:
+- Task-1: PENDING → (Device가 수신) → IN_PROGRESS
+- Task-2, 3: PENDING (대기 중)
 
 ---
 

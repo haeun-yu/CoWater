@@ -10,7 +10,8 @@
 
 사용자가 "A 구역 수중 촬영" 이라고 요청했을 때, 시스템은 이를 여러 방식으로 수행 가능한 추천안을 제시합니다.
 
-**문제**: 
+**문제**:
+
 - 사용자가 개별 Task를 조합해 선택하면 (예: ROV의 Task-A + USV의 Task-B), 시스템이 미리 계산하지 못한 **충돌이나 순서 문제** 발생 가능
 - "Task 조합을 사용자가 한다" = "시스템의 계획 책임을 사용자에게 넘김" = 복잡도 폭증
 
@@ -23,7 +24,7 @@
 ### 1️⃣ **Proposal의 정의**
 
 ```
-Proposal = 사용자 요청을 충족하기 위한 
+Proposal = 사용자 요청을 충족하기 위한
            "완전하고 일관된 Task 시퀀스 한 세트"
 ```
 
@@ -44,30 +45,31 @@ graph TD
     F -->|무효| H["승인 거절<br/>상태 재평가"]
 ```
 
-### 3️⃣ **Proposal.selected 필드의 역할**
+### 3️⃣ **Proposal 선택 상태 (selected 필드)**
 
 ```typescript
 Proposal {
   id: string
-  selected: boolean  // ← 사용자가 UI에서 선택하면 true
-  
+  selected: boolean  // true = 사용자가 이 Proposal을 선택함
+
   // Proposal-1
   {
-    selected: true,     // 사용자가 선택함
-    status: "APPROVED"  // 승인 처리
+    status: "APPROVED",    // 승인 처리
+    selected: true         // 사용자가 이 Proposal을 선택함
   }
-  
+
   // Proposal-2
   {
-    selected: false,    // 선택 안 함
-    status: "PROPOSED"  // 그대로 유지
+    status: "PROPOSED",    // 그대로 유지
+    selected: false        // 선택 안 함, 그대로 유지
   }
 }
 ```
 
 **흐름**:
+
 1. UI에서 사용자가 Proposal-1을 클릭
-2. UI가 `Proposal-1.selected = true`를 백엔드에 전달
+2. UI가 `Proposal-1.selected = true`로 설정
 3. 백엔드가 선택된 Proposal을 검증 (Device 상태 재확인)
 4. 유효하면 `Proposal.status = APPROVED`로 변경
 5. **Proposal에 포함된 모든 ProposalTask를 실제 Task로 일괄 변환**
@@ -103,11 +105,13 @@ Proposal-1 {
 ## 결과 (Consequences)
 
 ### ✅ 이점
+
 - **일관성 보장**: System Agent가 모든 Task 순서와 Device 할당을 검증한 후 제시
 - **사용자 부담 감소**: 사용자는 "어느 방안을 선택할지"만 결정 (복잡한 Task 조합 X)
 - **버그 감소**: Task 순서나 Device 충돌 같은 논리적 오류 사전 차단
 
 ### ⚠️ 제약
+
 - **개별 Task 변경 불가**: 승인 후 일부 Task만 수정/삭제 불가 → 전체 재계획 필요
 - **Proposal 수 제한**: `max_proposal_options = 3` 처럼 제한 필요 (너무 많으면 사용자 혼란)
 

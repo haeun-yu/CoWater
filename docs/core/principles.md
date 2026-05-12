@@ -264,31 +264,46 @@ Physical Constraint      Software Solution
 
 ### **P5. Task 수행 가능성 최종 판단 원칙 (Final Task Feasibility Decision)**
 
-**원칙**:
+**원칙** (5번 사용자 피드백 기반):
 
-> Task를 실제로 수행할 수 있는지에 대한 **최종 판단은 Device Agent가 합니다**.  
-> System Agent는 후보를 추천할 수만 있고, Device Agent가 거절할 수 있습니다.
+> System Agent가 계획(Proposal) → 할당(Task 전달)까지 담당  
+> Device Agent가 Task 수신 후 **최종 판단(실행 가능 여부)** 담당
 
 **구체화**:
 
-- System Agent가 Device를 선택할 때:
-  1. Device.actions[] 목록에 required_action이 있는가? (Strict Capability Matching)
-  2. 현재 배터리, 위치, 상태가 충분한가?
-  3. 이미 다른 Mission에 할당되어 있지 않은가?
-- Device Agent가 Task를 받으면:
-  - ACCEPTED 또는 REJECTED를 명시적으로 반환
-  - REJECTED인 경우 reason을 포함 (배터리 부족, 위치 이동 불가 등)
-  - 물리적으로 수행 불가능한 Task는 거절 가능
+**System Agent의 역할** (계획가):
+
+- Device.actions[] 목록에 required_action이 있는가? (Strict Capability Matching)
+- Device의 현재 status가 작업 가능 상태인가? (ONLINE, DEGRADED 등)
+- 현재 배터리, 위치가 충분한가?
+- 이미 다른 Mission에 할당되어 있지 않은가?
+- 조건을 만족하는 Device를 찾아 Task 생성 및 할당
+
+**Device Agent의 역할** (최종 판단자 - System Agent가 확인하지 않는 항목 판단):
+
+- Task를 수신(ASSIGNED 상태)한 후 실제 수행 가능 여부를 **최종 판단**
+- **IN_PROGRESS**: Task 실행 시작 (수행 가능 판단)
+- **ABORTED**: Task 거절 (schema.md 기준 - reason 포함)
+  - **Sensor 확인**: 필요한 센서 부재 또는 고장 (System Agent는 확인 범위 외)
+  - **배터리 정확도**: 최신 배터리 수치로 다시 판단
+  - **이미 할당됨**: 다른 Mission 할당 여부 실시간 확인
+  - **안전 규칙**: Device의 로컬 안전 규칙 위반 판단
+- ⚠️ ABORTED는 Task가 이미 Device로 전달된 후 판단 (PENDING/ASSIGNED 상태)
+
+**ABORTED vs FAILED의 차이** (schema.md 기준):
+
+- **ABORTED**: Task 전송받은 후 실행 전에 수행 불가능 판단 → Device Agent가 거절 (상태: PENDING/ASSIGNED → ABORTED)
+- **FAILED**: Task 실행 중(IN_PROGRESS)에 오류 발생 또는 완료 불가 → Device Agent가 실패 보고 (상태: IN_PROGRESS → FAILED)
 
 **왜 필요한가?**
 
 - **Strict Capability Matching의 근거**: Device는 선언한 것만 할 수 있다는 신뢰
 - 통신 지연이나 상태 변화로 인한 예상치 못한 실패 방지
-- Device Agent가 자신의 상태를 가장 정확히 알고 있음
+- Device Agent가 자신의 상태를 가장 정확히 알고 있음 (로컬 센서, 안전 규칙 등)
 
 **효과**:
 
-- 불가능한 Task 할당 사전 방지
+- 불가능한 Task 할당 사전 방지 (System 계획 → Device 최종 검증)
 - Task 실패율 감소
 - Device Agent의 자율성 확보
 
@@ -338,7 +353,10 @@ Physical Constraint      Software Solution
 
 - 사용자가 "이 Device에 이 Task를 할당하라"고 명령하면, System은 우선 수행
 - 하지만 시스템이 위험을 감지했다면 경고: "배터리 10%인데 먼 곳으로 보내려 합니다"
-- Device Agent가 "배터리가 20% 미만이므로 수행 불가"라고 거절할 수 있음
+  - 이것은 정책상 경고이지만, 사용자의 override 선택을 존중함
+- Device Agent는 **실제로 수행 불가능한 경우** 거절:
+  - **물리적 불가능**: 센서가 없음, 깊이/거리 초과, 하드웨어 오류
+  - (배터리 20% 미만 같은 정책 판단은 System과 협의하지만, 절대적 위험이면 거절 가능)
 - 모든 override 사항은 기록됨
 
 **왜 필요한가?**

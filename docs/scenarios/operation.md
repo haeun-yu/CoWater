@@ -62,7 +62,7 @@ Step 1: 의도 해석 (Intent Parsing)
   "고해상도 촬영" → required_action: ["MOVE_TO", "HIGH_RES_SCAN"]
   (사용자의 자연어를 추상화된 action으로 변환)
 
-Step 2: 현재 Device 상태 조사 (P3: 보고 기반)
+Step 2: 현재 Device 상태 조사 (P3: 보고 기반, 범위: actions[] + status만)
   ROV-1: 
     - actions: [MOVE_TO, HIGH_RES_SCAN, RETURN_TO_BASE]  ← P5: Device가 선언한 능력
     - status: OFFLINE  ← P3: Device Agent가 보고한 상태
@@ -72,6 +72,8 @@ Step 2: 현재 Device 상태 조사 (P3: 보고 기반)
     - actions: [MOVE_TO, SURFACE_SCAN]  ← P5: HIGH_RES_SCAN 없음 = 절대 할당 불가
     - status: ONLINE
     - battery: 80%
+  
+  ⚠️ 참고: System Agent는 Device.actions[]과 status만 확인합니다. Sensor 확인과 센서 기반 거절 판단은 Device Agent의 책임입니다 (P5 원칙)
 
 Step 3: Capability Matching 결과 (P5: Strict Matching)
   ❌ ROV-1: HIGH_RES_SCAN ✓ (actions에 있음)
@@ -103,7 +105,9 @@ Step 4: 최종 판단
 
 ### **3️⃣ System Agent: 여러 Proposal 생성**
 
-만약 수행 가능하면, **여러 솔루션 세트를 생성**:
+만약 수행 가능하면, **여러 솔루션 세트를 생성** (각 Proposal은 PROPOSED 상태로 생성):
+
+> **Proposal 상태**: PROPOSED (생성됨) → 사용자 선택 → APPROVED (승인됨)
 
 ```
 Proposal-1 (추천)
@@ -207,23 +211,29 @@ Task 배정
 ### **7️⃣ Task 실행**
 
 ```
-System Agent가 Task-1을 조회
+System Agent가 Task-1을 조회 (status: PENDING)
   ↓
 Device Agent (ROV-1)에 Task 전달
   ↓
 Device Agent:
   - Task 수신 확인
-  - status: PENDING → ASSIGNED
+  - status: PENDING → ASSIGNED (수신 확인)
   ↓
-ROV-1에서 실제 이동 수행
+Device Agent가 실행 준비 (P5: 수행 가능 여부 최종 판단)
+  ↓
+  실행 가능: status: ASSIGNED → IN_PROGRESS
+  실행 불가: Task ABORTED (이유와 함께 거절)
+  ↓
+ROV-1에서 실제 이동 수행 (IN_PROGRESS 상태)
   ↓
 완료 후 System에 결과 보고
   ↓
 System:
-  - Task status: ASSIGNED → IN_PROGRESS → COMPLETED
+  - Task status: IN_PROGRESS → COMPLETED
   - Task.result에 결과 저장
+  - Mission도 모든 Task가 COMPLETED되면 COMPLETED로 전이
   ↓
-다음 Task (Task-2) 시작
+다음 Task (Task-2) 시작 (또는 Mission 완료)
 ```
 
 ---

@@ -57,7 +57,7 @@ cd /Users/teamgrit/Documents/CoWater
 CoWater System
 │
 ├── Registry Server                  포트 8280
-│   └── 디바이스 등록 · Event/Alert/Insight/Approval/Mission 원장
+│   └── 디바이스 등록 · Event/Approval/Mission 원장
 │
 ├── System Agent                     포트 9116
 │   └── 역할 추천 · 운영 계획 추천 · Mission Proposal 생성 · 승인 후 실행
@@ -162,10 +162,8 @@ python device_agent.py --type usv --layer lower --port 9122
 # 등록 디바이스
 curl http://127.0.0.1:8280/devices | jq '.[] | {id, name, layer, device_type, connected}'
 
-# Event / Alert / Insight / Approval / Mission 원장
+# Event / Approval / Mission 원장
 curl http://127.0.0.1:8280/events    | jq .
-curl http://127.0.0.1:8280/alerts    | jq .
-curl http://127.0.0.1:8280/insights  | jq .
 curl http://127.0.0.1:8280/approvals | jq .
 curl http://127.0.0.1:8280/mission-proposals | jq .
 curl http://127.0.0.1:8280/missions  | jq .
@@ -178,21 +176,6 @@ curl http://127.0.0.1:9112/state | jq '.last_telemetry'  # AUV
 curl http://127.0.0.1:9113/state | jq '.last_telemetry'  # ROV
 ```
 
-### Alert 상태 흐름
-
-```
-registered → processing → completed
-                        ↘ failed
-```
-
-| 상태         | 의미                              |
-| ------------ | --------------------------------- |
-| `registered` | 레지스트리에 기록됨               |
-| `processing` | System Agent 인지 · 미션 진행 중  |
-| `completed`  | 디바이스에 대응 완료              |
-| `failed`     | 대응 불가                         |
-
----
 
 ## 운영 흐름 스모크 테스트
 

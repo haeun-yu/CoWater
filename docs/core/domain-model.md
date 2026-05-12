@@ -53,12 +53,25 @@
 > AgentConnection은 **단순 선 연결이 아니라**  
 > **협력의 목적과 조건을 명확히 정의**하는 것입니다.
 
-**Endpoint 관리 전략** (ADR-004):
-- **연결 생성 시점**: Agent 테이블의 최신 endpoint 정보로 AgentConnection.profile 초기화
-- **실행 시점**: 실제 통신 시 Agent 테이블을 실시간 조회하여 최신 정보 사용 (동적 조회)
+**Endpoint 관리 전략** (ADR-004, endpoint 변경 불가 원칙):
+- **기본 원칙**: Agent.endpoint는 등록 후 **변경하지 않음** (모든 AgentConnection에 영향)
+- **연결 생성 시점**: Agent 테이블의 endpoint 정보로 AgentConnection.profile 초기화
+- **실행 시점**: Task 전달/실행 시 AgentConnection.profile에 저장된 endpoint_a/b 사용
+  - endpoint 변경 불가 원칙 하에서는 항상 동일한 값
+  - 예외 상황(endpoint 변경 필수): schema.md:144-151의 처리 규칙 따름
 - **감사 추적**: Mission/Report 생성 시점의 endpoint는 스냅샷으로 기록
-  - 네트워크 전환(LTE → 위성) 같은 동적 변화에 대응 가능
   - 장애 분석 시 "해당 시점에 사용된 통신 정보" 추적 가능
+
+**유효성 판단** (6번 사용자 피드백 기반):
+- `deleted_at IS NULL`: 활성 연결
+- `deleted_at IS NOT NULL`: 소프트 삭제 상태 (더 이상 사용 불가)
+- status 필드는 제거됨 (ACTIVE, DEGRADED, INACTIVE 등 불필요)
+
+**relation_level 상세** (15번 사용자 피드백 기반):
+- **PEER**: 두 에이전트가 서로 독립적인 의사결정권을 가지며, 정보를 공유하거나 단순히 통신을 릴레이 (예: 두 대의 AUV 협력 수색)
+- **PARENT_CHILD**: 한 에이전트(Parent)가 다른 에이전트(Child)의 생명주기나 명령 실행을 부분적으로 통제하거나, Child가 Parent의 자원에 물리적으로 종속된 관계
+  - **예시**: USV(Parent)가 ROV(Child) 유선 연결 (또는 AUV가 수중으로 들어가는 경우)
+  - **로직**: USV가 복귀 명령을 받으면, Child인 ROV에게도 자동으로 복귀 또는 수거 준비 명령이 전달됨 (부모의 상태에 자식이 동기화)
 
 ---
 
@@ -94,7 +107,7 @@ REPORT (결과 요약)
   - 승인 상태(APPROVED) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED)
   
 - **Task**: Mission의 **세부 실행 항목**
-  - 할당 대기(PENDING) → 할당됨(ASSIGNED) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED)
+  - 대기(PENDING) → Device 수신(ASSIGNED) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED/ABORTED)
 
 ### **Event - 모든 의사결정의 근거**
 
