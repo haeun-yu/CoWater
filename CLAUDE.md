@@ -45,6 +45,7 @@
 | **프로세스** (설계, 리뷰, 구현 단계별) | `.claude/PROCESS.md` | 5분 |
 | **CoWater 컨텍스트** (아키텍처, Agent, 용어) | `.claude/COWATER_CONTEXT.md` | 5분 |
 | **일반 가이드라인** (코딩 방식, 베스트 프랙티스) | `.claude/GUIDELINES.md` | 3분 |
+| **문서 관리 규칙** (중복 배제, Mermaid, ADR) | `.claude/DOCUMENTATION_GUIDELINES.md` | 2분 |
 
 ---
 
@@ -73,8 +74,8 @@
 ## 📍 Quick Links
 
 - **프로젝트 메모리**: `.claude/projects/-Users-teamgrit-Documents-CoWater/memory/`
-- **프로젝트 아키텍처**: `SYSTEM_ARCHITECTURE.md`
-- **빠른 시작**: `QUICK_START.md`
+- **프로젝트 아키텍처**: `docs/SYSTEM_ARCHITECTURE.md`
+- **빠른 시작**: `docs/QUICK_START.md`
 - **Git Hooks**: `.git/hooks/pre-commit`, `pre-push`
 
 ---
