@@ -26,7 +26,7 @@
 
 ---
 
-## 2. Device (장비)
+## 2. Device (장비 - H/W 스펙)
 
 ```json
 {
@@ -43,6 +43,15 @@
     "latitude": "number",
     "longitude": "number"
   },
+
+  // ← 추가: 물리적 통신 인터페이스 (H/W)
+  "physical_interfaces": [
+    {
+      "type": "wired | acoustic | rf | internet",
+      "hardware": "string", // "Ethernet", "Acoustic Modem", "LTE Module" 등
+      "specs": "string | null" // "2.4GHz WiFi", "300m range" 등
+    }
+  ],
 
   "battery_percent": "number | null",
   "device_agent_id": "string (uuid) | null", // 연관된 Device Agent
@@ -61,11 +70,13 @@
 
 - **actions[]**: Device가 등록할 때 선언한 기능 목록 (불변, ADR-003)
 - **status**: Device 자체의 운영 상태 (ONLINE/OFFLINE/ERROR 등)
+- **physical_interfaces[]**: Device가 물리적으로 가진 통신 모듈 (H/W 사양, 불변)
+  - 예: ROV는 [wired], AUV는 [acoustic, internet, rf]
 - **target_type/target_id**: 진행 중인 작업 추적용 (다형성 관계)
 
 ---
 
-## 3. Agent (에이전트)
+## 3. Agent (에이전트 - 통신 인터페이스)
 
 ```json
 {
@@ -85,6 +96,18 @@
     "auth_token_ref": "string | null" // 인증 토큰 참조 (실제 토큰 X)
   },
 
+  // ← 추가: 물리적 통신 능력 (I/F - Interface)
+  "capabilities": ["wired", "acoustic", "rf", "internet"], // 지원 가능한 매체 (Device.physical_interfaces와 동기화)
+  
+  // ← 추가: 물리적 종속성 (Gateway Pattern)
+  "gateway_agent_id": "string (uuid) | null", // 부모 Agent (ROV의 경우 USV 참조)
+  
+  // ← 추가: 환경 상태 (실시간 변경)
+  "environment_state": "surface | submerged | unknown", // 현재 물리적 위치
+  
+  // ← 추가: 현재 활성 매체 (반드시 capabilities의 부분집합, 실시간 업데이트)
+  "active_mediums": ["wired", "rf"], // 지금 사용 가능한 매체 (AUV 수중 진입 시 ["acoustic"]으로 변경)
+
   "last_heartbeat_at": "timestamp | null",
 
   "created_at": "timestamp",
@@ -92,10 +115,20 @@
 }
 ```
 
-**변경 (ADR-004)**:
+**변경 (ADR-004 + 새 설계)**:
 
-- **endpoint** 필드 추가: Agent 등록 시 통신 정보 포함
-- AgentConnection이 이 정보를 자동으로 조회하여 profile 생성
+- **endpoint** 필드: Agent 등록 시 통신 정보 포함 (기존)
+- **capabilities[]**: Device의 physical_interfaces와 동기화 (등록 시 고정)
+  - ROV: ["wired"] (유선만)
+  - AUV: ["acoustic", "rf", "internet"] (수중/수상 모두)
+- **gateway_agent_id**: 물리적으로 종속된 Agent 참조
+  - ROV가 USV에 케이블로 연결 → ROV.gateway_agent_id = USV의 agent_id
+- **environment_state**: Agent의 현재 물리적 위치 (실시간 변경)
+  - 수상: "surface" (모든 매체 사용 가능)
+  - 수중: "submerged" (acoustic만 사용 가능)
+- **active_mediums[]**: 현재 사용 가능한 매체 (∈ capabilities)
+  - AUV 수면: ["rf", "internet", "acoustic"]
+  - AUV 수중: ["acoustic"] (자동 전환)
 
 ---
 
@@ -122,8 +155,13 @@
     "endpoint_b": "string",
 
     "protocol": "A2A",
-    "transport": "HTTP | SSE | GRPC | REST | CUSTOM",
-    "network_type": "RF | LTE | SATELLITE | ACOUSTIC | LOCAL_NETWORK | OTHER",
+    "transport": "HTTP | REST | GRPC | CUSTOM",
+    
+    // ← 추가: 물리 계층 추상화
+    "network_type": "wired | acoustic | rf | satellite",
+    "signal_strength": "number | null", // % (0-100)
+    "latency_ms": "number | null", // 지연시간 (밀리초)
+    "bandwidth_mbps": "number | null", // 대역폭 (Mbps)
 
     "auth_info_ref": "string | null",
     "expires_at": "timestamp | null"
@@ -139,6 +177,12 @@
 **특성**:
 
 - **profile**: Agent 테이블의 endpoint를 기반으로 자동 생성 (ADR-004)
+  - **network_type**: Device Agent가 물리 계층 드라이버를 선택하기 위한 정보
+    - `wired`: 유선 (Ethernet, USB) → HTTP, REST 드라이버
+    - `acoustic`: 음파 (수중 통신) → Acoustic Modem 드라이버
+    - `rf`: 무선 (WiFi, RF) → RF 모듈 드라이버
+    - `satellite`: 위성 → Satellite 모듈 드라이버
+  - **signal_strength, latency_ms, bandwidth_mbps**: 협력 판단 시 참고값 (Policy Rule 실행)
 - **deleted_at**: null이면 활성, 값이 있으면 소프트 삭제 상태 (REMOVED로 표시하지 않음)
 
 **endpoint 동기화 규칙** (ADR-004):

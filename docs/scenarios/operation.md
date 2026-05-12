@@ -577,6 +577,233 @@ Rule {
 
 ---
 
+## Device Agent 간 협력 미션 (AgentConnection 활용)
+
+### 시나리오: USV-ROV RELAY 협력 미션
+
+**배경**: 수심이 깊어 ROV가 직접 신호를 받지 못함 → USV가 중계
+
+### 흐름
+
+**1️⃣ 협력 설정 (System Agent)**
+```json
+// AgentConnection 생성 (자동)
+{
+  "id": "conn-usv-rov-relay-1",
+  "agent_a_id": "agent-usv-1",
+  "agent_b_id": "agent-rov-1",
+  "connection_type": "RELAY",
+  
+  "profile": {
+    "endpoint_a": "192.168.1.50:9111",  // USV 주소
+    "endpoint_b": "192.168.1.60:9112",  // ROV 주소
+    "network_type": "acoustic",
+    "signal_strength": 75,
+    "latency_ms": 800,
+    "bandwidth_mbps": 0.2
+  }
+}
+```
+
+**2️⃣ Mission 생성 (System Agent)**
+```
+Mission: "A 구역 수중 샘플 채집"
+├─ Task 1: USV가 A 구역으로 이동 (System Agent → USV 직접)
+├─ Task 2: ROV가 샘플 채집 (System Agent → ROV, 경로는 USV 중계)
+│          [내부적으로 AgentConnection RELAY 사용]
+├─ Task 3: ROV가 샘플 수거 지점으로 복귀 (RELAY)
+└─ Task 4: USV가 기지로 복귀
+```
+
+**3️⃣ ROV Task 실행 (Device Agent 협력)**
+```
+Device Agent ROV:
+  ↓
+  1. Registry에 요청: "Agent USV와의 협력 정보"
+     GET /api/agent-connections?agent_b_id=agent-rov-1&connection_type=RELAY
+  ↓
+  2. Registry 응답:
+     {
+       "profile": {
+         "endpoint_a": "192.168.1.50:9111",  // USV 주소
+         "network_type": "acoustic",
+         "latency_ms": 800
+       }
+     }
+  ↓
+  3. ROV가 AcousticModemDriver 선택
+  ↓
+  4. ROV → USV (음파): "샘플 채집 준비. A 구역으로 이동해줄래?"
+  ↓
+  Device Agent USV (음파 수신):
+    ├─ "A 구역으로 이동" 명령 실행
+    ├─ Moth로 위치 실시간 발행
+    └─ ROV는 Moth 구독으로 USV 위치 모니터링
+  ↓
+  5. ROV → USV (음파): "채집 완료. 다음 지점은?"
+  ↓
+  6. USV → ROV (음파): "다음 지점 B로 이동하자"
+```
+
+**4️⃣ Policy 실행 (Signal 감소 시)**
+```
+Rule: "signal_strength < 30% → RELAY 중단"
+
+Trigger:
+  - Event: signal_strength = 25% (AgentConnection 모니터링)
+  - Action: RELAY 미션 자동 중단
+  - Fallback: "ROV, 현재 위치에서 표면으로 복귀하라"
+```
+
+### 특징
+
+- ✅ **Registry가 중앙 관리**: AgentConnection으로 모든 Device 간 협력 정보 보유
+- ✅ **자율적 드라이버 선택**: ROV가 profile.network_type에 맞는 드라이버(음파 모뎀) 선택
+- ✅ **Signal 기반 Policy**: 신호 강도 저하 시 자동 대응
+- ✅ **비동기 모니터링**: Moth로 실시간 텔레메트리 공유, 신호 지연 보정
+
+---
+
+## 물리 통신 모드 전환 미션
+
+### 시나리오 1: ROV 유선 연결 (Fixed Gateway)
+
+**배경**: ROV는 USV에 유선(테더)로 연결 → 직접 인터넷 불가능
+
+```
+등록 단계:
+  Device: ROV-01
+    physical_interfaces: [wired]  (유선만 물리적으로 가짐)
+  
+  Device: USV-01
+    physical_interfaces: [wired, rf, internet, acoustic]
+  
+  Agent: agent-rov-01
+    gateway_agent_id: agent-usv-01  ← 핵심!
+    capabilities: [wired]
+    active_mediums: [wired]  (항상)
+
+Mission 할당:
+  System Agent → USV: "ROV에게 수심 측정 Task 전달해"
+    ↓
+  USV가 System Agent와의 AgentConnection에서:
+    endpoint_a = USV의 endpoint
+    endpoint_b = System Agent의 endpoint
+    network_type = "rf"  (직접 인터넷)
+    ↓
+  USV가 ROV와의 AgentConnection에서:
+    endpoint_a = USV의 endpoint (대리)
+    endpoint_b = ROV의 endpoint (유선)
+    network_type = "wired"  (테더 케이블)
+    ↓
+  USV → (케이블) → ROV
+    ROV: "수심 측정 Task 받음"
+    ROV: 수심 측정 실행
+    ROV: → (음파) → USV → (인터넷) → System Agent
+         "수심 123m 측정 완료"
+
+특징:
+  - ROV는 자신의 gateway_agent_id를 알고 있음
+  - System Agent는 ROV를 직접 제어할 수 없음 (USV 경유)
+  - ROV의 데이터는 USV를 통해 중계됨
+```
+
+### 시나리오 2: AUV 수중 진입 시 매체 전환 (Dynamic Hand-over)
+
+**배경**: AUV가 수심 진입하면서 RF 통신 불가능 → 음파 전환
+
+```
+Phase 1: 수면 (Surface)
+  AUV-01.environment_state = "surface"
+  AUV-01.active_mediums = ["rf", "internet", "acoustic"]
+  
+  AgentConnection [RF]:
+    network_type: "rf"
+    endpoint: "192.168.1.100:9112"
+    status: ACTIVE
+  
+  System Agent: RF로 Task 실시간 전달 가능
+    "AUV, A → B 이동하고 스캔해"
+    응답 시간: ~100ms
+
+Phase 2: 수심 진입 (Submerged)
+  
+  1️⃣ Event 발생:
+    AUV 센서 감지: "수심이 2m 넘었다"
+    Event: ENV_STATE_CHANGED
+      agent_id: "agent-auv-01"
+      from: "surface"
+      to: "submerged"
+  
+  2️⃣ System Agent 자동 응답:
+    a. AUV.environment_state = "submerged" 업데이트
+    b. AUV.active_mediums = ["acoustic"] 자동 전환
+       (RF는 사용 불가하니까 제외)
+    c. AgentConnection[RF] 비활성화
+    d. AgentConnection[Acoustic] 활성화
+  
+  3️⃣ Policy 실행:
+    Rule: "수중 진입 시 대역폭 제한"
+      Task.priority = "essential_only"
+      Telemetry sampling = 1/10로 감소
+      대파일 전송 = Queue (표면 복귀 후)
+  
+  AgentConnection [Acoustic]:
+    network_type: "acoustic"
+    endpoint: "192.168.1.100:9113"  (Acoustic Modem 주소)
+    status: ACTIVE
+  
+  System Agent: 음파로 Task 전달 (지연 있음)
+    "AUV, 현재 위치에서 스캔 계속해"
+    응답 시간: ~500-2000ms
+
+Phase 3: 수면 복귀 (Surface again)
+  
+  1️⃣ Event:
+    AUV 센서: "수심이 0.5m 미만"
+    Event: ENV_STATE_CHANGED
+      from: "submerged"
+      to: "surface"
+  
+  2️⃣ System Agent:
+    a. AUV.active_mediums = ["rf", "internet", "acoustic"]
+    b. RF Module Wake (Sleep에서 1초 이내)
+    c. AgentConnection[RF] 재활성화
+    d. 대역폭 제한 해제
+    e. 대기 중인 파일 전송 재개
+  
+  System Agent: RF로 복귀 완료 Task 수신
+    "AUV: 스캔 데이터 전송 시작"
+    데이터 전송율: RF의 높은 대역폭으로 빠르게
+```
+
+**Policy 트리거 예시**:
+
+```
+Rule 1: "음파 신호 약화 시 긴급 복귀"
+  IF (Event: signal_strength_degraded AND strength < 30%)
+  THEN (
+    CANCEL current_task
+    CREATE_MISSION type="EMERGENCY_SURFACE"
+    NOTIFY operator
+  )
+
+Rule 2: "수중 > 1시간 시 자동 복귀"
+  IF (Event: TIME_EXCEEDED AND duration > 3600s AND environment="submerged")
+  THEN (
+    CREATE_MISSION type="RETURN_TO_BASE"
+  )
+
+Rule 3: "유선 탈착 감지"
+  IF (Event: CONNECTION_LOST AND agent.gateway_agent_id exists)
+  THEN (
+    ALERT: "ROV 테더 분리!"
+    ACTIVATE_FAILSAFE (ROV 자체 배터리로 독립 작동)
+  )
+```
+
+---
+
 ## 재계획 / 취소 / 실패 처리
 
 각 항목의 상세는 [exceptions.md](exceptions.md) 참고.
@@ -585,6 +812,8 @@ Rule {
 
 ## 참고
 
+- **[ADR-004](../adr/ADR-004-agent-endpoint-management.md)**: Agent Endpoint & 3단계 필터링
+- **[ADR-009](../adr/ADR-009-physical-communication-routing.md)**: 물리 통신 라우팅 & 동적 핸드오버 ⭐
 - **[ADR-002](../adr/ADR-002-proposal-as-solution-set.md)**: Proposal = Solution Set
 - **[ADR-003](../adr/ADR-003-capability-driven-task-assignment.md)**: Capability Matching & Fail-Fast
 - **[ADR-005](../adr/ADR-005-event-triggered-rule-execution.md)**: Event-Triggered Rule

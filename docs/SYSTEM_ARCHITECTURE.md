@@ -59,6 +59,7 @@ CoWater의 모든 설계는 5가지 핵심 철학을 기반합니다.
     │  (Device 1, Device 2, ... Device N)                  │
     │  - Task 수행 판단 및 실행                              │
     │  - 로컬 안전 행동 (Edge-Side Resilience)              │
+    │  - Device ↔ Device 협력 (물리 통신: 음파, RF 등)     │
     └──────────────────────────────────────────────────────┘
             ↓
     ┌──────────────────────────────────────────────────────┐
@@ -66,15 +67,18 @@ CoWater의 모든 설계는 5가지 핵심 철학을 기반합니다.
     └──────────────────────────────────────────────────────┘
 
 Registry Server (공용 상태 저장소 - 모든 레이어에서 접근)
-├─ Device 등록 정보
+├─ Device 등록 정보 & Agent Endpoint
 ├─ Mission / Task 상태
 ├─ Event (모든 의사결정 기록)
+├─ AgentConnection (Device 간 협력 정보)
+│  └─ network_type: wired, acoustic, rf, satellite
+│  └─ endpoint, signal_strength, latency_ms 등
 └─ A2A 통신 로그
 
 Stream Layer (Moth - 실시간 데이터)
-├─ A2A 메시지
-├─ Telemetry
-└─ Healthcheck
+├─ A2A 메시지 (Agent ↔ Agent)
+├─ Telemetry (Device 센서 데이터)
+└─ Healthcheck (Device 상태 신호)
 ```
 
 ---
@@ -103,6 +107,59 @@ Stream Layer (Moth - 실시간 데이터)
 | **AgentConnection** | Device Agent 간 협력 관계 (RELAY, COORDINATE 등, 소프트삭제) | [schema.md#agentconnection](core/schema.md) |
 
 👉 전체 데이터 구조: [**스키마 정의**](core/schema.md)
+
+### 4.3 물리 통신 관리 (Physical Communication Management)
+
+CoWater의 핵심: **Device Agent는 물리 환경을 인식하고 자동으로 최적 통신을 선택합니다.**
+
+#### 📊 매체별 우선순위 (The Cost of Medium)
+
+| 매체 | 용도 | 우선순위 | 특성 |
+|------|------|---------|------|
+| **Wired (유선)** | ROV 테더, 충전 스테이션 | 1순위 | 최고 속도, 최저 지연, 물리 탯줄 필수 |
+| **RF/Internet** | 수상 장비 | 2순위 | 고속 데이터, 수중 진입 시 즉시 단절 |
+| **Acoustic (음향)** | 수중 통신 | 3순위 | 저속, 고지연, 수중 최후의 보루 |
+
+#### 🔀 3단계 필터링 로직 (AgentConnection 생성)
+
+```
+Step 1. 물리적 종속성 확인 (Gateway Check)
+  ├─ Agent.gateway_agent_id 확인
+  ├─ 있으면: 해당 부모를 통해서만 연결 (Fixed Routing)
+  └─ 예: ROV는 항상 USV를 통해서만 System Agent와 통신
+
+Step 2. 매체 교집합 확인 (Medium Matching)
+  ├─ Agent_A.capabilities ∩ Agent_B.capabilities
+  ├─ 공통 매체 없으면: 연결 불가
+  └─ 예: ROV(wired) ∩ USV(wired, acoustic, rf) = {wired}
+
+Step 3. 환경별 가용성 필터 (Environmental Filter)
+  ├─ Agent.environment_state 확인
+  ├─ 수면(Surface): [RF, Internet, Acoustic] 모두 후보
+  ├─ 수중(Submerged): [Acoustic]만 후보
+  └─ 예: AUV 수중 진입 → active_mediums = [acoustic]로 자동 변경
+```
+
+#### 🔄 실시간 통신 모드 전환 (Dynamic Hand-over)
+
+```
+상황: AUV가 수심 진입
+  ↓
+Event 발생: ENV_STATE_CHANGED (environment_state: "surface" → "submerged")
+  ↓
+System Agent:
+  1. active_mediums 갱신: ["rf", "internet", "acoustic"] → ["acoustic"]
+  2. 기존 RF 기반 AgentConnection 비활성화
+  3. Acoustic AgentConnection 활성화
+  4. Policy 적용: "대역폭 줄어듦 → 텍스트 위주 통신만 허용"
+  ↓
+Device Agent:
+  1. AcousticModemDriver 활성화
+  2. RF 모듈 Sleep (배터리 절감)
+  3. 수중 작업 계속
+```
+
+👉 상세: [**ADR-009: 물리 통신 라우팅**](adr/ADR-009-physical-communication-routing.md)
 
 ---
 

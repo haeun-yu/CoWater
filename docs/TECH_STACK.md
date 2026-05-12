@@ -121,7 +121,53 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 
 ---
 
-## 5️⃣ Device ↔ Physical Device (내부)
+## 5️⃣ Device Agent ↔ Device Agent (AgentConnection 기반 물리 통신)
+
+**목적**: Device 간 협력 (중계, 동기화, 데이터 공유 등)
+
+**기반**: AgentConnection.profile (Registry에서 조회)  
+**방식**: Registry → 연결 정보 제공 → Device Agent가 물리층 드라이버 선택  
+**데이터 포맷**: Device별 (바이너리, JSON 등)
+
+### 흐름
+```
+1. Device Agent A
+   └─ REST로 Registry 요청
+      "Device B와 협력하려면 연결 정보 줄래?"
+      
+2. Registry (AgentConnection 저장소)
+   └─ AgentConnection.profile 응답:
+      {
+        "device_id": "ROV-1",
+        "endpoint": "192.168.1.50:9111",
+        "network_type": "acoustic",
+        "transport": "acoustic_modem",
+        "latency_ms": 500,
+        "signal_strength": 85
+      }
+      
+3. Device Agent A
+   └─ profile.network_type에 맞는 드라이버 선택
+   └─ profile.endpoint로 Device B와 물리 통신 시작
+```
+
+### 지원 네트워크 타입
+
+| Type | 용도 | 특징 | 드라이버 |
+|------|------|------|---------|
+| **wired** | 유선 (Ethernet, USB) | 낮은 지연, 높은 대역폭 | HTTP, Serial |
+| **acoustic** | 음파 (수중) | 높은 지연(초~분), 낮은 대역폭 | Acoustic Modem 드라이버 |
+| **rf** | 무선 (WiFi, RF) | 중간 지연, 신호 감쇠 | RF 모듈 드라이버 |
+| **satellite** | 위성 | 매우 높은 지연(초), 제한 대역폭 | Satellite 모듈 드라이버 |
+
+### 특징
+- **Registry가 중앙 집중식 연결 관리** (모든 Device 간 협력 정보 보유)
+- **Device Agent가 자율적으로 드라이버 선택** (물리층 추상화)
+- **새로운 네트워크 타입 추가 용이** (profile 확장, 코드 변경 없음)
+
+---
+
+## 6️⃣ Device ↔ Physical Device (내부)
 
 **책임**: Device Agent가 각자 구현  
 **방식**: Serial, Modbus, MQTT 등 (Device 타입별)  
@@ -154,6 +200,26 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 ---
 
 # 섹션 2: 기술 스택 (Technology Stack)
+
+## 0️⃣ 물리 통신 매체 관리 (Physical Media Management)
+
+### 매체별 우선순위 및 특성
+
+| 매체 | 우선순위 | 환경 | 대역폭 | 지연 | 사용 사례 | 자세히 |
+|-----|---------|------|--------|------|---------|--------|
+| **Wired** | 1순위 | - | 매우 높음 | 극저 | ROV 테더, 충전 스테이션 | [ADR-009](../adr/ADR-009-physical-communication-routing.md) |
+| **RF/Internet** | 2순위 | Surface | 높음 | 저 | 수상 AUV/USV | [ADR-009](../adr/ADR-009-physical-communication-routing.md) |
+| **Acoustic** | 3순위 | Submerged | 낮음 | 높음 | 수중 AUV, 음파 통신 | [ADR-009](../adr/ADR-009-physical-communication-routing.md) |
+
+### 동적 선택 로직
+
+System Agent가 AgentConnection 생성 시:
+1. **Gateway 확인** (ROV의 부모는 USV)
+2. **매체 교집합** (둘 다 지원하는 매체만)
+3. **환경별 필터** (수중 = acoustic만, 수면 = 전부)
+4. **우선순위 선택** (Wired > RF > Acoustic)
+
+---
 
 ## 1️⃣ Backend Framework
 
