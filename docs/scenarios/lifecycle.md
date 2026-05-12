@@ -141,10 +141,13 @@ AND status IN ('PENDING', 'ASSIGNED', 'IN_PROGRESS')
 if (count > 0) {
   // Task 취소 처리
   UPDATE tasks SET status = 'CANCELLED',
-         cancel_reason = 'Device removed'
+         status_reason = 'Device removed',
+         status_updated_at = NOW()
   
   // Mission도 CANCELLED 처리 (모든 Task가 취소되면)
-  UPDATE missions SET status = 'CANCELLED'
+  UPDATE missions SET status = 'CANCELLED',
+         status_reason = 'Device removed',
+         status_updated_at = NOW()
   WHERE id IN (위의 tasks의 mission_id들)
 }
 ```
@@ -236,7 +239,7 @@ Mission {
   status: "READY",
   approved_by_user_id: "user-001",
   approved_at: "2026-05-12T10:30:00Z",
-  started_at: null  // 아직 실행 시작 X
+  status_updated_at: "2026-05-12T10:30:00Z"  // Mission 생성 시점
 }
 ```
 
@@ -276,12 +279,12 @@ Task-3: PENDING   ← 실행할 차례 아직 아님
 ```typescript
 Mission {
   status: "IN_PROGRESS",
-  started_at: "2026-05-12T10:31:00Z"  // Mission 시작 시각
+  status_updated_at: "2026-05-12T10:31:00Z"  // Mission 시작 시각 (READY → IN_PROGRESS 전이)
 }
 
 Task-1 {
   status: "IN_PROGRESS",
-  started_at: "2026-05-12T10:31:00Z"
+  status_updated_at: "2026-05-12T10:31:00Z"
 }
 ```
 
@@ -314,12 +317,12 @@ Task-1 {
 ```typescript
 Mission {
   status: "COMPLETED",
-  completed_at: "2026-05-12T11:15:00Z",
+  status_updated_at: "2026-05-12T11:15:00Z",
   result_summary: "A 구역 고해상도 촬영 완료, 1200장 이미지 획득"
 }
 
 // 모든 Task가 완료 상태
-Task-1: COMPLETED (completed_at: ...)
+Task-1: COMPLETED (status_updated_at: ...)
 Task-2: COMPLETED
 Task-3: COMPLETED
 ```
@@ -344,14 +347,15 @@ Task-3: COMPLETED
 ```typescript
 Mission {
   status: "FAILED",
-  fail_reason: "Task-2 (고해상도 촬영) Device 오류로 실패",
-  completed_at: "2026-05-12T10:45:00Z"  // 실패 시각
+  status_reason: "Task-2 (고해상도 촬영) Device 오류로 실패",
+  status_updated_at: "2026-05-12T10:45:00Z"  // 실패 시각
 }
 
 Task-1: COMPLETED
 Task-2: FAILED
-  error_message: "High Resolution Camera Error: Device Hardware Failure"
+  status_reason: "High Resolution Camera Error: Device Hardware Failure"
 Task-3: CANCELLED  // 남은 Task 자동 취소
+  status_reason: "Mission failed due to Task-2 failure"
 ```
 
 **액션**:
@@ -389,14 +393,15 @@ Task-3: CANCELLED  // 남은 Task 자동 취소
 ```typescript
 Mission {
   status: "CANCELLED",
-  cancelled_at: "2026-05-12T10:40:00Z",
-  cancel_reason: "사용자 요청: 날씨 악화로 미션 중단"
+  status_updated_at: "2026-05-12T10:40:00Z",
+  status_reason: "사용자 요청: 날씨 악화로 미션 중단"
 }
 
 Task-1: COMPLETED
 Task-2: CANCELLED
-  cancel_reason: "Mission cancelled by user"
+  status_reason: "Mission cancelled by user"
 Task-3: CANCELLED
+  status_reason: "Mission cancelled by user"
 ```
 
 **액션**:
@@ -559,13 +564,13 @@ Device Agent {
         task_id: "task-1",
         status: "COMPLETED",
         result: { ... },
-        completed_at: "2026-05-12T10:05:00Z"
+        status_updated_at: "2026-05-12T10:05:00Z"
       },
       {
         task_id: "task-2",
         status: "COMPLETED",
         result: { ... },
-        completed_at: "2026-05-12T10:10:00Z"
+        status_updated_at: "2026-05-12T10:10:00Z"
       }
     ],
     
@@ -608,7 +613,7 @@ ON device_reconnect_message_received:
       // Device가 성공했으므로 Task 완료 처리
       task_in_registry.status = "COMPLETED"
       task_in_registry.result = task.result
-      task_in_registry.completed_at = task.completed_at
+      task_in_registry.status_updated_at = task.status_updated_at
       
       // Mission 상태 갱신 (모든 Task가 완료됐나?)
       update_mission_status(task_in_registry.mission_id)
@@ -645,7 +650,7 @@ for mission in affected_missions:
   
   IF all(status == "COMPLETED"):
     mission.status = "COMPLETED"
-    mission.completed_at = MAX(task.completed_at)
+    mission.status_updated_at = MAX(task.status_updated_at)
   
   ELSE IF any(status == "FAILED"):
     mission.status = "FAILED"

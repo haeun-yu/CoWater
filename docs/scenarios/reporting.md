@@ -111,8 +111,8 @@ Mission {
   
   // 성공/실패 정보
   result_summary: "Task-2 실패로 전체 미션 중단",
-  fail_reason: "ROV-1 카메라 하드웨어 오류",
-  completed_at: "2026-05-12T10:45:00Z"
+  status_reason: "ROV-1 카메라 하드웨어 오류",
+  status_updated_at: "2026-05-12T10:45:00Z"
 }
 
 Task {
@@ -123,8 +123,7 @@ Task {
   assigned_device_id: "rov-1",
   assigned_agent_id: "agent-rov-1",
   
-  started_at: "2026-05-12T10:35:00Z",
-  completed_at: "2026-05-12T10:45:00Z",
+  status_updated_at: "2026-05-12T10:45:00Z",  // 마지막 상태 변경 시점
   
   // 결과/오류
   result: {
@@ -292,7 +291,9 @@ ORDER BY m.created_at DESC;
 SELECT d.id, d.name, d.type,
        COUNT(CASE WHEN t.status = 'COMPLETED' THEN 1 END) as success_count,
        COUNT(CASE WHEN t.status = 'FAILED' THEN 1 END) as fail_count,
-       AVG(TIMESTAMPDIFF(SECOND, t.started_at, t.completed_at)) as avg_duration
+       -- Task의 평균 실행 시간: 각 Task의 status_updated_at으로 계산
+       -- (정확한 시작/종료 시점 추적 필요시 StatusHistory 엔티티 도입 권장)
+       AVG(TIMESTAMPDIFF(SECOND, t.created_at, t.status_updated_at)) as avg_duration
 FROM devices d
 LEFT JOIN tasks t ON d.id = t.assigned_device_id
 WHERE t.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)

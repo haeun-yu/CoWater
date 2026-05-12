@@ -47,8 +47,8 @@
   "battery_percent": "number | null",
   "device_agent_id": "string (uuid) | null", // 연관된 Device Agent
 
-  "current_mission_id": "string (uuid) | null",
-  "current_task_id": "string (uuid) | null",
+  "target_type": "MISSION | TASK | null", // 현재 처리 중인 대상
+  "target_id": "string (uuid) | null",    // 대상의 ID
 
   "last_seen_at": "timestamp | null",
 
@@ -61,7 +61,7 @@
 
 - **actions[]**: Device가 등록할 때 선언한 기능 목록 (불변, ADR-003)
 - **status**: Device 자체의 운영 상태 (ONLINE/OFFLINE/ERROR 등)
-- **current_mission_id/task_id**: 진행 중인 작업 추적용
+- **target_type/target_id**: 진행 중인 작업 추적용 (다형성 관계)
 
 ---
 
@@ -234,8 +234,8 @@
   "approved_by_user_id": "string (uuid) | null",
   "approved_at": "timestamp | null",
 
-  "cancelled_at": "timestamp | null",
-  "cancel_reason": "string | null",
+  "status_updated_at": "timestamp",
+  "status_reason": "string | null",
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -259,8 +259,8 @@
   - → COMPLETED (Mission 완료 시 자동)
   - → FAILED (Mission 실패 시 자동)
   - → CANCELLED: 사용자가 Mission 취소 명령
-- **REPLANNING**: 이전 Proposal이 채택되지 않았으므로 재계획 중 (reason 필드에 불채택 이유 기록)
-- **CANCELLED**: 사용자가 거절
+- **REPLANNING**: 이전 Proposal이 채택되지 않았으므로 재계획 중 (status_reason 필드에 불채택 이유 기록)
+- **CANCELLED**: 사용자가 거절 (status_reason에 거절 사유 기록)
 - **EXPIRED**: 장시간 선택 안 됨
 
 **필드 상세**:
@@ -268,6 +268,9 @@
 - `selected`: 사용자가 이 Proposal을 선택했는지 여부 (true = 승인 절차 진행 중, false = 미선택)
 - `reason`: REPLANNING 상태일 때, 이전 Proposal이 왜 채택되지 않았는지 기록 (사용자 피드백 요약)
 - `limitations`: 사용자가 반드시 알아야 할 제약 사항이나 잠재적 위험 요소 (조건부 정보로, 최종 판단에 도움)
+- `status_updated_at`: 마지막으로 상태가 변경된 시점 (모든 상태 전이 추적)
+- `status_reason`: 현재 상태에 대한 사유 또는 설명 (취소/거절/재계획 사유 기록)
+- `approved_at`: APPROVED 상태로 처음 전이된 시점 (초기 승인 기록)
 
 ---
 
@@ -342,14 +345,10 @@
   "approved_by_user_id": "string (uuid) | null",
   "approved_at": "timestamp | null",
 
-  "started_at": "timestamp | null",
-  "completed_at": "timestamp | null",
-  "failed_at": "timestamp | null",
-  "cancelled_at": "timestamp | null",
+  "status_updated_at": "timestamp",
+  "status_reason": "string | null",
 
   "result_summary": "string | null",
-  "fail_reason": "string | null",
-  "cancel_reason": "string | null",
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -366,13 +365,14 @@
   - → FAILED: 임의의 Task가 FAILED 상태 → 이후 모든 PENDING/IN_PROGRESS Task는 CANCELLED 처리
   - → CANCELLED: 사용자가 취소 (진행 중/대기 중 Task도 함께 취소)
 - **COMPLETED** (완료): 모든 Task COMPLETED
-- **FAILED** (실패): 하나 이상의 Task FAILED, 이후 Task들 CANCELLED
-- **CANCELLED** (취소): 사용자 명령
+- **FAILED** (실패): 하나 이상의 Task FAILED, 이후 Task들 CANCELLED (status_reason에 실패 사유 기록)
+- **CANCELLED** (취소): 사용자 명령 (status_reason에 취소 사유 기록)
 
 **개념 정의** (ADR-002):
 
 - Proposal.status = APPROVED: 사용자가 이 솔루션을 선택/승인함 (결과 상태로, Mission 생성/실행 중에도 유지)
 - Mission.status = READY: 시스템이 실행 준비를 완료함 (Task들을 PENDING 상태로 생성, Device에 전달할 준비 완료)
+- Mission.status_updated_at: 마지막 상태 변경 시점 (READY→IN_PROGRESS, IN_PROGRESS→COMPLETED 등)
 
 ---
 
@@ -412,14 +412,8 @@
     // 실행 결과 (완료 시에만 채워짐)
   },
 
-  "error_message": "string | null",
-  "cancel_reason": "string | null",
-  "abort_reason": "string | null",
-
-  "started_at": "timestamp | null",
-  "completed_at": "timestamp | null",
-  "cancelled_at": "timestamp | null",
-  "aborted_at": "timestamp | null",
+  "status_updated_at": "timestamp",
+  "status_reason": "string | null",
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -434,19 +428,19 @@
 - **ASSIGNED** (할당됨): Device Agent가 Task 수신 확인, 아직 실행 시작 전
   - → IN_PROGRESS: Device가 실행 시작
   - → CANCELLED: 사용자가 Mission 취소 명령
+  - → ABORTED: Device Agent가 Task 실행 불가능 판단 (P5 원칙)
 - **IN_PROGRESS** (진행 중): Device가 Task를 실행 중
   - → COMPLETED: Device가 Task 완료 보고
   - → FAILED: Device 오류로 Task 실패
-  - → ABORTED: Device에서 직접 Task 중단 (자체 판단, P5 원칙)
   - → CANCELLED: 사용자가 Mission 취소 명령
 - **COMPLETED** (완료): Task 성공 완료
-- **FAILED** (실패): Device 오류/장애로 Task 실패 → Mission도 FAILED, 이후 Task들은 CANCELLED
-- **CANCELLED** (취소): 사용자 Mission 취소 또는 선행 Task 실패로 인한 자동 취소
+- **FAILED** (실패): Device 오류/장애로 Task 실패 → Mission도 FAILED, 이후 Task들은 CANCELLED (status_reason에 오류 사유 기록)
+- **CANCELLED** (취소): 사용자 Mission 취소 또는 선행 Task 실패로 인한 자동 취소 (status_reason에 취소 사유 기록)
 - **ABORTED** (중단): Device Agent가 Task를 수신 후 실행 불가능하다고 판단해서 거절 (P5: Task 수행 가능성 최종 판단)
   - 발생 가능 상태: PENDING, ASSIGNED 상태에서 가능 (시작하기 전 판단)
   - 예: "필요한 센서가 없음", "배터리 부족", "물리적 위치 초과", "안전 규칙 위반"
   - FAILED와의 차이: ABORTED = 수행 전 판단으로 거절, FAILED = 실행 중 장애/오류로 실패
-  - Mission에 영향: ABORTED 발생 시 Mission은 FAILED로 전이, 이후 Task들 CANCELLED
+  - Mission에 영향: ABORTED 발생 시 Mission은 FAILED로 전이, 이후 Task들 CANCELLED (status_reason에 거절 사유 기록)
 
 ---
 

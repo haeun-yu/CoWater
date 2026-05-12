@@ -238,14 +238,15 @@ Event {
 Task {
   id: "task-2",
   status: "FAILED",
-  error_message: "High Resolution Camera Hardware Failure",
-  completed_at: "2026-05-12T10:45:00Z"
+  status_reason: "High Resolution Camera Hardware Failure",
+  status_updated_at: "2026-05-12T10:45:00Z"
 }
 
 // 남은 Task 자동 취소
 Task-3 {
   status: "CANCELLED",
-  cancel_reason: "Previous task failed"
+  status_reason: "Previous task failed",
+  status_updated_at: "2026-05-12T10:45:05Z"
 }
 ```
 
@@ -254,7 +255,8 @@ Task-3 {
 ```typescript
 Mission {
   status: "FAILED",
-  fail_reason: "Task-2 실패로 인한 Mission 중단"
+  status_reason: "Task-2 실패로 인한 Mission 중단",
+  status_updated_at: "2026-05-12T10:45:00Z"
 }
 ```
 
@@ -324,20 +326,20 @@ Event {
 Task {
   id: "task-1",
   status: "ABORTED",  // PENDING → ABORTED 또는 ASSIGNED → ABORTED
-  abort_reason: "Required sensor CAMERA not found",
-  aborted_at: "2026-05-12T10:31:05Z"
+  status_reason: "Required sensor CAMERA not found",
+  status_updated_at: "2026-05-12T10:31:05Z"
 }
 
 // Mission은 FAILED로 전이 (Task 수행 불가로 판단됨)
 Mission {
   status: "FAILED",  // ← ABORTED = 실행 불가로 판단
-  fail_reason: "Task-1 ABORTED: Required sensor not found",
-  failed_at: "2026-05-12T10:31:05Z"
+  status_reason: "Task-1 ABORTED: Required sensor not found",
+  status_updated_at: "2026-05-12T10:31:05Z"
 }
 
 // 이후 Task들은 자동 취소
-Task-2: CANCELLED (자동 취소)
-Task-3: CANCELLED (자동 취소)
+Task-2: CANCELLED (status_reason: "Mission failed due to Task-1 ABORTED", status_updated_at: "...")
+Task-3: CANCELLED (status_reason: "Mission failed due to Task-1 ABORTED", status_updated_at: "...")
 ```
 
 **System의 대응**:
@@ -457,12 +459,14 @@ graph TD
    ```typescript
    SELECT * FROM missions WHERE status = 'IN_PROGRESS'
    UPDATE missions SET status = 'CANCELLED',
-           cancel_reason = 'CRITICAL_HAZARD - Emergency Preemption'
+           status_reason = 'CRITICAL_HAZARD - Emergency Preemption',
+           status_updated_at = NOW()
    ```
 4. **IN_PROGRESS와 PENDING 상태의 모든 Task를 중단**
    ```typescript
    UPDATE tasks SET status = 'CANCELLED',
-           cancel_reason = 'CRITICAL_HAZARD - Emergency Preemption'
+           status_reason = 'CRITICAL_HAZARD - Emergency Preemption',
+           status_updated_at = NOW()
    WHERE status IN ('PENDING', 'IN_PROGRESS')
    AND mission_id IN (위에서 CANCELLED된 mission_id들)
    ```
