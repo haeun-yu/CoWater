@@ -1,0 +1,110 @@
+{
+  "description": "CoWater Harness Engineering Settings - AI-safe development environment",
+
+  "permissions": {
+    "block": [
+      "Bash(git commit)",
+      "Bash(git push)",
+      "Bash(rm -rf)",
+      "Bash(git reset --hard)",
+      "Bash(git clean -f)",
+      "Bash(DROP|DELETE|TRUNCATE)"
+    ],
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log)",
+      "Bash(git add)",
+      "Read(*)",
+      "Edit(*)"
+    ]
+  },
+
+  "hooks": {
+    "before_response": [
+      {
+        "name": "harness_check_plan_required",
+        "description": "Implementation tasks > 3 steps require EnterPlanMode",
+        "trigger": "task_type=implementation AND complexity>=medium"
+      },
+      {
+        "name": "harness_check_memory_load",
+        "description": "Load project memory on session start",
+        "trigger": "session_start"
+      }
+    ],
+    "after_tool_call": [
+      {
+        "name": "harness_validate_git_safety",
+        "description": "Block unsafe git operations",
+        "tool": "Bash",
+        "pattern": "^git (reset|clean|push|commit)",
+        "action": "ask_permission"
+      },
+      {
+        "name": "harness_todo_tracking",
+        "description": "Auto-track multi-step tasks with TodoWrite",
+        "trigger": "task_involves_multiple_steps"
+      }
+    ],
+    "after_completion": [
+      {
+        "name": "harness_verify_changes",
+        "description": "Show what changed and verify against request",
+        "trigger": "always"
+      },
+      {
+        "name": "harness_save_feedback",
+        "description": "Save learnings from task execution",
+        "trigger": "non_trivial_task"
+      }
+    ]
+  },
+
+  "validation": {
+    "required_before_commit": [
+      "git_status_clean",
+      "no_debug_code",
+      "no_hardcoded_secrets"
+    ],
+    "required_before_push": [
+      "all_tests_pass",
+      "plan_documented",
+      "memory_updated"
+    ]
+  },
+
+  "constraints": {
+    "breaking_changes": "require_explicit_user_approval",
+    "multifile_edits": "limit_to_related_changes_only",
+    "new_dependencies": "ask_before_adding",
+    "database_operations": "use_migrations_only",
+    "commit_without_permission": "block_with_explanation"
+  },
+
+  "feedback_loop": {
+    "enabled": true,
+    "capture": [
+      "assumption_made",
+      "decision_tradeoff",
+      "unexpected_behavior",
+      "repeated_mistake"
+    ],
+    "storage": "memory/",
+    "auto_save": true
+  },
+
+  "safety": {
+    "readonly_mode_for": [
+      "production_code_without_review",
+      "database_schema_changes",
+      "ci_cd_pipeline_modifications"
+    ],
+    "require_review": [
+      "anything_touching_system_agent",
+      "registry_schema_changes",
+      "agent_communication_protocol"
+    ],
+    "auto_undo_on_error": true
+  }
+}

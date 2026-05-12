@@ -1,0 +1,247 @@
+# Claude Development Guidelines
+
+> 코드를 작성할 때 따를 일반적인 가이드라인
+
+---
+
+## 1️⃣ Think Before Coding
+
+**구현 전에 이해부터:**
+
+```
+사용자 요청
+  ↓
+"이게 맞나?" 확인
+- 뭘 만들어야 하나?
+- 왜 이렇게 만들어야 하나?
+- 다른 방식은?
+  ↓
+불명확한 부분 있으면
+- 물어보기 (추측 금지)
+  ↓
+명확해진 후 구현
+```
+
+---
+
+## 2️⃣ Simplicity First
+
+**최소 코드로 요구사항 충족:**
+
+```
+❌ 하지 말 것:
+- 미래를 대비한 과도한 추상화
+- 요청받지 않은 기능
+- "좋은 습관"이라는 이유의 "개선"
+
+✅ 해야 할 것:
+- 요청한 것만
+- 명확하고 읽기 쉽게
+- 기존 코드 스타일 유지
+```
+
+**예시:**
+
+```python
+# ❌ 과도함
+class MessageFactory(ABC):
+    def create_message(self): ...
+    
+class SystemMessageFactory(MessageFactory): ...
+class ErrorMessageFactory(MessageFactory): ...
+
+# ✅ 적절함
+def create_message(message_type, content):
+    return f"{message_type}: {content}"
+```
+
+---
+
+## 3️⃣ Surgical Changes
+
+**필요한 것만, 정확히:**
+
+```
+변경 전:
+- 이 파일이 꼭 필요한가?
+- 다른 파일도 영향 받나?
+- 기존 코드를 "개선"해야 하나? (아니면 그대로?)
+
+변경 후:
+- git diff로 확인
+- 모든 줄이 요청과 연관되어 있나?
+- 관련 없는 코드 손댔나?
+```
+
+**DO:**
+- 요청한 부분만 수정
+- 기존 스타일 유지
+- 필요한 import만 추가
+
+**DON'T:**
+- 관련 없는 코드 "개선"하기
+- 주변 코드 포맷팅 변경
+- 상관없는 변수명 바꾸기
+
+---
+
+## 4️⃣ Goal-Driven Execution
+
+**성공 기준을 먼저 정의:**
+
+```
+애매한 요청: "성능을 개선해줘"
+  ↓
+명확하게: "무엇이 느린가? 얼마나 빨라져야 하나?
+          어디서 병목이 있나?"
+
+좋은 요청: "사용자 등록이 3초 걸려. 1초 이하로 줄여줄 수 있나?"
+  ↓
+성공 기준: "사용자 등록 API 응답 < 1초"
+
+구현:
+1. 성능 측정 (현재: 3초)
+2. 원인 분석 (DB 쿼리 느림)
+3. 개선 (인덱스 추가)
+4. 검증 (< 1초 달성? YES)
+```
+
+---
+
+## 5️⃣ Code Style
+
+**기존 프로젝트 스타일 유지:**
+
+**Python:**
+```python
+# 들여쓰기: 4칸
+# 변수명: snake_case
+# 함수명: snake_case
+# 클래스명: PascalCase
+# 상수: UPPER_CASE
+
+def calculate_total_price(items):
+    """한 줄 설명만. 필요하면."""
+    total = sum(item.price for item in items)
+    return total
+```
+
+**JavaScript/TypeScript:**
+```typescript
+// 들여쓰기: 2칸
+// 변수명: camelCase
+// 함수명: camelCase
+// 클래스명: PascalCase
+
+function calculateTotalPrice(items: Item[]): number {
+  return items.reduce((sum, item) => sum + item.price, 0);
+}
+```
+
+**Git Commit:**
+```
+type(scope): short description
+
+- Bullet point 1
+- Bullet point 2
+
+Examples: 
+  docs: 문서 정리
+  feat: 새 기능
+  fix: 버그 수정
+  refactor: 리팩터링 (요청받았을 때만)
+```
+
+---
+
+## 6️⃣ Comments & Documentation
+
+**주의: 코멘트는 필요할 때만**
+
+```
+❌ 하지 말 것:
+# x = 5에 1을 더함
+x = x + 1
+
+✅ 할 것:
+# 시간대 차이로 1시간 조정
+adjusted_hour = hour + 1
+```
+
+**코멘트가 필요한 경우:**
+- 비명확한 비즈니스 로직
+- 성능상 트레이드오프
+- 우회적 해결책 (왜 이렇게?)
+
+---
+
+## 7️⃣ Testing
+
+**테스트로 검증:**
+
+```
+구현 → 테스트 → 통과? → YES → 완료
+                    ↓
+                   NO → 수정 → 다시 테스트
+```
+
+**테스트 기준:**
+- 새로운 기능: 최소 1개 테스트
+- 버그 수정: 재현 테스트 + 수정 검증
+- 리팩터: 기존 테스트 여전히 통과
+
+---
+
+## 8️⃣ What NOT to Do
+
+```
+❌ 추측하고 구현하기
+   → 물어보기
+
+❌ 요청받지 않은 기능 추가하기
+   → 최소 코드만
+
+❌ "좀 더 나을 것 같아서" 개선하기
+   → 명시적 요청 있을 때만
+
+❌ 오류 처리 (불가능한 상황)
+   → 프레임워크 믿기
+
+❌ 하드코딩 (설정)
+   → 환경 변수 사용
+
+❌ Dead code 만들기
+   → 필요할 때 추가
+
+❌ 글로벌 상태
+   → 전달 방식 사용
+
+❌ 한 파일에 여러 책임
+   → 단일 책임 원칙
+```
+
+---
+
+## ✅ Best Practices Summary
+
+| 상황 | 행동 |
+|------|------|
+| **명확하지 않을 때** | 물어보기 |
+| **기능 구현 전** | 설계 제시 후 승인 |
+| **여러 파일 영향** | 모두 검토 후 명시 |
+| **기존 코드 만날 때** | 스타일 유지 |
+| **테스트할 때** | 성공 기준 먼저 |
+| **코멘트 쓸 때** | WHY 설명 (WHAT 아님) |
+| **요청을 벗어날 때** | 물어보고 승인받기 |
+| **실패할 때** | 원인 분석 후 수정 |
+
+---
+
+## 🎯 Remember
+
+**좋은 코드 = 명확한 의도 + 최소한의 코드 + 동료 존중**
+
+- 코드는 다른 사람(또는 미래의 당신)이 읽습니다
+- 간단한 것이 강력합니다
+- 명확하지 않으면 물어보세요
+- 설계 없이 구현하지 마세요
