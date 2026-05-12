@@ -16,7 +16,7 @@ CoWater 시스템의 핵심 설계 원칙과 책임, 역할을 정의합니다.
 
 **왜 필요한가?**
 
-- USV, AUV, ROV, UAV 등 서로 다른 기종이 들어와도 시스템은 동일한 로직으로 통제 가능
+- USV, AUV, ROV 등 서로 다른 기종이 들어와도 시스템은 동일한 로직으로 통제 가능
 - 새로운 기종이 추가될 때 핵심 로직(Mission, Proposal, Task) 수정 불필요
 - 이종 기종의 **통합 관리(Heterogeneous Multi-Domain Support)** 실현
 
@@ -176,7 +176,7 @@ Physical Constraint      Software Solution
 
 **왜 필요한가?**
 
-- **이종 기종 통합 관리의 핵심**: USV, AUV, ROV, UAV 등 다양한 플랫폼을 하나의 원칙으로 관리
+- **이종 기종 통합 관리의 핵심**: USV, AUV, ROV 등 다양한 플랫폼을 하나의 원칙으로 관리
 - 각 Agent이 자신의 영역에만 책임을 가지므로 경계가 명확
 - Device 추가 시 기존 로직 수정 불필요 (Action Abstraction과 결합)
 

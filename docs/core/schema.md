@@ -32,7 +32,7 @@
 {
   "id": "string (uuid)",
   "name": "string",
-  "type": "USV | AUV | ROV | UAV | BUOY | FIXED_SENSOR | OTHER",
+  "type": "USV | AUV | ROV | OTHER",
 
   "actions": ["string"], // 자신이 수행 가능한 원자적 기능
   // 예: ["MOVE_TO", "HIGH_RES_SCAN", "SAMPLE_COLLECTION"]
@@ -48,7 +48,7 @@
   "device_agent_id": "string (uuid) | null", // 연관된 Device Agent
 
   "target_type": "MISSION | TASK | null", // 현재 처리 중인 대상
-  "target_id": "string (uuid) | null",    // 대상의 ID
+  "target_id": "string (uuid) | null", // 대상의 ID
 
   "last_seen_at": "timestamp | null",
 

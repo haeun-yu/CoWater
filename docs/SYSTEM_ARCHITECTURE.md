@@ -62,7 +62,7 @@ CoWater의 모든 설계는 5가지 핵심 철학을 기반합니다.
     └──────────────────────────────────────────────────────┘
             ↓
     ┌──────────────────────────────────────────────────────┐
-    │    Physical Devices & Sensors (USV, AUV, ROV, UAV...) │
+    │    Physical Devices & Sensors (USV, AUV, ROV...) │
     └──────────────────────────────────────────────────────┘
 
 Registry Server (공용 상태 저장소 - 모든 레이어에서 접근)
@@ -93,13 +93,13 @@ Stream Layer (Moth - 실시간 데이터)
 
 ### 4.2 핵심 데이터 모델
 
-| 개념                | 설명                                             | 상세                                        |
-| ------------------- | ------------------------------------------------ | ------------------------------------------- |
-| **Device**          | 물리 무인체 (USV, AUV, ROV, UAV)                 | [schema.md#device](core/schema.md)          |
-| **Proposal**        | 여러 솔루션 세트 (PROPOSED → PENDING_APPROVAL → APPROVED) | [schema.md#proposal](core/schema.md)        |
-| **Mission**         | 승인된 Proposal을 기반으로 실행되는 임무         | [schema.md#mission](core/schema.md)         |
-| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS) | [schema.md#task](core/schema.md)            |
-| **Event**           | 시스템에서 발생한 중요한 사건 (Rule Engine 트리거) | [schema.md#event](core/schema.md)           |
+| 개념                | 설명                                                         | 상세                                        |
+| ------------------- | ------------------------------------------------------------ | ------------------------------------------- |
+| **Device**          | 물리 무인체 (USV, AUV, ROV)                                  | [schema.md#device](core/schema.md)          |
+| **Proposal**        | 여러 솔루션 세트 (PROPOSED → PENDING_APPROVAL → APPROVED)    | [schema.md#proposal](core/schema.md)        |
+| **Mission**         | 승인된 Proposal을 기반으로 실행되는 임무                     | [schema.md#mission](core/schema.md)         |
+| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS)  | [schema.md#task](core/schema.md)            |
+| **Event**           | 시스템에서 발생한 중요한 사건 (Rule Engine 트리거)           | [schema.md#event](core/schema.md)           |
 | **AgentConnection** | Device Agent 간 협력 관계 (RELAY, COORDINATE 등, 소프트삭제) | [schema.md#agentconnection](core/schema.md) |
 
 👉 전체 데이터 구조: [**스키마 정의**](core/schema.md)
