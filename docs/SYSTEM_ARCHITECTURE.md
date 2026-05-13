@@ -110,7 +110,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 | #   | 에이전트            | 핵심 책임                                        | DB 소유권               |
 | --- | ------------------- | ------------------------------------------------ | ----------------------- |
 | 1️⃣  | **RequestHandler**  | 사용자 요청 해석 & 경로 결정 (직접 처리 vs 위임) | Read-only (모든 테이블) |
-| 2️⃣  | **DeviceBridge**    | 물리 장비 통신, 상태 동기화, Heartbeat 관리      | Device, Sensor          |
+| 2️⃣  | **DeviceBridge**    | 물리 장비 통신, 상태 동기화, healthcheck 정규화  | Device, Sensor          |
 | 3️⃣  | **MissionPlanner**  | 미션/태스크 설계, 실행 추적, 생명주기 관리       | Mission, Task, Proposal |
 | 4️⃣  | **PolicyManager**   | 정책/규칙 관리, 자동 대응, 장비 생명주기         | Policy, Rule, Config    |
 | 5️⃣  | **SystemSentinel**  | 이상 징후 감시, Alert/Event 생성, 건전성 체크    | Alert, Event            |
@@ -141,10 +141,10 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
    │  └─ MissionPlanner → DeviceBridge → Device Agent
    │
    └─【수신】Device Agent로부터 상태/결과 수집
-      ├─ Heartbeat (정기적: 배터리, 신호강도, 위치, 온도 등)
+      ├─ healthcheck (정기적: 배터리, 신호강도, 위치, 온도 등)
       ├─ Task Result (Task 완료/실패 결과)
       ├─ Problem Report (즉각적: 오류, 센서 이상, 물리적 문제)
-      └─ DeviceBridge가 수신한 정보를 Event로 발행
+      └─ DeviceBridge가 수신한 정보를 정규화된 Event로 발행
    ↓
 5. Device Agent (각 무인체)
    ├─ Task 수행 판단 → 실행 → 결과 보고
@@ -152,10 +152,10 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
    └─ 문제 발생 시 즉시 보고 (오류, 안전 경고)
    ↓
 6. SystemSentinel (지속적 감시)
-   ├─ DeviceBridge의 device.heartbeat Event 수신 → 상태 모니터링
-   ├─ DeviceBridge의 task.result Event 수신 → Task 진행 추적
+   ├─ device.healthcheck Event 수신 → 상태 모니터링
+   ├─ sys.task.dispatched Event 수신 → Task 할당 추적
    ├─ 비정상 감지: 배터리 부족, 신호 손실, Heartbeat 타임아웃 등
-   └─ 이상 징후 감지 시 anomaly.detected Event 발행 → PolicyManager 연쇄
+   └─ 이상 징후 감지 시 sys.anomaly.detected Event 발행 → PolicyManager 연쇄
    ↓
 7. InsightReporter (필요한 경우)
    └─ 모든 Event 기록 → Report 생성 → 사용자 보고
@@ -165,7 +165,8 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 
 - **송신**: MissionPlanner의 Task → Device Agent로 전달
 - **수신**: Device Agent의 Heartbeat, Task Result, Problem Report 수집
-- **발행**: 수집한 정보를 Event로 발행 (다른 Agent들이 구독)
+- **발행**: 수집한 정보를 정규화된 Event로 발행 (다른 Agent들이 구독)
+- **판단 경계**: 어떤 Agent에 전달할지 판단하지만, anomaly 판단은 하지 않음
 
 👉 상세 아키텍처: [**ADR-008: 다중 에이전트 시스템**](adr/ADR-008-multi-agent-system-architecture.md)
 
@@ -174,7 +175,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 | 개념                | 설명                                                         | 상세                                        |
 | ------------------- | ------------------------------------------------------------ | ------------------------------------------- |
 | **Device**          | 물리 무인체 (USV, AUV, ROV)                                  | [schema.md#device](core/schema.md)          |
-| **Proposal**        | 여러 솔루션 세트 (PROPOSED → PENDING_APPROVAL → APPROVED)    | [schema.md#proposal](core/schema.md)        |
+| **Proposal**        | 여러 솔루션 세트 (PROPOSED → APPROVED, 승인 시점까지만 추적) | [schema.md#proposal](core/schema.md)        |
 | **Mission**         | 승인된 Proposal을 기반으로 실행되는 임무                     | [schema.md#mission](core/schema.md)         |
 | **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS)  | [schema.md#task](core/schema.md)            |
 | **Event**           | 시스템에서 발생한 중요한 사건 (Rule Engine 트리거)           | [schema.md#event](core/schema.md)           |
@@ -209,9 +210,9 @@ Step 2. 매체 교집합 확인 (Medium Matching)
 
 Step 3. 환경별 가용성 필터 (Environmental Filter)
   ├─ Agent.environment_state 확인
-  ├─ 수면(Surface): [RF, Internet, Acoustic] 모두 후보
-  ├─ 수중(Submerged): [Acoustic]만 후보
-  └─ 예: AUV 수중 진입 → active_mediums = [acoustic]로 자동 변경
+  ├─ SURFACE: [RF, INTERNET, ACOUSTIC] 모두 후보
+  ├─ UNDERWATER: [ACOUSTIC]만 후보
+  └─ 예: AUV 수중 진입 → active_mediums = [ACOUSTIC]로 자동 변경
 ```
 
 #### 🔄 실시간 통신 모드 전환 (Dynamic Hand-over)
@@ -219,12 +220,12 @@ Step 3. 환경별 가용성 필터 (Environmental Filter)
 ```
 상황: AUV가 수심 진입
   ↓
-Event 발생: ENV_STATE_CHANGED (environment_state: "surface" → "submerged")
+Event 발생: ENV_STATE_CHANGED (environment_state: "SURFACE" → "UNDERWATER")
   ↓
 System Agent:
-  1. active_mediums 갱신: ["rf", "internet", "acoustic"] → ["acoustic"]
-  2. 기존 RF 기반 AgentConnection 비활성화
-  3. Acoustic AgentConnection 활성화
+  1. active_mediums 갱신: ["RF", "INTERNET", "ACOUSTIC"] → ["ACOUSTIC"]
+  2. 기존 RF 기반 AgentConnection soft-delete
+  3. Acoustic 기반 AgentConnection 재생성
   4. Policy 적용: "대역폭 줄어듦 → 텍스트 위주 통신만 허용"
   ↓
 Device Agent:

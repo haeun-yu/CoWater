@@ -727,34 +727,34 @@ Mission 할당:
 **배경**: AUV가 수심 진입하면서 RF 통신 불가능 → 음파 전환
 
 ```
-Phase 1: 수면 (Surface)
-  AUV-01.environment_state = "surface"
-  AUV-01.active_mediums = ["rf", "internet", "acoustic"]
+Phase 1: SURFACE
+  AUV-01.environment_state = "SURFACE"
+  AUV-01.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
   
   AgentConnection [RF]:
-    network_type: "rf"
+    network_type: "RF"
     endpoint: "192.168.1.100:9112"
-    status: ACTIVE
+    deleted_at: null
   
   System Agent: RF로 Task 실시간 전달 가능
     "AUV, A → B 이동하고 스캔해"
     응답 시간: ~100ms
 
-Phase 2: 수심 진입 (Submerged)
+Phase 2: UNDERWATER 진입
   
   1️⃣ Event 발생:
     AUV 센서 감지: "수심이 2m 넘었다"
     Event: ENV_STATE_CHANGED
       agent_id: "agent-auv-01"
-      from: "surface"
-      to: "submerged"
+      from: "SURFACE"
+      to: "UNDERWATER"
   
   2️⃣ System Agent 자동 응답:
-    a. AUV.environment_state = "submerged" 업데이트
-    b. AUV.active_mediums = ["acoustic"] 자동 전환
+    a. AUV.environment_state = "UNDERWATER" 업데이트
+    b. AUV.active_mediums = ["ACOUSTIC"] 자동 전환
        (RF는 사용 불가하니까 제외)
-    c. AgentConnection[RF] 비활성화
-    d. AgentConnection[Acoustic] 활성화
+    c. 기존 AgentConnection[RF] soft-delete
+    d. AgentConnection[ACOUSTIC] 생성
   
   3️⃣ Policy 실행:
     Rule: "수중 진입 시 대역폭 제한"
@@ -763,26 +763,26 @@ Phase 2: 수심 진입 (Submerged)
       대파일 전송 = Queue (표면 복귀 후)
   
   AgentConnection [Acoustic]:
-    network_type: "acoustic"
+    network_type: "ACOUSTIC"
     endpoint: "192.168.1.100:9113"  (Acoustic Modem 주소)
-    status: ACTIVE
+    deleted_at: null
   
   System Agent: 음파로 Task 전달 (지연 있음)
     "AUV, 현재 위치에서 스캔 계속해"
     응답 시간: ~500-2000ms
 
-Phase 3: 수면 복귀 (Surface again)
+Phase 3: SURFACE 복귀
   
   1️⃣ Event:
     AUV 센서: "수심이 0.5m 미만"
     Event: ENV_STATE_CHANGED
-      from: "submerged"
-      to: "surface"
+      from: "UNDERWATER"
+      to: "SURFACE"
   
   2️⃣ System Agent:
-    a. AUV.active_mediums = ["rf", "internet", "acoustic"]
+    a. AUV.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
     b. RF Module Wake (Sleep에서 1초 이내)
-    c. AgentConnection[RF] 재활성화
+    c. AgentConnection[RF] 재생성
     d. 대역폭 제한 해제
     e. 대기 중인 파일 전송 재개
   
@@ -803,7 +803,7 @@ Rule 1: "음파 신호 약화 시 긴급 복귀"
   )
 
 Rule 2: "수중 > 1시간 시 자동 복귀"
-  IF (Event: TIME_EXCEEDED AND duration > 3600s AND environment="submerged")
+  IF (Event: TIME_EXCEEDED AND duration > 3600s AND environment="UNDERWATER")
   THEN (
     CREATE_MISSION type="RETURN_TO_BASE"
   )

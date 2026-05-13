@@ -112,7 +112,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 #### 3️⃣ DeviceBridge (포트 9110, 3일)
 - [ ] A2A 엔드포인트: POST /message:send
-- [ ] task.assign, task.result, mission.result, child.register, layer.assignment 처리
+- [ ] task.assign, task.result, child.register, layer.assignment 처리
 - [ ] Device Endpoint 관리
 - [ ] MEB: sys.task.dispatched, sys.task.result 발행
 
@@ -128,7 +128,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 - [ ] 규칙 기반: 배터리, Heartbeat, 센서 이상 탐지
 - [ ] AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - [ ] LLM 기반: 복합 패턴 분석
-- [ ] 구독: device.healthcheck, sys.task.dispatched
+- [ ] 구독: device.healthcheck, ENV_STATE_CHANGED, sys.task.dispatched, sys.task.result
 - [ ] MEB: sys.anomaly.detected, sys.agent_connection.* 발행
 
 #### 6️⃣ InsightReporter (포트 9114, 2일)

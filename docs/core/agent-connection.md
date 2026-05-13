@@ -1,7 +1,7 @@
 # AgentConnection Specification (Device 간 통신 관리)
 
 **문서 버전**: 1.0  
-**목적**: Device 간 통신 가능성을 관리하는 AgentConnection의 3단계 필터링, CRUD, 상태 관리
+**목적**: Device 간 통신 가능성을 관리하는 AgentConnection의 3단계 필터링, CRUD, soft-delete 기반 활성 관리
 
 ---
 
@@ -14,16 +14,16 @@ class AgentConnection:
     id: str                          # 고유 ID
     source_device_id: str            # 송신자 Device
     target_device_id: str            # 수신자 Device
-    status: "ACTIVE" | "INACTIVE"    # 현재 활성 여부
-    
-    primary_medium: str              # 주 통신 매체 (RF, Acoustic, ...)
+
+    primary_medium: str              # 주 통신 매체 (WIRED, ACOUSTIC, ...)
     active_mediums: list[str]        # 사용 가능한 모든 매체
-    
+
     gateway_agent_id: str            # 송신자의 gateway (relay용)
-    environment_state: str           # SURFACE, UNDERWATER, TRANSITION
+    environment_state: str           # "SURFACE", "UNDERWATER"
+
+    deleted_at: datetime | null      # null = 활성, 값 있음 = 소프트 삭제
     
     created_at: datetime
-    activated_at: datetime
     updated_at: datetime
 ```
 
@@ -98,18 +98,14 @@ def select_primary_medium(compatible_mediums: list[str]) -> str:
 def check_environment_feasibility(source: Device, target: Device, 
                                    primary_medium: str) -> bool:
     """환경 제약 검증"""
-    source_env = source.environment_state  # SURFACE, UNDERWATER, TRANSITION
+    source_env = source.environment_state  # SURFACE, UNDERWATER
     target_env = target.environment_state
     
     # 규칙 1: 같은 환경 내에서는 항상 가능
     if source_env == target_env:
         return True
     
-    # 규칙 2: TRANSITION 상태는 유연함 (모두 허용)
-    if source_env == "TRANSITION" or target_env == "TRANSITION":
-        return True
-    
-    # 규칙 3: 환경 교차 시 매체 확인
+    # 규칙 2: 환경 교차 시 매체 확인
     # SURFACE → UNDERWATER (또는 역방향): Acoustic 또는 Wired만 가능
     if (source_env == "SURFACE" and target_env == "UNDERWATER") or \
        (source_env == "UNDERWATER" and target_env == "SURFACE"):
@@ -121,15 +117,10 @@ def check_environment_feasibility(source: Device, target: Device,
 **상태 전환 규칙**:
 ```
 SURFACE:
-  - depth > 0.5m     → TRANSITION
   - depth > 5.0m     → UNDERWATER
 
 UNDERWATER:
-  - depth < 0.5m     → TRANSITION
   - depth ≤ 0m       → SURFACE
-
-TRANSITION:
-  - elapsed > 30s    → SURFACE or UNDERWATER (강제 전환)
 ```
 
 ---
@@ -140,7 +131,7 @@ SystemSentinel이 AgentConnection의 전체 생명주기를 관리합니다.
 
 ### 3.1 생성 (Create)
 
-**발동 지점**: Device heartbeat 수신 시 새 Device 감지
+**발동 지점**: Device healthcheck 수신 시 새 Device 감지
 
 ```python
 async def on_device_detected(device: Device):
@@ -176,97 +167,41 @@ async def on_device_detected(device: Device):
                 primary_medium=primary_medium,
                 active_mediums=compatible_mediums,
                 gateway_agent_id=source.gateway_agent_id,
-                status="ACTIVE" if source.environment_state != "TRANSITION" else "INACTIVE",
                 environment_state=source.environment_state
             )
             
             await self.registry.post_agent_connection(conn)
             await self.publish_event(
                 event_type="sys.agent_connection.created",
-                payload={"connection_id": conn.id, "status": conn.status},
-                target_agents=["MissionPlanner", "SystemSentinel"]
+                payload={"connection_id": conn.id},
+                target_agents=["MissionPlanner"]
             )
 ```
 
 **MEB 이벤트**: `sys.agent_connection.created`
 
-### 3.2 활성화 (Activate)
+### 3.2 삭제 (Delete) - Soft Delete
 
-**발동 지점**: 비활성 연결이 조건을 만족할 때 (예: TRANSITION → UNDERWATER)
+| 상황 | 작업 | 타입 |
+|------|------|------|
+| 환경 조건 불만족 (환경 변화) | deleted_at 설정 (소프트 삭제) | 일시적 |
+| Device 제거 또는 TTL 만료 | deleted_at 설정 (소프트 삭제) | 영구 |
 
+`deleted_at IS NULL` 이면서 환경/신호 조건이 나쁜 경우는 삭제되지 않은 비정상 운영 상태로 간주합니다. 이 경우 AgentConnection 레코드는 유지하고, 판단/알림은 `SystemSentinel`이 Event/Alert로 처리합니다.
+
+**Soft Delete 메커니즘**:
 ```python
-async def activate_connection(conn_id: str):
-    """INACTIVE → ACTIVE"""
+async def delete_connection(conn_id: str):
+    """AgentConnection 소프트 삭제"""
     conn = await self.registry.get_agent_connection(conn_id)
-    
-    source = await self.registry.get_device(conn.source_device_id)
-    target = await self.registry.get_device(conn.target_device_id)
-    
-    # 환경 조건 재확인
-    if check_environment_feasibility(source, target, conn.primary_medium):
-        conn.status = "ACTIVE"
-        conn.activated_at = datetime.utcnow()
-        await self.registry.put_agent_connection(conn_id, conn)
-        
-        await self.publish_event(
-            event_type="sys.agent_connection.activated",
-            payload={"connection_id": conn_id},
-            target_agents=["MissionPlanner"]
-        )
-```
-
-**MEB 이벤트**: `sys.agent_connection.activated`
-
-### 3.3 비활성화 (Deactivate)
-
-**발동 지점**: 환경 변화로 연결 조건 불만족 (예: UNDERWATER → TRANSITION)
-
-```python
-async def deactivate_connection(conn_id: str):
-    """ACTIVE → INACTIVE"""
-    conn = await self.registry.get_agent_connection(conn_id)
-    
-    conn.status = "INACTIVE"
-    conn.updated_at = datetime.utcnow()
+    conn.deleted_at = datetime.utcnow()
     await self.registry.put_agent_connection(conn_id, conn)
     
     await self.publish_event(
-        event_type="sys.agent_connection.deactivated",
-        payload={"connection_id": conn_id, "reason": "environment_change"},
+        event_type="sys.agent_connection.deleted",
+        payload={"connection_id": conn_id, "reason": "environment_change|stale_ttl"},
         target_agents=["MissionPlanner"]
     )
-```
-
-**MEB 이벤트**: `sys.agent_connection.deactivated`
-
-**주의**: 진행 중인 Task 있으면 MissionPlanner에 취소 알림
-
-### 3.4 삭제 (Delete) vs 비활성화
-
-| 상황 | 작업 | 타입 | TTL |
-|------|------|------|-----|
-| 환경 변화로 신호 약함 | **비활성화** | 일시적 | - |
-| Device 배터리 부족 | **비활성화** + TTL 기반 자동 삭제 | 영구 | 24시간 |
-| Device 재부팅 후 재연결 | **비활성화** → 재연결 시 **활성화** | 복구 | - |
-| Registry에서 Device 삭제 | **삭제** (DB 제거) | 영구 | - |
-
-**TTL 기반 자동 삭제**:
-```python
-async def cleanup_stale_connections():
-    """매 5분마다 실행 (SystemSentinel)"""
-    connections = await self.registry.get_all_agent_connections()
-    
-    for conn in connections:
-        if conn.status == "INACTIVE":
-            inactive_duration = (datetime.utcnow() - conn.updated_at).total_seconds()
-            
-            if inactive_duration > 86400:  # 24시간
-                await self.registry.delete_agent_connection(conn.id)
-                await self.publish_event(
-                    event_type="sys.agent_connection.deleted",
-                    payload={"connection_id": conn.id, "reason": "stale_ttl"},
-                    target_agents=["SystemSentinel"]
-                )
 ```
 
 **MEB 이벤트**: `sys.agent_connection.deleted`
@@ -325,9 +260,7 @@ AgentConnection 관련 MEB 이벤트 (총 4가지):
 | event_type | 발행자 | 구독자 | 발행 시점 |
 |-----------|--------|--------|---------|
 | **sys.agent_connection.created** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 |
-| **sys.agent_connection.activated** | SystemSentinel | MissionPlanner | 비활성 → 활성 |
-| **sys.agent_connection.deactivated** | SystemSentinel | MissionPlanner | 활성 → 비활성 |
-| **sys.agent_connection.deleted** | SystemSentinel | SystemSentinel | TTL 만료 또는 수동 삭제 |
+| **sys.agent_connection.deleted** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 변화, TTL 만료 등) |
 
 ---
 
@@ -338,7 +271,7 @@ AgentConnection 관련 MEB 이벤트 (총 4가지):
 ```
 Device A (USV) 시작
     ↓
-Heartbeat MEB 발행 (device.healthcheck)
+device.healthcheck MEB 발행
     ↓
 SystemSentinel 수신
     ├─ 3단계 필터링 수행
@@ -363,23 +296,22 @@ depth > 5.0m (수중 진입)
     ↓
 environment_state: SURFACE → UNDERWATER 변경
     ↓
-Healthcheck 발행 (meb pub 채널)
+device.healthcheck 발행 (meb pub 채널)
     └─ {"device_id": "USV-01", "environment_state": "UNDERWATER", ...}
     ↓
 SystemSentinel 수신 (healthcheck에서 environment_state 변화 감지)
     ├─ 모든 AgentConnection 재검증
     │  └─ (예) USV-ROV 연결: 환경 교차 → Acoustic만 가능?
     │
-    └─ 필요하면 연결 상태 업데이트
-        ├─ ACTIVE → INACTIVE (조건 불만족)
-        └─ MEB: sys.agent_connection.deactivated
+    └─ 조건 불만족 시 deleted_at 설정
+        └─ MEB: sys.agent_connection.deleted
 ```
 
 ---
 
 ## 7. Device-to-Device 통신 흐름
 
-AgentConnection이 ACTIVE일 때, Device A는 Device B로 직접 A2A 통신 가능:
+AgentConnection이 생성되어 있고 deleted_at이 null일 때, Device A는 Device B로 직접 A2A 통신 가능:
 
 ```
 Device A (9201)

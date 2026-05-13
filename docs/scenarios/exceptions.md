@@ -523,9 +523,9 @@ Event {
 
 **대응**:
 
-1. AgentConnection.status: ACTIVE → DEGRADED
-2. 새로운 RELAY 경로 탐색 (다른 Relay Agent 사용)
-3. 또는 직접 통신 복구 대기
+1. AgentConnection은 유지 (`deleted_at = null`)
+2. SystemSentinel이 `AGENTCONNECTION_DEGRADED` Event와 Alert 생성
+3. 새로운 RELAY 경로 탐색 (다른 Relay Agent 사용)
 4. 긴급이면 현재 Mission 중단
 
 **복구**: 통신 상태 개선 또는 다른 경로 재설정

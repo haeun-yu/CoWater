@@ -164,7 +164,7 @@ class DeviceAgent:
             f"{self.device_id}-{target_device_id}"
         )
         
-        if not conn or conn.status == "INACTIVE":
+        if not conn or conn.deleted_at is not None:
             raise ConnectionError(f"No active connection to {target_device_id}")
         
         # 2. primary_medium 기반으로 드라이버 선택
@@ -177,11 +177,11 @@ class DeviceAgent:
         return driver
     
     DRIVERS = {
-        "Wired": WiredDriver,
+        "WIRED": WiredDriver,
         "RF": RFDriver,
-        "Acoustic": AcousticDriver,
-        "Satellite": SatelliteDriver,
-        "Inertial": InertialDriver
+        "ACOUSTIC": AcousticDriver,
+        "SATELLITE": SatelliteDriver,
+        "INERTIAL": InertialDriver
     }
 ```
 
@@ -243,13 +243,13 @@ async def find_relay_path(source_device_id: str,
                           target_device_id: str) -> list[str]:
     """source → target으로의 최단 경로 찾기 (BFS)"""
     
-    # 모든 ACTIVE AgentConnection 조회
+    # 모든 활성 AgentConnection 조회 (deleted_at IS NULL)
     connections = await self.registry.get_all_agent_connections()
     
     # 인접 리스트 구성
     graph = {}
     for conn in connections:
-        if conn.status == "ACTIVE":
+        if conn.deleted_at is None:
             if conn.source_device_id not in graph:
                 graph[conn.source_device_id] = []
             graph[conn.source_device_id].append(conn.target_device_id)

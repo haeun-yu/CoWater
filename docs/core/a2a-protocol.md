@@ -84,7 +84,6 @@ class A2ASendRequest(BaseModel):
 |--------------|------|------|------|
 | **task.assign** | System → Device | Task 할당 | `{"task_id": "task-001", "action": "scan_area", "params": {...}}` |
 | **task.result** | Device → System | Task 실행 결과 | `{"task_id": "task-001", "status": "COMPLETED", "result": {...}}` |
-| **mission.result** | Device → System | Mission 완료 보고 | `{"mission_id": "m-001", "status": "COMPLETED"}` |
 | **child.register** | Device → Parent | 자신을 부모로 등록 요청 | `{"device_id": "ROV-01", "parent_id": "USV-01"}` |
 | **layer.assignment** | System → Device | 계층 정보 할당 | `{"parent_gateway": {"id": "USV-01", "port": 9201}, "layer": 2}` |
 
@@ -302,7 +301,8 @@ async def handle_task_assign(task: Task):
 ## 9. 기존 구현과의 호환성
 
 - **기존 코드**: `device/controller/a2a.py`, `device/agent/message_router.py` 사용
-- **메시지 타입**: `task.assign`, `task.result`, `mission.result`, `child.register`, `layer.assignment`
+- **메시지 타입**: `task.assign`, `task.result`, `child.register`, `layer.assignment`
+- **Mission 완료 판단**: 별도 `mission.result` 없이 System Agent가 `task.result`들을 집계해 Mission 완료를 계산
 - **변경 없음**: 기존 `task.assign`, `task.result` 구현 재사용
 
 ---

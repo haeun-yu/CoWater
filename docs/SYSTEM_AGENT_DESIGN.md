@@ -31,9 +31,9 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 
 ### DeviceBridge (포트 9110)
 - Device Agent와의 A2A 통신 (task.assign, task.result)
-- Device healthcheck 수신 (meb pub 채널)
+- Device healthcheck 수신 및 정규화
 - Task 할당 & 결과 수집
-- **LLM**: Task 전달 실패 시 대체 Device 선택, relay 경로 결정
+- **LLM**: Task 전달 실패 시 대체 Device 선택, relay 대상 판단
 
 ### MissionPlanner (포트 9111)
 - 사용자 intent로부터 여러 대안 Proposal 생성 (3단계: 규칙 기반 + LLM + 검증)

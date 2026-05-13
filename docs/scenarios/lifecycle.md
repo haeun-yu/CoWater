@@ -92,7 +92,7 @@ graph TD
     L -->|완료| H
     H -->|Task 취소 요청| M["MissionPlanner<br/>진행 중 Task<br/>취소"]
     M -->|완료| N["PolicyManager<br/>Device 제거 처리"]
-    N -->|상태 변경| O["removed_at<br/>타임스탬프 기록"]
+    N -->|상태 변경| O["deleted_at<br/>타임스탬프 기록"]
     O -->|Event 발행| P["DEVICE_REMOVED<br/>Event"]
     P -->|기록| Q["InsightReporter<br/>감사 추적"]
 ```
@@ -162,17 +162,17 @@ if (count > 0) {
 
 #### **Step 4: 제거 처리**
 ```typescript
-// Device 상태 변경 (완전 삭제 X, removed_at 기록)
+// Device 상태 변경 (완전 삭제 X, deleted_at 기록)
 UPDATE devices SET status = 'REMOVED',
-       removed_at = NOW()
+       deleted_at = NOW()
 WHERE id = '{device_id}'
 
 // Agent도 REMOVED 처리
-UPDATE agents SET removed_at = NOW()
+UPDATE agents SET deleted_at = NOW()
 WHERE id = '{device_agent_id}'
 
 // Sensor도 REMOVED 처리
-UPDATE sensors SET removed_at = NOW()
+UPDATE sensors SET deleted_at = NOW()
 WHERE device_id = '{device_id}'
 
 // AgentConnection 소프트 삭제 (status 제거, deleted_at 추가)
@@ -206,7 +206,7 @@ Event {
 Device {
   id: "device-rov-1",
   status: "REMOVED",
-  removed_at: "2026-05-12T15:30:00Z",
+  deleted_at: "2026-05-12T15:30:00Z",
   // 다른 필드는 유지 (감사 추적용)
 }
 
@@ -462,7 +462,7 @@ COMPLETED (Task 완료)
   └─ 다음: 다음 Task 시작 또는 Mission 완료
   
 FAILED (Task 실패)
-  ├─ 작업 오류, error_message 저장
+  ├─ 작업 오류, status_reason 저장
   └─ 다음: Mission FAILED 또는 재시도
   
 CANCELLED (Task 취소)

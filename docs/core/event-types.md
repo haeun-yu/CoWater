@@ -87,25 +87,17 @@ System Agent 간의 의사결정 프로세스를 이벤트로 추적.
 
 Device 간 통신 가능성을 관리하는 이벤트 (SystemSentinel 발행).
 
-### 3.1 생성 & 활성화
+### 3.1 생성
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.agent_connection.created** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 | `{"connection_id": "...", "source_device": "AUV-01", "target_device": "USV-01", "status": "ACTIVE"}` |
-| **sys.agent_connection.activated** | SystemSentinel | MissionPlanner | 비활성 연결 → 활성화 | `{"connection_id": "...", "status": "ACTIVE"}` |
+| **sys.agent_connection.created** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 | `{"connection_id": "...", "source_device": "AUV-01", "target_device": "USV-01"}` |
 
-### 3.2 상태 변화 & 손실
-
-| event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
-|------------|--------|--------|---------|---------|
-| **sys.agent_connection.deactivated** | SystemSentinel | MissionPlanner | 활성 연결 → 비활성 (일시적) | `{"connection_id": "...", "status": "INACTIVE", "reason": "environment_change"}` |
-| **sys.agent_connection.lost** | SystemSentinel | MissionPlanner | 연결 손실 (신호 약함 또는 미응답) | `{"source_device": "AUV-01", "target_device": "USV-01"}` |
-
-### 3.3 삭제
+### 3.2 삭제
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.agent_connection.deleted** | SystemSentinel | MissionPlanner | AgentConnection 삭제 (TTL 만료 또는 수동 삭제) | `{"connection_id": "...", "reason": "stale_ttl"}` |
+| **sys.agent_connection.deleted** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 조건 불만족, TTL 만료, 수동 제거) | `{"connection_id": "...", "reason": "environment_change"}` |
 
 ---
 
@@ -119,11 +111,11 @@ Device가 발행하는 상태 신호 (MEB를 통해 System에 전파).
 |------------|--------|--------|---------|---------|
 | **device.healthcheck** | Device (MEB relay: DeviceBridge) | SystemSentinel, InsightReporter | 주기적 (예: 10초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}}` |
 
-### 4.2 Device 건전성 신호 (pub 채널)
+### 4.2 환경 변화 감지
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **device.healthcheck** | Device (pub) | SystemSentinel, InsightReporter | 주기적 (예: 10초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}, "environment_state": "UNDERWATER"}` |
+| **ENV_STATE_CHANGED** | DeviceBridge | SystemSentinel, InsightReporter | device.healthcheck 정규화 중 `environment_state` 변화 감지 | `{"device_id": "AUV-01", "from": "SURFACE", "to": "UNDERWATER"}` |
 
 ---
 
@@ -137,8 +129,7 @@ subscribe_to_events = []  # 구독 없음, 발행만 함
 
 # DeviceBridge
 subscribe_to_events = [
-    "sys.task.dispatched",
-    "sys.task.result"
+    "sys.task.dispatched"
 ]
 
 # MissionPlanner
@@ -148,9 +139,7 @@ subscribe_to_events = [
     "sys.anomaly.detected",
     "sys.policy.decision",
     "sys.agent_connection.created",
-    "sys.agent_connection.activated",
-    "sys.agent_connection.deactivated",
-    "sys.agent_connection.lost"
+    "sys.agent_connection.deleted"
 ]
 
 # PolicyManager
@@ -162,7 +151,9 @@ subscribe_to_events = [
 # SystemSentinel
 subscribe_to_events = [
     "device.healthcheck",
-    "sys.task.dispatched"
+    "ENV_STATE_CHANGED",
+    "sys.task.dispatched",
+    "sys.task.result"
 ]
 
 # InsightReporter

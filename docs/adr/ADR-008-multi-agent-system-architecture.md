@@ -88,20 +88,20 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    - Task 실패: 실패 사유, 오류 코드
    - MissionPlanner에 즉시 보고
 
-4. **Reconnect 메시지** → 오프라인 복구 처리
-   - Device가 다시 온라인됨을 감지
-   - 오프라인 중 완료한 Task 동기화 준비
-
-5. **Problem Report** (즉각적) → 긴급 문제 알림
+4. **Problem Report** (즉각적) → 긴급 문제 알림
    - 센서 고장, 배터리 급저하, 물리적 충돌 감지
-   - 즉시 Event로 발행 → SystemSentinel 긴급 처리
+   - 정규화된 Event로 발행 → SystemSentinel 긴급 처리
 
 **출력 (Event로 발행)**:
-- `device.heartbeat` → SystemSentinel 구독 (지속적 모니터링)
-- `task.result` → MissionPlanner 구독 (Task 진행 추적)
-- `device.reconnected` → MissionPlanner 구독 (오프라인 복구)
-- `device.problem_detected` → SystemSentinel 구독 (긴급 알림)
+- `device.healthcheck` → SystemSentinel 구독 (지속적 모니터링)
+- `ENV_STATE_CHANGED` → SystemSentinel 구독 (환경 상태 변화 전달)
+- `sys.task.result` → MissionPlanner 구독 (Task 진행 추적)
+- 목적지 라우팅 정보가 필요한 경우 적절한 Agent로 전달
 - DB 쓰기: devices 상태 (배터리, 위치, 신호, 마지막_하트비트), sensors 센서 데이터
+
+**경계**:
+- DeviceBridge는 수신, 정규화, 전달 대상 판단까지 수행
+- DeviceBridge는 anomaly를 판단하거나 `sys.anomaly.detected`를 발행하지 않음
 
 **DB 권한**: Device, Sensor (읽기/쓰기)
 - devices: id, name, type, status, battery, location, last_heartbeat, ...
@@ -114,21 +114,21 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **책임**: 미션/태스크 설계, 실행 추적, 생명주기 관리
 
 **입력**:
-- `intent.classified` (type=MISSION)
-- `policy.decision` 또는 `commander.request`
-- `task.result` 이벤트 (DeviceBridge로부터)
-- `device.reconnected` 이벤트 (DeviceBridge로부터)
+- `sys.intent.classified` (type=MISSION)
+- `sys.policy.decision`
+- `sys.task.result` 이벤트 (DeviceBridge로부터)
+- `sys.agent_connection.created` 이벤트 (SystemSentinel로부터)
 
 **처리**:
 1. **Proposal 생성** (Capability Matching, AgentConnection 확인)
 2. **사용자 선택 → Mission 생성** (상태 재검증)
 3. **Task 할당** → DeviceBridge에 요청
-4. **진행 추적** → task.result 수신 후 상태 갱신
+4. **진행 추적** → sys.task.result 수신 후 상태 갱신
 5. **규칙 기반 임무** (PolicyManager로부터 긴급 미션 요청 처리)
 
 **출력**:
-- `mission.proposed`, `mission.created`, `task.assigned`, `task.completed`, `mission.completed`, `mission.failed` 이벤트
-- DB 쓰기: proposals, missions, tasks, task_results
+- `sys.mission.updated` 이벤트 (모든 Mission 상태 변화)
+- DB 쓰기: proposals, missions, tasks
 
 **DB 권한**: Mission, Task, Proposal (읽기/쓰기)
 
@@ -139,8 +139,8 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **책임**: 정책/규칙 관리, 자동 대응 결정, 장비 생명주기 관리
 
 **입력**:
-- `intent.classified` (type=UPDATE, type=DELETE)
-- `anomaly.detected` (SystemSentinel로부터)
+- `sys.intent.classified` (type=UPDATE, type=DELETE)
+- `sys.anomaly.detected` (SystemSentinel로부터)
 
 **처리**:
 1. **Policy/Rule 수정** (UPDATE intent)
@@ -152,9 +152,9 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 3. **Anomaly 대응** (Rule 매칭 → 자동 응답)
 
 **출력**:
-- `policy.decision` 이벤트 (MissionPlanner 요청)
-- `policy.mission_request` 이벤트 (긴급 미션 생성)
-- `action.triggered` 이벤트
+- `sys.policy.decision` 이벤트 (MissionPlanner 요청)
+- 긴급 미션 생성 요청 이벤트
+- 정책 실행 추적 이벤트
 - DB 쓰기: policies, rules, configs
 
 **DB 권한**: Policy, Rule, Config (읽기/쓰기)
@@ -166,19 +166,19 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **책임**: 시스템 건전성 모니터링, 이상 징후 감시
 
 **입력**:
-- `device.heartbeat` (DeviceBridge로부터)
+- `device.healthcheck` (DeviceBridge로부터)
 - 모든 이벤트 (감시 목적)
 
 **처리**:
-- Battery < 20% → `anomaly.detected {type: LOW_BATTERY}`
-- Signal < 30% → `anomaly.detected {type: SIGNAL_LOSS}`
-- Heartbeat timeout → `anomaly.detected {type: OFFLINE}`
-- Mission overdue → `anomaly.detected {type: MISSION_TIMEOUT}`
-- State inconsistency → `anomaly.detected {type: STATE_MISMATCH}`
-- Task failed → `anomaly.detected {type: TASK_FAILURE}`
+- Battery < 20% → `sys.anomaly.detected {type: LOW_BATTERY}`
+- Signal < 30% → `sys.anomaly.detected {type: SIGNAL_LOSS}`
+- Heartbeat timeout → `sys.anomaly.detected {type: OFFLINE}`
+- Mission overdue → `sys.anomaly.detected {type: MISSION_TIMEOUT}`
+- State inconsistency → `sys.anomaly.detected {type: STATE_MISMATCH}`
+- Task failed → `sys.anomaly.detected {type: TASK_FAILURE}`
 
 **출력**:
-- `anomaly.detected` 이벤트 (PolicyManager 구독)
+- `sys.anomaly.detected` 이벤트 (PolicyManager 구독)
 - DB 쓰기: alerts, events
 
 **DB 권한**: Alert, Event (읽기/쓰기)
@@ -190,7 +190,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **책임**: 데이터 조회, 분석, 리포트 생성
 
 **입력**:
-- `intent.classified` (type=QUERY)
+- `sys.intent.classified` (type=QUERY)
 - 모든 테이블 (읽기)
 
 **처리**:
@@ -199,7 +199,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 - Report 형식으로 정리
 
 **출력**:
-- `report.generated` 이벤트
+- `sys.insight.report` 이벤트
 - 사용자 보고
 
 **DB 권한**: Read-only (모든 테이블)
@@ -225,9 +225,9 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    │  └─ MissionPlanner의 명령 → Device Agent로 중계
    │
    └─【수신】Device Agent로부터 상태/결과 수집 및 Event 발행
-      ├─ device.heartbeat (정기적: 배터리, 신호, 위치)
-      ├─ task.result (Task 완료/실패)
-      ├─ device.reconnected (오프라인 후 재연결)
+      ├─ device.healthcheck (정기적: 배터리, 신호, 위치)
+      ├─ sys.task.result (Task 완료/실패)
+      ├─ ENV_STATE_CHANGED (환경 상태 변화)
       └─ 즉각적 문제 보고 (오류, 센서 이상, 안전 경고)
    ↓
 5. Device Agent (각 무인체)
@@ -236,10 +236,10 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    └─ 문제 발생 시 즉시 보고
    ↓
 6. SystemSentinel (지속적 감시)
-   ├─ device.heartbeat Event 모니터링 → 상태 추적
-   ├─ task.result Event 분석 → Task 진행 추적
+   ├─ device.healthcheck Event 모니터링 → 상태 추적
+   ├─ sys.task.result Event 분석 → Task 진행 추적
    ├─ 이상 징후 감지 (배터리 부족, 신호 손실, Heartbeat 타임아웃)
-   └─ anomaly.detected Event 발행 → PolicyManager로 연쇄
+   └─ sys.anomaly.detected Event 발행 → PolicyManager로 연쇄
    ↓
 7. InsightReporter (필요한 경우)
    └─ 모든 Event 기록 → Report 생성 → 사용자 보고
@@ -260,57 +260,45 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 ```
 1. 사용자: "AUV-01 표면 정찰"
    ↓
-2. RequestHandler: intent.classified {type: MISSION} 발행
+2. RequestHandler: sys.intent.classified {type: MISSION} 발행
    ↓
-3. MissionPlanner: Proposal 생성 → mission.proposed 발행
+3. MissionPlanner: Proposal 생성 → `sys.mission.updated` 발행
    ↓
 4. 사용자가 Proposal 선택 & 승인
    ↓
 5. MissionPlanner: Mission 생성 → DeviceBridge에 Task 할당 요청
    ↓
 6. DeviceBridge【송신】: A2A로 Device에 Task 전달
-   └─ task.assigned 이벤트 발행
+   └─ `sys.task.dispatched` 이벤트 발행
    ↓
 7. Device Agent (AUV-01): Task 수행 판단
    ├─ Go/No-Go 판단 후
-   ├─ Task 시작 전 상태 전송 (Heartbeat)
-   └─ Task 진행 중 정기적 Heartbeat 송신
+   ├─ Task 시작 전 상태 전송 (healthcheck)
+   └─ Task 진행 중 정기적 healthcheck 송신
    ↓
 8. DeviceBridge【수신】: Device로부터 정보 수집 및 Event 발행
-   ├─ device.heartbeat Event: 배터리 80%, 신호 강도 90%
+   ├─ device.healthcheck Event: 배터리 80%, 신호 강도 90%
    ├─ 진행 상황: Task 진행 중
    └─ 문제 없음: 정상 진행
    ↓
 9. SystemSentinel: DeviceBridge의 Event 구독
-   ├─ device.heartbeat 모니터링
+   ├─ device.healthcheck 모니터링
    ├─ 배터리/신호 정상 확인
    └─ 이상 없음: 계속 감시
    ↓
 10. Device Agent (AUV-01): Task 완료
-    ├─ 최종 Heartbeat 전송 (완료 상태)
-    └─ task.result Event 발행: COMPLETED
+    ├─ 최종 healthcheck 전송 (완료 상태)
+    └─ sys.task.result Event 발행: COMPLETED
     ↓
-11. DeviceBridge【수신】: task.result Event 수신
+11. DeviceBridge【수신】: A2A task.result 메시지 수신
     └─ MissionPlanner에 Task 완료 알림
     ↓
 12. MissionPlanner: Task 상태 업데이트
     ├─ 모든 Task 완료 확인
-    └─ mission.completed Event 발행
+    └─ sys.mission.updated Event 발행
     ↓
 13. InsightReporter: 모든 Event 기록
     └─ Report 생성 및 사용자 보고
-```
-7. Device: Task 실행
-   ↓
-8. Device → DeviceBridge: Task 완료 메시지
-   ↓
-9. DeviceBridge: task.result 이벤트 발행
-   ↓
-10. MissionPlanner: Task 상태 갱신 → mission.completed 발행
-    ↓
-11. SystemSentinel: 모든 이벤트 감시 (기록 목적)
-    ↓
-12. InsightReporter: 사용자 조회 요청 → Report 생성
 ```
 
 ---
