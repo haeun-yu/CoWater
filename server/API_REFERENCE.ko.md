@@ -57,12 +57,6 @@ Base URL: `http://127.0.0.1:8280`
 
 ### 운영 원장
 
-- `GET /device-roles`
-- `GET /device-roles/{device_id}`
-- `POST /operation-plans`
-- `GET /operation-plans`
-- `GET /operation-plans/{operation_plan_id}`
-- `POST /operation-plans/{operation_plan_id}/activate`
 - `POST /insights`
 - `GET /insights`
 - `GET /insights/{insight_id}`
@@ -90,7 +84,7 @@ Base URL: `http://127.0.0.1:8280`
 
 ### 주의 사항
 
-- `/policies`, `/devices/{device_id}/role`, `/operation-plans/{operation_plan_id}/activate`, `/a2a-logs/ingest`는 내부 전용입니다.
+- `/policies`, `/a2a-logs/ingest`는 내부 전용입니다.
 - `device_id`는 내부 숫자 ID와 public ID가 함께 쓰일 수 있으니 호출 전에 응답 포맷을 확인하는 것이 좋습니다.
 
 ## System-Agent Server
@@ -124,17 +118,13 @@ Base URL: `http://127.0.0.1:9116`
 - `GET /tasks`
 - `GET /manual-interventions`
 - `GET /manual-interventions/{mission_id}`
-- `POST /device-roles/recommend`
-- `POST /device-roles/apply`
-- `POST /operation-plans/recommend`
-- `POST /operation-plans`
-- `POST /operation-plans/{operation_plan_id}/activate`
+- `POST /execute`
 - `POST /mission-proposals/generate`
 - `POST /approvals/{approval_id}/decision`
 - `GET /overview`
 
 ### 동작 메모
 
-- `/operation-plans`는 추천안을 만들고 Registry에 저장한 뒤 승인 레코드까지 생성합니다.
+- `/execute`는 역할별 System Agent 내부 실행 API입니다.
 - `/device-recovery`는 복구 보고를 받아 Agent 내부 상태를 갱신합니다.
 - `children`, `tasks`, `inbox`, `outbox`는 실행 중 상태로 다뤄집니다.

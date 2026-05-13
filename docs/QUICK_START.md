@@ -45,9 +45,9 @@ cd /Users/teamgrit/Documents/CoWater
 
 브라우저에서 열기:
 
-- **3D 대시보드**: `file:///Users/teamgrit/Documents/CoWater/client/index.html`
-- **운영 관제**: `file:///Users/teamgrit/Documents/CoWater/client/ops.html`
-- **미션 상세**: `file:///Users/teamgrit/Documents/CoWater/client/mission.html?id=<mission_id>`
+- **Client SPA**: `http://127.0.0.1:5173/`
+- **운영 관제**: `http://127.0.0.1:5173/ops`
+- **미션 상세**: `http://127.0.0.1:5173/mission/<mission_id>`
 
 ---
 
@@ -59,22 +59,27 @@ CoWater System
 ├── Registry Server                  포트 8280
 │   └── 디바이스 등록 · Event/Approval/Mission 원장
 │
-├── System Agent                     포트 9116
-│   └── 역할 추천 · 운영 계획 추천 · Mission Proposal 생성 · 승인 후 실행
+├── System Agent Layer
+│   ├── DeviceBridge                 포트 9110
+│   ├── MissionPlanner               포트 9111
+│   ├── PolicyManager                포트 9112
+│   ├── SystemSentinel               포트 9113
+│   ├── InsightReporter              포트 9114
+│   └── RequestHandler               포트 9116
+│       └── SYS_INTENT_CLASSIFIED → Proposal → Mission → Task 흐름 조율
 │
 ├── Device Agents
-│   ├── Control Ship  (layer=middle) 포트 9115
-│   ├── USV           (layer=lower)  포트 9111
-│   ├── AUV           (layer=lower)  포트 9112
-│   └── ROV           (layer=lower)  포트 9113
+│   ├── USV           (layer=lower)  포트 9201
+│   ├── AUV           (layer=lower)  포트 9202
+│   ├── ROV           (layer=lower)  포트 9203
+│   ├── Relay USV     (layer=middle) 포트 9204
+│   └── Control Ship  (layer=middle) 포트 9205
 │
 ├── Moth Broker (외부)               wss://cobot.center:8287
 │   └── Pub/Sub 텔레메트리 스트림
 │
 └── Client
-    ├── index.html   — 3D 실시간 시각화
-    ├── ops.html     — 운영 관제 대시보드
-    └── mission.html — 미션 상세 추적
+    └── React SPA    — 3D 대시보드 · 운영 관제 · 미션/장비 상세
 ```
 
 ### 포트 정리
@@ -82,11 +87,17 @@ CoWater System
 | 포트   | 서비스                    |
 | ------ | ------------------------- |
 | `8280` | Registry Server           |
-| `9111` | USV Lower Agent           |
-| `9112` | AUV Lower Agent           |
-| `9113` | ROV Lower Agent           |
-| `9115` | Control Ship Middle Agent |
-| `9116` | System Agent              |
+| `9110` | DeviceBridge              |
+| `9111` | MissionPlanner            |
+| `9112` | PolicyManager             |
+| `9113` | SystemSentinel            |
+| `9114` | InsightReporter           |
+| `9116` | RequestHandler            |
+| `9201` | USV Lower Agent           |
+| `9202` | AUV Lower Agent           |
+| `9203` | ROV Lower Agent           |
+| `9204` | Relay USV Middle Agent    |
+| `9205` | Control Ship Middle Agent |
 
 ---
 
@@ -110,15 +121,16 @@ python device_registration_server.py
 curl http://127.0.0.1:8280/health
 ```
 
-### 2. System Agent
+### 2. System Agent Layer
 
 ```bash
 cd server/system-agent
-python system_agent.py
+python run_system_agents.py
 ```
 
 ```bash
 curl http://127.0.0.1:9116/health
+curl http://127.0.0.1:9110/health
 ```
 
 ### 3. Middle Agent
@@ -183,7 +195,7 @@ python device_agent.py --type usv --layer lower --port 9122
   "system_agent": {
     "endpoint": {
       "host": "127.0.0.1",
-      "port": 9116,
+      "port": 9110,
       "protocol": "HTTP",
       "path": "/api/agent"
     },
@@ -207,7 +219,7 @@ python device_agent.py --type usv --layer lower --port 9122
 - `device.type`: 장비 종류 (USV, AUV, ROV, SHIP)
 - `device.actions`: 이 Device가 수행 가능한 작업
 - `capabilities`: 통신 매체 (ACOUSTIC, RF, INTERNET 등)
-- `system_agent.endpoint`: System Agent 주소/포트
+- `system_agent.endpoint`: DeviceBridge 주소/포트
 
 ### device_agent.py 옵션
 
@@ -235,10 +247,11 @@ curl http://127.0.0.1:8280/missions  | jq .
 
 # System Agent 내부 상태
 curl http://127.0.0.1:9116/state | jq .
+curl http://127.0.0.1:9110/state | jq .  # DeviceBridge
 
 # 디바이스 에이전트 상태
-curl http://127.0.0.1:9112/state | jq '.last_telemetry'  # AUV
-curl http://127.0.0.1:9113/state | jq '.last_telemetry'  # ROV
+curl http://127.0.0.1:9202/state | jq '.last_telemetry'  # AUV
+curl http://127.0.0.1:9203/state | jq '.last_telemetry'  # ROV
 ```
 
 
@@ -247,15 +260,14 @@ curl http://127.0.0.1:9113/state | jq '.last_telemetry'  # ROV
 서비스 전체 기동 후:
 
 ```bash
-curl -X POST http://127.0.0.1:9116/device-roles/recommend \
+curl -X POST http://127.0.0.1:9116/mission-proposals/generate \
   -H 'Content-Type: application/json' \
   -d '{"goal":"항만 주변 기뢰 탐지 및 제거"}'
 ```
 
-이후 `client/ops.html`에서 다음 흐름이 보여야 합니다.
+이후 `http://127.0.0.1:5173/ops`에서 다음 흐름이 보여야 합니다.
 
-- Device Role 추천
-- Operation Plan 생성
+- SYS_INTENT_CLASSIFIED Event 기록
 - Mission Proposal 생성
 - Approval 승인/거절
 - 승인된 Mission의 Step / Task / Timeline 진행

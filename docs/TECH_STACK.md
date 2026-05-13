@@ -140,7 +140,7 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
    └─ AgentConnection.profile 응답:
       {
         "device_id": "ROV-1",
-        "endpoint": "192.168.1.50:9111",
+        "endpoint": "192.168.1.60:9203",
         "network_type": "acoustic",
         "transport": "acoustic_modem",
         "latency_ms": 500,

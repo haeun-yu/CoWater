@@ -387,7 +387,7 @@ def bootstrap_device_agent(config_path: str):
 Device Agent 등록 후, 다음과 같이 System Agent와 통신합니다:
 
 ```
-Device Agent (9010)
+Device Agent (9201)
    ↓ (HTTP A2A)
 DeviceBridge (9110)
    ├─【송신】MissionPlanner → Task 할당

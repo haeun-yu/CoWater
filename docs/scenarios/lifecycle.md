@@ -82,7 +82,7 @@ response = device_bridge_client.register(
         "tracks": [...],  # VIDEO, SONAR 등
         "actions": [...]
     },
-    agent_endpoint="http://device-ip:9010"  # Device Agent의 HTTP 주소
+    agent_endpoint="http://device-ip:9201"  # Device Agent의 HTTP 주소
 )
 
 # → 응답: registry_id, agent_id, tracks, telemetry_topics, healthcheck_topic

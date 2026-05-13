@@ -612,8 +612,8 @@ Rule {
   "connection_type": "RELAY",
   
   "profile": {
-    "endpoint_a": "192.168.1.50:9111",  // USV 주소
-    "endpoint_b": "192.168.1.60:9112",  // ROV 주소
+    "endpoint_a": "192.168.1.50:9201",  // USV 주소
+    "endpoint_b": "192.168.1.60:9203",  // ROV 주소
     "network_type": "acoustic",
     "signal_strength": 75,
     "latency_ms": 800,
@@ -642,10 +642,10 @@ Device Agent ROV:
   2. Registry 응답:
      {
        "profile": {
-         "endpoint_a": "192.168.1.50:9111",  // USV 주소
-         "network_type": "acoustic",
-         "latency_ms": 800
-       }
+        "endpoint_a": "192.168.1.50:9201",  // USV 주소
+        "network_type": "acoustic",
+        "latency_ms": 800
+      }
      }
   ↓
   3. ROV가 AcousticModemDriver 선택
@@ -736,7 +736,7 @@ Phase 1: SURFACE
   
   AgentConnection [RF]:
     network_type: "RF"
-    endpoint: "192.168.1.100:9112"
+    endpoint: "192.168.1.100:9202"
     deleted_at: null
   
   System Agent: RF로 Task 실시간 전달 가능
@@ -767,7 +767,7 @@ Phase 2: UNDERWATER 진입
   
   AgentConnection [Acoustic]:
     network_type: "ACOUSTIC"
-    endpoint: "192.168.1.100:9113"  (Acoustic Modem 주소)
+    endpoint: "192.168.1.100:9202"  (Acoustic Modem 주소)
     deleted_at: null
   
   System Agent: 음파로 Task 전달 (지연 있음)

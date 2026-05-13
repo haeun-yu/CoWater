@@ -147,7 +147,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
       ├─ Problem Report (즉각적: 오류, 센서 이상, 물리적 문제)
       └─ DeviceBridge가 수신한 정보를 정규화된 Event로 발행
    ↓
-5. Device Agent (각 무인체) [포트 9010+]
+5. Device Agent (각 무인체) [포트 9201+]
    ├─ Task 수행 판단 → 실행 → 결과 보고
    ├─ 정기적 Heartbeat 송신 (상태, 배터리, 센서 데이터)
    └─ 문제 발생 시 즉시 보고 (오류, 안전 경고)
@@ -328,7 +328,7 @@ CoWater의 5가지 시나리오별 프로세스:
 - 2-4 Mission 생성 및 Task 분해
 - 2-5 Task 할당 및 실행
 - 2-6 실행 결과 보고
-- 2-7 Operation Plan 관리
+- 2-7 Proposal 트리거 및 자동화 정책 관리
 - 2-8 통신 복구 후 상태 동기화
 - 2-9 Business Logic 실행 (Policy/Rule/Config)
 - 2-10 Failed Task 재실행
