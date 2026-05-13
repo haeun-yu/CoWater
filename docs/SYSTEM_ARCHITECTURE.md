@@ -122,14 +122,15 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 | ---------------- | --------------------------------------------- | ------------------------------------------------- | ------------------------- |
 | **Device Agent** | 개별 무인체 Agent (USV-01, AUV-01, ROV-01 등) | Task 수행 판단 및 실행, 로컬 안전 행동, 상태 보고 | 자신의 Device만 직접 제어 |
 
-👉 자세한 책임 및 규칙: [**도메인 모델**](core/domain-model.md), [**설계 원칙**](core/principles.md)
+👉 자세한 책임 및 규칙: [**도메인 모델**](core/domain-model.md), [**설계 원칙**](core/principles.md)  
+👉 **Device Agent 구현**: [**Device Agent 구현 가이드**](core/device-agent-implementation.md) ← Task 수행 판단, 통신 드라이버, Heartbeat 등 상세 구현
 
 #### 생명주기 흐름 (입력 → 판단 → 계획 → 실행 → 감시 → 기록)
 
 ```
 1. 사용자 입력 (자연어 명령)
    ↓
-2. RequestHandler (운영 요청 처리)
+2. RequestHandler (운영 요청 처리) [포트 9116]
    ├─ [경로 A] 간단한 조회 → DB 읽기 → 직접 응답
    └─ [경로 B] 복잡한 처리 → 해당 System Agent 위임
       ↓
@@ -146,7 +147,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
       ├─ Problem Report (즉각적: 오류, 센서 이상, 물리적 문제)
       └─ DeviceBridge가 수신한 정보를 정규화된 Event로 발행
    ↓
-5. Device Agent (각 무인체)
+5. Device Agent (각 무인체) [포트 9010+]
    ├─ Task 수행 판단 → 실행 → 결과 보고
    ├─ 정기적 Heartbeat 송신 (상태, 배터리, 센서 데이터)
    └─ 문제 발생 시 즉시 보고 (오류, 안전 경고)
@@ -161,12 +162,12 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
    └─ 모든 Event 기록 → Report 생성 → 사용자 보고
 ```
 
-**DeviceBridge의 역할** (심장 같은 역할):
+**DeviceBridge의 역할** (통신 중개자 + Event 발행자):
 
-- **송신**: MissionPlanner의 Task → Device Agent로 전달
+- **송신**: MissionPlanner의 Task → Device Agent로 전달 (검증 없이 즉시 전달)
 - **수신**: Device Agent의 Heartbeat, Task Result, Problem Report 수집
-- **발행**: 수집한 정보를 정규화된 Event로 발행 (다른 Agent들이 구독)
-- **판단 경계**: 어떤 Agent에 전달할지 판단하지만, anomaly 판단은 하지 않음
+- **발행**: 수집한 정보를 정규화된 Event로 발행 (SystemSentinel, PolicyManager 등이 구독)
+- **최종 판단은 Device Agent가 함**: Task 수신 후 자신의 Capability/Resource/Safety를 확인하여 ACCEPT 또는 ABORT 응답
 
 👉 상세 아키텍처: [**ADR-008: 다중 에이전트 시스템**](adr/ADR-008-multi-agent-system-architecture.md)
 
@@ -235,6 +236,70 @@ Device Agent:
 ```
 
 👉 상세: [**ADR-009: 물리 통신 라우팅**](adr/ADR-009-physical-communication-routing.md)
+
+### 4.4 Device Agent 초기화 & 등록 (Initialization & Registration)
+
+Device Agent는 시스템 부팅 후 다음 단계로 초기화됩니다:
+
+```
+1️⃣ 설정 파일 로드          → device-config.yaml에서 Device 기본 정보 읽음
+                             (타입, 포트, capabilities 등)
+                             ↓
+2️⃣ 로컬 IdentityStore 확인  → .runtime/{instance_id}.json 존재?
+                             ↓
+                    ┌─ 있음 → 캐시된 등록 정보 사용 (device_id, agent_id, endpoint)
+                    │
+                    └─ 없음 → DeviceBridge를 통해 등록
+                             ↓
+3️⃣ Device/Agent 등록        → DeviceBridge → Device Registration Server에 대신 등록
+                             ↓
+4️⃣ 응답 저장                → 등록 응답 (ID, endpoint, stream URLs)를
+                             로컬 IdentityStore에 JSON으로 저장
+                             ↓
+5️⃣ 준비 완료                → DeviceBridge와 A2A 통신 가능
+```
+
+**핵심: 로컬 캐싱**
+- **첫 실행**: 설정파일 → System Agent 등록 → 응답 저장 (IdentityStore)
+- **재기동**: 설정파일 → IdentityStore에서 로드 → 바로 준비 완료
+- **이점**: 네트워크 단절 상태에서도 기존 agent_id 등 메타데이터 유지, 재등록 불필요
+
+**저장 데이터 구조** (IdentityStore `.data/identity/{device_id}.json`):
+```json
+{
+  "device_id": "aauv-01",
+  "device_type": "AUV",
+  "layer": "lower",
+  "device_endpoint": {"host": "192.168.50.1", "port": 9001, "protocol": "HTTP"},
+  
+  "agent_id": "agent-uuid-xxx",
+  "agent_endpoint": "http://192.168.1.100:8000/api/agent",
+  "capabilities": ["ACOUSTIC", "RF", "INTERNET"],
+  "gateway_agent_id": null,
+  "parent_id": null,
+  
+  "sensors": [
+    {"name": "camera-01", "type": "VIDEO", "endpoint": "ws://..."},
+    {"name": "sonar-01", "type": "SONAR", "endpoint": "ws://..."}
+  ],
+  "telemetry_topics": [
+    {"track_type": "VIDEO", "track_name": "camera-01", "topic": "device.telemetry.aauv-01.VIDEO"},
+    {"track_type": "SONAR", "track_name": "sonar-01", "topic": "device.telemetry.aauv-01.SONAR"}
+  ],
+  
+  "healthcheck_topic": "agents",
+  "healthcheck_endpoint": "/healthcheck/aauv-01",
+  
+  "is_submerged": false,
+  "environment_state": "SURFACE",
+  "active_mediums": ["RF", "INTERNET", "ACOUSTIC"],
+  "force_parent_routing": false,
+  
+  "registered_at": "2026-05-13T10:30:45.123Z"
+}
+```
+
+👉 상세: [**Device Agent 구현 가이드**](core/device-agent-implementation.md#2-device-agent-초기화--등록-initialization--registration)
 
 ---
 

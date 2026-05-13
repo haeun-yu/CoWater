@@ -47,38 +47,163 @@ Agent {
 
 ---
 
-### 2️⃣ **Agent 등록 흐름**
+### 2️⃣ **Device Agent 초기화 & 등록 흐름**
+
+Device Agent 시작 시 자동으로 수행되는 흐름:
 
 ```mermaid
 graph TD
-    A["Device Agent<br/>시스템에 등록 요청"] -->|POST /agent/register<br/>body: endpoint 포함| B["System Agent<br/>검증"]
-    B -->|유효| C["Agent 테이블에<br/>endpoint 저장"]
-    C -->|저장 완료| D["Device Agent에<br/>agent_id 반환"]
-    D -->|저장| E["Device Agent<br/>로컬 캐시"]
-    E -->|재기동 시| F["캐시된 agent_id로<br/>heartbeat 송신"]
+    A["Device Agent 시작<br/>(설정파일 로드)"] -->|device_id, capabilities| B{"IdentityStore<br/>확인"}
+    B -->|캐시 있음<br/>(재기동)| C["기존 agent_id<br/>endpoint 사용"]
+    B -->|캐시 없음<br/>(첫 실행)| D["1️⃣ Device 등록"]
+    D -->|POST /devices/register| E["Registry<br/>(Device 저장)"]
+    E -->|device_id, endpoint| F["2️⃣ Agent 등록"]
+    F -->|POST /agents/register| G["Registry<br/>(Agent + endpoint 저장)"]
+    G -->|agent_id 반환| H["3️⃣ IdentityStore 저장<br/>(.data/identity/{device_id}.json)"]
+    C -->|4️⃣ Heartbeat 시작| I["System과<br/>A2A 통신"]
+    H -->|4️⃣ Heartbeat 시작| I
 ```
 
-**요청 예시**:
+### **Step 1: Device 등록** (캐시 없을 때만)
+
 ```json
-POST /api/agents/register
+POST /api/devices/register
 {
-  "name": "ROV-1-Agent",
-  "type": "DEVICE_AGENT",
   "device_id": "rov-1",
-  "endpoint": {
-    "host": "192.168.1.100",
-    "port": 8080,
-    "protocol": "HTTP",
-    "path": "/agent"
-  }
+  "device_type": "ROV",
+  "device_ip": "192.168.50.1",
+  "device_port": 9001
 }
 
 Response:
 {
-  "agent_id": "agent-rov-1",
-  "device_id": "rov-1"
+  "device_id": "rov-1",
+  "device_type": "ROV",
+  "endpoint": {
+    "host": "192.168.50.1",
+    "port": 9001,
+    "protocol": "HTTP"
+  },
+  "stream_endpoints": [
+    {
+      "type": "sensor_stream",
+      "url": "ws://192.168.1.100:8002/stream/rov-1"
+    }
+  ],
+  "created_at": "2026-05-13T10:30:45.123Z"
 }
 ```
+
+### **Step 2: Agent 등록** (Device 등록 후)
+
+Device 등록에서 반환된 endpoint 정보를 사용하여 Agent를 등록합니다:
+
+```json
+POST /api/agents/register
+{
+  "name": "Agent_rov-1",
+  "type": "DEVICE_AGENT",
+  "role": "DEVICE_BRIDGE",
+  "device_id": "rov-1",
+  "endpoint": {
+    "host": "192.168.50.1",
+    "port": 9001,
+    "protocol": "HTTP",
+    "path": "/agent"
+  },
+  "capabilities": ["WIRED", "RF"],
+  "gateway_agent_id": null
+}
+
+Response:
+{
+  "agent_id": "agent-rov-1-uuid",
+  "device_id": "rov-1",
+  "type": "DEVICE_AGENT",
+  "role": "DEVICE_BRIDGE",
+  "endpoint": {
+    "host": "192.168.50.1",
+    "port": 9001,
+    "protocol": "HTTP",
+    "path": "/agent"
+  },
+  "created_at": "2026-05-13T10:30:45.123Z"
+}
+```
+
+### **Step 3: IdentityStore에 저장** (로컬 캐싱)
+
+등록 응답 데이터를 로컬 JSON 파일에 저장합니다:
+
+`.data/identity/rov-1.json`:
+```json
+{
+  "device_id": "rov-1",
+  "device_type": "ROV",
+  "layer": "lower",
+  "device_endpoint": {
+    "host": "192.168.50.1",
+    "port": 9001,
+    "protocol": "HTTP"
+  },
+  
+  "agent_id": "agent-rov-1-uuid",
+  "agent_type": "DEVICE_AGENT",
+  "agent_role": "DEVICE_BRIDGE",
+  "agent_endpoint": "http://192.168.50.1:9001/agent",
+  "capabilities": ["WIRED", "RF"],
+  "gateway_agent_id": "agent-usv-1-uuid",
+  "parent_id": 2,
+  
+  "sensors": [
+    {
+      "name": "front-camera",
+      "type": "VIDEO",
+      "endpoint": "ws://192.168.1.100:8002/stream/rov-1/front-camera"
+    },
+    {
+      "name": "manipulator-cam",
+      "type": "VIDEO",
+      "endpoint": "ws://192.168.1.100:8002/stream/rov-1/manipulator-cam"
+    }
+  ],
+  "telemetry_topics": [
+    {
+      "track_type": "VIDEO",
+      "track_name": "front-camera",
+      "topic": "device.telemetry.rov-1.VIDEO"
+    },
+    {
+      "track_type": "VIDEO",
+      "track_name": "manipulator-cam",
+      "topic": "device.telemetry.rov-1.VIDEO"
+    }
+  ],
+  
+  "healthcheck_topic": "agents",
+  "healthcheck_endpoint": "/healthcheck/rov-1",
+  
+  "is_submerged": true,
+  "environment_state": "UNDERWATER",
+  "active_mediums": ["WIRED"],
+  "force_parent_routing": true,
+  
+  "registered_at": "2026-05-13T10:30:45.123Z"
+}
+```
+
+### **캐시 재사용** (재기동 시)
+
+Device Agent 재기동 시:
+1. 설정파일(`device-config.yaml`) 로드 → device_id 확인
+2. IdentityStore 확인 → `.data/identity/{device_id}.json` 존재?
+3. 있으면: 파일에서 agent_id, endpoint 로드 → 바로 heartbeat 송신
+4. 없으면: 위의 Step 1~3 수행
+
+**이점**:
+- ✅ 재기동 시 System Agent와의 재협상 불필요
+- ✅ 네트워크 단절 중에도 agent_id/endpoint 유지
+- ✅ 기존 AgentConnection 재활용 가능
 
 ---
 

@@ -128,6 +128,28 @@ cd device
 python device_agent.py --type ship --layer middle
 ```
 
+Device Agent 시작 시 자동으로 다음이 수행됩니다:
+
+```
+1️⃣ 설정 파일 로드      → device/configs/{type}-{layer}.json 읽음
+                         (Device ID, capabilities, System Agent endpoint)
+                         ↓
+2️⃣ IdentityStore 확인  → .data/identity/{device_id}.json 존재?
+                         ↓
+         ┌─ 있음 → 캐시된 agent_id/endpoint 사용
+         │
+         └─ 없음 → System Agent Registry에 등록
+                   (device_id, agent_id, stream URLs 획득)
+                   → 로컬에 저장
+                   ↓
+3️⃣ Heartbeat 시작      → 30초 주기로 System Agent로 상태 보고
+```
+
+**주요 파일:**
+- 설정: `device/configs/{type}-{layer}.json`
+- 로컬 캐시: `.data/identity/{device_id}.json`
+- 로그: `.logs/{Type}-{Layer}.log`
+
 ### 4. Lower Agents
 
 ```bash
@@ -143,6 +165,49 @@ python device_agent.py --type rov --layer lower
 python device_agent.py --type usv --layer lower --port 9121
 python device_agent.py --type usv --layer lower --port 9122
 ```
+
+각 Device Agent는 자신의 설정파일에서 Device ID를 읽어 독립적으로 등록됩니다.
+
+### Device Agent 설정 파일 예시
+
+`device/configs/auv-lower.json`:
+```json
+{
+  "device": {
+    "id": "aauv-01",
+    "type": "AUV",
+    "name": "Autonomous Underwater Vehicle 01",
+    "actions": ["MOVE_TO", "HIGH_RES_SCAN", "SAMPLE_COLLECTION"]
+  },
+  "capabilities": ["ACOUSTIC", "RF", "INTERNET"],
+  "system_agent": {
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 9116,
+      "protocol": "HTTP",
+      "path": "/api/agent"
+    },
+    "heartbeat_interval_sec": 30,
+    "heartbeat_timeout_sec": 120
+  },
+  "physical_constraints": {
+    "battery": {
+      "critical_threshold_percent": 15,
+      "warning_threshold_percent": 30
+    },
+    "depth": {
+      "max_depth_m": 1000
+    }
+  }
+}
+```
+
+**설정 항목:**
+- `device.id`: 고유 Device ID (System Registry에 등록)
+- `device.type`: 장비 종류 (USV, AUV, ROV, SHIP)
+- `device.actions`: 이 Device가 수행 가능한 작업
+- `capabilities`: 통신 매체 (ACOUSTIC, RF, INTERNET 등)
+- `system_agent.endpoint`: System Agent 주소/포트
 
 ### device_agent.py 옵션
 

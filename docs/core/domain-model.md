@@ -41,6 +41,123 @@
 - Device 1개 = 여러 Agent가 제어 불가 (exclusive)
 - Agent는 Device와 1:1 또는 System 전체 담당
 
+### Device & Agent 생명주기 (Lifecycle Binding)
+
+Device Agent가 시작될 때:
+
+```
+Device Agent 시작
+  ↓
+1️⃣ 설정파일에서 device_id, DeviceBridge 정보 로드
+  ├─ Device 정보: device_id, type, capabilities, actions
+  └─ DeviceBridge 정보: DeviceBridge Agent 주소 (포트 9110)
+  
+2️⃣ 로컬 IdentityStore 확인 (.runtime/{instance_id}.json)
+  ├─ 캐시 있음 → 재등록 불필요 (기존 device_id, agent_id 재사용)
+  └─ 캐시 없음 → DeviceBridge를 통해 등록
+  
+3️⃣ DeviceBridge를 통해 등록
+  ├─ Device Agent → DeviceBridge에 등록 요청
+  ├─ DeviceBridge → Device Registration Server(8280)에 대신 등록
+  └─ DeviceBridge → Device Agent에게 등록 응답 반환
+     (device_id, agent_id, tracks, telemetry_topics 등)
+  
+4️⃣ IdentityStore에 등록 응답 저장
+  └─ .runtime/{instance_id}.json: device_id, agent_id, tracks, telemetry_topics 등
+  
+5️⃣ 준비 완료
+  └─ DeviceBridge와 A2A 통신 시작 (Task 수신, Heartbeat 송신)
+```
+
+**캐싱의 의미**:
+
+- **Device 정보**: 물리 장비의 고유 정보 (device_id, type, actions)
+  - 설정파일에서 계속 로드 (변경 시 다시 등록)
+- **Agent 정보**: System과의 통신 주소 (agent_id, endpoint)
+  - 첫 등록 후 로컬 캐시 → 재기동 시 재사용
+  - 설정파일이 변경되지 않으면 System과의 재협상 없음
+
+**IdentityStore 구조** (`.runtime/{instance_id}.json`):
+
+```json
+{
+  "device_id": "aauv-01",
+  "device_type": "AUV",
+  "layer": "lower",
+  
+  "registry_id": 1,                       // ← Device Registration Server가 부여한 ID
+  "token": "device-token-xxx",
+  "agent_id": "agent-uuid-xxx",
+  "registered_at": "2026-05-13T10:30:45Z",
+  
+  "tracks": [
+    {
+      "type": "VIDEO",
+      "name": "camera-01",
+      "endpoint": "ws://localhost:8002/stream/aauv-01/camera-01"
+    },
+    {
+      "type": "SONAR",
+      "name": "sonar-01",
+      "endpoint": "ws://localhost:8002/stream/aauv-01/sonar-01"
+    }
+  ],
+  
+  "telemetry_topics": [
+    {
+      "track_type": "VIDEO",
+      "track_name": "camera-01",
+      "topic": "device.telemetry.aauv-01.VIDEO"
+    },
+    {
+      "track_type": "SONAR",
+      "track_name": "sonar-01",
+      "topic": "device.telemetry.aauv-01.SONAR"
+    }
+  ],
+  
+  "healthcheck_topic": "agents",
+  "healthcheck_endpoint": "/healthcheck/aauv-01",
+  
+  "parent_id": null,                      // ← ROV의 경우 부모 Device ID
+  "gateway_agent_id": null,               // ← 부모 Agent ID (향후 DeviceBridge)
+  "environment_state": "SURFACE",
+  "active_mediums": ["RF", "INTERNET", "ACOUSTIC"],
+  "is_submerged": false,
+  "force_parent_routing": false
+}
+```
+
+#### IdentityStore 필드 설명
+
+| 필드 | 용도 | 어디서 얻는가 |
+|------|------|------------|
+| `registry_id`, `token` | Device Registration Server와의 통신 | register_device() 응답 |
+| `agent_id` | 이 Device를 대표하는 Agent ID | upsert_agent() 응답 |
+| `tracks` | 센서 스트림 주소 (Device Agent가 센서에서 데이터 읽는 곳) | register_device() 응답 |
+| `telemetry_topics` | Moth pub/sub 채널 (센서 데이터를 System에 발행하는 곳) | register_device() 응답 |
+| `healthcheck_topic`, `healthcheck_endpoint` | Heartbeat 발행 위치 | register_device() 응답 |
+| `parent_id`, `gateway_agent_id` | 상위 Device/Agent (물리적 연결 또는 통신 중계) | get_assignment() 또는 설정 |
+| `environment_state`, `active_mediums` | 현재 통신 환경 (수중/수면, 사용 가능 매체) | 초기값은 설정, 실행 중 업데이트 |
+
+#### Tracks vs Telemetry Topics 구분
+
+**Tracks** (센서 스트림):
+- Device **내부**의 센서에서 데이터를 **읽는** 주소
+- 예: `ws://localhost:8002/stream/aauv-01/camera-01`
+- Device Agent가 센서로부터 실시간 데이터 수집
+
+**Telemetry Topics** (Moth 채널):
+- 읽은 센서 데이터를 **외부 시스템에 발행**하는 Moth 주소
+- 예: `device.telemetry.aauv-01.VIDEO`
+- RequestHandler 또는 다른 System Agent가 구독 가능
+
+#### IdentityStore의 의미
+
+- **재기동 시**: 로컬 캐시를 읽어 Device Registration Server와의 재협상 없이 즉시 통신 가능
+- **설정 변경 시**: Device Config를 다시 읽고, Device Registration Server에서 새로운 등록 정보를 받아 덮어씀
+- **격리**: 각 Device Agent는 자신의 IdentityStore만 관리 (다른 Device 정보에 접근 불가)
+
 ### 🔗 **AgentConnection - 협력 관계**
 
 **정의**: Device Agent 간의 논리적/물리적 협력 관계
