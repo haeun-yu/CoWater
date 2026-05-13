@@ -84,7 +84,7 @@
   "name": "string",
   "type": "SYSTEM_AGENT | DEVICE_AGENT",
 
-  "role": "COMMAND | MISSION_PLANNING | ASSIGNMENT | MONITORING | POLICY_CHECK | REPORTING | DEVICE_CONTROL",
+  "role": "REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER | DEVICE_CONTROL",
 
   "device_id": "string (uuid) | null", // DEVICE_AGENT만 설정
 
@@ -115,8 +115,22 @@
 }
 ```
 
-**변경 (ADR-004 + 새 설계)**:
+**역할별 에이전트 정의 (ADR-008 참고)**:
 
+| 역할 | Agent 이름 | 책임 | DB 권한 |
+|------|----------|------|--------|
+| REQUEST_HANDLER | RequestHandler | 사용자 요청 해석 & 경로 결정 | Read-only |
+| DEVICE_BRIDGE | DeviceBridge | 장비 통신, 상태 동기화 | Device, Sensor |
+| MISSION_PLANNER | MissionPlanner | 미션/태스크 계획, 실행 추적 | Mission, Task, Proposal |
+| POLICY_MANAGER | PolicyManager | 정책/규칙 관리, 자동 대응 | Policy, Rule, Config |
+| SYSTEM_SENTINEL | SystemSentinel | 이상 감시, Alert/Event 생성 | Alert, Event |
+| INSIGHT_REPORTER | InsightReporter | 데이터 조회, 리포트 생성 | Read-only |
+| DEVICE_CONTROL | Device Agent | 개별 디바이스 제어 | Device 상태 |
+
+**변경 (ADR-004 + ADR-008)**:
+
+- **role** 필드: 6개의 전문 에이전트 역할로 업데이트 (ADR-008 참고)
+  - 각 역할은 명확한 책임 영역과 DB 소유권을 가짐
 - **endpoint** 필드: Agent 등록 시 통신 정보 포함 (기존)
 - **capabilities[]**: Device의 physical_interfaces와 동기화 (등록 시 고정)
   - ROV: ["wired"] (유선만)

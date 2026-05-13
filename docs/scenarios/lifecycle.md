@@ -1,7 +1,13 @@
 # 미션 생명주기 (Mission Lifecycle)
 
 Proposal 승인부터 완료/취소까지의 전체 상태 전이  
-**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md)
+**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
+
+**관련 에이전트**:
+- **MissionPlanner**: Mission/Task 생성 및 상태 관리
+- **DeviceBridge**: Task 할당 → Device로 전달, Device의 Heartbeat/Result/Problem ← 수집
+- **PolicyManager**: Device 제거 프로세스 관리
+- **SystemSentinel**: 상태 모니터링, 이상 감시
 
 ---
 
@@ -72,21 +78,23 @@ Device 제거 전 확인:
 
 ```mermaid
 graph TD
-    A["사용자: Device 제거 요청"] -->|POST /devices/{id}/remove| B["System 검증"]
-    B -->|확인| C{"Device<br/>상태?"}
-    C -->|ONLINE/ERROR| D["❌ 제거 거부<br/>먼저 OFFLINE 대기"]
-    C -->|OFFLINE| E["AgentConnection<br/>확인"]
-    E -->|조회| F{"협력 관계<br/>있는가?"}
-    F -->|없음| G["제거 가능<br/>상태 확인"]
-    F -->|있음| H{"대체 Agent<br/>있는가?"}
-    H -->|없음| I["❌ 제거 거부<br/>협력 관계 유지 필요"]
-    H -->|있음| J["기존<br/>AgentConnection<br/>REMOVED/EXPIRED<br/>처리"]
-    J -->|새로 생성| K["새 AgentConnection<br/>대체 Agent로"]
-    K -->|완료| G
-    G -->|최종 확인| L["Device, Agent,<br/>Sensor 제거 처리"]
-    L -->|상태 변경| M["removed_at<br/>타임스탬프 기록"]
-    M -->|Event 발행| N["DEVICE_REMOVED<br/>Event"]
-    N -->|보관| O["Archive<br/>감사 추적"]
+    A["사용자: Device 제거 요청"] -->|POST /devices/{id}/remove| B["RequestHandler<br/>요청 수신"]
+    B -->|위임| C["PolicyManager<br/>검증 시작"]
+    C -->|확인| D{"Device<br/>상태?"}
+    D -->|ONLINE/ERROR| E["❌ 제거 거부<br/>먼저 OFFLINE 대기"]
+    D -->|OFFLINE| F["AgentConnection<br/>확인"]
+    F -->|조회| G{"협력 관계<br/>있는가?"}
+    G -->|없음| H["제거 가능<br/>상태 확인"]
+    G -->|있음| I{"대체 Agent<br/>있는가?"}
+    I -->|없음| J["❌ 제거 거부<br/>협력 관계 유지 필요"]
+    I -->|있음| K["기존<br/>AgentConnection<br/>REMOVED/EXPIRED<br/>처리"]
+    K -->|새로 생성| L["새 AgentConnection<br/>대체 Agent로"]
+    L -->|완료| H
+    H -->|Task 취소 요청| M["MissionPlanner<br/>진행 중 Task<br/>취소"]
+    M -->|완료| N["PolicyManager<br/>Device 제거 처리"]
+    N -->|상태 변경| O["removed_at<br/>타임스탬프 기록"]
+    O -->|Event 발행| P["DEVICE_REMOVED<br/>Event"]
+    P -->|기록| Q["InsightReporter<br/>감사 추적"]
 ```
 
 ### **단계별 상세**

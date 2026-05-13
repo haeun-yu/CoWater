@@ -1,7 +1,11 @@
 # 작업 프로세스 (Operation Process)
 
 작업 제안 → 사용자 선택 → 실행의 전체 흐름  
-**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-003](../adr/ADR-003-capability-driven-task-assignment.md), [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md)
+**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-003](../adr/ADR-003-capability-driven-task-assignment.md), [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
+
+**참고**: 이 문서에서 "System Agent"는 다음 6개 전문 에이전트의 협력을 의미합니다:
+- RequestHandler (요청 처리), MissionPlanner (임무 계획), PolicyManager (정책 관리), 
+- SystemSentinel (감시), DeviceBridge (Task 전달 ↔ Heartbeat/Result 수집), InsightReporter (보고)
 
 **이 문서에서 준수하는 핵심 원칙**:
 - [P1](../core/principles.md#p1-🔴-agent-직접-제어-원칙-agent-direct-control) (각 Agent의 자원만 제어)
@@ -17,16 +21,16 @@
 
 ```mermaid
 graph TD
-    A["사용자 요청<br/>자연어"] -->|USER_COMMAND<br/>이벤트| B["System Agent<br/>의도 해석"]
+    A["사용자 요청<br/>자연어"] -->|USER_COMMAND<br/>이벤트| B["RequestHandler<br/>의도 해석"]
     B -->|역량 매칭<br/>Capability Matching| C{"수행<br/>가능?"}
-    C -->|YES| D["여러 Proposal<br/>생성"]
+    C -->|YES| D["MissionPlanner<br/>여러 Proposal<br/>생성"]
     C -->|NO| E["USER_COMMAND_FAILED<br/>이벤트"]
     D -->|화면에 표시| F["사용자 선택<br/>및 승인"]
-    F -->|Proposal.selected=true| G["상태 재검증<br/>Device/Agent 확인"]
-    G -->|유효| H["Mission 생성<br/>Task 할당"]
+    F -->|Proposal.selected=true| G["MissionPlanner<br/>상태 재검증<br/>Device/Agent 확인"]
+    G -->|유효| H["MissionPlanner<br/>Mission 생성<br/>Task 할당"]
     G -->|무효| I["승인 거절<br/>상태 변경"]
-    H -->|배정된 Task| J["Device Agent<br/>Task 수행"]
-    J -->|Task 완료| K["다음 Task<br/>또는 완료"]
+    H -->|배정된 Task| J["DeviceBridge<br/>→ Device Agent<br/>Task 수행"]
+    J -->|Task 완료| K["다음 Task<br/>또는 완료<br/>InsightReporter 기록"]
     E -->|명확한 사유| L["사용자에게<br/>이유 전달"]
 ```
 
@@ -50,22 +54,27 @@ System이 USER_COMMAND 이벤트 생성
 }
 ```
 
-### **2️⃣ System Agent: 의도 해석 → Capability Matching (ADR-003)**
+### **2️⃣ RequestHandler + MissionPlanner: 의도 해석 → Capability Matching (ADR-003, ADR-008)**
+
+**역할 분담**:
+- **RequestHandler**: 사용자 요청 수신 → 의도 해석 → MissionPlanner에 위임
+- **MissionPlanner**: Capability Matching → Proposal 생성/거절
 
 **P5 & P10 적용**:
-- P5: **Device.actions[]는 진실의 원천** → System은 이 목록만 신뢰
+- P5: **Device.actions[]는 진실의 원천** → MissionPlanner는 이 목록만 신뢰
 - P10: **required_action은 추상화 레벨** → "MOVE_TO", "HIGH_RES_SCAN" (저수준 제어 아님)
-- P3: **보고된 상태만 사용** → Device Agent가 보고한 상태를 근거로 판단
+- P3: **보고된 상태만 사용** → DeviceBridge가 보고한 상태를 근거로 판단
 
 ```
-Step 1: 의도 해석 (Intent Parsing)
+Step 1: RequestHandler - 의도 해석 (Intent Parsing)
   "고해상도 촬영" → required_action: ["MOVE_TO", "HIGH_RES_SCAN"]
   (사용자의 자연어를 추상화된 action으로 변환)
+  → MissionPlanner에 위임
 
-Step 2: 현재 Device 상태 조사 (P3: 보고 기반, 범위: actions[] + status만)
+Step 2: MissionPlanner - 현재 Device 상태 조사 (P3: 보고 기반, 범위: actions[] + status만)
   ROV-1: 
     - actions: [MOVE_TO, HIGH_RES_SCAN, RETURN_TO_BASE]  ← P5: Device가 선언한 능력
-    - status: OFFLINE  ← P3: Device Agent가 보고한 상태
+    - status: OFFLINE  ← P3: DeviceBridge가 보고한 상태
     - battery: 15%
   
   USV-1:
@@ -73,12 +82,12 @@ Step 2: 현재 Device 상태 조사 (P3: 보고 기반, 범위: actions[] + stat
     - status: ONLINE
     - battery: 80%
   
-  ⚠️ 참고: System Agent는 Device.actions[]과 status만 확인합니다. Sensor 확인과 센서 기반 거절 판단은 Device Agent의 책임입니다 (P5 원칙)
+  ⚠️ 참고: MissionPlanner는 Device.actions[]과 status만 확인합니다. Sensor 확인과 센서 기반 거절 판단은 Device Agent의 책임입니다 (P5 원칙)
 
-Step 3: Capability Matching 결과 (P5: Strict Matching)
+Step 3: MissionPlanner - Capability Matching 결과 (P5: Strict Matching)
   ❌ ROV-1: HIGH_RES_SCAN ✓ (actions에 있음)
            하지만 OFFLINE 상태 → 불가능
-           (System은 추측하지 않음. OFFLINE = 할당 금지)
+           (MissionPlanner는 추측하지 않음. OFFLINE = 할당 금지)
   
   ❌ USV-1: HIGH_RES_SCAN ✗ (actions에 없음)
            → 절대 할당 불가 (P5의 핵심)
@@ -103,13 +112,18 @@ Step 4: 최종 판단
 3. 새로운 고해상도 촬영 가능 Device 추가 등록"
 ```
 
-### **3️⃣ System Agent: 여러 Proposal 생성**
+### **3️⃣ MissionPlanner: 여러 Proposal 생성**
 
-만약 수행 가능하면, **여러 솔루션 세트를 생성** (각 Proposal은 PROPOSED 상태로 생성):
+Capability Matching이 성공하면, **MissionPlanner가 여러 솔루션 세트를 생성** (각 Proposal은 PROPOSED 상태로 생성):
 
 > **Proposal 상태**: PROPOSED (생성됨) → 사용자 선택 → APPROVED (승인됨)
 
 ```
+MissionPlanner이 다음을 고려하여 Proposal 생성:
+- Device.actions[] 확인 (수행 가능성)
+- AgentConnection 확인 (통신 경로)
+- Device 현재 상태 (배터리, 위치)
+
 Proposal-1 (추천)
 - Device: ROV-1
 - Steps: [
@@ -130,7 +144,7 @@ Proposal-2 (대안)
 
 **특성**:
 - 각 Proposal은 **완전하고 일관된 Task 시퀀스** (ADR-002)
-- ProposalTask가 이미 순서와 Device 할당이 결정됨
+- ProposalTask가 이미 순서와 Device 할당이 결정됨 (MissionPlanner의 책임)
 - 사용자는 Task 수정 불가, **Proposal 전체를 선택만 가능**
 
 ### **4️⃣ 사용자: Proposal 선택 및 승인**
@@ -152,18 +166,18 @@ UI: Proposal.selected = true 설정
 백엔드에 전달
 ```
 
-### **5️⃣ 승인 직전 재검증**
+### **5️⃣ MissionPlanner: 승인 직전 재검증**
 
 ```
-System이 Proposal-1 재검증:
+MissionPlanner이 Proposal-1 재검증:
 
-✓ ROV-1 상태 재확인
+✓ ROV-1 상태 재확인 (DeviceBridge의 최신 보고 기반)
   - status: 여전히 ONLINE? → YES
   - battery >= 30%? → NO (battery = 15%)
   ↓
   ❌ 배터리 부족으로 승인 불가
 
-System 응답:
+MissionPlanner 응답 (RequestHandler를 통해 사용자에게 전달):
 "선택하신 Proposal의 Device 상태가 변경되었습니다.
  ROV-1의 배터리가 15%로 부족합니다.
  
@@ -173,16 +187,16 @@ System 응답:
  3. 취소"
 ```
 
-### **6️⃣ 승인 성공 → Mission 생성**
+### **6️⃣ MissionPlanner: 승인 성공 → Mission 생성**
 
 ```
-Device 상태 유효 확인
+MissionPlanner의 재검증 완료
   ↓
 Proposal.status = APPROVED 변경
 Proposal.approved_by_user_id = user-001
 Proposal.approved_at = now()
   ↓
-ProposalTask → Task 일괄 변환
+ProposalTask → Task 일괄 변환 (MissionPlanner 책임)
   ↓
 Mission 생성 (READY 상태로)
 {
@@ -195,7 +209,7 @@ Mission 생성 (READY 상태로)
   approved_at: "2026-05-12T10:30:00Z"
 }
   ↓
-Task 배정
+Task 배정 (DeviceBridge에 요청)
 {
   id: "task-1",
   mission_id: "mission-123",
