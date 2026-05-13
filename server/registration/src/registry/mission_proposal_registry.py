@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, List
 from uuid import uuid4
@@ -97,6 +97,8 @@ class MissionProposalRegistry:
         data.setdefault("proposal_id", row["proposal_id"])
         data.setdefault("created_at", row["created_at"])
         data.setdefault("updated_at", row["updated_at"])
+        allowed_fields = {item.name for item in fields(MissionProposalRecord)}
+        data = {key: value for key, value in data.items() if key in allowed_fields}
         return MissionProposalRecord(**data)
 
     def _persist_mission_proposal(self, mission_proposal: MissionProposalRecord) -> None:

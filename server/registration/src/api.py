@@ -51,6 +51,13 @@ def _schedule_background_task(coro: Any) -> None:
     loop.create_task(coro)
 
 
+def _publish_registry_snapshot(channel: str, payload: Any) -> None:
+    async def publish() -> None:
+        await get_moth_publisher().publish(channel, payload)
+
+    _schedule_background_task(publish())
+
+
 def require_internal_caller(x_cowater_internal: str | None) -> None:
     if str(x_cowater_internal or "").strip() != INTERNAL_CALLER_HEADER:
         raise HTTPException(status_code=403, detail="system agent only")
@@ -71,8 +78,6 @@ rule_registry = components.rule_registry
 config_registry = components.config_registry
 sensor_registry = components.sensor_registry
 mission_registry = components.mission_registry
-device_role_registry = components.device_role_registry
-operation_plan_registry = components.operation_plan_registry
 insight_registry = components.insight_registry
 approval_registry = components.approval_registry
 mission_proposal_registry = components.mission_proposal_registry
@@ -123,8 +128,8 @@ def meta() -> dict[str, Any]:
             "list": "/alerts",
             "ack": "/alerts/{alert_id}/ack",
         },
-        "device_roles": "/device-roles",
-        "operation_plans": "/operation-plans",
+        "device_register": "/devices/register",
+        "agent_register": "/agents/register",
         "insights": "/insights",
         "approvals": "/approvals",
         "mission_proposals": "/mission-proposals",
@@ -148,6 +153,11 @@ def register_device(request: DeviceRegistrationRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return device.to_device_registration_dict()
+
+
+@app.post("/devices/register", status_code=status.HTTP_201_CREATED)
+def register_device_alias(request: DeviceRegistrationRequest) -> dict[str, Any]:
+    return register_device(request)
 
 
 @app.get("/devices/{device_id}/assignment")
@@ -218,6 +228,13 @@ def upsert_device_agent(device_id: str, request: DeviceAgentRegistrationRequest)
     return device.to_dict()
 
 
+@app.post("/agents/register")
+def register_agent(request: DeviceAgentRegistrationRequest) -> dict[str, Any]:
+    if request.device_id is None:
+        raise HTTPException(status_code=400, detail="device_id is required")
+    return upsert_device_agent(str(request.device_id), request)
+
+
 @app.delete("/devices/{device_id}/agent")
 def detach_device_agent(device_id: str, secretKey: str) -> dict[str, Any]:
     try:
@@ -253,27 +270,41 @@ def update_device_connectivity(
 def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
     alert = alert_registry.ingest_alert(request)
     result = alert.to_dict()
-    _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+    _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
     return result
 
 
 @app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_event(body: dict[str, Any]) -> dict[str, Any]:
     """Event 생성"""
+    event_type = body.get("type", body.get("event_type", "UNKNOWN"))
+    payload = body.get("data", {})
+    actor_type = body.get("actor_type")
+    actor_id = body.get("actor_id")
+    source_system = str(body.get("source_system") or "").lower()
+    if not actor_type:
+        if source_system.startswith("device"):
+            actor_type = "DEVICE"
+        elif source_system.startswith("user"):
+            actor_type = "USER"
+        else:
+            actor_type = "SYSTEM"
+    if actor_id is None:
+        actor_id = body.get("source_agent_id") or body.get("source_device_id") or body.get("source_user_id") or "system"
     event = event_registry.create_event(
-        actor_type=body.get("actor_type", "SYSTEM"),
-        actor_id=body.get("actor_id", "system"),
-        type=body.get("type", body.get("event_type", "UNKNOWN")),
+        actor_type=actor_type,
+        actor_id=actor_id,
+        type=event_type,
         severity=body.get("severity", "INFO"),
         title=body.get("title", ""),
         description=body.get("description", ""),
         target_type=body.get("target_type", "UNKNOWN"),
         target_id=body.get("target_id", ""),
-        data=body.get("data", {}),
+        data=payload,
         status=body.get("status", "OPEN"),
     )
     result = event.to_dict()
-    _schedule_background_task(get_moth_publisher().publish("events", [e.to_dict() for e in event_registry.list_events()]))
+    _publish_registry_snapshot("events", [e.to_dict() for e in event_registry.list_events()])
     return result
 
 
@@ -313,7 +344,7 @@ def get_alert(alert_id: str) -> dict[str, Any]:
 def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]:
     try:
         result = alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
-        _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+        _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
         return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="alert not found") from exc
@@ -324,7 +355,7 @@ def complete_alert(alert_id: str, body: dict[str, Any] | None = Body(None)) -> d
     try:
         notes = str((body or {}).get("notes") or "Mission completed")
         result = alert_registry.complete_alert(alert_id, notes=notes).to_dict()
-        _schedule_background_task(get_moth_publisher().publish("alerts", [a.to_dict() for a in alert_registry.list_alerts()]))
+        _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
         return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="alert not found") from exc
@@ -384,7 +415,7 @@ def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(
     """정책 생성 (Ch.17.1)"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.create_policy(body)
-    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _publish_registry_snapshot("policies", policy_registry.get_policies())
     return result
 
 
@@ -411,7 +442,7 @@ def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str 
     """정책 업데이트"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.update_policy(policy_id, body)
-    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _publish_registry_snapshot("policies", policy_registry.get_policies())
     return result
 
 
@@ -420,69 +451,8 @@ def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(defaul
     """정책 삭제"""
     require_internal_caller(x_cowater_internal)
     policy_registry.delete_policy(policy_id)
-    _schedule_background_task(get_moth_publisher().publish("policies", policy_registry.get_policies()))
+    _publish_registry_snapshot("policies", policy_registry.get_policies())
     return Response(status_code=204)
-
-
-@app.get("/device-roles")
-def list_device_roles(
-    limit: int | None = Query(default=None, ge=1),
-    offset: int = Query(default=0, ge=0),
-) -> list[dict[str, Any]]:
-    return [item.to_dict() for item in device_role_registry.list_device_roles(limit=limit, offset=offset)]
-
-
-@app.get("/device-roles/{device_id}")
-def get_device_role(device_id: str) -> dict[str, Any]:
-    try:
-        return device_role_registry.get_device_role(device_id).to_dict()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="device role not found") from exc
-
-
-@app.put("/devices/{device_id}/role")
-def upsert_device_role(
-    device_id: str,
-    body: dict[str, Any],
-    x_cowater_internal: str | None = Header(default=None),
-) -> dict[str, Any]:
-    require_internal_caller(x_cowater_internal)
-    return device_role_registry.upsert_device_role(device_id, body).to_dict()
-
-
-@app.post("/operation-plans", status_code=status.HTTP_201_CREATED)
-def create_operation_plan(body: dict[str, Any]) -> dict[str, Any]:
-    return operation_plan_registry.create_operation_plan(body).to_dict()
-
-
-@app.get("/operation-plans")
-def list_operation_plans(
-    limit: int | None = Query(default=None, ge=1),
-    offset: int = Query(default=0, ge=0),
-) -> list[dict[str, Any]]:
-    return [item.to_dict() for item in operation_plan_registry.list_operation_plans(limit=limit, offset=offset)]
-
-
-@app.get("/operation-plans/{operation_plan_id}")
-def get_operation_plan(operation_plan_id: str) -> dict[str, Any]:
-    try:
-        return operation_plan_registry.get_operation_plan(operation_plan_id).to_dict()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="operation plan not found") from exc
-
-
-@app.post("/operation-plans/{operation_plan_id}/activate")
-def activate_operation_plan(
-    operation_plan_id: str,
-    x_cowater_internal: str | None = Header(default=None),
-) -> dict[str, Any]:
-    require_internal_caller(x_cowater_internal)
-    try:
-        plan = operation_plan_registry.get_operation_plan(operation_plan_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="operation plan not found") from exc
-    updated = operation_plan_registry.create_operation_plan({**plan.to_dict(), "status": "active"})
-    return updated.to_dict()
 
 
 @app.post("/insights", status_code=status.HTTP_201_CREATED)
@@ -509,7 +479,7 @@ def get_insight(insight_id: str) -> dict[str, Any]:
 @app.post("/approvals", status_code=status.HTTP_201_CREATED)
 def create_approval(body: dict[str, Any]) -> dict[str, Any]:
     result = approval_registry.create_approval(body).to_dict()
-    _schedule_background_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in approval_registry.list_approvals()]))
+    _publish_registry_snapshot("approvals", [item.to_dict() for item in approval_registry.list_approvals()])
     return result
 
 
@@ -542,7 +512,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
             notes=notes,
         )
         result = approval.to_dict()
-        _schedule_background_task(get_moth_publisher().publish("approvals", [item.to_dict() for item in approval_registry.list_approvals()]))
+        _publish_registry_snapshot("approvals", [item.to_dict() for item in approval_registry.list_approvals()])
         return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="approval not found") from exc
@@ -551,7 +521,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
 @app.post("/mission-proposals", status_code=status.HTTP_201_CREATED)
 def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
     result = mission_proposal_registry.create_mission_proposal(body).to_dict()
-    _schedule_background_task(get_moth_publisher().publish("mission_proposals", [item.to_dict() for item in mission_proposal_registry.list_mission_proposals()]))
+    _publish_registry_snapshot("mission_proposals", [item.to_dict() for item in mission_proposal_registry.list_mission_proposals()])
     return result
 
 
@@ -574,6 +544,29 @@ def get_mission_proposal(proposal_id: str) -> dict[str, Any]:
 @app.post("/agent-connections", status_code=status.HTTP_201_CREATED)
 def create_agent_connection(body: dict[str, Any]) -> dict[str, Any]:
     record = agent_connection_registry.create_agent_connection(body)
+    event_registry.create_event(
+        actor_type="SYSTEM",
+        actor_id="system",
+        type="SYS_AGENT_CONNECTION_CREATED",
+        severity="INFO",
+        title="Agent connection created",
+        description="AgentConnection created",
+        target_type="AGENT_CONNECTION",
+        target_id=record.connection_id,
+        data={
+            "connection_id": record.connection_id,
+            "agent_a_id": record.agent_a_id,
+            "agent_b_id": record.agent_b_id,
+            "connection_type": record.connection_type,
+            "relation_level": record.relation_level,
+            "parent_agent_id": record.parent_agent_id,
+            "mission_id": record.mission_id,
+            "reason": record.reason,
+            "profile": record.profile,
+            "deleted_at": record.deleted_at,
+        },
+    )
+    _publish_registry_snapshot("events", [e.to_dict() for e in event_registry.list_events()])
     return record.to_dict()
 
 
@@ -604,7 +597,25 @@ def update_agent_connection(connection_id: str, body: dict[str, Any]) -> dict[st
 @app.delete("/agent-connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_agent_connection(connection_id: str) -> Response:
     try:
+        record = agent_connection_registry.get_agent_connection(connection_id)
         agent_connection_registry.delete_agent_connection(connection_id)
+        event_registry.create_event(
+            actor_type="SYSTEM",
+            actor_id="system",
+            type="SYS_AGENT_CONNECTION_DELETED",
+            severity="WARNING",
+            title="Agent connection deleted",
+            description="AgentConnection soft deleted",
+            target_type="AGENT_CONNECTION",
+            target_id=connection_id,
+            data={
+                "connection_id": connection_id,
+                "agent_a_id": record.agent_a_id,
+                "agent_b_id": record.agent_b_id,
+                "reason": record.reason or "soft delete",
+            },
+        )
+        _publish_registry_snapshot("events", [e.to_dict() for e in event_registry.list_events()])
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="agent connection not found") from exc
     return Response(status_code=204)
@@ -714,7 +725,6 @@ class MissionCreateRequest(BaseModel):
     alert_id: str | None = None
     event_id: str | None = None
     source_event_id: str | None = None
-    operation_plan_id: str | None = None
     proposal_id: str | None = None
     source_proposal_id: str | None = None
     approval_id: str | None = None
@@ -1243,8 +1253,6 @@ def reset_all_data() -> Response:
     alert_registry.reset()
     event_registry.reset()
     mission_registry.reset()
-    device_role_registry.reset()
-    operation_plan_registry.reset()
     insight_registry.reset()
     approval_registry.reset()
     mission_proposal_registry.reset()
@@ -1315,8 +1323,6 @@ async def websocket_dashboard(websocket: WebSocket) -> None:
             "type": "initial",
             "events": [e.to_dict() for e in event_registry.list_events()],
             "alerts": [a.to_dict() for a in alert_registry.list_alerts()],
-            "device_roles": [d.to_dict() for d in device_role_registry.list_device_roles()],
-            "operation_plans": [p.to_dict() for p in operation_plan_registry.list_operation_plans()],
             "insights": [i.to_dict() for i in insight_registry.list_insights()],
             "approvals": [a.to_dict() for a in approval_registry.list_approvals()],
             "mission_proposals": [p.to_dict() for p in mission_proposal_registry.list_mission_proposals()],

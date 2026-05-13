@@ -20,7 +20,7 @@ class AgentState:
     parent_id: Optional[int] = None
     parent_endpoint: Optional[str] = None
     parent_command_endpoint: Optional[str] = None
-    gateway_agent_id: Optional[int] = None
+    gateway_agent_id: Optional[str] = None
     environment_state: Optional[str] = None
     active_mediums: list[str] = field(default_factory=list)
     route_mode: str = "direct_to_system"

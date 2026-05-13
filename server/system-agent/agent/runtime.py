@@ -38,9 +38,11 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
-    def __init__(self, config_path: Path) -> None:
+    def __init__(self, config_path: Path, overrides: dict[str, Any] | None = None) -> None:
         self.config_path = config_path
         self.config = json.loads(config_path.read_text(encoding="utf-8"))
+        if overrides:
+            self._deep_update(self.config, overrides)
         self.server = self.config.get("server", {})
         self.agent_config = self.config.get("agent", {})
         self.capabilities = self.agent_config.get("capabilities", {})
@@ -88,8 +90,18 @@ class AgentRuntime:
             "return_to_base": ["return_to_base", "surface", "hold_position"],
         }
         self._recommendation_suppressions: dict[str, str] = {}
+        self._policy_action_dedupe: dict[str, float] = {}
         self._command_requests: dict[str, dict[str, Any]] = {}
         self._command_request_tasks: set[asyncio.Task[Any]] = set()
+
+    @classmethod
+    def _deep_update(cls, target: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                cls._deep_update(target[key], value)
+            else:
+                target[key] = value
+        return target
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -128,7 +140,7 @@ class AgentRuntime:
             "ABORTED": "CANCELLED",
         }
         normalized = aliases.get(normalized, normalized)
-        if normalized in {"READY", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"}:
+        if normalized in {"READY", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"}:
             return normalized
         return default
 
@@ -235,7 +247,7 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
-            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_id"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_agent_id"),
             "environment_state": assignment.get("environment_state"),
             "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
@@ -244,7 +256,7 @@ class AgentRuntime:
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
-        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_id")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_agent_id")
         self.state.environment_state = assignment.get("environment_state")
         self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
@@ -266,6 +278,7 @@ class AgentRuntime:
             raise RuntimeError("agent identity is not registered")
         self.registry_client.upsert_agent(
             self.state.registry_id,
+            agent_id=self.state.agent_id,
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
@@ -280,12 +293,10 @@ class AgentRuntime:
 
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
-            await asyncio.gather(
-                self._alert_processing_loop(),
-                self._operation_plan_loop(),
-                self._registry_keepalive_loop(),
-                self._state_cleanup_loop(),
-            )
+            tasks = [self._registry_keepalive_loop(), self._state_cleanup_loop()]
+            if self.state.role == "policy_manager":
+                tasks.append(self._alert_processing_loop())
+            await asyncio.gather(*tasks)
         else:
             await self._telemetry_processing_loop()
 
@@ -406,22 +417,29 @@ class AgentRuntime:
     async def _evaluate_and_apply_policies(self, devices: list[dict[str, Any]], logger: Any) -> None:
         """Policy를 평가하고 Critical 상황 시 자동 대응 (Ch.17.1)"""
         try:
-            # Critical 상황 감지 (예: device lost)
+            # Critical 상황 감지 (예: device offline)
             for device in devices:
                 connectivity_status = device.get("connectivity_status", "offline")
+                device_layer = str(device.get("layer") or "").lower()
+                device_id = str(device.get("id") or device.get("registry_id") or "")
 
-                # Device LOST 상황
-                if connectivity_status == "lost":
-                    # auto_rtb_on_lost 정책 검사
-                    policy = self.registry_client.get_policy("auto_rtb_on_lost")
+                # Device OFFLINE 상황
+                if connectivity_status == "offline" and device_layer != "system" and device_id:
+                    # auto_rtb_on_offline 정책 검사
+                    policy = self.registry_client.get_policy("auto_rtb_on_offline")
                     if policy and policy.get("enabled"):
+                        dedupe_key = f"auto_rtb_on_offline:{device_id}"
+                        now = time.time()
+                        if self._policy_action_dedupe.get(dedupe_key, 0) > now - 600:
+                            continue
+                        self._policy_action_dedupe[dedupe_key] = now
                         logger.info(f"🚨 Policy triggered: {policy.get('policy_name')} for device {device.get('id')}")
                         # 자동 Mission 생성: Return to Base
                         mission = {
                             "mission_id": str(uuid4()),
                             "title": f"Auto Recovery: {device.get('name')} - Return to Base",
                             "trigger_type": "policy",
-                            "trigger_policy_id": "auto_rtb_on_lost",
+                            "trigger_policy_id": "auto_rtb_on_offline",
                             "target_device_id": device.get("id"),
                             "steps": [
                                 {
@@ -752,128 +770,89 @@ class AgentRuntime:
         items.sort(key=lambda item: str((item.get("manual_intervention") or {}).get("at") or ""), reverse=True)
         return items
 
-    def recommend_device_roles(self, goal: str = "") -> dict[str, Any]:
-        devices = self.registry_client.list_devices()
-        recommendations: list[dict[str, Any]] = []
-        for device in devices:
-            device_type = str(device.get("device_type") or "").upper()
-            layer = str(device.get("layer") or "")
-            role_name = "support"
-            responsibility = "General support role."
-            if device_type == "AUV":
-                role_name = "underwater_survey"
-                responsibility = "Performs underwater scanning, anomaly survey, and area mapping."
-            elif device_type == "ROV":
-                role_name = "precision_intervention"
-                responsibility = "Performs close inspection and manipulation tasks at target locations."
-            elif device_type == "USV":
-                role_name = "surface_patrol"
-                responsibility = "Maintains surface patrol, relay, and safety positioning."
-            elif device_type == "CONTROL_SHIP" and layer == "middle":
-                role_name = "relay_and_safety_host"
-                responsibility = "Relays tasks/results for downstream devices and maintains local failsafe control."
-            elif layer == "middle":
-                role_name = "middle_layer_relay"
-                responsibility = "Relays mission tasks and state between System Agent and downstream devices."
-            recommendations.append(
-                {
-                    "device_id": str(device.get("id") or device.get("registry_id") or ""),
-                    "device_name": device.get("name"),
-                    "device_type": device_type,
-                    "role_name": role_name,
-                    "responsibility": responsibility,
-                    "goal_alignment": goal or None,
-                }
-            )
-        return {
-            "goal": goal,
-            "recommended_at": utc_now(),
-            "recommendations": recommendations,
-        }
-
-    def assign_device_role(self, payload: dict[str, Any], *, decided_by: str = "user") -> dict[str, Any]:
-        device_id = str(payload.get("device_id") or "")
-        if not device_id:
-            raise ValueError("device_id is required")
-        approval = self.registry_client.create_approval(
-            {
-                "target_type": "device_role_assignment",
-                "target_id": device_id,
-                "summary": f"Apply device role to {device_id}",
-                "requested_action": "apply_device_role",
-                "status": "pending",
-                "requested_by": "system_agent",
-                "metadata": {
-                    "role_name": payload.get("role_name"),
-                    "responsibility": payload.get("responsibility"),
-                    "status": payload.get("status") or "active",
-                    "notes": payload.get("notes"),
-                    "metadata": payload.get("metadata") or {},
+    async def execute_role_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        role = self.state.role
+        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else payload
+        if role == "request_handler":
+            return await self._execute_request_handler(parameters)
+        if role == "mission_planner":
+            return self.generate_mission_proposal(parameters, allow_suppression=False)
+        if role == "policy_manager":
+            return self._execute_policy_manager(parameters)
+        if role == "device_bridge":
+            command = {
+                "action": parameters.get("action") or parameters.get("command") or "hold_position",
+                "params": parameters.get("params") or {},
+                "reason": parameters.get("reason") or "DeviceBridge execute request",
+            }
+            result = await self.handle_command_with_llm(command)
+            return {"type": "COMMAND", "status": "SUCCESS", "result": result}
+        if role == "system_sentinel":
+            return {"type": "STATE", "status": "SUCCESS", "devices": self.registry_client.list_devices()}
+        if role == "insight_reporter":
+            return {
+                "type": "RESPONSE",
+                "status": "SUCCESS",
+                "data": {
+                    "devices": self.registry_client.list_devices(),
+                    "missions": self.registry_client.list_missions(),
+                    "insights": self.registry_client.list_insights(),
                 },
             }
+        return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
+
+    async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        user_input = str(parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or "").strip()
+        intent = str(parameters.get("intent") or "").upper()
+        if not intent:
+            intent = "QUERY" if any(word in user_input.lower() for word in ["status", "battery", "상태", "배터리"]) else "MISSION"
+        event = self.registry_client.ingest_event(
+            {
+                "event_type": "SYS_INTENT_CLASSIFIED",
+                "source_system": "system_agent",
+                "source_agent_id": self.state.agent_id,
+                "source_role": self.state.role,
+                "severity": "INFORMATION",
+                "message": user_input or f"{intent} request",
+                "target_type": "SYSTEM",
+                "title": "Intent classified",
+                "description": f"RequestHandler classified user request as {intent}.",
+                "data": {"intent": intent, "parameters": parameters},
+            }
         )
-        return {"approval": approval, "device_role": None}
-
-    def activate_operation_plan(self, operation_plan_id: str, *, activated_by: str = "user") -> dict[str, Any]:
-        plan = self.registry_client.activate_operation_plan(operation_plan_id)
-        generated: list[dict[str, Any]] = []
-        for trigger in plan.get("triggers") or []:
-            if not isinstance(trigger, dict):
-                continue
-            trigger_type = str(trigger.get("type") or trigger.get("trigger_type") or "").upper()
-            if trigger_type != "MANUAL":
-                continue
-            generated.append(
-                self.generate_mission_proposal(
-                    {
-                        **self._build_plan_proposal_payload(plan, source="operation_plan_manual_trigger"),
-                        "summary": f"Manual trigger activated by {activated_by}.",
-                    }
-                )
-            )
-        return {"operation_plan": plan, "generated": generated}
-
-    def recommend_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        goal = str(payload.get("goal") or "").strip()
-        roles = payload.get("device_roles")
-        if not isinstance(roles, list) or not roles:
-            roles = self.registry_client.list_device_roles()
-        normalized_roles = [role for role in roles if isinstance(role, dict)]
-        mission_type = self._infer_mission_type(goal, payload.get("alert_type"))
-        triggers = payload.get("triggers")
-        if not isinstance(triggers, list) or not triggers:
-            triggers = [{"type": "MANUAL", "summary": "Operator-triggered execution"}]
-            if mission_type == "mine_clearance":
-                triggers.append({"type": "EVENT", "event_type": "mine_detection", "summary": "Generate proposal when a mine-like object is detected"})
-        summary = payload.get("summary") or f"Plan for {goal or mission_type}"
-        mission_template = {
-            "mission_type": mission_type,
-            "goal": goal,
-            "location": payload.get("location") or {},
-            "requires_approval": True,
-        }
+        if intent == "QUERY":
+            return {
+                "type": "RESPONSE",
+                "status": "SUCCESS",
+                "event": event,
+                "data": {"devices": self.registry_client.list_devices(), "missions": self.registry_client.list_missions()},
+            }
         return {
-            "name": payload.get("name") or f"{mission_type.replace('_', ' ').title()} Plan",
-            "goal": goal,
-            "status": payload.get("status") or "draft",
-            "summary": summary,
-            "triggers": triggers,
-            "device_roles": normalized_roles,
-            "mission_templates": [mission_template],
-            "recommended_by": "system_agent",
-            "metadata": payload.get("metadata") or {},
+            "type": "PROPOSAL",
+            "status": "PENDING_APPROVAL",
+            "event": event,
+            **self.generate_mission_proposal(
+                {
+                    "goal": user_input or str(parameters.get("goal") or intent),
+                    "event_id": event.get("event_id"),
+                    "source": "user_intent",
+                    "location": parameters.get("location") or {},
+                },
+                allow_suppression=False,
+            ),
         }
+
+    def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        policy_id = str(parameters.get("policy_id") or parameters.get("id") or "").strip()
+        if policy_id:
+            policy = self.registry_client.update_policy(policy_id, parameters)
+        else:
+            policy = self.registry_client.create_policy(parameters)
+        return {"type": "RESPONSE", "status": "SUCCESS", "policy": policy}
 
     def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
-        operation_plan_id = payload.get("operation_plan_id")
-        plan = None
-        if operation_plan_id:
-            try:
-                plan = self.registry_client.get_operation_plan(str(operation_plan_id))
-            except Exception:
-                plan = None
         alert = None
         alert_id = payload.get("alert_id")
         if alert_id:
@@ -881,9 +860,9 @@ class AgentRuntime:
                 alert = self.registry_client.get_alert(str(alert_id))
             except Exception:
                 alert = None
-        mission_type = self._infer_mission_type(goal or (plan or {}).get("goal") or "", (alert or {}).get("alert_type"))
-        location = payload.get("location") or ((plan or {}).get("mission_templates") or [{}])[0].get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
-        suppression_fingerprint = f"{mission_type}:{goal or (plan or {}).get('goal') or ''}:{(alert or {}).get('alert_id') or ''}"
+        mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
+        location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+        suppression_fingerprint = f"{mission_type}:{goal}:{(alert or {}).get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
             return {
@@ -916,12 +895,11 @@ class AgentRuntime:
             {
                 "title": payload.get("title") or f"{mission_type.replace('_', ' ').title()} Proposal",
                 "mission_type": mission_type,
-                "goal": goal or (plan or {}).get("goal") or mission_type,
+                "goal": goal or mission_type,
                 "summary": payload.get("summary") or f"Proposal with {len(steps)} step(s) for operator review.",
-                "source": payload.get("source") or ("operation_plan" if plan else "system_agent"),
+                "source": payload.get("source") or "system_agent",
                 "alert_id": (alert or {}).get("alert_id"),
                 "event_id": payload.get("event_id") or (alert or {}).get("event_id"),
-                "operation_plan_id": operation_plan_id,
                 "insight_id": insight.get("insight_id"),
                 "steps": steps,
                 "metadata": {"location": location, "fingerprint": suppression_fingerprint},
@@ -968,22 +946,6 @@ class AgentRuntime:
             decided_by=decided_by,
             notes=notes,
         )
-        if str(approval.get("target_type") or "") == "device_role_assignment":
-            if approved:
-                metadata = dict(approval.get("metadata") or {})
-                role = self.registry_client.upsert_device_role(
-                    str(approval.get("target_id") or ""),
-                    {
-                        "device_id": str(approval.get("target_id") or ""),
-                        "role_name": metadata.get("role_name"),
-                        "responsibility": metadata.get("responsibility"),
-                        "assigned_by": decided_by,
-                        "status": metadata.get("status") or "active",
-                        "metadata": metadata.get("metadata") or {},
-                    },
-                )
-                return {"approval": approval, "device_role": role, "mission": None}
-            return {"approval": approval, "device_role": None, "mission": None}
         if str(approval.get("target_type") or "") == "mission_reapproval":
             mission_id = str(approval.get("target_id") or "")
             mission = self.registry_client.get_mission(mission_id)
@@ -1166,48 +1128,6 @@ class AgentRuntime:
             return self._condition_clause_matches(trigger, source)
         return False
 
-    def _build_plan_proposal_payload(self, plan: dict[str, Any], *, source: str, event: dict[str, Any] | None = None) -> dict[str, Any]:
-        mission_template = ((plan.get("mission_templates") or [{}])[0] if isinstance(plan.get("mission_templates"), list) else {}) or {}
-        metadata = dict(plan.get("metadata") or {})
-        return {
-            "title": f"{plan.get('name') or 'Operation Plan'} Proposal",
-            "goal": mission_template.get("goal") or plan.get("goal") or "",
-            "operation_plan_id": plan.get("operation_plan_id"),
-            "location": mission_template.get("location") or metadata.get("location") or ((event or {}).get("metadata") or {}).get("location") or {},
-            "alert_id": (event or {}).get("alert_id"),
-            "event_id": (event or {}).get("event_id"),
-            "severity": (event or {}).get("severity") or "INFORMATION",
-            "source": source,
-            "summary": f"Proposal generated from operation plan {plan.get('operation_plan_id')}.",
-        }
-
-    async def _operation_plan_loop(self) -> None:
-        logger = logging.getLogger(__name__)
-        last_triggered: dict[str, str] = {}
-        while True:
-            await asyncio.sleep(30)
-            try:
-                plans = self.registry_client.list_operation_plans()
-            except Exception as exc:
-                logger.debug(f"Failed to fetch operation plans: {exc}")
-                continue
-            snapshot = self._condition_snapshot()
-            current_slot = self._current_hhmm()
-            for plan in plans:
-                if str(plan.get("status") or "") != "active":
-                    continue
-                for idx, trigger in enumerate(plan.get("triggers") or []):
-                    if not isinstance(trigger, dict):
-                        continue
-                    if not self._trigger_matches(trigger, snapshot=snapshot):
-                        continue
-                    dedupe_key = f"{plan.get('operation_plan_id')}:{idx}:{current_slot}"
-                    if last_triggered.get(dedupe_key) == current_slot:
-                        continue
-                    self.generate_mission_proposal(self._build_plan_proposal_payload(plan, source="operation_plan_time_trigger"))
-                    last_triggered[dedupe_key] = current_slot
-                    self.state.remember({"kind": "operation_plan_triggered", "at": utc_now(), "operation_plan_id": plan.get("operation_plan_id"), "trigger": trigger})
-
     def _infer_mission_type(self, goal: str, alert_type: Any) -> str:
         goal_text = str(goal or "").lower()
         alert_text = str(alert_type or "").lower()
@@ -1264,7 +1184,6 @@ class AgentRuntime:
             "source": proposal.get("source") or "system_agent",
             "alert_id": proposal.get("alert_id"),
             "event_id": proposal.get("event_id"),
-            "operation_plan_id": proposal.get("operation_plan_id"),
             "proposal_id": proposal.get("proposal_id"),
             "approval_id": approval_id,
             "insight_id": proposal.get("insight_id"),
@@ -1639,7 +1558,7 @@ class AgentRuntime:
         
         Scoring Factors:
         - Distance (25%): 목표까지의 거리
-        - Battery (20%): 배터리 수준
+        - Battery (30% 경고 / 10% 자동 복귀): 배터리 수준
         - Capability (20%): action 수행 능력
         - Reliability (15%): 역사적 성공률
         - Workload (15%): 현재 작업 부하
@@ -1832,7 +1751,7 @@ class AgentRuntime:
 
             # Device 상태를 "online"으로 복원
             device = self.registry_client.get_device(device_id)
-            if device and device.get("connectivity_status") == "lost":
+            if device and device.get("connectivity_status") == "offline":
                 # Connectivity status를 online으로 변경
                 self.registry_client.update_device_connectivity(device_id, "online")
                 logger.info(f"✅ Device {device_id} marked as online")
@@ -1919,7 +1838,7 @@ class AgentRuntime:
         # P9 (기록 가능성): 평가 결과를 Event로 기록
         try:
             event = create_step_evaluation_event(
-                source_agent_id=self.state.registry_id or self.state.agent_id,
+                source_agent_id=self.state.agent_id,
                 response_id=response.get("response_id", ""),
                 step_id=step.get("step_id", ""),
                 policy=evaluation.get("policy", ""),
@@ -2214,6 +2133,31 @@ class AgentRuntime:
                                     )
                                 except Exception as e:
                                     logger.debug(f"Failed to record task_assigned timeline: {e}")
+                                try:
+                                    self.registry_client.ingest_event(
+                                        {
+                                            "source_system": "system_agent",
+                                            "source_agent_id": str(self.state.agent_id),
+                                            "source_role": str(self.state.role or "mission_planner"),
+                                            "event_type": "SYS_TASK_DISPATCHED",
+                                            "severity": "INFO",
+                                            "title": f"Task {task['task_id']} dispatched",
+                                            "description": f"Task {task['task_id']} dispatched to device {task['target_device_id']}.",
+                                            "target_type": "TASK",
+                                            "target_id": str(task["task_id"]),
+                                            "data": {
+                                                "mission_id": mission_id,
+                                                "step_id": str(step["step_id"]),
+                                                "task_id": str(task["task_id"]),
+                                                "action": task["action"],
+                                                "target_device_id": str(task["target_device_id"]),
+                                                "route_agent_id": str(task["route_agent_id"]),
+                                            },
+                                            "target_agents": ["SystemSentinel", "InsightReporter"],
+                                        }
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Failed to record task dispatched event: {e}")
                             task_state["dispatch"] = dispatch
                             task_state["dispatch_status"] = "ASSIGNED" if dispatch.get("delivered") else "FAILED"
                             task_state["acceptance_status"] = dispatch.get("acceptance_status")
@@ -2636,7 +2580,6 @@ class AgentRuntime:
                     "summary": f"LLM interpreted operator command as {command_action}.",
                     "reason_summary": llm_result.get("reasoning") if llm_result else "Operator command interpreted by system agent.",
                     "source": "user_command",
-                    "operation_plan_id": command.get("operation_plan_id"),
                     "location": (command.get("params") or {}).get("location") or {},
                     "insight_summary": f"Command-driven response for {command_action}",
                     "severity": "INFORMATION",
@@ -2757,32 +2700,6 @@ class AgentRuntime:
                 "summary": f"Proposal generated from alert {stored_alert.get('alert_id')}.",
             }
         )
-        try:
-            plans = self.registry_client.list_operation_plans()
-        except Exception:
-            plans = []
-        for plan in plans:
-            if str(plan.get("status") or "") != "active":
-                continue
-            matched = any(
-                isinstance(trigger, dict) and self._trigger_matches(trigger, event={"event_type": event_type, "type": event_type, "metadata": metadata, "event_id": stored_event.get("event_id"), "alert_id": stored_alert.get("alert_id"), "severity": severity})
-                for trigger in (plan.get("triggers") or [])
-            )
-            if matched:
-                self.generate_mission_proposal(
-                    self._build_plan_proposal_payload(
-                        plan,
-                        source="operation_plan_event_trigger",
-                        event={
-                            "event_type": event_type,
-                            "event_id": stored_event.get("event_id"),
-                            "alert_id": stored_alert.get("alert_id"),
-                            "metadata": metadata,
-                            "severity": severity,
-                        },
-                    )
-                )
-
         self.state.remember(
             {
                 "kind": "event_report_processed",
@@ -2946,6 +2863,31 @@ class AgentRuntime:
                 "data": {"task_id": task_id, "error": error, "decision": decision},
             }
         )
+        try:
+            self.registry_client.ingest_event(
+                {
+                    "source_system": "system_agent",
+                    "source_agent_id": str(self.state.agent_id),
+                    "source_role": str(self.state.role or "mission_planner"),
+                    "event_type": "SYS_TASK_FAILED",
+                    "severity": "WARNING",
+                    "title": f"Task {task_id} failed",
+                    "description": f"Task {task_id} reported {status}.",
+                    "target_type": "TASK",
+                    "target_id": task_id,
+                    "data": {
+                        "mission_id": mission_id,
+                        "step_id": str(payload.get("step_id") or "default"),
+                        "task_id": task_id,
+                        "status": status,
+                        "error": error,
+                        "decision": decision,
+                    },
+                    "target_agents": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
+                }
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to record task failed event: {exc}")
         current_mission["status"] = "FAILED" if decision == "abort_mission" else "IN_PROGRESS"
         if decision == "abort_mission":
             current_mission["completed_at"] = utc_now()
@@ -3185,9 +3127,9 @@ class AgentRuntime:
                                     "source_system": "system_agent",
                                     "source_agent_id": str(self.state.agent_id),
                                     "source_role": str(self.state.role or "mission_planner"),
-                                    "event_type": "USER_REPLAN_REQUEST",
+                                    "event_type": "SYS_MISSION_REPLAN_REQUESTED",
                                     "severity": "INFO",
-                                    "title": "User replan requested",
+                                    "title": "Mission replan requested",
                                     "description": f"Mission {mission_id} requires replan or reapproval.",
                                     "target_type": "MISSION",
                                     "target_id": mission_id,
@@ -3200,7 +3142,7 @@ class AgentRuntime:
                                 }
                             )
                         except Exception as exc:
-                            logger.debug(f"Failed to record USER_REPLAN_REQUEST event: {exc}")
+                            logger.debug(f"Failed to record SYS_MISSION_REPLAN_REQUESTED event: {exc}")
                         mission.setdefault("timeline", []).append(
                             {
                                 "timestamp": utc_now(),
@@ -3363,6 +3305,31 @@ class AgentRuntime:
                         },
                     }
                 )
+                try:
+                    self.registry_client.ingest_event(
+                        {
+                            "source_system": "system_agent",
+                            "source_agent_id": str(self.state.agent_id),
+                            "source_role": str(self.state.role or "mission_planner"),
+                            "event_type": "SYS_TASK_COMPLETED" if normalized_status == "COMPLETED" else "SYS_TASK_FAILED",
+                            "severity": "INFO" if normalized_status == "COMPLETED" else "WARNING",
+                            "title": f"Task {task_id} {normalized_status.lower()}",
+                            "description": f"Task {task_id} reported {normalized_status}.",
+                            "target_type": "TASK",
+                            "target_id": task_id,
+                            "data": {
+                                "mission_id": mission_id,
+                                "step_id": step_id,
+                                "task_id": task_id,
+                                "status": normalized_status,
+                                "device_id": execution_entry.get("device_id"),
+                                "failure_reason": execution_entry.get("failure_reason"),
+                            },
+                            "target_agents": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
+                        }
+                    )
+                except Exception as exc:
+                    logger.debug(f"Failed to record task event: {exc}")
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
@@ -3392,6 +3359,28 @@ class AgentRuntime:
                             self.registry_client.complete_alert(alert_id, notes="Mission completed")
                         except Exception as exc:
                             logger.debug(f"Failed to complete alert {alert_id}: {exc}")
+                    try:
+                        self.registry_client.ingest_event(
+                            {
+                                "source_system": "system_agent",
+                                "source_agent_id": str(self.state.agent_id),
+                                "source_role": str(self.state.role or "mission_planner"),
+                                "event_type": "SYS_MISSION_COMPLETED",
+                                "severity": "INFO",
+                                "title": "Mission completed",
+                                "description": f"Mission {mission_id} completed.",
+                                "target_type": "MISSION",
+                                "target_id": mission_id,
+                                "data": {
+                                    "mission_id": mission_id,
+                                    "step_id": step_id,
+                                    "status": "COMPLETED",
+                                },
+                                "target_agents": ["InsightReporter", "SystemSentinel"],
+                            }
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to record mission completed event: {exc}")
                 elif aggregate_status == "FAILED":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
@@ -3415,6 +3404,29 @@ class AgentRuntime:
                             self.registry_client.acknowledge_alert(alert_id, approved=False, notes="Mission failed")
                         except Exception as exc:
                             logger.debug(f"Failed to mark alert {alert_id} as failed: {exc}")
+                    try:
+                        self.registry_client.ingest_event(
+                            {
+                                "source_system": "system_agent",
+                                "source_agent_id": str(self.state.agent_id),
+                                "source_role": str(self.state.role or "mission_planner"),
+                                "event_type": "SYS_MISSION_UPDATED",
+                                "severity": "WARNING",
+                                "title": "Mission failed",
+                                "description": f"Mission {mission_id} failed.",
+                                "target_type": "MISSION",
+                                "target_id": mission_id,
+                                "data": {
+                                    "mission_id": mission_id,
+                                    "step_id": step_id,
+                                    "status": "FAILED",
+                                    "reason": mission["final_result"].get("reason"),
+                                },
+                                "target_agents": ["InsightReporter", "SystemSentinel"],
+                            }
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to record mission failed event: {exc}")
                 if manual_intervention_required:
                     mission.setdefault("timeline", []).append(
                         {

@@ -296,7 +296,7 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
-            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_id"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_agent_id"),
             "environment_state": assignment.get("environment_state"),
             "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
@@ -305,7 +305,7 @@ class AgentRuntime:
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
-        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_id")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_agent_id")
         self.state.environment_state = assignment.get("environment_state")
         self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
@@ -337,6 +337,7 @@ class AgentRuntime:
         
         self.registry_client.upsert_agent(
             self.state.registry_id,
+            agent_id=self.state.agent_id,
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
@@ -532,8 +533,6 @@ class AgentRuntime:
                     underwater = float(altitude_value) < 0.0
                 self.state.environment_state = "UNDERWATER" if underwater else "SURFACE"
                 self.state.active_mediums = ["ACOUSTIC"] if underwater else ["RF", "INTERNET", "ACOUSTIC"]
-                self.state.gateway_agent_id = self.state.parent_id
-
                 # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
                 # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
                 self._update_tools_from_telemetry(telemetry)
@@ -768,16 +767,25 @@ class AgentRuntime:
         last_level = self._last_sensor_check.get("battery_level", current_level)
 
         # 배터리 상태 변화 감지
-        if current_level < 20 and last_level >= 20:
+        if current_level < 30 and last_level >= 30:
             # ✅ Event를 Registry에 보고 (Ch.15)
             event = {
                 "event_id": str(uuid4()),
                 "source_system": "device_agent",
-                "source_agent_id": self.state.registry_id,
+                "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "event_type": "sensor_status_changed",
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "severity": "WARNING",
                 "message": f"Battery low: {current_level}%",
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "title": "Low battery warning",
+                "description": f"Battery dropped below warning threshold: {current_level}%",
+                "data": {
+                    "anomaly_type": "LOW_BATTERY",
+                    "battery_percent": current_level,
+                    "threshold": 30,
+                },
                 "metadata": {
                     "sensor_type": "battery",
                     "sensor_id": "battery_main",
@@ -802,11 +810,21 @@ class AgentRuntime:
             event = {
                 "event_id": str(uuid4()),
                 "source_system": "device_agent",
-                "source_agent_id": self.state.registry_id,
+                "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "event_type": "sensor_status_changed",
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "severity": "CRITICAL",
                 "message": f"Depth exceeded: {depth_m}m > {max_depth}m",
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "title": "Depth limit exceeded",
+                "description": f"Depth exceeded maximum limit: {depth_m}m > {max_depth}m",
+                "data": {
+                    "anomaly_type": "CRITICAL_HAZARD",
+                    "hazard": "DEPTH_LIMIT_EXCEEDED",
+                    "depth_m": depth_m,
+                    "threshold_m": max_depth,
+                },
                 "metadata": {
                     "sensor_type": "depth",
                     "sensor_id": "depth_main",

@@ -148,12 +148,13 @@ class RegistryClient:
             body["location"] = location
         if requires_parent:
             body["requires_parent"] = requires_parent
-        return post_json(f"{self.url}/devices", body)
+        return post_json(f"{self.url}/devices/register", body)
 
     def upsert_agent(
         self,
         registry_id: int,
         *,
+        agent_id: str | None = None,
         endpoint: str,
         command_endpoint: str,
         role: str,
@@ -164,12 +165,13 @@ class RegistryClient:
         latitude: float | None = None,
         longitude: float | None = None,
         battery_percent: float | None = None,
-        gateway_agent_id: int | None = None,
+        gateway_agent_id: str | None = None,
         environment_state: str | None = None,
         active_mediums: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "secretKey": self.secret_key,
+            "agent_id": agent_id,
             "endpoint": endpoint,
             "commandEndpoint": command_endpoint,
             "role": role,
@@ -192,8 +194,9 @@ class RegistryClient:
             payload["environment_state"] = environment_state
         if active_mediums is not None:
             payload["active_mediums"] = active_mediums
-        return put_json(
-            f"{self.url}/devices/{registry_id}/agent",
+        payload["device_id"] = registry_id
+        return post_json(
+            f"{self.url}/agents/register",
             payload,
         )
 

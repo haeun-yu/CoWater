@@ -135,12 +135,13 @@ class RegistryClient:
             body["location"] = location
         if requires_parent:
             body["requires_parent"] = requires_parent
-        return post_json(f"{self.url}/devices", body)
+        return post_json(f"{self.url}/devices/register", body)
 
     def upsert_agent(
         self,
         registry_id: int,
         *,
+        agent_id: str | None = None,
         endpoint: str,
         command_endpoint: str,
         role: str,
@@ -148,26 +149,29 @@ class RegistryClient:
         skills: list[str],
         actions: list[str],
         last_seen_at: str | None,
-        gateway_agent_id: int | None = None,
+        gateway_agent_id: str | None = None,
         environment_state: str | None = None,
         active_mediums: list[str] | None = None,
     ) -> dict[str, Any]:
-        return put_json(
-            f"{self.url}/devices/{registry_id}/agent",
-            {
-                "secretKey": self.secret_key,
-                "endpoint": endpoint,
-                "commandEndpoint": command_endpoint,
-                "role": role,
-                "llm_enabled": llm_enabled,
-                "skills": skills,
-                "available_actions": actions,
-                "connected": True,
-                "last_seen_at": last_seen_at,
-                "gateway_agent_id": gateway_agent_id,
-                "environment_state": environment_state,
-                "active_mediums": active_mediums or [],
-            },
+        payload = {
+            "secretKey": self.secret_key,
+            "device_id": registry_id,
+            "agent_id": agent_id,
+            "endpoint": endpoint,
+            "commandEndpoint": command_endpoint,
+            "role": role,
+            "llm_enabled": llm_enabled,
+            "skills": skills,
+            "available_actions": actions,
+            "connected": True,
+            "last_seen_at": last_seen_at,
+            "gateway_agent_id": gateway_agent_id,
+            "environment_state": environment_state,
+            "active_mediums": active_mediums or [],
+        }
+        return post_json(
+            f"{self.url}/agents/register",
+            payload,
         )
 
     def get_assignment(self, registry_id: int) -> dict[str, Any]:
@@ -216,35 +220,6 @@ class RegistryClient:
         body = {"notes": notes or "Mission completed"}
         return post_json(f"{self.url}/alerts/{alert_id}/complete", body)
 
-    def list_device_roles(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/device-roles", params={"limit": limit, "offset": offset})
-
-    def get_device_role(self, device_id: str | int) -> dict[str, Any]:
-        return get_json(f"{self.url}/device-roles/{device_id}")
-
-    def upsert_device_role(self, device_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
-        return put_json(
-            f"{self.url}/devices/{device_id}/role",
-            payload,
-            headers=self._internal_headers(),
-        )
-
-    def create_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return post_json(f"{self.url}/operation-plans", payload)
-
-    def list_operation_plans(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/operation-plans", params={"limit": limit, "offset": offset})
-
-    def get_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
-        return get_json(f"{self.url}/operation-plans/{operation_plan_id}")
-
-    def activate_operation_plan(self, operation_plan_id: str) -> dict[str, Any]:
-        return post_json(
-            f"{self.url}/operation-plans/{operation_plan_id}/activate",
-            {},
-            headers=self._internal_headers(),
-        )
-
     def create_insight(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/insights", payload)
 
@@ -256,6 +231,12 @@ class RegistryClient:
 
     def get_policy(self, policy_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/policies/{policy_id}")
+
+    def create_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/policies", payload, headers=self._internal_headers())
+
+    def update_policy(self, policy_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(f"{self.url}/policies/{policy_id}", payload, headers=self._internal_headers())
 
     def create_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/approvals", payload)

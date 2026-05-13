@@ -12,12 +12,10 @@ from src.registry.alert_registry import AlertRegistry
 from src.registry.approval_registry import ApprovalRegistry
 from src.registry.config_registry import ConfigRegistry
 from src.registry.device_registry import DeviceRegistry
-from src.registry.device_role_registry import DeviceRoleRegistry
 from src.registry.event_registry import EventRegistry
 from src.registry.insight_registry import InsightRegistry
 from src.registry.mission_proposal_registry import MissionProposalRegistry
 from src.registry.mission_registry import MissionRegistry
-from src.registry.operation_plan_registry import OperationPlanRegistry
 from src.registry.policy_registry import PolicyRegistry
 from src.registry.proposal_task_registry import ProposalTaskRegistry
 from src.registry.report_registry import ReportRegistry
@@ -44,8 +42,6 @@ class RegistryComponents:
     config_registry: ConfigRegistry
     sensor_registry: SensorRegistry
     mission_registry: MissionRegistry
-    device_role_registry: DeviceRoleRegistry
-    operation_plan_registry: OperationPlanRegistry
     insight_registry: InsightRegistry
     approval_registry: ApprovalRegistry
     mission_proposal_registry: MissionProposalRegistry
@@ -93,8 +89,6 @@ def build_registry_components() -> RegistryComponents:
     config_db_path = ":memory:" if storage_type == "memory" else ".data/configs.db"
     sensor_db_path = ":memory:" if storage_type == "memory" else ".data/sensors.db"
     mission_db_path = ":memory:" if storage_type == "memory" else ".data/missions.db"
-    device_role_db_path = ":memory:" if storage_type == "memory" else ".data/device_roles.db"
-    operation_plan_db_path = ":memory:" if storage_type == "memory" else ".data/operation_plans.db"
     insight_db_path = ":memory:" if storage_type == "memory" else ".data/insights.db"
     approval_db_path = ":memory:" if storage_type == "memory" else ".data/approvals.db"
     mission_proposal_db_path = ":memory:" if storage_type == "memory" else ".data/mission_proposals.db"
@@ -109,8 +103,6 @@ def build_registry_components() -> RegistryComponents:
     config_registry = ConfigRegistry(db_path=config_db_path)
     sensor_registry = SensorRegistry(db_path=sensor_db_path)
     mission_registry = MissionRegistry(db_path=mission_db_path)
-    device_role_registry = DeviceRoleRegistry(db_path=device_role_db_path)
-    operation_plan_registry = OperationPlanRegistry(db_path=operation_plan_db_path)
     insight_registry = InsightRegistry(db_path=insight_db_path)
     approval_registry = ApprovalRegistry(db_path=approval_db_path)
     mission_proposal_registry = MissionProposalRegistry(db_path=mission_proposal_db_path)
@@ -136,8 +128,6 @@ def build_registry_components() -> RegistryComponents:
         config_registry=config_registry,
         sensor_registry=sensor_registry,
         mission_registry=mission_registry,
-        device_role_registry=device_role_registry,
-        operation_plan_registry=operation_plan_registry,
         insight_registry=insight_registry,
         approval_registry=approval_registry,
         mission_proposal_registry=mission_proposal_registry,

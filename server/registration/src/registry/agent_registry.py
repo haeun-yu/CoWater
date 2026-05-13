@@ -109,11 +109,19 @@ class AgentRegistry:
 
     def list_agents(self, limit: int = 100, offset: int = 0) -> List[AgentRecord]:
         """에이전트 목록 조회"""
+        query = "SELECT agent_id, data, created_at, updated_at FROM agents ORDER BY created_at DESC"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT agent_id, data, created_at, updated_at FROM agents LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [self._row_to_agent(row) for row in rows]
 
     def list_agents_by_type(self, agent_type: str) -> List[AgentRecord]:

@@ -20,12 +20,12 @@ DEFAULT_CORS_ORIGINS = ["*"]
 
 # ← NEW: Healthcheck & Re-binding
 DEFAULT_HEALTHCHECK_INTERVAL_SECONDS = 1
-DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS = 20  # ← UPDATED: 3s → 20s (device-type default)
+DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS = 10
 DEFAULT_HEALTHCHECK_TIMEOUT_BY_DEVICE_TYPE = {
-    "usv": 20,      # Surface vehicle: 20 seconds
-    "auv": 30,      # Underwater vehicle: 30 seconds (slow telemetry)
-    "rov": 25,      # Tethered vehicle: 25 seconds (tether lag)
-    "ship": 15,     # Surface ship: 15 seconds (fast comms)
+    "usv": 10,
+    "auv": 10,
+    "rov": 10,
+    "ship": 10,
 }
 DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS = 500
 DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS = 1

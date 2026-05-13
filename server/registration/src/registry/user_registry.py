@@ -90,11 +90,19 @@ class UserRegistry:
 
     def list_users(self, limit: int = 100, offset: int = 0) -> List[UserRecord]:
         """사용자 목록 조회"""
+        query = "SELECT user_id, data, created_at, updated_at FROM users ORDER BY created_at DESC"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT user_id, data, created_at, updated_at FROM users LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [self._row_to_user(row) for row in rows]
 
     def update_user(self, user_id: str, **kwargs) -> UserRecord:

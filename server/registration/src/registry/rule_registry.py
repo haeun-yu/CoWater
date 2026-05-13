@@ -111,11 +111,19 @@ class RuleRegistry:
 
     def list_rules(self, limit: int = 100, offset: int = 0) -> List[RuleRecord]:
         """Rule 목록 조회"""
+        query = "SELECT rule_id, policy_id, data, created_at, updated_at FROM rules ORDER BY created_at DESC"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT rule_id, policy_id, data, created_at, updated_at FROM rules LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [self._row_to_rule(row) for row in rows]
 
     def list_rules_by_policy(self, policy_id: str) -> List[RuleRecord]:

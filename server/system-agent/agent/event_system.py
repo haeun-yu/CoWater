@@ -33,9 +33,11 @@ class EventSeverity(Enum):
 class EventType(Enum):
     """Event 유형"""
     STEP_EVALUATION = "SYS_MISSION_UPDATED"
-    TASK_EXECUTION = "SYS_TASK_RESULT"
+    TASK_COMPLETED = "SYS_TASK_COMPLETED"
+    TASK_FAILED = "SYS_TASK_FAILED"
     RECOVERY_ACTION = "SYS_MISSION_UPDATED"
     MISSION_STATE_CHANGE = "SYS_MISSION_UPDATED"
+    MISSION_COMPLETED = "SYS_MISSION_COMPLETED"
     ALERT_GENERATED = "SYS_ANOMALY_DETECTED"
     DEVICE_STATUS_CHANGE = "SYS_ANOMALY_DETECTED"
     POLICY_DECISION = "SYS_POLICY_DECISION"
@@ -53,6 +55,7 @@ class StateChangeEvent:
         event_type: EventType | str,
         source_system: str,
         source_agent_id: int | str,
+        actor_type: str = "SYSTEM",
         severity: EventSeverity | str = EventSeverity.INFO,
         title: str = "",
         description: str = "",
@@ -73,7 +76,7 @@ class StateChangeEvent:
             recovery_history: 복구 이력 (retry/reassign 등)
         """
         self.event_id = str(uuid4())
-        self.created_at = datetime.now(timezone.utc).isoformat() + "Z"
+        self.created_at = datetime.now(timezone.utc).isoformat()
         
         # Event 유형 정규화
         if isinstance(event_type, EventType):
@@ -90,6 +93,7 @@ class StateChangeEvent:
         
         self.source_system = str(source_system)
         self.source_agent_id = source_agent_id
+        self.actor_type = str(actor_type or "SYSTEM").upper()
         self.title = str(title)
         self.description = str(description)
         self.related_ids = related_ids or {}
@@ -103,7 +107,7 @@ class StateChangeEvent:
             "created_at": self.created_at,
             "type": self.event_type,
             "severity": self.severity,
-            "actor_type": "SYSTEM_AGENT",
+            "actor_type": self.actor_type,
             "actor_id": str(self.source_agent_id),
             "title": self.title,
             "description": self.description,
@@ -163,7 +167,7 @@ class EventPublisher:
             if self.registry_client:
                 event_dict = event.to_dict()
                 self.registry_client.create_event(
-                    actor_type=event_dict.get("actor_type", "SYSTEM_AGENT"),
+                    actor_type=event_dict.get("actor_type", "SYSTEM"),
                     actor_id=event_dict.get("actor_id", "system"),
                     type=event_dict.get("type", "UNKNOWN"),
                     severity=event_dict.get("severity", "INFO"),
@@ -277,6 +281,35 @@ def create_recovery_action_event(
     )
 
 
+def create_task_result_event(
+    source_agent_id: int | str,
+    mission_id: str,
+    step_id: str,
+    task_id: str,
+    status: str,
+    reason: str = "",
+    metrics: Optional[dict[str, Any]] = None,
+) -> StateChangeEvent:
+    """Task 완료/실패 이벤트 생성."""
+    normalized_status = str(status or "COMPLETED").upper()
+    event_type = EventType.TASK_FAILED if normalized_status in {"FAILED", "ABORTED", "CANCELLED"} else EventType.TASK_COMPLETED
+    severity = EventSeverity.WARNING if event_type == EventType.TASK_FAILED else EventSeverity.INFO
+    return StateChangeEvent(
+        event_type=event_type,
+        source_system="system_agent",
+        source_agent_id=source_agent_id,
+        severity=severity,
+        title=f"Task Result: {normalized_status}",
+        description=reason,
+        related_ids={
+            "mission_id": mission_id,
+            "step_id": step_id,
+            "task_id": task_id,
+        },
+        metrics=metrics or {"status": normalized_status},
+    )
+
+
 def create_mission_state_change_event(
     source_agent_id: int | str,
     mission_id: str,
@@ -294,10 +327,12 @@ def create_mission_state_change_event(
         new_state: 새로운 상태
         reason: 상태 변화 이유
     """
-    severity = EventSeverity.INFO if str(new_state).upper() == "COMPLETED" else EventSeverity.WARNING
+    normalized_state = str(new_state).upper()
+    severity = EventSeverity.INFO if normalized_state == "COMPLETED" else EventSeverity.WARNING
+    event_type = EventType.MISSION_COMPLETED if normalized_state == "COMPLETED" else EventType.MISSION_STATE_CHANGE
     
     return StateChangeEvent(
-        event_type=EventType.MISSION_STATE_CHANGE,
+        event_type=event_type,
         source_system="system_agent",
         source_agent_id=source_agent_id,
         severity=severity,
@@ -328,16 +363,17 @@ def create_device_status_change_event(
         source_agent_id: Device Agent ID
         device_id: Device ID
         device_name: Device 이름
-        old_status: 이전 상태 (online, offline, lost, recovered)
+        old_status: 이전 상태 (online, offline, recovered)
         new_status: 새로운 상태
         reason: 상태 변화 이유
     """
-    severity = EventSeverity.CRITICAL if new_status == "lost" else EventSeverity.WARNING
+    severity = EventSeverity.CRITICAL if new_status == "offline" else EventSeverity.WARNING
     
     return StateChangeEvent(
         event_type=EventType.DEVICE_STATUS_CHANGE,
         source_system="device_agent",
         source_agent_id=source_agent_id,
+        actor_type="DEVICE",
         severity=severity,
         title=f"Device Status Change: {old_status} → {new_status}",
         description=reason,

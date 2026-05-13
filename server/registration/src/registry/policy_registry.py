@@ -51,27 +51,26 @@ class PolicyRegistry:
         conn.commit()
 
     def _seed_default_policies(self) -> None:
-        if self.list_policies():
-            return
+        # Migrate the old "lost" wording to the docs-standard "offline" state.
+        self.db.execute("DELETE FROM policies WHERE policy_id = ?", ("auto_rtb_on_lost",))
+        self.db.commit()
 
-        self.create_policy(
+        default_policies = [
             {
-                "policy_id": "auto_rtb_on_lost",
-                "policy_name": "Lost Device Return to Base",
-                "name": "auto_rtb_on_lost",
-                "description": "Lost device triggers return-to-base mission proposal.",
+                "policy_id": "auto_rtb_on_offline",
+                "policy_name": "Offline Device Return to Base",
+                "name": "auto_rtb_on_offline",
+                "description": "Offline device triggers return-to-base mission proposal.",
                 "enabled": True,
                 "trigger_condition": {
                     "event_type": "device_connectivity_changed",
-                    "new_status": "lost",
+                    "new_status": "offline",
                 },
                 "action": {
                     "task_type": "return_to_base",
                     "priority": "critical",
                 },
-            }
-        )
-        self.create_policy(
+            },
             {
                 "policy_id": "alert_low_battery",
                 "policy_name": "Low Battery Alert",
@@ -85,8 +84,11 @@ class PolicyRegistry:
                 "action": {
                     "type": "alert_only",
                 },
-            }
-        )
+            },
+        ]
+        for policy in default_policies:
+            if self._read_row(str(policy["policy_id"])) is None:
+                self.create_policy(policy)
 
     def _read_row(self, policy_id: str) -> dict[str, Any] | None:
         cursor = self.db.execute(

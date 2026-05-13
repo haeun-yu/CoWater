@@ -152,10 +152,16 @@ class A2ALogRegistry:
                 FROM a2a_logs
                 WHERE {where_clause}
                 ORDER BY logged_at DESC
-                LIMIT ? OFFSET ?
             """
-            params.append(limit)
-            params.append(offset)
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+                if offset:
+                    query += " OFFSET ?"
+                    params.append(offset)
+            elif offset:
+                query += " LIMIT -1 OFFSET ?"
+                params.append(offset)
 
             with self._connect() as conn:
                 rows = conn.execute(query, params).fetchall()

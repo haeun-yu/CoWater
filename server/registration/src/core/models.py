@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -42,7 +43,14 @@ TIMELINE_EVENT_TYPES = Literal[
     "TASK_ABORTED",
     "USER_COMMAND",
     "USER_COMMAND_FAILED",
-    "USER_REPLAN_REQUEST",
+    "SYS_MISSION_REPLAN_REQUESTED",
+    "SYS_TASK_DISPATCHED",
+    "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED",
+    "SYS_MISSION_UPDATED",
+    "SYS_MISSION_COMPLETED",
+    "SYS_AGENT_CONNECTION_CREATED",
+    "SYS_AGENT_CONNECTION_DELETED",
     "LOW_BATTERY",
     "DEVICE_OFFLINE",
     "HEARTBEAT_LOST",
@@ -148,6 +156,23 @@ def build_agent_command_endpoint(scheme: str, host: str, port: int, path_prefix:
     return f"{scheme}://{host}:{port}{prefix}/{token}/command"
 
 
+def parse_endpoint_value(endpoint: Optional[str]) -> Optional[dict[str, Any]]:
+    if not endpoint:
+        return None
+    if isinstance(endpoint, dict):
+        return endpoint
+    parsed = urlparse(endpoint)
+    if not parsed.scheme or not parsed.hostname:
+        return {"raw": endpoint}
+    return {
+        "host": parsed.hostname,
+        "port": parsed.port,
+        "protocol": parsed.scheme.upper(),
+        "path": parsed.path or None,
+        "auth_token_ref": None,
+    }
+
+
 def resolve_default_main_video_track_name(tracks: List["TrackRecord"]) -> Optional[str]:
     for track in tracks:
         if track.type == "VIDEO":
@@ -181,6 +206,7 @@ MISSION_STATUS_ALIASES: dict[str, str] = {
     "REJECTED": "FAILED",
     "NEEDS_REVIEW": "FAILED",
     "PENDING": "READY",
+    "EXPIRED": "EXPIRED",
 }
 
 PROPOSAL_STATUS_ALIASES: dict[str, str] = {
@@ -191,7 +217,6 @@ PROPOSAL_STATUS_ALIASES: dict[str, str] = {
     "REJECTED": "CANCELLED",
     "CANCELED": "CANCELLED",
     "CANCELLED": "CANCELLED",
-    "REPLANNING": "REPLANNING",
     "EXPIRED": "EXPIRED",
 }
 
@@ -215,7 +240,7 @@ TASK_STATUS_ALIASES: dict[str, str] = {
 }
 
 EVENT_TYPE_ALIASES: dict[str, str] = {
-    "SYS.TASK.EXECUTED": "SYS_TASK_RESULT",
+    "SYS.TASK.EXECUTED": "SYS_TASK_COMPLETED",
     "SYS.MISSION.STATE_CHANGED": "SYS_MISSION_UPDATED",
     "SYS.RECOVERY.ACTION": "SYS_MISSION_UPDATED",
     "SYS.ALERT.GENERATED": "SYS_ANOMALY_DETECTED",
@@ -228,10 +253,12 @@ EVENT_TYPE_ALIASES: dict[str, str] = {
     "SYS_INTENT_CLASSIFIED": "SYS_INTENT_CLASSIFIED",
     "SYS_INTENT_REJECTED": "SYS_INTENT_REJECTED",
     "SYS_TASK_DISPATCHED": "SYS_TASK_DISPATCHED",
-    "SYS_TASK_RESULT": "SYS_TASK_RESULT",
+    "SYS_TASK_COMPLETED": "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED": "SYS_TASK_FAILED",
     "SYS_ANOMALY_DETECTED": "SYS_ANOMALY_DETECTED",
     "SYS_POLICY_DECISION": "SYS_POLICY_DECISION",
     "SYS_MISSION_UPDATED": "SYS_MISSION_UPDATED",
+    "SYS_MISSION_COMPLETED": "SYS_MISSION_COMPLETED",
     "SYS_MISSION_REPLAN_REQUESTED": "SYS_MISSION_REPLAN_REQUESTED",
     "SYS_INSIGHT_REPORT": "SYS_INSIGHT_REPORT",
     "SYS_AGENT_CONNECTION_CREATED": "SYS_AGENT_CONNECTION_CREATED",
@@ -272,8 +299,12 @@ def normalize_event_type(value: Any) -> str:
         return EVENT_TYPE_ALIASES[normalized]
     if normalized.startswith("USER_COMMAND"):
         return "SYS_INTENT_CLASSIFIED"
-    if normalized.startswith("TASK_"):
-        return "SYS_TASK_RESULT"
+    if normalized in {"TASK_COMPLETED", "SYS_TASK_COMPLETED"}:
+        return "SYS_TASK_COMPLETED"
+    if normalized in {"TASK_FAILED", "SYS_TASK_FAILED"}:
+        return "SYS_TASK_FAILED"
+    if normalized in {"MISSION_COMPLETED", "SYS_MISSION_COMPLETED"}:
+        return "SYS_MISSION_COMPLETED"
     if normalized.startswith("MISSION_") or normalized.startswith("PROPOSAL_") or normalized.startswith("USER_"):
         return "SYS_MISSION_UPDATED"
     if normalized in {"LOW_BATTERY", "DEVICE_OFFLINE", "HEARTBEAT_LOST", "CRITICAL_HAZARD"}:
@@ -323,6 +354,7 @@ class DeviceAgentInformationRecord:
     path_prefix: str
     endpoint: str
     command_endpoint: str
+    agent_id: Optional[str] = None
     role: Optional[str] = None
     llm_enabled: bool = False
     skills: List[str] = field(default_factory=list)
@@ -334,16 +366,21 @@ class DeviceAgentInformationRecord:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     battery_percent: Optional[float] = None
-    gateway_agent_id: Optional[int] = None
+    gateway_agent_id: Optional[str] = None
     environment_state: Optional[str] = None
     active_mediums: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        result["endpoint"] = parse_endpoint_value(self.endpoint)
+        result["command_endpoint"] = parse_endpoint_value(self.command_endpoint)
+        return result
 
 
 class DeviceAgentRegistrationRequest(BaseModel):
     secretKey: str
+    device_id: Optional[int | str] = None
+    agent_id: Optional[str] = None
     endpoint: Optional[str] = None
     commandEndpoint: Optional[str] = None
     role: Optional[str] = None
@@ -356,7 +393,7 @@ class DeviceAgentRegistrationRequest(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     battery_percent: Optional[float] = None
-    gateway_agent_id: Optional[int] = None
+    gateway_agent_id: Optional[str] = None
     environment_state: Optional[str] = None
     active_mediums: List[str] = Field(default_factory=list)
 
@@ -440,7 +477,7 @@ class MissionRecord:
     mission_id: str
     title: str
     type: str  # OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY
-    status: str  # READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+    status: str  # READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED | EXPIRED
     priority: str = "NORMAL"  # LOW | NORMAL | HIGH | EMERGENCY
     source_event_id: Optional[str] = None
     source_proposal_id: Optional[str] = None
@@ -471,7 +508,7 @@ class MissionRecord:
 @dataclass
 class EventRecord:
     event_id: str
-    type: str  # SYS_INTENT_CLASSIFIED | SYS_TASK_RESULT | SYS_ANOMALY_DETECTED | SYS_MISSION_UPDATED | DEVICE_HEALTHCHECK | ENV_STATE_CHANGED etc.
+    type: str  # SYS_INTENT_CLASSIFIED | SYS_TASK_COMPLETED | SYS_TASK_FAILED | SYS_ANOMALY_DETECTED | SYS_MISSION_UPDATED | SYS_MISSION_COMPLETED | DEVICE_HEALTHCHECK | ENV_STATE_CHANGED etc.
     severity: EVENT_SEVERITIES
     actor_type: Optional[str] = None
     actor_id: Optional[str] = None
@@ -579,7 +616,7 @@ class DeviceRecord:
     tracks: List[TrackRecord]
     actions: DeviceActionsRecord
     main_video_track_name: Optional[str] = None
-    # ← NEW: Device connectivity status (online | lost | offline)
+    # ← NEW: Device connectivity status (online | offline)
     connectivity_status: str = "offline"
     # ← NEW: Device hierarchy & location
     device_type: Optional[str] = None
@@ -634,7 +671,7 @@ class DeviceRecord:
             "position": {"latitude": self.latitude, "longitude": self.longitude},
             "physical_interfaces": self.physical_interfaces(),
             "battery_percent": self.last_battery_percent,
-            "device_agent_id": self.agent.endpoint,
+            "device_agent_id": self.agent.agent_id,
             "last_seen_at": self.agent.last_seen_at,
             "deleted_at": None,
             "connected": self.connected,
@@ -702,7 +739,7 @@ class DeviceRegistrationRequest(BaseModel):
     parent_id: Optional[int] = None
     physical_interfaces: List[Dict[str, Any]] = Field(default_factory=list)
     battery_percent: Optional[float] = None
-    gateway_agent_id: Optional[int] = None
+    gateway_agent_id: Optional[str] = None
     environment_state: Optional[str] = None
     active_mediums: List[str] = Field(default_factory=list)
 
@@ -771,6 +808,12 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
     )
 
     agent_d = data.get("agent") or {}
+    agent_id = agent_d.get("agent_id")
+    if agent_id is not None:
+        agent_id = str(agent_id)
+    gateway_agent_id = agent_d.get("gateway_agent_id")
+    if gateway_agent_id is not None:
+        gateway_agent_id = str(gateway_agent_id)
     agent = DeviceAgentInformationRecord(
         scheme=agent_d.get("scheme", "http"),
         host=agent_d.get("host", ""),
@@ -778,6 +821,7 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         path_prefix=agent_d.get("path_prefix", ""),
         endpoint=agent_d.get("endpoint", ""),
         command_endpoint=agent_d.get("command_endpoint", ""),
+        agent_id=agent_id,
         role=agent_d.get("role"),
         llm_enabled=bool(agent_d.get("llm_enabled", False)),
         skills=list(agent_d.get("skills") or []),
@@ -788,7 +832,7 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         latitude=agent_d.get("latitude"),
         longitude=agent_d.get("longitude"),
         battery_percent=agent_d.get("battery_percent"),
-        gateway_agent_id=agent_d.get("gateway_agent_id"),
+        gateway_agent_id=gateway_agent_id,
         environment_state=agent_d.get("environment_state"),
         active_mediums=list(agent_d.get("active_mediums") or []),
     )
@@ -867,8 +911,6 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         record.agent.environment_state = "UNDERWATER" if record.is_submerged else "SURFACE"
     if not record.agent.active_mediums:
         record.agent.active_mediums = ["ACOUSTIC"] if record.is_submerged else ["RF", "INTERNET", "ACOUSTIC"]
-    if record.agent.gateway_agent_id is None and record.parent_id is not None:
-        record.agent.gateway_agent_id = record.parent_id
     return record
 
 

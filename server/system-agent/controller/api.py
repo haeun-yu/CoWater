@@ -151,52 +151,9 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
                 return item
         raise HTTPException(status_code=404, detail="manual intervention not found")
 
-    @app.post("/device-roles/recommend")
-    def recommend_device_roles(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-        body = body or {}
-        goal = str(body.get("goal") or "")
-        return runtime.recommend_device_roles(goal)
-
-    @app.post("/device-roles/apply")
-    def apply_device_role(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-        body = body or {}
-        return runtime.assign_device_role(body, decided_by=str(body.get("decided_by") or "user"))
-
-    @app.post("/operation-plans/recommend")
-    def recommend_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-        body = body or {}
-        return runtime.recommend_operation_plan(body)
-
-    @app.post("/operation-plans")
-    def create_operation_plan(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-        body = body or {}
-        plan = runtime.recommend_operation_plan(body)
-        merged = {**plan, **body}
-        merged.setdefault("status", "draft")
-        saved_plan = runtime.registry_client.create_operation_plan(merged)
-        try:
-            runtime.registry_client.create_approval(
-                {
-                    "target_type": "operation_plan",
-                    "target_id": saved_plan.get("operation_plan_id") or saved_plan.get("id") or "",
-                    "summary": f"Approve operation plan: {saved_plan.get('name') or 'Operation Plan'}",
-                    "requested_action": "approve_operation_plan",
-                    "requested_by": "system_agent",
-                    "metadata": {
-                        "operation_plan_id": saved_plan.get("operation_plan_id") or saved_plan.get("id"),
-                        "goal": saved_plan.get("goal"),
-                    },
-                }
-            )
-        except Exception as exc:
-            runtime.state.remember({"kind": "operation_plan_approval_create_failed", "at": utc_now(), "error": str(exc)})
-        return saved_plan
-
-    @app.post("/operation-plans/{operation_plan_id}/activate")
-    def activate_operation_plan(operation_plan_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-        body = body or {}
-        activated_by = str(body.get("activated_by") or body.get("decided_by") or "user")
-        return runtime.activate_operation_plan(operation_plan_id, activated_by=activated_by)
+    @app.post("/execute")
+    async def execute(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        return await runtime.execute_role_request(body or {})
 
     @app.post("/mission-proposals/generate")
     def generate_mission_proposal(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
@@ -267,7 +224,7 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     return task
 
 
-def run(default_config_path: Path, runtime: AgentRuntime | None = None) -> None:
+def run(default_config_path: Path, runtime: AgentRuntime | None = None, argv: list[str] | None = None) -> None:
     import argparse
     import os
 
@@ -275,7 +232,7 @@ def run(default_config_path: Path, runtime: AgentRuntime | None = None) -> None:
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     config_path = (args.config or default_config_path).resolve()
     runtime = runtime or build_agent_runtime(config_path)
     host = args.host or runtime.server.get("host") or "127.0.0.1"

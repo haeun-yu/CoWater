@@ -122,11 +122,19 @@ class MissionRegistry:
 
     def list_missions(self, limit: int = 100, offset: int = 0) -> List[MissionRecord]:
         """Mission 목록 조회"""
+        query = "SELECT mission_id, source_event_id, source_proposal_id, data, created_at, updated_at FROM missions ORDER BY created_at DESC"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT mission_id, source_event_id, source_proposal_id, data, created_at, updated_at FROM missions ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [self._row_to_mission(row) for row in rows]
 
     def list_missions_by_status(self, status: str) -> List[MissionRecord]:
@@ -170,6 +178,7 @@ class MissionRegistry:
             "completed": len([m for m in missions if m.status == "COMPLETED"]),
             "failed": len([m for m in missions if m.status == "FAILED"]),
             "cancelled": len([m for m in missions if m.status == "CANCELLED"]),
+            "expired": len([m for m in missions if m.status == "EXPIRED"]),
         }
 
     def reset(self) -> None:

@@ -14,7 +14,7 @@
     "name": "RequestHandler",
     "role": "request_handler",
     "layer": "system",
-    "device_type": "SYSTEM",
+    "device_type": "OTHER",
     "connectivity": "none",
     "requires_parent": false,
     "children_required": false,

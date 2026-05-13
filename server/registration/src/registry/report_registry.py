@@ -97,11 +97,19 @@ class ReportRegistry:
 
     def list_reports(self, limit: int = 100, offset: int = 0) -> List[ReportRecord]:
         """Report 목록 조회"""
+        query = "SELECT report_id, data, created_at FROM reports ORDER BY created_at DESC"
+        params: list[int] = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT report_id, data, created_at FROM reports ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [self._row_to_report(row) for row in rows]
 
     def list_reports_by_target(self, target_type: str, target_id: str) -> List[ReportRecord]:
