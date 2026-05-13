@@ -12,6 +12,9 @@ CoWater 시스템의 핵심 아키텍처 결정사항과 설계 철학을 기록
 | **[ADR-004](ADR-004-agent-endpoint-management.md)** | **Agent Endpoint Management** | ✅ Accepted | 2026-05-12 |
 | **[ADR-005](ADR-005-event-triggered-rule-execution.md)** | **Event-Triggered Rule Execution** | ✅ Accepted | 2026-05-12 |
 | **[ADR-006](ADR-006-adaptive-autonomy-migration-path.md)** | **Adaptive Autonomy Migration Path** | ✅ Accepted | 2026-05-12 |
+| **[ADR-007](ADR-007-data-generalization.md)** | **Data Generalization** | ✅ Accepted | 2026-04-28 |
+| **[ADR-008](ADR-008-multi-agent-system-architecture.md)** | **Multi-Agent System Architecture** | ✅ Accepted | 2026-05-13 |
+| **[ADR-009](ADR-009-physical-communication-routing.md)** | **Physical Communication Routing** | ✅ Accepted | 2026-05-10 |
 
 ## 핵심 철학 (Core Philosophy)
 

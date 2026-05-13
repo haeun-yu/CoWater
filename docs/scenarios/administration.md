@@ -301,7 +301,8 @@ DetectionPolicy {
       // 반응
       action: {
         create_event: {
-          type: "LOW_BATTERY",
+          type: "SYS_ANOMALY_DETECTED",
+          anomaly_type: "LOW_BATTERY",
           severity: "WARNING"
         },
         create_proposal: true  // 사용자 선택 Proposal 생성
@@ -324,7 +325,8 @@ DetectionPolicy {
       
       action: {
         create_event: {
-          type: "DEVICE_OFFLINE",
+          type: "SYS_ANOMALY_DETECTED",
+          anomaly_type: "DEVICE_OFFLINE",
           severity: "WARNING"
         }
       },
@@ -345,7 +347,8 @@ DetectionPolicy {
       
       action: {
         create_event: {
-          type: "AGENTCONNECTION_DEGRADED",
+          type: "SYS_ANOMALY_DETECTED",
+          anomaly_type: "AGENTCONNECTION_DEGRADED",
           severity: "WARNING"
         }
       },
@@ -391,9 +394,10 @@ AutoResponsePolicy {
     {
       id: "auto-low-battery-return",
       
-      trigger: "PROBLEM_DETECTED",
+      trigger: "SYS_ANOMALY_DETECTED",
       condition: {
-        event_type: "LOW_BATTERY",
+        event_type: "SYS_ANOMALY_DETECTED",
+        anomaly_type: "LOW_BATTERY",
         battery_percent: "LT 20"  // 20% 미만만
       },
       
@@ -417,7 +421,7 @@ AutoResponsePolicy {
     {
       id: "auto-critical-hazard-stop",
       
-      trigger: "CRITICAL_HAZARD Event",
+      trigger: "`SYS_ANOMALY_DETECTED` Event (`anomaly_type=CRITICAL_HAZARD`)",
       condition: {
         severity: "CRITICAL",
         hazard_type: ["collision_risk", "emergency_signal"]
@@ -437,7 +441,7 @@ AutoResponsePolicy {
     {
       id: "auto-offline-device-replace",
       
-      trigger: "DEVICE_OFFLINE Event",
+      trigger: "`SYS_ANOMALY_DETECTED` Event (`anomaly_type=DEVICE_OFFLINE`)",
       condition: {
         offline_duration_sec: "GT 300"  // 5분 이상
       },
@@ -471,7 +475,7 @@ Policy 수정
     enabled: true  // false → true
   }
   ↓
-다음 LOW_BATTERY Event부터 자동 RETURN Mission 생성
+다음 `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` Event부터 자동 RETURN Mission 생성
 ```
 
 ---

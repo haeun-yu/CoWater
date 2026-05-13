@@ -36,7 +36,7 @@ Proposal = 사용자 요청을 충족하기 위한
 
 ```mermaid
 graph TD
-    A["사용자 요청<br/>'A 구역 촬영'"] -->|USER_COMMAND 이벤트| B["System Agent<br/>의도 해석"]
+    A["사용자 요청<br/>'A 구역 촬영'"] -->|SYS_INTENT_CLASSIFIED 이벤트| B["System Agent<br/>의도 해석"]
     B -->|필요한 Task 시퀀스 결정| C["Proposal-1<br/>[ROV:MOVE → ROV:HIGH_RES_SCAN]"]
     C -->|후보 생성| D["Proposal-2<br/>[AUV:MOVE → AUV:STD_RES_SCAN]"]
     D -->|화면에 표시| E["사용자 선택<br/>Proposal-1 클릭"]

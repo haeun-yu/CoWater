@@ -39,15 +39,12 @@ graph TD
 
 | 분류 | Event Type | 예시 | 심각도 |
 |------|-----------|------|--------|
-| **요청** | USER_COMMAND | 사용자가 "A 구역 촬영" 요청 | INFO |
-| **감지** | PROBLEM_DETECTED | 배터리 < 30% 감지 | WARNING |
-| **감지** | CRITICAL_HAZARD | 충돌 위험 감지 | CRITICAL |
-| **실패** | TASK_FAILED | Task 하드웨어 오류 | WARNING |
-| **거절** | USER_COMMAND_FAILED | 수행 불가능한 요청 | INFO |
-| **상태** | DEVICE_OFFLINE | Device 10분 이상 응답 없음 | WARNING |
-| **의사결정** | PROPOSAL_CREATED | Proposal 생성 | INFO |
-| **의사결정** | MISSION_APPROVED | Mission 승인됨 | INFO |
-| **의사결정** | AUTO_RESPONSE_TRIGGERED | 자동 대응 실행 | WARNING |
+| **요청** | `SYS_INTENT_CLASSIFIED` | 사용자가 "A 구역 촬영" 요청 | INFO |
+| **거절** | `SYS_INTENT_REJECTED` | 수행 불가능한 요청 | INFO |
+| **감지** | `SYS_ANOMALY_DETECTED` | 배터리 < 30% 감지, 충돌 위험 감지, Device 오프라인 | WARNING / CRITICAL |
+| **실패** | `SYS_TASK_RESULT` | Task 하드웨어 오류 (`status=FAILED`) | WARNING |
+| **상태** | `SYS_MISSION_UPDATED` | Mission 상태 변화 | INFO |
+| **의사결정** | `SYS_MISSION_REPLAN_REQUESTED` | 재계획/재승인 요청 | WARNING |
 
 **Event 기록 방식**:
 
@@ -56,7 +53,7 @@ Event {
   id: "event-12345",
   
   // 무엇이 일어났는가?
-  type: "TASK_FAILED",
+  type: "SYS_TASK_RESULT",
   severity: "WARNING",
   status: "OPEN" → "RESOLVED",  // 처리 여부
   
@@ -74,6 +71,7 @@ Event {
   // 추가 정보 (Event 타입별로 다름)
   data: {
     mission_id: "mission-1",
+    status: "FAILED",
     error_type: "HardwareError",
     error_code: "CAM_001",
     retry_count: 0  // 현재까지 재시도 횟수
@@ -98,32 +96,26 @@ Event {
 **기록 항목**:
 
 ```typescript
+// 엔티티 (최신 상태만 보관)
 Mission {
   id: "mission-1",
-  status: "READY" → "IN_PROGRESS" → "FAILED",
-  
-  // 상태 변경 이력 (자동 기록)
-  status_history: [
-    { status: "READY", changed_at: "2026-05-12T10:30:00Z" },
-    { status: "IN_PROGRESS", changed_at: "2026-05-12T10:31:00Z" },
-    { status: "FAILED", changed_at: "2026-05-12T10:45:00Z" }
-  ],  // 또는 Event로 기록
+  status: "FAILED",  // 최신 상태만
   
   // 성공/실패 정보
   result_summary: "Task-2 실패로 전체 미션 중단",
   status_reason: "ROV-1 카메라 하드웨어 오류",
-  status_updated_at: "2026-05-12T10:45:00Z"
+  status_updated_at: "2026-05-12T10:45:00Z"  // 마지막 상태 변경 시점
 }
 
 Task {
   id: "task-2",
-  status: "PENDING" → "ASSIGNED" → "IN_PROGRESS" → "FAILED",
+  status: "FAILED",  // 최신 상태만
   
   // 실행 정보
   assigned_device_id: "rov-1",
   assigned_agent_id: "agent-rov-1",
   
-  status_updated_at: "2026-05-12T10:45:00Z",  // 마지막 상태 변경 시점
+  status_updated_at: "2026-05-12T10:45:00Z",
   
   // 결과/오류
   result: {
@@ -131,20 +123,27 @@ Task {
     status_code: "CAM_001",
     images_saved: 500
   },
-  error_message: "Camera Hardware Error: Sensor Timeout",
+  status_reason: "Camera Hardware Error: Sensor Timeout",
   
-  // 재시도 이력
   retry_count: 0,
   last_attempted_at: "2026-05-12T10:45:00Z"
 }
+
+// 상태 변경 이력 (Event 테이블에만 기록)
+Event (별도 테이블)
+[
+  { entity_type: "MISSION", entity_id: "mission-1", event_type: "SYS_MISSION_UPDATED", old_status: "READY", new_status: "IN_PROGRESS", timestamp: "2026-05-12T10:31:00Z" },
+  { entity_type: "MISSION", entity_id: "mission-1", event_type: "SYS_MISSION_UPDATED", old_status: "IN_PROGRESS", new_status: "FAILED", timestamp: "2026-05-12T10:45:00Z", reason: "task_failure" },
+  { entity_type: "TASK", entity_id: "task-2", event_type: "SYS_TASK_RESULT", old_status: "IN_PROGRESS", new_status: "FAILED", timestamp: "2026-05-12T10:45:00Z", error: "CAM_001" }
+]
 ```
 
-**상태 이력 관리**:
-- Option A: `status_history` 배열로 기록 (구조화)
-- Option B: `TASK_STATUS_CHANGED` Event로 기록 (Event-centric)
+**상태 이력 관리 (Event-Only 기반)**:
+- 엔티티: 최신 상태만 보관 (status, status_updated_at, status_reason)
+- Event 테이블: 모든 상태 변화 기록 (status_changed, 이유, 타임스탬프)
   ```
   Event {
-    type: "TASK_STATUS_CHANGED",
+    type: "SYS_TASK_RESULT",
     target_type: "TASK",
     target_id: "task-2",
     data: {
@@ -318,7 +317,7 @@ ORDER BY created_at DESC;
 Mission FAILED
   ↓
 Report Agent: 실패 원인 추적
-  1. TASK_FAILED Event 확인
+  1. `SYS_TASK_RESULT` Event 확인 (`status=FAILED`)
   2. Device/Agent 상태 확인
   3. 네트워크/통신 상태 확인
   4. 타임스탬프 분석 (병목 지점)
@@ -349,7 +348,7 @@ Report에 기록
 ```typescript
 Rule {
   name: "Task Failure Root Cause Analysis",
-  trigger: "TASK_FAILED Event",
+  trigger: "`SYS_TASK_RESULT` Event (`status=FAILED`)",
   analysis: [
     {
       condition: "error_code == 'CAM_001'",

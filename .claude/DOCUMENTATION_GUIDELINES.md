@@ -77,26 +77,62 @@ graph TD
 
 ---
 
+## ⚠️ ADR 번호 관리 규칙
+
+**규칙**: ADR 번호는 **순차적이어야 함** (건너뛰지 말 것)
+
+**기본 원칙**:
+- ADR-001~006: 핵심 설계 철학 및 패턴 (변경 X)
+- ADR-007+: 새로운 기술 결정 사항 (순차적으로 생성)
+- **반드시 ADR-000-index.md에 즉시 등재**
+- 모든 관련 문서에서 참고 링크 업데이트
+
+**현재 상태**: ADR-001~009까지 정의 (ADR-010은 사용 금지)
+
+---
+
 ## 적용 예시
 
 **시나리오**: "Operation에 priority 필드 추가하고 싶어"
 
 ```
-1. docs/adr/ADR-00X` 작성  (다음 번호 사용 — 현재 최신: ADR-006)
+【PROCESS】
+1. 현재 최신 ADR 번호 확인 (docs/adr/ADR-000-index.md)
+   → 현재 최신: ADR-009
+   → 다음 번호: ADR-010 (순차 증가)
+
+2. docs/adr/ADR-010-operation-priority-management.md 작성
    - 상황: Operation 우선순위 관리 필요
    - 결정: priority 필드 추가 (int, 1-5)
    - 결과: 작업 실행 순서를 동적으로 변경 가능
 
-2. docs/core/schema.md 업데이트
+3. docs/adr/ADR-000-index.md 즉시 업데이트
+   - 표에 새 행 추가
+   - 정확한 링크 확인
+
+4. 모든 관련 문서에서 ADR 참고 업데이트
+   - docs/SYSTEM_ARCHITECTURE.md (Section 6 ADR 참고)
+   - docs/core/schema.md
+   - docs/scenarios/*.md
+   - .claude/*.md
+
+5. docs/core/schema.md 업데이트
    - Operation JSON에 priority 필드 추가
 
-3. docs/scenarios/operation.md 업데이트
+6. docs/scenarios/operation.md 업데이트
    - "우선순위에 따라 작업 실행" 절차 추가
+   - ADR-010 참고 추가
    - schema.md의 priority 필드 링크
 
-4. docs/scenarios/lifecycle.md 검토
+7. docs/scenarios/lifecycle.md 검토
    - 생명주기에 영향 있는지 확인
 ```
+
+**검사 체크리스트**:
+- [ ] ADR-000-index.md에 새 ADR 등재됨?
+- [ ] 새 ADR 번호 = (이전 최신 번호 + 1)?
+- [ ] 모든 관련 문서에서 ADR 참고 업데이트됨?
+- [ ] 시나리오/코어 문서에서 불일치 없음?
 
 ---
 

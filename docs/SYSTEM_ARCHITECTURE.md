@@ -76,33 +76,108 @@ Registry Server (공용 상태 저장소 - 모든 레이어에서 접근)
 └─ A2A 통신 로그
 
 Stream Layer (Moth - 실시간 데이터)
-├─ A2A 메시지 (Agent ↔ Agent)
-├─ Telemetry (Device 센서 데이터)
-└─ Healthcheck (Device 상태 신호)
+├─ pub/sub 채널
+│  └─ Telemetry (Device 고대역폭 실시간 데이터)
+│     └─ video, lidar, audio, 센서 데이터 등
+│
+├─ A2A Protocol (HTTP POST)
+│  ├─ Device Agent ↔ System Agent (task.assign, task.result)
+│  │  ├─ task.assign (System → Device: Task 할당)
+│  │  └─ task.result (Device → System: Task 결과)
+│  │
+│  └─ Device Agent ↔ Device Agent (직접 통신, multi-hop relay)
+│     └─ AgentConnection 기반 A2A 통신 (BFS 경로)
+│
+└─ meb 채널 ("agents" - 송수신)
+   ├─ DEVICE_HEALTHCHECK (Device 주기적 신호, 배터리/위치/상태 포함)
+   └─ MEB Events (event_type + target_agents)
+      └─ System Layer (System Agent ↔ System Agent)
+         └─ SYS_INTENT_CLASSIFIED, SYS_TASK_DISPATCHED, SYS_POLICY_DECISION, ...
 ```
 
 ---
 
 ## 4. 핵심 컴포넌트와 역할
 
-### 4.1 Agent 계층
+### 4.1 다중 에이전트 아키텍처 (Multi-Agent Architecture)
 
-| 계층                   | 역할                            | 책임                                   |
-| ---------------------- | ------------------------------- | -------------------------------------- |
-| **System Agent**       | 전체 운영 판단 및 조율          | Proposal 생성, Mission 관리, Rule 실행 |
-| **Middle-layer Agent** | 직접 통신 불가능한 Device 중계  | Device 등록 중계, Task 전달, 상태 보고 |
-| **Device Agent**       | 개별 디바이스 제어 및 상태 관리 | Task 수행 판단, 실행, 로컬 안전 행동   |
+CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에이전트는 명확한 책임 영역과 데이터베이스 소유권을 가집니다.
 
-👉 자세한 책임과 규칙: [**도메인 모델**](core/domain-model.md), [**역할 정의**](core/principles.md#역할-정의-who-what)
+**핵심 원칙**: RequestHandler는 사용자 요청의 처리 책임자이며, 각 도메인 데이터의 변경은 해당 도메인을 소유한 전문 Agent가 수행한다.
+
+#### System Agent 계층 (6개 전문 에이전트)
+
+| #   | 에이전트            | 핵심 책임                                        | DB 소유권               |
+| --- | ------------------- | ------------------------------------------------ | ----------------------- |
+| 1️⃣  | **RequestHandler**  | 사용자 요청 해석 & 경로 결정 (직접 처리 vs 위임) | Read-only (모든 테이블) |
+| 2️⃣  | **DeviceBridge**    | 물리 장비 통신, 상태 동기화, healthcheck 정규화  | Device, Sensor          |
+| 3️⃣  | **MissionPlanner**  | 미션/태스크 설계, 실행 추적, 생명주기 관리       | Mission, Task, Proposal |
+| 4️⃣  | **PolicyManager**   | 정책/규칙 관리, 자동 대응, 장비 생명주기         | Policy, Rule, Config    |
+| 5️⃣  | **SystemSentinel**  | 이상 징후 감시, Alert/Event 생성, 건전성 체크    | Alert, Event            |
+| 6️⃣  | **InsightReporter** | 데이터 조회, 통계/분석, 리포트 생성              | Read-only (모든 테이블) |
+
+#### Device Agent 계층 (각 물리 장비마다 1개)
+
+| 계층             | 에이전트                                      | 핵심 책임                                         | 특성                      |
+| ---------------- | --------------------------------------------- | ------------------------------------------------- | ------------------------- |
+| **Device Agent** | 개별 무인체 Agent (USV-01, AUV-01, ROV-01 등) | Task 수행 판단 및 실행, 로컬 안전 행동, 상태 보고 | 자신의 Device만 직접 제어 |
+
+👉 자세한 책임 및 규칙: [**도메인 모델**](core/domain-model.md), [**설계 원칙**](core/principles.md)
+
+#### 생명주기 흐름 (입력 → 판단 → 계획 → 실행 → 감시 → 기록)
+
+```
+1. 사용자 입력 (자연어 명령)
+   ↓
+2. RequestHandler (운영 요청 처리)
+   ├─ [경로 A] 간단한 조회 → DB 읽기 → 직접 응답
+   └─ [경로 B] 복잡한 처리 → 해당 System Agent 위임
+      ↓
+3. 대상 Agent (MissionPlanner, PolicyManager, ...)
+   └─ 명령 실행 (Event 발행)
+   ↓
+4. DeviceBridge (양방향 통신)
+   ├─【송신】Device Agent에게 Task 전달 (A2A 프로토콜)
+   │  └─ MissionPlanner → DeviceBridge → Device Agent
+   │
+   └─【수신】Device Agent로부터 상태/결과 수집
+      ├─ healthcheck (정기적: 배터리, 신호강도, 위치, 온도 등)
+      ├─ Task Result (Task 완료/실패 결과)
+      ├─ Problem Report (즉각적: 오류, 센서 이상, 물리적 문제)
+      └─ DeviceBridge가 수신한 정보를 정규화된 Event로 발행
+   ↓
+5. Device Agent (각 무인체)
+   ├─ Task 수행 판단 → 실행 → 결과 보고
+   ├─ 정기적 Heartbeat 송신 (상태, 배터리, 센서 데이터)
+   └─ 문제 발생 시 즉시 보고 (오류, 안전 경고)
+   ↓
+6. SystemSentinel (지속적 감시)
+   ├─ DEVICE_HEALTHCHECK Event 수신 → 상태 모니터링
+   ├─ SYS_TASK_DISPATCHED Event 수신 → Task 할당 추적
+   ├─ 비정상 감지: 배터리 부족, 신호 손실, Heartbeat 타임아웃 등
+   └─ 이상 징후 감지 시 SYS_ANOMALY_DETECTED Event 발행 → PolicyManager 연쇄
+   ↓
+7. InsightReporter (필요한 경우)
+   └─ 모든 Event 기록 → Report 생성 → 사용자 보고
+```
+
+**DeviceBridge의 역할** (심장 같은 역할):
+
+- **송신**: MissionPlanner의 Task → Device Agent로 전달
+- **수신**: Device Agent의 Heartbeat, Task Result, Problem Report 수집
+- **발행**: 수집한 정보를 정규화된 Event로 발행 (다른 Agent들이 구독)
+- **판단 경계**: 어떤 Agent에 전달할지 판단하지만, anomaly 판단은 하지 않음
+
+👉 상세 아키텍처: [**ADR-008: 다중 에이전트 시스템**](adr/ADR-008-multi-agent-system-architecture.md)
 
 ### 4.2 핵심 데이터 모델
 
 | 개념                | 설명                                                         | 상세                                        |
 | ------------------- | ------------------------------------------------------------ | ------------------------------------------- |
 | **Device**          | 물리 무인체 (USV, AUV, ROV)                                  | [schema.md#device](core/schema.md)          |
-| **Proposal**        | 여러 솔루션 세트 (PROPOSED → PENDING_APPROVAL → APPROVED)    | [schema.md#proposal](core/schema.md)        |
+| **Proposal**        | 여러 솔루션 세트 (PROPOSED → APPROVED, 승인 시점까지만 추적) | [schema.md#proposal](core/schema.md)        |
 | **Mission**         | 승인된 Proposal을 기반으로 실행되는 임무                     | [schema.md#mission](core/schema.md)         |
-| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS)  | [schema.md#task](core/schema.md)            |
+| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS → COMPLETED / FAILED / CANCELLED / ABORTED) | [schema.md#task](core/schema.md)            |
 | **Event**           | 시스템에서 발생한 중요한 사건 (Rule Engine 트리거)           | [schema.md#event](core/schema.md)           |
 | **AgentConnection** | Device Agent 간 협력 관계 (RELAY, COORDINATE 등, 소프트삭제) | [schema.md#agentconnection](core/schema.md) |
 
@@ -114,11 +189,11 @@ CoWater의 핵심: **Device Agent는 물리 환경을 인식하고 자동으로 
 
 #### 📊 매체별 우선순위 (The Cost of Medium)
 
-| 매체 | 용도 | 우선순위 | 특성 |
-|------|------|---------|------|
-| **Wired (유선)** | ROV 테더, 충전 스테이션 | 1순위 | 최고 속도, 최저 지연, 물리 탯줄 필수 |
-| **RF/Internet** | 수상 장비 | 2순위 | 고속 데이터, 수중 진입 시 즉시 단절 |
-| **Acoustic (음향)** | 수중 통신 | 3순위 | 저속, 고지연, 수중 최후의 보루 |
+| 매체                | 용도                    | 우선순위 | 특성                                 |
+| ------------------- | ----------------------- | -------- | ------------------------------------ |
+| **Wired (유선)**    | ROV 테더, 충전 스테이션 | 1순위    | 최고 속도, 최저 지연, 물리 탯줄 필수 |
+| **RF/Internet**     | 수상 장비               | 2순위    | 고속 데이터, 수중 진입 시 즉시 단절  |
+| **Acoustic (음향)** | 수중 통신               | 3순위    | 저속, 고지연, 수중 최후의 보루       |
 
 #### 🔀 3단계 필터링 로직 (AgentConnection 생성)
 
@@ -135,9 +210,9 @@ Step 2. 매체 교집합 확인 (Medium Matching)
 
 Step 3. 환경별 가용성 필터 (Environmental Filter)
   ├─ Agent.environment_state 확인
-  ├─ 수면(Surface): [RF, Internet, Acoustic] 모두 후보
-  ├─ 수중(Submerged): [Acoustic]만 후보
-  └─ 예: AUV 수중 진입 → active_mediums = [acoustic]로 자동 변경
+  ├─ SURFACE: [RF, INTERNET, ACOUSTIC] 모두 후보
+  ├─ UNDERWATER: [ACOUSTIC]만 후보
+  └─ 예: AUV 수중 진입 → active_mediums = [ACOUSTIC]로 자동 변경
 ```
 
 #### 🔄 실시간 통신 모드 전환 (Dynamic Hand-over)
@@ -145,12 +220,12 @@ Step 3. 환경별 가용성 필터 (Environmental Filter)
 ```
 상황: AUV가 수심 진입
   ↓
-Event 발생: ENV_STATE_CHANGED (environment_state: "surface" → "submerged")
+Event 발생: ENV_STATE_CHANGED (environment_state: "SURFACE" → "UNDERWATER")
   ↓
 System Agent:
-  1. active_mediums 갱신: ["rf", "internet", "acoustic"] → ["acoustic"]
-  2. 기존 RF 기반 AgentConnection 비활성화
-  3. Acoustic AgentConnection 활성화
+  1. active_mediums 갱신: ["RF", "INTERNET", "ACOUSTIC"] → ["ACOUSTIC"]
+  2. 기존 RF 기반 AgentConnection soft-delete
+  3. Acoustic 기반 AgentConnection 재생성
   4. Policy 적용: "대역폭 줄어듦 → 텍스트 위주 통신만 허용"
   ↓
 Device Agent:
@@ -203,7 +278,7 @@ CoWater의 5가지 시나리오별 프로세스:
 - 3-2 Communication Failure 처리
 - 3-3 Resource Shortage (배터리, 스토리지 등)
 - 3-4 Sensor Failure 처리
-- 3-5 CRITICAL_HAZARD 프리엠션 및 긴급 정지
+- 3-5 `SYS_ANOMALY_DETECTED` 기반 프리엠션 및 긴급 정지
 
 👉 [**Exception Handling**](scenarios/exceptions.md)
 
@@ -248,6 +323,7 @@ CoWater의 5가지 시나리오별 프로세스:
 - **ADR-004**: [Agent Endpoint Management](adr/ADR-004-agent-endpoint-management.md)
 - **ADR-005**: [Event-Triggered Rule Execution](adr/ADR-005-event-triggered-rule-execution.md)
 - **ADR-006**: [Adaptive Autonomy Migration Path](adr/ADR-006-adaptive-autonomy-migration-path.md)
+- **ADR-008**: [다중 에이전트 시스템 아키텍처](adr/ADR-008-multi-agent-system-architecture.md)
 
 👉 [**전체 ADR 색인**](adr/ADR-000-index.md)
 
@@ -282,7 +358,7 @@ Phase 1: Manual Approval
 
 Phase 2: Partial Automation
   └─ 정책이 정의된 상황에서만 자동 Mission 생성/실행
-  └─ LOW_BATTERY, CRITICAL_HAZARD 등 사전 정의된 규칙만 자동화
+  └─ `SYS_ANOMALY_DETECTED`의 `anomaly_type` 기준 사전 정의 규칙만 자동화
 
 Phase 3: Full Autonomous
   └─ Device 자율성 강화

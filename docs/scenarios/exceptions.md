@@ -14,7 +14,7 @@
 
 ## 주요 예외 시나리오
 
-### **1️⃣ USER_COMMAND_FAILED: 요청 불가능**
+### **1️⃣ SYS_INTENT_REJECTED: 요청 불가능**
 
 **상황**: 사용자 요청을 수행할 수 있는 Device가 없거나 불가능
 
@@ -34,7 +34,7 @@
 
 ```typescript
 Event {
-  type: "USER_COMMAND_FAILED",
+  type: "SYS_INTENT_REJECTED",
   severity: "WARNING",
   target_type: "SYSTEM",
   data: {
@@ -69,7 +69,7 @@ Event {
 
 ---
 
-### **2️⃣ LOW_BATTERY: 배터리 부족**
+### **2️⃣ SYS_ANOMALY_DETECTED (anomaly_type=LOW_BATTERY): 배터리 부족**
 
 **상황**: Device 배터리가 임계값(`min_battery_percent_for_task = 30%`)을 넘음
 
@@ -93,11 +93,12 @@ System Agent 판단:
 
 ```typescript
 Event {
-  type: "LOW_BATTERY",
+  type: "SYS_ANOMALY_DETECTED",
   severity: "WARNING",
   target_type: "DEVICE",
   target_id: "rov-1",
   data: {
+    anomaly_type: "LOW_BATTERY",
     battery_percent: 15,
     threshold: 30,
     delta: -15
@@ -111,7 +112,8 @@ Event {
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "LOW_BATTERY" },
+    { field: "event.type", operator: "EQ", value: "SYS_ANOMALY_DETECTED" },
+    { field: "event.data.anomaly_type", operator: "EQ", value: "LOW_BATTERY" },
     { field: "device.battery_percent", operator: "LT", value: 20 }
   ],
   action: {
@@ -134,7 +136,7 @@ Rule {
 
 ---
 
-### **3️⃣ HEARTBEAT_TIMEOUT: Device 오프라인**
+### **3️⃣ SYS_ANOMALY_DETECTED (anomaly_type=DEVICE_OFFLINE): Device 오프라인**
 
 **상황**: Device Agent의 Heartbeat가 설정 시간(`device_offline_timeout_sec`)을 초과
 
@@ -147,17 +149,18 @@ Rule {
 
 System Agent:
   Device.status: ONLINE → OFFLINE
-  LOW_CONNECTION Event 발행
+  SYS_ANOMALY_DETECTED Event 발행 (`anomaly_type=DEVICE_OFFLINE`)
 ```
 
 **Event 발행**:
 
 ```typescript
 Event {
-  type: "LOW_CONNECTION" | "HEARTBEAT_LOST",
+  type: "SYS_ANOMALY_DETECTED",
   severity: "WARNING",
   target_type: "DEVICE" | "AGENT",
   data: {
+    anomaly_type: "DEVICE_OFFLINE",
     last_heartbeat_at: "2026-05-12T10:00:00Z",
     timeout_sec: 600
   }
@@ -171,7 +174,7 @@ Event {
 ```
 Task-1 IN_PROGRESS (Device: ROV-1)
   ↓
-HEARTBEAT_LOST Event
+SYS_ANOMALY_DETECTED Event (`anomaly_type=DEVICE_OFFLINE`)
   ↓
 Rule Engine:
   - Critical이면: 현재 Task FAILED → Mission FAILED
@@ -187,7 +190,7 @@ Device Agent (Edge-Side Resilience):
 ```
 Mission READY (Task 할당 안 됨)
   ↓
-HEARTBEAT_LOST Event
+SYS_ANOMALY_DETECTED Event (`anomaly_type=DEVICE_OFFLINE`)
   ↓
 Rule Engine:
   - 다른 Device로 Proposal 재생성
@@ -202,7 +205,7 @@ Rule Engine:
 
 ---
 
-### **4️⃣ TASK_FAILED: Task 실행 실패**
+### **4️⃣ SYS_TASK_RESULT (status=FAILED): Task 실행 실패**
 
 **상황**: Device Agent가 Task 실패를 보고하거나 System이 Timeout 감지
 
@@ -218,11 +221,12 @@ Rule Engine:
 
 ```typescript
 Event {
-  type: "TASK_FAILED",
+  type: "SYS_TASK_RESULT",
   severity: "WARNING",
   target_type: "TASK",
   target_id: "task-2",
   data: {
+    status: "FAILED",
     mission_id: "mission-123",
     error_type: "HardwareError",
     error_message: "High Resolution Camera Hardware Failure",
@@ -266,7 +270,8 @@ Mission {
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "TASK_FAILED" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "event.severity", operator: "EQ", value: "WARNING" }
   ],
   action: {
@@ -289,7 +294,7 @@ Rule {
 
 ---
 
-### **4️⃣-2 TASK_ABORTED: Device Agent가 Task 거절 (P5 적용)**
+### **4️⃣-2 SYS_TASK_RESULT (status=ABORTED): Device Agent가 Task 거절 (P5 적용)**
 
 **상황**: Device Agent가 Task를 받은 후 실행 불가능하다고 판단해서 거절
 
@@ -305,10 +310,11 @@ Rule {
 
 ```typescript
 Event {
-  type: "TASK_ABORTED",
+  type: "SYS_TASK_RESULT",
   severity: "WARNING",
   target_type: "TASK",
   data: {
+    status: "ABORTED",
     task_id: "task-1",
     mission_id: "mission-123",
     device_id: "rov-1",
@@ -348,7 +354,8 @@ Task-3: CANCELLED (status_reason: "Mission failed due to Task-1 ABORTED", status
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "TASK_ABORTED" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.data.status", operator: "EQ", value: "ABORTED" },
     { field: "event.severity", operator: "EQ", value: "WARNING" }
   ],
   action: {
@@ -374,7 +381,7 @@ Rule {
 - Device Agent를 강제로 Task 할당 불가
 - 단, 사용자는 P7을 통해 "이 Device에 이 Task를 강제 할당"하라고 override 가능 (그 후 실패 책임은 사용자)
 
-**TASK_FAILED vs TASK_ABORTED 구분**:
+**`SYS_TASK_RESULT(status=FAILED)` vs `SYS_TASK_RESULT(status=ABORTED)` 구분**:
 | 상황 | 상태 | 이유 | 설명 |
 |------|------|------|------|
 | Task 시작 전 Device가 거절 | ABORTED | P5: 불가능 사전 판단 | Device는 이 Task를 못함 (센서 없음, 범위 초과 등) |
@@ -384,7 +391,7 @@ Rule {
 
 ---
 
-### **5️⃣ CRITICAL_HAZARD: 긴급 상황**
+### **5️⃣ SYS_ANOMALY_DETECTED (anomaly_type=CRITICAL_HAZARD): 긴급 상황**
 
 **상황**: 즉시 대응이 필요한 위험 상황
 
@@ -406,10 +413,11 @@ Rule {
 
 ```typescript
 Event {
-  type: "CRITICAL_HAZARD",
+  type: "SYS_ANOMALY_DETECTED",
   severity: "CRITICAL",  // ← CRITICAL
   target_type: "DEVICE" | "MISSION",
   data: {
+    anomaly_type: "CRITICAL_HAZARD",
     hazard_type: "collision_risk",
     description: "Obstacle detected at 5 meters, collision risk"
   }
@@ -441,7 +449,7 @@ Rule {
 
 ```mermaid
 graph TD
-    A["CRITICAL_HAZARD Event<br/>(충돌 위험, 긴급 정지 등)"] -->|즉시| B["AUTO_CREATE_MISSION<br/>priority: EMERGENCY"]
+    A["SYS_ANOMALY_DETECTED<br/>(anomaly_type=CRITICAL_HAZARD)"] -->|즉시| B["AUTO_CREATE_MISSION<br/>priority: EMERGENCY"]
     B -->|찾기| C["진행 중인<br/>모든 Mission"]
     C -->|상태 변경| D["Mission<br/>CANCELLED"]
     B -->|중단 신호| E["IN_PROGRESS Task<br/>모두 중단"]
@@ -453,19 +461,19 @@ graph TD
 
 **상세 프로세스**:
 
-1. CRITICAL_HAZARD Event 발생
+1. `SYS_ANOMALY_DETECTED` Event 발생 (`anomaly_type=CRITICAL_HAZARD`)
 2. System Agent가 즉시 AUTO_CREATE_MISSION 실행
 3. **현재 진행 중인 모든 Mission을 CANCELLED 처리**
    ```typescript
    SELECT * FROM missions WHERE status = 'IN_PROGRESS'
    UPDATE missions SET status = 'CANCELLED',
-           status_reason = 'CRITICAL_HAZARD - Emergency Preemption',
+           status_reason = 'Emergency preemption due to CRITICAL_HAZARD',
            status_updated_at = NOW()
    ```
 4. **IN_PROGRESS와 PENDING 상태의 모든 Task를 중단**
    ```typescript
    UPDATE tasks SET status = 'CANCELLED',
-           status_reason = 'CRITICAL_HAZARD - Emergency Preemption',
+           status_reason = 'Emergency preemption due to CRITICAL_HAZARD',
            status_updated_at = NOW()
    WHERE status IN ('PENDING', 'IN_PROGRESS')
    AND mission_id IN (위에서 CANCELLED된 mission_id들)
@@ -492,7 +500,7 @@ graph TD
 
 ---
 
-### **6️⃣ AGENTCONNECTION_DEGRADED: 협력 관계 저하**
+### **6️⃣ SYS_ANOMALY_DETECTED (anomaly_type=AGENTCONNECTION_DEGRADED): 협력 관계 저하**
 
 **상황**: Device Agent 간 협력(RELAY, COORDINATE 등)이 불안정
 
@@ -507,11 +515,12 @@ graph TD
 
 ```typescript
 Event {
-  type: "AGENTCONNECTION_DEGRADED",
+  type: "SYS_ANOMALY_DETECTED",
   severity: "WARNING",
   target_type: "AGENT_CONNECTION",
   target_id: "conn-relay-1",
   data: {
+    anomaly_type: "AGENTCONNECTION_DEGRADED",
     connection_type: "RELAY",
     agent_a_id: "agent-rov-1",
     agent_b_id: "agent-usv-1",
@@ -523,9 +532,9 @@ Event {
 
 **대응**:
 
-1. AgentConnection.status: ACTIVE → DEGRADED
-2. 새로운 RELAY 경로 탐색 (다른 Relay Agent 사용)
-3. 또는 직접 통신 복구 대기
+1. AgentConnection은 유지 (`deleted_at = null`)
+2. SystemSentinel이 `SYS_ANOMALY_DETECTED` Event와 Alert 생성 (`anomaly_type=AGENTCONNECTION_DEGRADED`)
+3. 새로운 RELAY 경로 탐색 (다른 Relay Agent 사용)
 4. 긴급이면 현재 Mission 중단
 
 **복구**: 통신 상태 개선 또는 다른 경로 재설정
@@ -537,7 +546,7 @@ Event {
 **문제**: 동일한 문제가 반복되면 Event와 Alert가 폭주합니다.
 
 - 배터리 부족 경고가 계속 발생 → Alert 테이블 폭증
-- 온-오프 반복 Device → HEARTBEAT_LOST Event 무한 반복
+- 온-오프 반복 Device → `SYS_ANOMALY_DETECTED(anomaly_type=DEVICE_OFFLINE)` Event 무한 반복
 - 같은 실패가 매 Heartbeat마다 → 사용자가 동일 알림 수십 개
 
 **해결**: Alert Fingerprint와 Deduplication 규칙 (기존 SYSTEM_ARCHITECTURE.md 섹션 13 기반)
@@ -630,7 +639,7 @@ IF user_rejected_recommendation THEN:
 
 ### **실제 적용 예**
 
-**Scenario: LOW_BATTERY Event가 계속 발생**
+**Scenario: `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` Event가 계속 발생**
 
 ```
 Timeline:
@@ -712,15 +721,15 @@ Table recommendation_suppressions {
 
 ## 자동 대응 정책 요약
 
-| 예외                     | 심각도   | 자동 여부 | 규칙                      |
-| ------------------------ | -------- | --------- | ------------------------- |
-| USER_COMMAND_FAILED      | INFO     | ✗         | 사용자에게 이유 전달      |
-| LOW_BATTERY (< 20%)      | WARNING  | ✓         | RETURN_TO_BASE 자동 생성  |
-| LOW_BATTERY (20-30%)     | INFO     | ✗         | 알림만 전달               |
-| HEARTBEAT_LOST           | WARNING  | ✗         | 재연결 대기 또는 재계획   |
-| TASK_FAILED              | WARNING  | ✗         | 재시도/대체 Proposal 제시 |
-| CRITICAL_HAZARD          | CRITICAL | ✓         | EMERGENCY_STOP 자동 생성  |
-| AGENTCONNECTION_DEGRADED | WARNING  | ✗         | 대체 경로 탐색            |
+| 예외 | 심각도 | 자동 여부 | 규칙 |
+| --- | --- | --- | --- |
+| `SYS_INTENT_REJECTED` | INFO | ✗ | 사용자에게 이유 전달 |
+| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY < 20%`) | WARNING | ✓ | RETURN_TO_BASE 자동 생성 |
+| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY 20-30%`) | INFO | ✗ | 알림만 전달 |
+| `SYS_ANOMALY_DETECTED` (`DEVICE_OFFLINE`) | WARNING | ✗ | 재연결 대기 또는 재계획 |
+| `SYS_TASK_RESULT` (`status=FAILED`) | WARNING | ✗ | 재시도/대체 Proposal 제시 |
+| `SYS_ANOMALY_DETECTED` (`CRITICAL_HAZARD`) | CRITICAL | ✓ | EMERGENCY_STOP 자동 생성 |
+| `SYS_ANOMALY_DETECTED` (`AGENTCONNECTION_DEGRADED`) | WARNING | ✗ | 대체 경로 탐색 |
 
 ---
 
@@ -738,7 +747,8 @@ Table recommendation_suppressions {
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "TASK_FAILED" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "policy.auto_retry_enabled", operator: "EQ", value: true }
   ],
   action: {

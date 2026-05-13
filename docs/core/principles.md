@@ -109,14 +109,14 @@ AgentConnection 타입:
 
 ```
 Event: 모든 중요한 사건 객체화
-├─ USER_COMMAND (사용자 요청)
-├─ PROBLEM_DETECTED (배터리 부족 등)
-├─ TASK_FAILED (작업 실패)
-├─ CRITICAL_HAZARD (긴급 상황)
+├─ SYS_INTENT_CLASSIFIED (사용자 요청 해석)
+├─ SYS_ANOMALY_DETECTED (배터리 부족, 오프라인, 긴급 위험 등)
+├─ SYS_TASK_RESULT (작업 완료/실패/거절)
+├─ SYS_MISSION_UPDATED (Mission 상태 변화)
 └─ ...
 
 Rule Engine: Event 발생 시 실행
-└─ "LOW_BATTERY Event → RETURN_TO_BASE Mission 생성"
+└─ "SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY) → RETURN_TO_BASE Mission 생성"
 ```
 
 **효과**:
@@ -320,9 +320,9 @@ Physical Constraint      Software Solution
 
 **구체화**:
 
-- Policy가 정의된 경우: LOW_BATTERY → RETURN_TO_BASE Mission 자동 생성
+- Policy가 정의된 경우: `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → RETURN_TO_BASE Mission 자동 생성
 - Policy가 없는 경우: "배터리가 낮으니 귀환하시겠습니까?" 제안 (사용자 선택)
-- CRITICAL_HAZARD는 예외: 즉시 자동 대응 후 보고
+- `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)`는 예외: 즉시 자동 대응 후 보고
 
 **왜 필요한가?**
 

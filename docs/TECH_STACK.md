@@ -99,8 +99,9 @@ POST   /events               # Event 기록
 
 ### 토픽 구조
 ```
-device.healthcheck                  # 모든 디바이스 헬스신호
-device.telemetry.{device_id}.{type} # 특정 디바이스 텔레메트리
+DEVICE_HEALTHCHECK                  # 모든 디바이스 헬스신호
+ENV_STATE_CHANGED                  # 환경 상태 변화 이벤트
+DEVICE_TELEMETRY_{device_id}_{type} # 특정 디바이스 텔레메트리
 a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 ```
 

@@ -56,7 +56,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 - **[lifecycle.md](scenarios/lifecycle.md)**: Device 생명주기 (등록→준비→운영→제거)
 - **[operation.md](scenarios/operation.md)**: 사용자 명령 → Proposal → Mission → Task 실행 흐름
-- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (LOST, OFFLINE, CRITICAL_HAZARD)
+- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (`SYS_ANOMALY_DETECTED`, `SYS_TASK_RESULT`, `SYS_INTENT_REJECTED`)
 - **[reporting.md](scenarios/reporting.md)**: Event 기록, Report 생성, 실패 분석, 피드백 수집
 - **[administration.md](scenarios/administration.md)**: 시스템 설정, 정책 관리, 승인 규칙
 
@@ -64,33 +64,104 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 ## 🚀 Phase 2: Core Implementation (2026-05-13 ~ 2026-08-31)
 
-### Q2 2026 (2026-05-13 ~ 2026-07-31)
+### Phase 2-A: 공통 인프라 구축 (1주, 2026-05-13 ~ 2026-05-19)
 
-#### 2-1. Backend Core (FastAPI)
-- [ ] **Registry Server 구현**
-  - Device, Mission, Task 상태 관리
-  - Event, Alert, Insight 저장소
-  - Transaction 기반 일관성 보장
-  - 예상: 3주
+기본 통신 및 Agent 프레임워크 구현
 
-- [ ] **System Agent 구현**
-  - Proposal 생성 로직 (LLM 기반)
-  - Task 할당 알고리즘 (Capability-Driven)
-  - Rule Engine (Event 기반 Policy 실행)
-  - 예상: 4주
+#### 공통 모듈 (shared/)
+- [ ] **moth_client.py** - MEB pub/sub/meb 클라이언트
+  - single "agents" meb 채널 구독/발행
+  - event_type + target_agents 라우팅
+  - 재연결 로직 포함
 
-- [ ] **Device Agent Framework**
-  - Base Device Agent 클래스
-  - Task 수행 판단 로직
-  - 로컬 Failsafe 정책
-  - Edge-Side Resilience 구현
-  - 예상: 3주
+- [ ] **llm_client.py** - Ollama 클라이언트
+  - Circuit Breaker + 재시도
+  - JSON 파싱 + 유효성 검사
+  - timeout 관리
 
-- [ ] **A2A 메시징 (Moth 통합)**
-  - Agent 간 메시지 전달
-  - A2A 로깅
-  - 통신 실패 재시도
-  - 예상: 2주
+- [ ] **registry_client.py** - Registry REST API 클라이언트
+  - Device, Mission, Task, Event 조회/생성/업데이트
+  - AgentConnection CRUD
+
+- [ ] **base_agent.py** - BaseAgent 공통 클래스
+  - init, start, call_llm, publish_event
+  - MEB 구독 패턴
+  - 상태 관리 (메모리 캐시)
+
+#### 설정
+- [ ] config.yaml - 포트, Registry, LLM, Moth 설정
+
+---
+
+### Phase 2-B: 6개 System Agent 구현 (2주, 2026-05-20 ~ 2026-06-02)
+
+순차 구현 (의존성 순서):
+
+#### 1️⃣ RequestHandler (포트 9116, 3일)
+- [ ] Intent 분류 LLM 프롬프트
+- [ ] /agents/{token}/command 엔드포인트
+- [ ] MEB: SYS_INTENT_CLASSIFIED 발행
+- [ ] Fleet 상태 요약 API
+
+#### 2️⃣ MissionPlanner (포트 9111, 4일)
+- [ ] 3단계 Proposal 생성 (규칙 기반 + LLM + 검증)
+- [ ] 여러 대안 생성 (최적/빠른/안전)
+- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
+- [ ] MEB: SYS_MISSION_UPDATED 발행
+- [ ] Mission 생명주기 관리
+
+#### 3️⃣ DeviceBridge (포트 9110, 3일)
+- [ ] A2A 엔드포인트: POST /message:send
+- [ ] task.assign, task.result, child.register, layer.assignment 처리
+- [ ] Device Endpoint 관리
+- [ ] MEB: SYS_TASK_DISPATCHED, SYS_TASK_RESULT 발행
+
+#### 4️⃣ PolicyManager (포트 9112, 2일)
+- [ ] Policy 등록/관리
+- [ ] LLM 기반 Policy 매칭
+- [ ] auto_execute 정책 실행
+- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_ANOMALY_DETECTED
+- [ ] MEB: SYS_POLICY_DECISION 발행
+
+#### 5️⃣ SystemSentinel (포트 9113, 3일)
+- [ ] Device 건전성 감시 루프 (2초 interval)
+- [ ] 규칙 기반: 배터리, Heartbeat, 센서 이상 탐지
+- [ ] AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
+- [ ] LLM 기반: 복합 패턴 분석
+- [ ] 구독: DEVICE_HEALTHCHECK, ENV_STATE_CHANGED, SYS_TASK_DISPATCHED, SYS_TASK_RESULT
+- [ ] MEB: SYS_ANOMALY_DETECTED, SYS_AGENT_CONNECTION_* 발행
+
+#### 6️⃣ InsightReporter (포트 9114, 2일)
+- [ ] 데이터 조회 (Mission, Device, Event)
+- [ ] LLM 기반 한국어 리포트 생성
+- [ ] stateless (Registry에서 실시간 조회)
+- [ ] 구독: 모든 주요 이벤트
+
+---
+
+### Phase 2-C: 통합 & E2E 테스트 (1주, 2026-06-03 ~ 2026-06-09)
+
+#### 각 Agent 단독 테스트
+- [ ] 포트별 응답성 확인 (9110~9114)
+- [ ] LLM 호출 타임아웃 처리
+- [ ] MEB 이벤트 발행/수신
+
+#### MEB 이벤트 흐름 테스트
+- [ ] Intent classified → MissionPlanner → Proposal 생성
+- [ ] Policy decision → Policy 자동 실행
+- [ ] Anomaly detected → Alert + 자동 대응
+
+#### E2E 시나리오
+- [ ] 사용자 명령 → Proposal → Mission → Task → Device 실행 → 결과 보고
+- [ ] 에러 처리: Device offline, Task timeout, Policy escalation
+- [ ] Multi-hop relay (Device A → Device B → DeviceBridge)
+
+---
+
+### Q2 2026 (2026-05-13 ~ 2026-07-31) - 기존 계획
+
+#### 2-1. Backend Core (FastAPI) - 기존
+[기존 내용 유지...]
 
 #### 2-2. Frontend Core (Next.js)
 - [ ] **Proposal 승인 화면**
@@ -123,8 +194,8 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 #### 3-1. Phase 1 → Phase 2 전환
 - [ ] **자동화 정책 구현**
-  - LOW_BATTERY → RETURN_TO_BASE 자동 Mission
-  - CRITICAL_HAZARD → EMERGENCY_STOP 자동 Mission
+  - `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → RETURN_TO_BASE 자동 Mission
+  - `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` → EMERGENCY_STOP 자동 Mission
   - 예상: 2주
 
 - [ ] **User Feedback Loop**

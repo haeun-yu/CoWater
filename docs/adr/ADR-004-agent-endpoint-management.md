@@ -36,7 +36,7 @@ Agent {
     port: number          // 포트
     protocol: string      // HTTP, GRPC, WebSocket 등
     path?: string         // 경로 (예: /api/agent)
-    auth_token?: string   // 인증 토큰 참조
+    auth_token_ref?: string   // 인증 토큰 참조
   }
   
   last_heartbeat_at?: string

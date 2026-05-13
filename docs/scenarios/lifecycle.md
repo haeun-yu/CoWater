@@ -1,7 +1,13 @@
 # 미션 생명주기 (Mission Lifecycle)
 
 Proposal 승인부터 완료/취소까지의 전체 상태 전이  
-**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md)
+**기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
+
+**관련 에이전트**:
+- **MissionPlanner**: Mission/Task 생성 및 상태 관리
+- **DeviceBridge**: Task 할당 → Device로 전달, Device의 Heartbeat/Result/Problem ← 수집
+- **PolicyManager**: Device 제거 프로세스 관리
+- **SystemSentinel**: 상태 모니터링, 이상 감시
 
 ---
 
@@ -72,21 +78,23 @@ Device 제거 전 확인:
 
 ```mermaid
 graph TD
-    A["사용자: Device 제거 요청"] -->|POST /devices/{id}/remove| B["System 검증"]
-    B -->|확인| C{"Device<br/>상태?"}
-    C -->|ONLINE/ERROR| D["❌ 제거 거부<br/>먼저 OFFLINE 대기"]
-    C -->|OFFLINE| E["AgentConnection<br/>확인"]
-    E -->|조회| F{"협력 관계<br/>있는가?"}
-    F -->|없음| G["제거 가능<br/>상태 확인"]
-    F -->|있음| H{"대체 Agent<br/>있는가?"}
-    H -->|없음| I["❌ 제거 거부<br/>협력 관계 유지 필요"]
-    H -->|있음| J["기존<br/>AgentConnection<br/>REMOVED/EXPIRED<br/>처리"]
-    J -->|새로 생성| K["새 AgentConnection<br/>대체 Agent로"]
-    K -->|완료| G
-    G -->|최종 확인| L["Device, Agent,<br/>Sensor 제거 처리"]
-    L -->|상태 변경| M["removed_at<br/>타임스탬프 기록"]
-    M -->|Event 발행| N["DEVICE_REMOVED<br/>Event"]
-    N -->|보관| O["Archive<br/>감사 추적"]
+    A["사용자: Device 제거 요청"] -->|POST /devices/{id}/remove| B["RequestHandler<br/>요청 수신"]
+    B -->|위임| C["PolicyManager<br/>검증 시작"]
+    C -->|확인| D{"Device<br/>상태?"}
+    D -->|ONLINE/ERROR| E["❌ 제거 거부<br/>먼저 OFFLINE 대기"]
+    D -->|OFFLINE| F["AgentConnection<br/>확인"]
+    F -->|조회| G{"협력 관계<br/>있는가?"}
+    G -->|없음| H["제거 가능<br/>상태 확인"]
+    G -->|있음| I{"대체 Agent<br/>있는가?"}
+    I -->|없음| J["❌ 제거 거부<br/>협력 관계 유지 필요"]
+    I -->|있음| K["기존<br/>AgentConnection<br/>REMOVED/EXPIRED<br/>처리"]
+    K -->|새로 생성| L["새 AgentConnection<br/>대체 Agent로"]
+    L -->|완료| H
+    H -->|Task 취소 요청| M["MissionPlanner<br/>진행 중 Task<br/>취소"]
+    M -->|완료| N["PolicyManager<br/>Device 제거 처리"]
+    N -->|상태 변경| O["deleted_at<br/>타임스탬프 기록"]
+    O -->|Event 발행| P["DEVICE_REMOVED<br/>Event"]
+    P -->|기록| Q["InsightReporter<br/>감사 추적"]
 ```
 
 ### **단계별 상세**
@@ -154,17 +162,17 @@ if (count > 0) {
 
 #### **Step 4: 제거 처리**
 ```typescript
-// Device 상태 변경 (완전 삭제 X, removed_at 기록)
+// Device 상태 변경 (완전 삭제 X, deleted_at 기록)
 UPDATE devices SET status = 'REMOVED',
-       removed_at = NOW()
+       deleted_at = NOW()
 WHERE id = '{device_id}'
 
 // Agent도 REMOVED 처리
-UPDATE agents SET removed_at = NOW()
+UPDATE agents SET deleted_at = NOW()
 WHERE id = '{device_agent_id}'
 
 // Sensor도 REMOVED 처리
-UPDATE sensors SET removed_at = NOW()
+UPDATE sensors SET deleted_at = NOW()
 WHERE device_id = '{device_id}'
 
 // AgentConnection 소프트 삭제 (status 제거, deleted_at 추가)
@@ -198,7 +206,7 @@ Event {
 Device {
   id: "device-rov-1",
   status: "REMOVED",
-  removed_at: "2026-05-12T15:30:00Z",
+  deleted_at: "2026-05-12T15:30:00Z",
   // 다른 필드는 유지 (감사 추적용)
 }
 
@@ -295,11 +303,11 @@ Task-1 {
 
 **P5 적용 (Device Agent의 최종 판단)**:
 - Device Agent는 Task 수행 중 문제 발생 시 즉시 중단 가능
-- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 Task FAILED 보고 가능
+- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_RESULT(status=FAILED)` 보고 가능
 - System Agent는 Device Agent의 판단을 존중하고 대체안 제시 (거절 불가)
 
 **Device/Agent 문제 발생 시**:
-- OFFLINE, LOW_BATTERY 등의 Event 발행
+- `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=DEVICE_OFFLINE`, `LOW_BATTERY` 등)
 - Rule Engine이 자동 대응 결정
 
 **다음**:
@@ -330,7 +338,7 @@ Task-3: COMPLETED
 **액션**:
 - Mission 결과 요약 저장
 - Report 생성
-- Event 발행: MISSION_COMPLETED
+- Event 발행: `SYS_MISSION_UPDATED` (`status=COMPLETED`)
 
 **다음**:
 - Report 조회 가능
@@ -361,7 +369,7 @@ Task-3: CANCELLED  // 남은 Task 자동 취소
 **액션**:
 - 현재 Task 중단
 - 남은 Task 모두 CANCELLED
-- TASK_FAILED 또는 MISSION_FAILED Event 발행
+- `SYS_TASK_RESULT(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
 - Rule Engine이 자동 대응 결정 (재시도, 다른 Device로 재실행 등)
 
 **P7 적용 (사용자 결정 우선)**:
@@ -454,7 +462,7 @@ COMPLETED (Task 완료)
   └─ 다음: 다음 Task 시작 또는 Mission 완료
   
 FAILED (Task 실패)
-  ├─ 작업 오류, error_message 저장
+  ├─ 작업 오류, status_reason 저장
   └─ 다음: Mission FAILED 또는 재시도
   
 CANCELLED (Task 취소)
@@ -473,7 +481,7 @@ Task-1 실행 중 (Device: ONLINE, battery: 80%)
   ↓
 Heartbeat: Device OFFLINE (network 끊김)
   ↓
-System: LOW_CONNECTION Event 발행
+System: `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=DEVICE_OFFLINE`)
   ↓
 Rule Engine: 상황별 판단
   ├─ Critical이면: EMERGENCY_ABORT 신호
@@ -505,7 +513,7 @@ Device Agent: 정상 실행
 Network Partition 발생
   ↓
 Device: System과 통신 불가능
-System: Heartbeat 타임아웃 감지 → HEARTBEAT_LOST Event
+System: Heartbeat 타임아웃 감지 → `SYS_ANOMALY_DETECTED` Event (`anomaly_type=DEVICE_OFFLINE`)
 ```
 
 **Phase 2: 로컬 자율 운영 (Edge-Side Resilience)**
@@ -583,9 +591,9 @@ Device Agent {
     
     // 로컬에서 발생한 모든 Event
     local_events: [
-      { type: "TASK_COMPLETED", task_id: "task-1", ... },
-      { type: "TASK_COMPLETED", task_id: "task-2", ... },
-      { type: "LOW_BATTERY_WARNING", battery_percent: 45, ... }
+      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-1", ... },
+      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-2", ... },
+      { type: "SYS_ANOMALY_DETECTED", anomaly_type: "LOW_BATTERY", battery_percent: 45, ... }
     ]
   }
   
@@ -761,7 +769,7 @@ Table mission_timeline {
   id: UUID,
   mission_id: string,
   
-  event_type: enum,  // TASK_COMPLETED, OFFLINE, RECONNECTED 등
+  event_type: enum,  // SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
   occurred_at: timestamp,
   recorded_at: timestamp,
   
@@ -781,7 +789,7 @@ Table device_state_snapshots {
   
   // 스냅샷 시점
   timestamp: timestamp,
-  event_type: enum,  // OFFLINE, RECONNECT, STATUS_CHANGE
+  event_type: enum,  // SYS_ANOMALY_DETECTED, ENV_STATE_CHANGED, SYS_MISSION_UPDATED 등
   
   // 상태
   status: enum,

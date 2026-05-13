@@ -47,7 +47,7 @@
   // ← 추가: 물리적 통신 인터페이스 (H/W)
   "physical_interfaces": [
     {
-      "type": "wired | acoustic | rf | internet",
+      "type": "WIRED | ACOUSTIC | RF | INTERNET",
       "hardware": "string", // "Ethernet", "Acoustic Modem", "LTE Module" 등
       "specs": "string | null" // "2.4GHz WiFi", "300m range" 등
     }
@@ -61,6 +61,8 @@
 
   "last_seen_at": "timestamp | null",
 
+  "deleted_at": "timestamp | null",
+
   "created_at": "timestamp",
   "updated_at": "timestamp"
 }
@@ -71,7 +73,7 @@
 - **actions[]**: Device가 등록할 때 선언한 기능 목록 (불변, ADR-003)
 - **status**: Device 자체의 운영 상태 (ONLINE/OFFLINE/ERROR 등)
 - **physical_interfaces[]**: Device가 물리적으로 가진 통신 모듈 (H/W 사양, 불변)
-  - 예: ROV는 [wired], AUV는 [acoustic, internet, rf]
+  - 예: ROV는 [WIRED], AUV는 [ACOUSTIC, INTERNET, RF]
 - **target_type/target_id**: 진행 중인 작업 추적용 (다형성 관계)
 
 ---
@@ -84,7 +86,7 @@
   "name": "string",
   "type": "SYSTEM_AGENT | DEVICE_AGENT",
 
-  "role": "COMMAND | MISSION_PLANNING | ASSIGNMENT | MONITORING | POLICY_CHECK | REPORTING | DEVICE_CONTROL",
+  "role": "REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER | DEVICE_CONTROL",
 
   "device_id": "string (uuid) | null", // DEVICE_AGENT만 설정
 
@@ -97,38 +99,54 @@
   },
 
   // ← 추가: 물리적 통신 능력 (I/F - Interface)
-  "capabilities": ["wired", "acoustic", "rf", "internet"], // 지원 가능한 매체 (Device.physical_interfaces와 동기화)
+  "capabilities": ["WIRED", "ACOUSTIC", "RF", "INTERNET"], // 지원 가능한 매체 (Device.physical_interfaces와 동기화)
   
   // ← 추가: 물리적 종속성 (Gateway Pattern)
   "gateway_agent_id": "string (uuid) | null", // 부모 Agent (ROV의 경우 USV 참조)
   
   // ← 추가: 환경 상태 (실시간 변경)
-  "environment_state": "surface | submerged | unknown", // 현재 물리적 위치
+  "environment_state": "SURFACE | UNDERWATER", // 현재 물리적 위치
   
   // ← 추가: 현재 활성 매체 (반드시 capabilities의 부분집합, 실시간 업데이트)
-  "active_mediums": ["wired", "rf"], // 지금 사용 가능한 매체 (AUV 수중 진입 시 ["acoustic"]으로 변경)
+  "active_mediums": ["WIRED", "RF"], // 지금 사용 가능한 매체 (AUV 수중 진입 시 ["ACOUSTIC"]으로 변경)
 
   "last_heartbeat_at": "timestamp | null",
+
+  "deleted_at": "timestamp | null",
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
 }
 ```
 
-**변경 (ADR-004 + 새 설계)**:
+**역할별 에이전트 정의 (ADR-008 참고)**:
 
+| 역할 | Agent 이름 | 책임 | DB 권한 |
+|------|----------|------|--------|
+| REQUEST_HANDLER | RequestHandler | 사용자 요청 해석 & 경로 결정 | Read-only |
+| DEVICE_BRIDGE | DeviceBridge | 장비 통신, 상태 동기화 | Device, Sensor |
+| MISSION_PLANNER | MissionPlanner | 미션/태스크 계획, 실행 추적 | Mission, Task, Proposal |
+| POLICY_MANAGER | PolicyManager | 정책/규칙 관리, 자동 대응 | Policy, Rule, Config |
+| SYSTEM_SENTINEL | SystemSentinel | 이상 감시, Alert/Event 생성 | Alert, Event |
+| INSIGHT_REPORTER | InsightReporter | 데이터 조회, 리포트 생성 | Read-only |
+| DEVICE_CONTROL | Device Agent | 개별 디바이스 제어 | Device 상태 |
+
+**변경 (ADR-004 + ADR-008)**:
+
+- **role** 필드: 6개의 전문 에이전트 역할로 업데이트 (ADR-008 참고)
+  - 각 역할은 명확한 책임 영역과 DB 소유권을 가짐
 - **endpoint** 필드: Agent 등록 시 통신 정보 포함 (기존)
 - **capabilities[]**: Device의 physical_interfaces와 동기화 (등록 시 고정)
-  - ROV: ["wired"] (유선만)
-  - AUV: ["acoustic", "rf", "internet"] (수중/수상 모두)
+  - ROV: ["WIRED"] (유선만)
+  - AUV: ["ACOUSTIC", "RF", "INTERNET"] (수중/수상 모두)
 - **gateway_agent_id**: 물리적으로 종속된 Agent 참조
   - ROV가 USV에 케이블로 연결 → ROV.gateway_agent_id = USV의 agent_id
 - **environment_state**: Agent의 현재 물리적 위치 (실시간 변경)
-  - 수상: "surface" (모든 매체 사용 가능)
-  - 수중: "submerged" (acoustic만 사용 가능)
+  - SURFACE: 수상 (모든 매체 사용 가능)
+  - UNDERWATER: 수중 (ACOUSTIC만 사용 가능)
 - **active_mediums[]**: 현재 사용 가능한 매체 (∈ capabilities)
-  - AUV 수면: ["rf", "internet", "acoustic"]
-  - AUV 수중: ["acoustic"] (자동 전환)
+  - AUV 수상: ["RF", "INTERNET", "ACOUSTIC"]
+  - AUV 수중: ["ACOUSTIC"] (자동 전환)
 
 ---
 
@@ -158,7 +176,7 @@
     "transport": "HTTP | REST | GRPC | CUSTOM",
     
     // ← 추가: 물리 계층 추상화
-    "network_type": "wired | acoustic | rf | satellite",
+    "network_type": "WIRED | ACOUSTIC | RF | SATELLITE | INERTIAL",
     "signal_strength": "number | null", // % (0-100)
     "latency_ms": "number | null", // 지연시간 (밀리초)
     "bandwidth_mbps": "number | null", // 대역폭 (Mbps)
@@ -178,10 +196,11 @@
 
 - **profile**: Agent 테이블의 endpoint를 기반으로 자동 생성 (ADR-004)
   - **network_type**: Device Agent가 물리 계층 드라이버를 선택하기 위한 정보
-    - `wired`: 유선 (Ethernet, USB) → HTTP, REST 드라이버
-    - `acoustic`: 음파 (수중 통신) → Acoustic Modem 드라이버
-    - `rf`: 무선 (WiFi, RF) → RF 모듈 드라이버
-    - `satellite`: 위성 → Satellite 모듈 드라이버
+    - `WIRED`: 유선 (Ethernet, USB) → HTTP, REST 드라이버
+    - `ACOUSTIC`: 음파 (수중 통신) → Acoustic Modem 드라이버
+    - `RF`: 무선 (WiFi, RF) → RF 모듈 드라이버
+    - `SATELLITE`: 위성 → Satellite 모듈 드라이버
+    - `INERTIAL`: 관성 항법 (위치 추정) → Inertial 드라이버
   - **signal_strength, latency_ms, bandwidth_mbps**: 협력 판단 시 참고값 (Policy Rule 실행)
 - **deleted_at**: null이면 활성, 값이 있으면 소프트 삭제 상태 (REMOVED로 표시하지 않음)
 
@@ -208,7 +227,7 @@
 {
   "id": "string (uuid)",
 
-  "type": "string", // USER_COMMAND, PROBLEM_DETECTED, TASK_FAILED, CRITICAL_HAZARD 등
+  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
 
   "severity": "INFO | WARNING | CRITICAL",
   "status": "OPEN | HANDLED | RESOLVED",
@@ -225,6 +244,8 @@
   "data": {
     // Event 타입별로 다름
     // 예: { original_request: "...", capability_gap: {...} }
+    // 예: SYS_ANOMALY_DETECTED -> { anomaly_type: "LOW_BATTERY", ... }
+    // 예: SYS_TASK_RESULT -> { status: "FAILED", error_type: "...", ... }
     // 중요: 전체 Proposal/Mission/Task 데이터 저장 금지
   },
 
@@ -238,6 +259,7 @@
 - Event는 사건의 **기록**이지 데이터의 **저장소** X
 - Proposal/Mission/Task 전체 데이터를 data에 넣지 않기
 - Rule Engine이 Event를 트리거로 삼아 실행
+- `SYS_ANOMALY_DETECTED`는 `data.anomaly_type`으로 세부 이상 종류를 구분
 
 ---
 
@@ -299,10 +321,8 @@
   - → REPLANNING: 이전 Proposal 불채택으로 재계획 필요
   - → CANCELLED: 사용자가 거절
   - → EXPIRED: 유효기간 만료
-- **APPROVED** (결과 상태): 사용자가 이 Proposal을 선택/승인함. Mission 생성 및 실행 중에도 계속 유지 (결과로서의 상태)
-  - → COMPLETED (Mission 완료 시 자동)
-  - → FAILED (Mission 실패 시 자동)
-  - → CANCELLED: 사용자가 Mission 취소 명령
+- **APPROVED** (고정 상태): 사용자가 이 Proposal을 선택/승인함. Proposal은 승인 시점까지만 추적하며, 이후에는 상태를 변경하지 않음
+  - **참고**: Mission의 최종 결과(COMPLETED/FAILED/CANCELLED)는 Proposal.status에 반영되지 않음. 실행 결과는 Mission.status만 추적
 - **REPLANNING**: 이전 Proposal이 채택되지 않았으므로 재계획 중 (status_reason 필드에 불채택 이유 기록)
 - **CANCELLED**: 사용자가 거절 (status_reason에 거절 사유 기록)
 - **EXPIRED**: 장시간 선택 안 됨
@@ -504,7 +524,7 @@
 
   "details": {
     // 기록 타입별로 다름
-    // 예: mission_summary, task_results, device_health_check
+    // 예: mission_summary, task_execution_summary, device_health_snapshot
   },
 
   "created_by": {
@@ -635,7 +655,7 @@ Policy: "Low Battery Auto-Return"
     {
       "field": "event.type",
       "operator": "EQ",
-      "value": "CRITICAL_HAZARD"
+      "value": "SYS_ANOMALY_DETECTED"
     },
     {
       "field": "event.severity",
@@ -748,7 +768,7 @@ Policy: "Low Battery Auto-Return"
 
   "stream_endpoint": "string", // 센서 데이터 스트림 주소
 
-  "removed_at": "timestamp | null", // null이면 활성, 값이 있으면 제거됨
+  "deleted_at": "timestamp | null", // null이면 활성, 값이 있으면 제거됨
 
   "created_at": "timestamp",
   "updated_at": "timestamp"

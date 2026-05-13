@@ -47,16 +47,16 @@ graph TD
 ```
 1. 사용자가 "A 구역 촬영해줘" 입력
    ↓
-2. USER_COMMAND 이벤트 생성
+2. SYS_INTENT_CLASSIFIED 이벤트 생성
    {
-     type: "USER_COMMAND",
+     type: "SYS_INTENT_CLASSIFIED",
      actor_type: "USER",
      data: { original_request: "A 구역 촬영해줘" }
    }
    ↓
 3. Rule Engine 실행
    - rule_type: "RECOMMENDATION"인 Rule 조회
-   - conditions 매칭 (USER_COMMAND 이벤트에 대해)
+   - conditions 매칭 (SYS_INTENT_CLASSIFIED 이벤트에 대해)
    ↓
 4. 조건 만족 → action 실행
    {
@@ -73,12 +73,12 @@ graph TD
 1. Device Agent의 Heartbeat에서 
    battery: 15% (임계치: 30%)
    ↓
-2. System Agent가 LOW_BATTERY 이벤트 생성
+2. System Agent가 `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` 이벤트 생성
    {
-     type: "LOW_BATTERY",
+     type: "SYS_ANOMALY_DETECTED",
      target_type: "DEVICE",
      target_id: "rov-1",
-     data: { battery_percent: 15 }
+     data: { anomaly_type: "LOW_BATTERY", battery_percent: 15 }
    }
    ↓
 3. Rule Engine 실행
@@ -88,7 +88,7 @@ graph TD
 4. 조건 만족 → action 실행
    {
      type: "CREATE_EVENT",
-     params: { event_type: "ALERT_LOW_BATTERY" }
+     params: { event_type: "SYS_ANOMALY_DETECTED", anomaly_type: "LOW_BATTERY" }
    }
    ↓
 5. 알림 이벤트 생성 (또는 ALERT 생성)
@@ -100,11 +100,11 @@ graph TD
 1. Device Agent가 
    collision_detected: true 보고
    ↓
-2. System Agent가 CRITICAL_HAZARD 이벤트 생성
+2. System Agent가 `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` 이벤트 생성
    {
-     type: "CRITICAL_HAZARD",
+     type: "SYS_ANOMALY_DETECTED",
      severity: "CRITICAL",
-     data: { hazard: "collision_risk" }
+     data: { anomaly_type: "CRITICAL_HAZARD", hazard: "collision_risk" }
    }
    ↓
 3. Rule Engine 실행
@@ -144,11 +144,11 @@ graph TD
    "temperature 35°C > 40°C 임계치" → False
    
 3. 임계치 초과 항목만 Event 발행
-   - LOW_BATTERY 이벤트 발행
+   - `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` 이벤트 발행
    - (temperature는 이벤트 X)
    
 4. Event 발행 시 Rule Engine 실행
-   - LOW_BATTERY 조건을 만족하는 Rule만 체크
+   - `event.type = SYS_ANOMALY_DETECTED`와 `anomaly_type = LOW_BATTERY` 조건을 만족하는 Rule만 체크
    
 5. Rule 동작
    - action: CREATE_EVENT 또는 ALERT
