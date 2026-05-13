@@ -41,7 +41,6 @@
       ],
       "tools": [
         "gps_reader",
-        "wired_link_monitor",
         "rov_tether_controller",
         "child_registry",
         "a2a_router",
@@ -72,11 +71,6 @@
           "type": "ODOMETRY",
           "name": "ship_motion",
           "frequency_hz": 1
-        },
-        {
-          "type": "TOPIC",
-          "name": "wired_link",
-          "frequency_hz": 10
         },
         {
           "type": "VIDEO",

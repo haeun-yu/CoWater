@@ -164,6 +164,9 @@ class RegistryClient:
         latitude: float | None = None,
         longitude: float | None = None,
         battery_percent: float | None = None,
+        gateway_agent_id: int | None = None,
+        environment_state: str | None = None,
+        active_mediums: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "secretKey": self.secret_key,
@@ -183,6 +186,12 @@ class RegistryClient:
             payload["longitude"] = longitude
         if battery_percent is not None:
             payload["battery_percent"] = battery_percent
+        if gateway_agent_id is not None:
+            payload["gateway_agent_id"] = gateway_agent_id
+        if environment_state is not None:
+            payload["environment_state"] = environment_state
+        if active_mediums is not None:
+            payload["active_mediums"] = active_mediums
         return put_json(
             f"{self.url}/devices/{registry_id}/agent",
             payload,

@@ -40,10 +40,9 @@ def build_task(task_id: str | None, message: A2AMessage, result: dict[str, Any])
     now = utc_now()
     return {
         "id": task_id or str(uuid4()),
-        "status": {"state": "completed"},
+        "status": {"state": "COMPLETED"},
         "createdAt": now,
         "updatedAt": now,
         "message": message.model_dump(),
         "artifacts": [{"name": "result", "parts": [{"type": "data", "data": result}]}],
     }
-

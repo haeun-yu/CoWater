@@ -94,8 +94,14 @@ class PolicyEvaluator:
         """
         step_type = str(step.get("step_type") or "generic_action")
         task_total = len([task for task in (step_state.get("tasks") or []) if isinstance(task, dict)])
-        completed_results = [item for item in step_execution_results if str(item.get("status")) == "completed"]
-        failed_results = [item for item in step_execution_results if str(item.get("status")) == "failed"]
+        completed_results = [
+            item for item in step_execution_results
+            if self.runtime._task_status(item.get("status")) == "COMPLETED"
+        ]
+        failed_results = [
+            item for item in step_execution_results
+            if self.runtime._task_status(item.get("status")) in {"FAILED", "ABORTED", "CANCELLED"}
+        ]
         usable_results = [
             item for item in completed_results
             if self.runtime._extract_task_result(item).get("usable_output", True) is not False
@@ -154,8 +160,14 @@ class PolicyEvaluator:
         """
         step_type = str(step.get("step_type") or "generic_action")
         task_total = len([task for task in (step_state.get("tasks") or []) if isinstance(task, dict)])
-        completed_results = [item for item in step_execution_results if str(item.get("status")) == "completed"]
-        failed_results = [item for item in step_execution_results if str(item.get("status")) == "failed"]
+        completed_results = [
+            item for item in step_execution_results
+            if self.runtime._task_status(item.get("status")) == "COMPLETED"
+        ]
+        failed_results = [
+            item for item in step_execution_results
+            if self.runtime._task_status(item.get("status")) in {"FAILED", "ABORTED", "CANCELLED"}
+        ]
 
         # P5 (최종 판단): Task 수행 가능 여부의 최종 판단은 Device가 함
         # 하지만 Step 평가에서는 모든 task의 성공 여부로 판정

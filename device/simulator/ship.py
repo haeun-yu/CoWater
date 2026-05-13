@@ -10,7 +10,6 @@ class DeviceSimulator(BaseDeviceSimulator):
     def _platform_telemetry(self, state: AgentState) -> dict[str, Any]:
         child_registry = getattr(self, "_child_registry", None)
         tether = getattr(self, "_rov_tether_controller", None)
-        wired = getattr(self, "_wired_link_monitor", None)
         telemetry = {
             "navigation": {
                 "route_mode": self.mission_state.get("mode"),
@@ -18,7 +17,6 @@ class DeviceSimulator(BaseDeviceSimulator):
             },
             "children": child_registry.list_children() if child_registry is not None else [],
             "tether": tether.get_tether_info() if tether is not None else {"current_length_meters": 0.0, "tension_status": "normal"},
-            "wired_link": wired.check_link_health() if wired is not None else {"connected": False, "status": "degraded"},
             "mission": dict(self.mission_state),
         }
         return telemetry
@@ -32,7 +30,6 @@ class DeviceSimulator(BaseDeviceSimulator):
     ) -> bool:
         self._child_registry = tools.get("child_registry")
         self._rov_tether_controller = tools.get("rov_tether_controller")
-        self._wired_link_monitor = tools.get("wired_link_monitor")
         self._video_processor = tools.get("video_processor") or tools.get("camera_controller") or tools.get("high_def_camera")
         self._a2a_router = tools.get("a2a_router")
 
@@ -88,8 +85,6 @@ class DeviceSimulator(BaseDeviceSimulator):
                 result["artifacts"].append({"type": "video_frame", "captured": False})
             return True
         if action == "relay_data":
-            if self._wired_link_monitor is not None:
-                self._wired_link_monitor.connected = True
             self.mission_state.update({"mode": "relay", "status": "relaying", "active_action": action, "relay_active": True, "last_relay": params.get("channel") or "general"})
             result["artifacts"].append({"type": "relay_ack", "channel": params.get("channel") or "general"})
             return True

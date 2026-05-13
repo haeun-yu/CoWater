@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -10,45 +9,11 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-try:
-    import websockets
-except ImportError:
-    websockets = None
-
 from agent.runtime import AgentRuntime
 from application.bootstrap import build_agent_runtime
 from agent.state import utc_now
 from controller.a2a import A2ASendRequest, build_task, extract_message_data
 from controller.commands import CommandRequest
-
-
-async def _publish_overview_to_moth(data: Any) -> None:
-    """System Agent overview를 Moth에 발행"""
-    if websockets is None:
-        return
-    try:
-        moth_url = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=overview&source=system-agent&track=system-agent"
-        async with websockets.connect(moth_url, ping_interval=None) as ws:
-            message = {
-                "type": "publish",
-                "channel": "overview",
-                "data": data,
-            }
-            await ws.send(json.dumps(message))
-    except Exception:
-        pass  # Silently ignore Moth publish errors
-
-
-def _schedule_background_task(coro: Any) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        close = getattr(coro, "close", None)
-        if callable(close):
-            close()
-        return
-    loop.create_task(coro)
-
 
 def create_app(runtime: AgentRuntime) -> FastAPI:
     @asynccontextmanager
@@ -246,19 +211,28 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         notes = body.get("notes")
         return await runtime.decide_approval_flow(approval_id, approved, decided_by=decided_by, notes=notes)
 
-    @app.get("/overview")
-    def overview(
+    @app.post("/agent-connections")
+    def create_agent_connection(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        return runtime.registry_client.create_agent_connection(body or {})
+
+    @app.get("/agent-connections")
+    def list_agent_connections(
         limit: int = Query(default=100, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
-    ) -> dict[str, Any]:
-        result = runtime.registry_client.get_overview(limit=limit, offset=offset)
-        result["meta"] = {
-            "limit": limit,
-            "offset": offset,
-        }
-        # Publish to Moth in background
-        _schedule_background_task(_publish_overview_to_moth(result))
-        return result
+    ) -> list[dict[str, Any]]:
+        return runtime.registry_client.list_agent_connections(limit=limit, offset=offset)
+
+    @app.get("/agent-connections/{connection_id}")
+    def get_agent_connection(connection_id: str) -> dict[str, Any]:
+        return runtime.registry_client.get_agent_connection(connection_id)
+
+    @app.put("/agent-connections/{connection_id}")
+    def update_agent_connection(connection_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        return runtime.registry_client.update_agent_connection(connection_id, body or {})
+
+    @app.delete("/agent-connections/{connection_id}")
+    def delete_agent_connection(connection_id: str) -> dict[str, Any]:
+        return runtime.registry_client.delete_agent_connection(connection_id)
 
     return app
 
@@ -275,10 +249,6 @@ async def handle_a2a(runtime: AgentRuntime, request: A2ASendRequest) -> dict[str
     elif msg_type == "layer.assignment":
         runtime.apply_assignment(data)
         result = {"assigned": True, "route_mode": runtime.state.route_mode, "parent_id": runtime.state.parent_id}
-    elif msg_type == "event.report":
-        result = runtime.handle_event_report(data)
-    elif msg_type == "mission.result":
-        result = await runtime.handle_mission_result(data)
     elif msg_type == "task.result":
         # Device reports task execution result (success or failure)
         result = await runtime.handle_task_result(data)

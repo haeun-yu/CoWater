@@ -27,34 +27,71 @@ TRACK_TYPES = Literal[
 
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
 LAYERS = Literal["lower", "middle", "system"]
-ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFORMATION"]
+ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFO"]
 EVENT_SEVERITIES = ALERT_SEVERITIES
 
-TASK_STATES = Literal["pending", "assigned", "running", "completed", "failed", "canceled"]
+TASK_STATES = Literal["PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "ABORTED"]
 FAILURE_CATEGORIES = Literal["device", "communication", "sensor", "mission", "policy", "user", "unknown"]
 TIMELINE_EVENT_TYPES = Literal[
-    "mission_created",
-    "mission_approved",
-    "mission_rejected",
-    "mission_updated",
-    "mission_completed",
-    "mission_failed",
-    "mission_canceled",
-    "step_started",
-    "task_assigned",
-    "task_accepted",
-    "task_rejected",
-    "task_running",
-    "task_completed",
-    "task_failed",
-    "task_canceled",
-    "alert_created",
-    "alert_updated",
-    "event_reported",
-    "agent_judgment",
+    "PROPOSAL_CREATED",
+    "PROPOSAL_APPROVED",
+    "PROPOSAL_REJECTED",
+    "TASK_STATUS_CHANGED",
+    "MISSION_STATUS_CHANGED",
+    "MISSION_RETRY_REQUEST",
+    "TASK_ABORTED",
+    "USER_COMMAND",
+    "USER_COMMAND_FAILED",
+    "USER_REPLAN_REQUEST",
+    "LOW_BATTERY",
+    "DEVICE_OFFLINE",
+    "HEARTBEAT_LOST",
+    "CRITICAL_HAZARD",
+    "CONFIG_CHANGED",
+    "USER_MODIFIED",
+    "USER_FEEDBACK",
+    "DEVICE_REMOVED",
+    "MISSION_CREATED",
+    "MISSION_STARTED",
+    "MISSION_APPROVED",
+    "MISSION_REJECTED",
+    "MISSION_UPDATED",
+    "MISSION_COMPLETED",
+    "MISSION_FAILED",
+    "MISSION_CANCELED",
+    "USER_APPROVAL",
+    "USER_REAPPROVAL",
+    "USER_REAPPROVAL_REQUESTED",
+    "STEP_STARTED",
+    "TASK_ASSIGNED",
+    "TASK_ACCEPTED",
+    "TASK_REJECTED",
+    "TASK_STARTED",
+    "TASK_DISPATCHED",
+    "DISPATCH_FAILED",
+    "TASK_RUNNING",
+    "TASK_COMPLETED",
+    "TASK_FAILED",
+    "TASK_CANCELED",
+    "TASK_FAILURE",
+    "TASK_RESULT_REPORTED",
+    "DEVICE_RESULT_REPORTED",
+    "ALERT_CREATED",
+    "ALERT_UPDATED",
+    "EVENT_REPORTED",
+    "AGENT_JUDGMENT",
+    "PLAN_CHANGED",
+    "WARNING",
 ]
 
 CORE_ACTIONS = Literal[
+    "MOVE_TO",
+    "HIGH_RES_SCAN",
+    "SURFACE_SCAN",
+    "SONAR_SCAN",
+    "SAMPLE_COLLECTION",
+    "RETURN_TO_BASE",
+    "HOLD_POSITION",
     "SLAM_NAVIGATION",
     "MAP_NAVIGATION",
     "GPS_NAVIGATION",
@@ -97,7 +134,7 @@ def as_pub_track_endpoint(endpoint: str) -> str:
 def build_healthcheck_endpoint(device_id: int) -> str:
     return (
         "/pang/ws/meb"
-        "?channel=instant&name=healthcheck&source=base&track=base"
+        "?channel=instant&name=agents&source=base&track=base"
     )
 
 
@@ -116,6 +153,132 @@ def resolve_default_main_video_track_name(tracks: List["TrackRecord"]) -> Option
         if track.type == "VIDEO":
             return track.name
     return None
+
+
+def _upper_status_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"status", "state", "execution_status", "dispatch_status", "acceptance_status"} and item is not None:
+                normalized[key] = str(item).upper()
+            else:
+                normalized[key] = _upper_status_fields(item)
+        return normalized
+    if isinstance(value, list):
+        return [_upper_status_fields(item) for item in value]
+    return value
+
+
+MISSION_STATUS_ALIASES: dict[str, str] = {
+    "PENDING_APPROVAL": "READY",
+    "APPROVED": "READY",
+    "RUNNING": "IN_PROGRESS",
+    "IN_PROGRESS": "IN_PROGRESS",
+    "COMPLETED": "COMPLETED",
+    "FAILED": "FAILED",
+    "CANCELED": "CANCELLED",
+    "CANCELLED": "CANCELLED",
+    "REJECTED": "FAILED",
+    "NEEDS_REVIEW": "FAILED",
+    "PENDING": "READY",
+}
+
+PROPOSAL_STATUS_ALIASES: dict[str, str] = {
+    "PENDING_APPROVAL": "PROPOSED",
+    "PENDING": "PROPOSED",
+    "PROPOSED": "PROPOSED",
+    "APPROVED": "APPROVED",
+    "REJECTED": "CANCELLED",
+    "CANCELED": "CANCELLED",
+    "CANCELLED": "CANCELLED",
+    "REPLANNING": "REPLANNING",
+    "EXPIRED": "EXPIRED",
+}
+
+APPROVAL_STATUS_ALIASES: dict[str, str] = {
+    "PENDING": "PENDING",
+    "APPROVED": "APPROVED",
+    "REJECTED": "REJECTED",
+}
+
+TASK_STATUS_ALIASES: dict[str, str] = {
+    "PENDING": "PENDING",
+    "ASSIGNED": "ASSIGNED",
+    "RUNNING": "IN_PROGRESS",
+    "IN_PROGRESS": "IN_PROGRESS",
+    "COMPLETED": "COMPLETED",
+    "FAILED": "FAILED",
+    "CANCELED": "CANCELLED",
+    "CANCELLED": "CANCELLED",
+    "ABORTED": "ABORTED",
+    "REJECTED": "ABORTED",
+}
+
+EVENT_TYPE_ALIASES: dict[str, str] = {
+    "SYS.TASK.EXECUTED": "SYS_TASK_RESULT",
+    "SYS.MISSION.STATE_CHANGED": "SYS_MISSION_UPDATED",
+    "SYS.RECOVERY.ACTION": "SYS_MISSION_UPDATED",
+    "SYS.ALERT.GENERATED": "SYS_ANOMALY_DETECTED",
+    "SYS.DEVICE.STATUS_CHANGED": "SYS_ANOMALY_DETECTED",
+    "STEP_EVALUATION": "SYS_MISSION_UPDATED",
+    "RECOVERY_ACTION": "SYS_MISSION_UPDATED",
+    "MISSION_STATE_CHANGE": "SYS_MISSION_UPDATED",
+    "DEVICE_STATUS_CHANGE": "SYS_ANOMALY_DETECTED",
+    "POLICY_DECISION": "SYS_POLICY_DECISION",
+    "SYS_INTENT_CLASSIFIED": "SYS_INTENT_CLASSIFIED",
+    "SYS_INTENT_REJECTED": "SYS_INTENT_REJECTED",
+    "SYS_TASK_DISPATCHED": "SYS_TASK_DISPATCHED",
+    "SYS_TASK_RESULT": "SYS_TASK_RESULT",
+    "SYS_ANOMALY_DETECTED": "SYS_ANOMALY_DETECTED",
+    "SYS_POLICY_DECISION": "SYS_POLICY_DECISION",
+    "SYS_MISSION_UPDATED": "SYS_MISSION_UPDATED",
+    "SYS_MISSION_REPLAN_REQUESTED": "SYS_MISSION_REPLAN_REQUESTED",
+    "SYS_INSIGHT_REPORT": "SYS_INSIGHT_REPORT",
+    "SYS_AGENT_CONNECTION_CREATED": "SYS_AGENT_CONNECTION_CREATED",
+    "SYS_AGENT_CONNECTION_DELETED": "SYS_AGENT_CONNECTION_DELETED",
+    "DEVICE_HEALTHCHECK": "DEVICE_HEALTHCHECK",
+    "ENV_STATE_CHANGED": "ENV_STATE_CHANGED",
+}
+
+
+def _normalize_enum(value: Any, aliases: dict[str, str], default: str) -> str:
+    normalized = str(value or default).strip().upper()
+    return aliases.get(normalized, normalized or default)
+
+
+def normalize_mission_status(value: Any) -> str:
+    return _normalize_enum(value, MISSION_STATUS_ALIASES, "READY")
+
+
+def normalize_proposal_status(value: Any) -> str:
+    return _normalize_enum(value, PROPOSAL_STATUS_ALIASES, "PROPOSED")
+
+
+def normalize_approval_status(value: Any) -> str:
+    return _normalize_enum(value, APPROVAL_STATUS_ALIASES, "PENDING")
+
+
+def normalize_task_status(value: Any) -> str:
+    return _normalize_enum(value, TASK_STATUS_ALIASES, "PENDING")
+
+
+def normalize_event_type(value: Any) -> str:
+    raw = str(value or "SYS_MISSION_UPDATED").strip()
+    if raw.startswith("sys."):
+        return EVENT_TYPE_ALIASES.get(raw.upper(), raw.replace(".", "_").upper())
+
+    normalized = raw.upper()
+    if normalized in EVENT_TYPE_ALIASES:
+        return EVENT_TYPE_ALIASES[normalized]
+    if normalized.startswith("USER_COMMAND"):
+        return "SYS_INTENT_CLASSIFIED"
+    if normalized.startswith("TASK_"):
+        return "SYS_TASK_RESULT"
+    if normalized.startswith("MISSION_") or normalized.startswith("PROPOSAL_") or normalized.startswith("USER_"):
+        return "SYS_MISSION_UPDATED"
+    if normalized in {"LOW_BATTERY", "DEVICE_OFFLINE", "HEARTBEAT_LOST", "CRITICAL_HAZARD"}:
+        return "SYS_ANOMALY_DETECTED"
+    return normalized
 
 
 @dataclass
@@ -171,6 +334,9 @@ class DeviceAgentInformationRecord:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     battery_percent: Optional[float] = None
+    gateway_agent_id: Optional[int] = None
+    environment_state: Optional[str] = None
+    active_mediums: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -190,6 +356,9 @@ class DeviceAgentRegistrationRequest(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     battery_percent: Optional[float] = None
+    gateway_agent_id: Optional[int] = None
+    environment_state: Optional[str] = None
+    active_mediums: List[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -245,7 +414,8 @@ class TaskResult:
     reported_at: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        return _upper_status_fields(result)
 
 
 @dataclass
@@ -259,7 +429,9 @@ class TimelineEvent:
     related_step_index: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        result["event_type"] = str(self.event_type).upper()
+        return result
 
 
 @dataclass
@@ -269,30 +441,36 @@ class MissionRecord:
     response_id: str
     alert_id: str
     event_id: str
-    status: str = "pending"  # pending|in_progress|completed|failed
+    status: str = "READY"
+    priority: Optional[str] = None
     step_states: List[Dict[str, Any]] = field(default_factory=list)  # [{step_id, status, tasks, ...}]
     completion_report: Dict[str, Any] = field(default_factory=dict)  # {...}
     metadata: Dict[str, Any] = field(default_factory=dict)
     timeline: List[TimelineEvent] = field(default_factory=list)
+    status_reason: Optional[str] = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     updated_at: str = field(default_factory=utc_now_iso)
 
-    def touch(self, status: Optional[str] = None) -> None:
+    def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
         """상태 업데이트 및 타임스탐프 갱신"""
         self.updated_at = utc_now_iso()
         if status:
-            self.status = status
-        if status == "in_progress" and self.started_at is None:
+            self.status = normalize_mission_status(status)
+            self.status_updated_at = self.updated_at
+        if reason is not None:
+            self.status_reason = reason
+        if self.status == "IN_PROGRESS" and self.started_at is None:
             self.started_at = utc_now_iso()
-        if status in {"completed", "failed"} and self.completed_at is None:
+        if self.status in {"COMPLETED", "FAILED", "CANCELLED"} and self.completed_at is None:
             self.completed_at = utc_now_iso()
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["timeline"] = [evt.to_dict() for evt in self.timeline]
-        return result
+        return _upper_status_fields(result)
 
     def append_timeline_event(self, event: TimelineEvent) -> None:
         """Timeline 이벤트 추가"""
@@ -308,13 +486,29 @@ class EventRecord:
     source_role: Optional[str]
     event_type: str
     severity: EVENT_SEVERITIES
-    message: str
+    actor_type: Optional[str] = None
+    actor_id: Optional[str] = None
+    status: str = "OPEN"
+    message: Optional[str] = None
+    title: str = ""
+    description: Optional[str] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    data: Dict[str, Any] = field(default_factory=dict)
+    target_agents: List[str] = field(default_factory=list)
+    status_reason: Optional[str] = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def touch(self) -> None:
+    def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
         self.updated_at = utc_now_iso()
+        if status is not None:
+            self.status = str(status).upper()
+            self.status_updated_at = self.updated_at
+        if reason is not None:
+            self.status_reason = reason
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -322,18 +516,19 @@ class EventRecord:
 
 def normalize_severity_value(value: Any) -> str:
     if value is None:
-        return "INFORMATION"
+        return "INFO"
     normalized = str(value).strip().upper()
     aliases = {
-        "INFO": "INFORMATION",
-        "INFORMATION": "INFORMATION",
+        "INFO": "INFO",
+        "INFORMATION": "INFO",
         "WARNING": "WARNING",
         "WARN": "WARNING",
+        "ERROR": "CRITICAL",
         "CRITICAL": "CRITICAL",
     }
     if normalized in aliases:
         return aliases[normalized]
-    raise ValueError("severity must be one of CRITICAL, WARNING, INFORMATION")
+    raise ValueError("severity must be one of CRITICAL, WARNING, INFO")
 
 
 class EventIngestRequest(BaseModel):
@@ -341,9 +536,20 @@ class EventIngestRequest(BaseModel):
     source_system: str = "control_center"
     source_agent_id: Optional[str] = None
     source_role: Optional[str] = None
+    actor_type: Optional[str] = None
+    actor_id: Optional[str] = None
     event_type: str
-    severity: EVENT_SEVERITIES = "INFORMATION"
-    message: str
+    severity: EVENT_SEVERITIES = "INFO"
+    status: str = "OPEN"
+    message: Optional[str] = None
+    title: str = ""
+    description: Optional[str] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+    target_agents: List[str] = Field(default_factory=list)
+    status_reason: Optional[str] = None
+    status_updated_at: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("severity", mode="before")
@@ -359,7 +565,7 @@ class AlertIngestRequest(BaseModel):
     source_agent_id: Optional[str] = None
     source_role: Optional[str] = None
     alert_type: str
-    severity: ALERT_SEVERITIES = "INFORMATION"
+    severity: ALERT_SEVERITIES = "INFO"
     message: str
     status: str = "waiting"
     recommended_action: Optional[str] = None
@@ -407,6 +613,8 @@ class DeviceRecord:
     parent_id: Optional[int] = None
     last_location_update: Optional[str] = None
     last_error: Optional[str] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
     # ← NEW: Moth topics for telemetry & healthcheck
     healthcheck_topic: Optional[str] = None
     healthcheck_endpoint: Optional[str] = None
@@ -424,12 +632,32 @@ class DeviceRecord:
                     return self.main_video_track_name
         return resolve_default_main_video_track_name(self.tracks)
 
+    def physical_interfaces(self) -> list[dict[str, Any]]:
+        if self.device_type == "ROV":
+            types = ["WIRED"]
+        elif self.device_type == "AUV":
+            types = ["ACOUSTIC", "RF", "INTERNET"]
+        elif self.device_type == "USV":
+            types = ["WIRED", "RF", "INTERNET", "ACOUSTIC"]
+        else:
+            types = list(self.agent.active_mediums or [])
+        return [{"type": item, "hardware": item, "specs": None} for item in dict.fromkeys(types)]
+
     def to_dict(self) -> dict[str, Any]:
+        action_list = list(self.actions.core) + list(self.actions.custom)
         return {
             "id": self.public_id,
             "registry_id": self.id,
             "token": self.token,
             "name": self.name,
+            "type": self.device_type if self.device_type in {"USV", "AUV", "ROV"} else "OTHER",
+            "status": "ONLINE" if self.connected else "OFFLINE",
+            "position": {"latitude": self.latitude, "longitude": self.longitude},
+            "physical_interfaces": self.physical_interfaces(),
+            "battery_percent": self.last_battery_percent,
+            "device_agent_id": self.agent.endpoint,
+            "last_seen_at": self.agent.last_seen_at,
+            "deleted_at": None,
             "connected": self.connected,
             "connectivity_status": self.connectivity_status,
             "created_at": self.created_at,
@@ -438,7 +666,8 @@ class DeviceRecord:
             "server": self.server.to_dict(),
             "agent": self.agent.to_dict(),
             "tracks": [track.to_dict() for track in self.tracks],
-            "actions": self.actions.to_dict(),
+            "actions": action_list,
+            "action_catalog": self.actions.to_dict(),
             # ← NEW
             "device_type": self.device_type,
             "layer": self.layer,
@@ -449,6 +678,8 @@ class DeviceRecord:
             "last_battery_update": self.last_battery_update,
             "parent_id": self.parent_id,
             "last_location_update": self.last_location_update,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
             # ← NEW: Moth topics
             "healthcheck_topic": self.healthcheck_topic,
             "healthcheck_endpoint": self.healthcheck_endpoint,
@@ -490,6 +721,11 @@ class DeviceRegistrationRequest(BaseModel):
     location: Optional[dict] = None
     requires_parent: bool = False
     parent_id: Optional[int] = None
+    physical_interfaces: List[Dict[str, Any]] = Field(default_factory=list)
+    battery_percent: Optional[float] = None
+    gateway_agent_id: Optional[int] = None
+    environment_state: Optional[str] = None
+    active_mediums: List[str] = Field(default_factory=list)
 
 
 class DeviceRenameRequest(BaseModel):
@@ -570,6 +806,12 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         connected=bool(agent_d.get("connected", False)),
         connected_at=agent_d.get("connected_at"),
         last_seen_at=agent_d.get("last_seen_at"),
+        latitude=agent_d.get("latitude"),
+        longitude=agent_d.get("longitude"),
+        battery_percent=agent_d.get("battery_percent"),
+        gateway_agent_id=agent_d.get("gateway_agent_id"),
+        environment_state=agent_d.get("environment_state"),
+        active_mediums=list(agent_d.get("active_mediums") or []),
     )
 
     tracks = [
@@ -581,7 +823,9 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         for t in (data.get("tracks") or [])
     ]
 
-    actions_d = data.get("actions") or {}
+    actions_d = data.get("action_catalog") or data.get("actions") or {}
+    if isinstance(actions_d, list):
+        actions_d = {"core": [], "custom": actions_d}
     actions = DeviceActionsRecord(
         core=list(actions_d.get("core") or []),
         custom=list(actions_d.get("custom") or []),
@@ -607,7 +851,7 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
             public_id_value = f"id-{uuid4().hex[:12]}"
     public_id_value = str(public_id_value)
 
-    return DeviceRecord(
+    record = DeviceRecord(
         id=int(numeric_id),
         public_id=public_id_value,
         token=str(data["token"]),
@@ -629,6 +873,8 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         last_battery_update=data.get("last_battery_update"),
         parent_id=data.get("parent_id"),
         last_location_update=data.get("last_location_update"),
+        target_type=data.get("target_type"),
+        target_id=data.get("target_id"),
         healthcheck_topic=data.get("healthcheck_topic") or data.get("healthcheck_topic"),
         healthcheck_endpoint=data.get("healthcheck_endpoint") or data.get("healthcheck_endpoint"),
         telemetry_topics=list(data.get("telemetry_topics") or []),
@@ -637,3 +883,11 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         surfaced_at=data.get("surfaced_at"),
         force_parent_routing=bool(data.get("force_parent_routing", False)),
     )
+
+    if not record.agent.environment_state:
+        record.agent.environment_state = "UNDERWATER" if record.is_submerged else "SURFACE"
+    if not record.agent.active_mediums:
+        record.agent.active_mediums = ["ACOUSTIC"] if record.is_submerged else ["RF", "INTERNET", "ACOUSTIC"]
+    if record.agent.gateway_agent_id is None and record.parent_id is not None:
+        record.agent.gateway_agent_id = record.parent_id
+    return record

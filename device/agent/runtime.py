@@ -296,12 +296,18 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_id"),
+            "environment_state": assignment.get("environment_state"),
+            "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
             "force_parent_routing": bool(assignment.get("force_parent_routing", False)),
         }
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_id")
+        self.state.environment_state = assignment.get("environment_state")
+        self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
         self.state.force_parent_routing = bool(signature["force_parent_routing"])
         if self._last_assignment_signature != signature:
@@ -341,6 +347,9 @@ class AgentRuntime:
             latitude=self.state.latitude,
             longitude=self.state.longitude,
             battery_percent=battery_percent,
+            gateway_agent_id=self.state.gateway_agent_id,
+            environment_state=self.state.environment_state,
+            active_mediums=list(self.state.active_mediums or []),
         )
 
     def register_child(self, child: dict[str, Any]) -> dict[str, Any]:
@@ -513,6 +522,17 @@ class AgentRuntime:
                         self.state.latitude = float(pos["latitude"])
                     if "longitude" in pos:
                         self.state.longitude = float(pos["longitude"])
+
+                depth_value = telemetry.get("depth")
+                altitude_value = telemetry.get("altitude")
+                underwater = False
+                if isinstance(depth_value, (int, float)):
+                    underwater = float(depth_value) > 0.0
+                elif isinstance(altitude_value, (int, float)):
+                    underwater = float(altitude_value) < 0.0
+                self.state.environment_state = "UNDERWATER" if underwater else "SURFACE"
+                self.state.active_mediums = ["ACOUSTIC"] if underwater else ["RF", "INTERNET", "ACOUSTIC"]
+                self.state.gateway_agent_id = self.state.parent_id
 
                 # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
                 # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
@@ -698,12 +718,13 @@ class AgentRuntime:
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         execution_result = self.command_controller.execute(command)
         simulation_result: dict[str, Any] = {}
-        if execution_result.get("status") != "failed" and execution_result.get("delivered", True):
+        execution_status = str(execution_result.get("status") or "").upper()
+        if execution_status != "FAILED" and execution_result.get("delivered", True):
             try:
                 simulation_result = self.simulator.apply_command(self.state, command, self.tools)
             except Exception as exc:
                 simulation_result = {
-                    "status": "failed",
+                    "status": "FAILED",
                     "delivered": False,
                     "usable_output": False,
                     "failure_reason": f"simulation_apply_failed:{exc}",
@@ -712,7 +733,7 @@ class AgentRuntime:
                 }
         else:
             simulation_result = {
-                "status": "failed",
+                "status": "FAILED",
                 "delivered": False,
                 "usable_output": False,
                 "failure_reason": execution_result.get("error") or execution_result.get("failure_reason") or "command_execution_failed",
@@ -720,6 +741,8 @@ class AgentRuntime:
                 "mission_state": dict(self.state.mission_state),
             }
         result = {**execution_result, **simulation_result}
+        if "status" in result:
+            result["status"] = "COMPLETED" if str(result.get("status") or "").upper() in {"OK", "SUCCESS", "COMPLETED"} else "FAILED"
         self.state.last_command = dict(command)
         self.state.mission_state = dict(simulation_result.get("mission_state") or self.state.mission_state)
         self.state.remember({

@@ -347,7 +347,11 @@ class TaskDispatcher:
 
     def _device_can_execute(self, device: dict[str, Any], action: str) -> bool:
         """Device가 해당 action을 수행할 수 있는가?"""
-        supported_actions = list(device.get("actions", {}).get("custom", []) or [])
+        actions_payload = device.get("actions") or []
+        if isinstance(actions_payload, dict):
+            supported_actions = list(actions_payload.get("custom", []) or []) + list(actions_payload.get("core", []) or [])
+        else:
+            supported_actions = list(actions_payload or [])
         agent = device.get("agent") or {}
         if isinstance(agent, dict):
             supported_actions.extend(agent.get("available_actions", []))

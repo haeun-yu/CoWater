@@ -10,15 +10,15 @@
     "healthcheck_interval_seconds": 1
   },
   "agent": {
-    "id": "system-agent",
-    "name": "System Agent",
-    "role": "system_agent",
+    "id": "request-handler-agent",
+    "name": "RequestHandler",
+    "role": "request_handler",
     "layer": "system",
     "device_type": "SYSTEM",
     "connectivity": "none",
     "requires_parent": false,
     "children_required": false,
-    "description": "Upper-layer system agent for mission planning, approval, priority, and response strategy.",
+    "description": "Upper-layer request handler for intent classification and routing.",
     "llm": {
       "provider": "ollama",
       "endpoint": "http://localhost:11434",

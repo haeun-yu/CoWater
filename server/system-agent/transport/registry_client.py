@@ -56,6 +56,26 @@ def put_json(url: str, body: dict[str, Any], timeout: int = 5, headers: dict[str
         raise
 
 
+def delete_json(url: str, timeout: int = 5, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json", **(headers or {})},
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        logger.error(f"HTTP error deleting {url}: {e.code}")
+        raise
+    except urllib.error.URLError as e:
+        logger.error(f"Network error deleting {url}: {e.reason}")
+        raise
+    except TimeoutError as e:
+        logger.error(f"Timeout deleting {url}: {e}")
+        raise
+
+
 def get_json(url: str, timeout: int = 5, params: dict[str, Any] | None = None) -> dict[str, Any]:
     if params:
         query = urlencode({key: value for key, value in params.items() if value is not None})
@@ -128,6 +148,9 @@ class RegistryClient:
         skills: list[str],
         actions: list[str],
         last_seen_at: str | None,
+        gateway_agent_id: int | None = None,
+        environment_state: str | None = None,
+        active_mediums: list[str] | None = None,
     ) -> dict[str, Any]:
         return put_json(
             f"{self.url}/devices/{registry_id}/agent",
@@ -141,6 +164,9 @@ class RegistryClient:
                 "available_actions": actions,
                 "connected": True,
                 "last_seen_at": last_seen_at,
+                "gateway_agent_id": gateway_agent_id,
+                "environment_state": environment_state,
+                "active_mediums": active_mediums or [],
             },
         )
 
@@ -153,14 +179,23 @@ class RegistryClient:
     def list_devices(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return get_json(f"{self.url}/devices", params={"limit": limit, "offset": offset})
 
+    def create_agent_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/agent-connections", payload)
+
+    def list_agent_connections(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/agent-connections", params={"limit": limit, "offset": offset})
+
+    def get_agent_connection(self, connection_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/agent-connections/{connection_id}")
+
+    def update_agent_connection(self, connection_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(f"{self.url}/agent-connections/{connection_id}", payload)
+
+    def delete_agent_connection(self, connection_id: str) -> dict[str, Any]:
+        return delete_json(f"{self.url}/agent-connections/{connection_id}")
+
     def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/events/ingest", event)
-
-    def list_events(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/events", params={"limit": limit, "offset": offset})
-
-    def get_event(self, event_id: str) -> dict[str, Any]:
-        return get_json(f"{self.url}/events/{event_id}")
 
     def ingest_alert(self, alert: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/alerts/ingest", alert)
@@ -193,17 +228,6 @@ class RegistryClient:
             payload,
             headers=self._internal_headers(),
         )
-
-    def get_overview(self, *, limit: int | None = 100, offset: int = 0) -> dict[str, Any]:
-        return {
-            "devices": self.list_devices(limit=limit, offset=offset),
-            "device_roles": self.list_device_roles(limit=limit, offset=offset),
-            "operation_plans": self.list_operation_plans(limit=limit, offset=offset),
-            "insights": self.list_insights(limit=limit, offset=offset),
-            "approvals": self.list_approvals(limit=limit, offset=offset),
-            "mission_proposals": self.list_mission_proposals(limit=limit, offset=offset),
-            "missions": self.list_missions(limit=limit, offset=offset),
-        }
 
     def create_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/operation-plans", payload)

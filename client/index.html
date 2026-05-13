@@ -1513,8 +1513,8 @@
         // Close existing connection if any
         closeWebSocket('moth-healthcheck');
 
-        // healthcheck MEB 채널 구독 — 위치/배터리 실시간 업데이트
-        const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base`;
+        // agents MEB 채널의 DEVICE_HEALTHCHECK 이벤트 구독
+        const wsUrl = `${MOTH_WS_BASE}/pang/ws/meb?channel=instant&name=agents&source=base&track=base`;
         const ws = new WebSocket(wsUrl);
         activeWebSockets.set('moth-healthcheck', ws);
 
@@ -1522,7 +1522,7 @@
           ws.send(
             JSON.stringify({
               type: "subscribe",
-              channel: "device.healthcheck",
+              channel: "agents",
               channel_type: "meb",
             }),
           );

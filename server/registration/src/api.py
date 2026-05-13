@@ -28,6 +28,7 @@ from src.core.models import (
     LocationUpdate,
     MainVideoTrackRequest,
     TRACK_TYPES,
+    normalize_mission_status,
 )
 from src.core.pubsub import get_pubsub_manager
 from src.application.bootstrap import build_registry_components
@@ -115,6 +116,7 @@ def meta() -> dict[str, Any]:
         "insights": "/insights",
         "approvals": "/approvals",
         "mission_proposals": "/mission-proposals",
+        "agent_connections": "/agent-connections",
         "events": {
             "ingest": "/events/ingest",
             "list": "/events",
@@ -545,6 +547,56 @@ def get_mission_proposal(proposal_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="mission proposal not found") from exc
 
 
+@app.post("/agent-connections", status_code=status.HTTP_201_CREATED)
+def create_agent_connection(body: dict[str, Any]) -> dict[str, Any]:
+    record = domain_registry.create_agent_connection(body)
+    return record.to_dict()
+
+
+@app.get("/agent-connections")
+def list_agent_connections(
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in domain_registry.list_agent_connections(limit=limit, offset=offset)]
+
+
+@app.get("/agent-connections/{connection_id}")
+def get_agent_connection(connection_id: str) -> dict[str, Any]:
+    try:
+        return domain_registry.get_agent_connection(connection_id).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="agent connection not found") from exc
+
+
+@app.put("/agent-connections/{connection_id}")
+def update_agent_connection(connection_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return domain_registry.update_agent_connection(connection_id, body).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="agent connection not found") from exc
+
+
+@app.delete("/agent-connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_agent_connection(connection_id: str) -> Response:
+    try:
+        domain_registry.delete_agent_connection(connection_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="agent connection not found") from exc
+    return Response(status_code=204)
+
+
+@app.get("/devices/{device_id}/connections")
+def get_device_connections(device_id: str) -> list[dict[str, Any]]:
+    connections = []
+    for connection in domain_registry.list_agent_connections():
+        if connection.deleted_at is not None:
+            continue
+        if connection.agent_a_id == device_id or connection.agent_b_id == device_id:
+            connections.append(connection.to_dict())
+    return connections
+
+
 @app.post("/devices/{device_id}/location")
 def update_device_location(device_id: int, request: LocationUpdate) -> dict[str, Any]:
     """POC 01-05 에이전트의 텔레메트리 기반 위치 업데이트"""
@@ -578,7 +630,27 @@ def update_device_metadata(device_id: int, request: dict[str, Any]) -> Response:
 def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict[str, Any]:
     """AUV 수중/수면 상태 업데이트 (수중음향통신 라우팅 활성화)"""
     try:
+        previous = registry.get_device(device_id)
         device = registry.update_auv_submersion(device_id, request.is_submerged)
+        if getattr(previous, "is_submerged", False) != device.is_submerged:
+            event_registry.ingest_event(
+                EventIngestRequest(
+                    event_type="ENV_STATE_CHANGED",
+                    severity="INFO",
+                    source_system="registration_server",
+                    source_role=getattr(device.agent, "role", None) if hasattr(device, "agent") else None,
+                    title="Environment state changed",
+                    description=f"Device {device.name} changed environment state",
+                    target_type="DEVICE",
+                    target_id=str(device.id),
+                    data={
+                        "device_id": device.id,
+                        "device_name": device.name,
+                        "from": "UNDERWATER" if getattr(previous, "is_submerged", False) else "SURFACE",
+                        "to": "UNDERWATER" if device.is_submerged else "SURFACE",
+                    },
+                )
+            )
         registry.notify_assignment(registry.assignment_for(device_id))
         return device.to_dict()
     except KeyError as exc:
@@ -613,16 +685,27 @@ class MissionCreateRequest(BaseModel):
     mission_id: str | None = None
     title: str | None = None
     mission_type: str | None = None
+    type: str | None = None
     goal: str | None = None
     summary: str | None = None
     source: str | None = None
     alert_id: str | None = None
     event_id: str | None = None
+    source_event_id: str | None = None
     operation_plan_id: str | None = None
     proposal_id: str | None = None
+    source_proposal_id: str | None = None
     approval_id: str | None = None
     insight_id: str | None = None
     status: str | None = None
+    priority: str | None = None
+    target_area: str | None = None
+    target_position: dict[str, Any] | None = None
+    created_by: dict[str, Any] | None = None
+    approved_by_user_id: str | None = None
+    result_summary: str | None = None
+    status_reason: str | None = None
+    status_updated_at: str | None = None
     steps: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     logs: list[dict[str, Any]] = Field(default_factory=list)
@@ -648,9 +731,13 @@ def create_mission(
     if not mission_payload.get("title"):
         mission_payload["title"] = "Mission"
     if not mission_payload.get("mission_type"):
-        mission_payload["mission_type"] = "generic_mission"
+        mission_payload["mission_type"] = mission_payload.get("type") or "OPERATION"
+    mission_payload["source_event_id"] = mission_payload.get("source_event_id") or mission_payload.get("event_id")
+    mission_payload["source_proposal_id"] = mission_payload.get("source_proposal_id") or mission_payload.get("proposal_id")
     if not mission_payload.get("status"):
-        mission_payload["status"] = "pending_approval"
+        mission_payload["status"] = "READY"
+    else:
+        mission_payload["status"] = normalize_mission_status(mission_payload.get("status"))
     mission = domain_registry.create_mission(mission_payload)
     result = mission.to_dict()
     async def publish_mission():
@@ -670,7 +757,8 @@ def list_missions(
 
 @app.get("/missions/status/{status}")
 def list_missions_by_status(status: str) -> list[dict[str, Any]]:
-    return [m.to_dict() for m in domain_registry.list_missions() if str(m.status) == status]
+    normalized_status = normalize_mission_status(status)
+    return [m.to_dict() for m in domain_registry.list_missions() if str(m.status).upper() == normalized_status]
 
 
 @app.get("/missions/stats")
@@ -678,13 +766,11 @@ def get_mission_stats() -> dict[str, Any]:
     missions = domain_registry.list_missions()
     return {
         "total": len(missions),
-        "pending_approval": len([m for m in missions if m.status == "pending_approval"]),
-        "approved": len([m for m in missions if m.status == "approved"]),
-        "running": len([m for m in missions if m.status == "running"]),
-        "completed": len([m for m in missions if m.status == "completed"]),
-        "failed": len([m for m in missions if m.status == "failed"]),
-        "rejected": len([m for m in missions if m.status == "rejected"]),
-        "canceled": len([m for m in missions if m.status == "canceled"]),
+        "READY": len([m for m in missions if m.status == "READY"]),
+        "IN_PROGRESS": len([m for m in missions if m.status == "IN_PROGRESS"]),
+        "COMPLETED": len([m for m in missions if m.status == "COMPLETED"]),
+        "FAILED": len([m for m in missions if m.status == "FAILED"]),
+        "CANCELLED": len([m for m in missions if m.status == "CANCELLED"]),
     }
 
 

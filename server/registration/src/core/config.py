@@ -31,8 +31,8 @@ DEFAULT_REBINDING_DISTANCE_DELTA_THRESHOLD_METERS = 500
 DEFAULT_REBINDING_CHECK_INTERVAL_SECONDS = 1
 
 # ← NEW: Moth (WebSocket for position updates)
-DEFAULT_MOTH_SERVER_URL = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base"
-DEFAULT_MOTH_HEALTHCHECK_TOPIC_TEMPLATE = "device.healthcheck"
+DEFAULT_MOTH_SERVER_URL = "wss://cobot.center:8287/pang/ws/meb?channel=instant&name=agents&source=base&track=base"
+DEFAULT_MOTH_HEALTHCHECK_TOPIC_TEMPLATE = "agents"
 DEFAULT_MOTH_TELEMETRY_TOPIC_TEMPLATE = "device.telemetry.{device_id}.{track_type}"
 
 CONFIG_PATH = Path(os.getenv("COWATER_DEVICE_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))

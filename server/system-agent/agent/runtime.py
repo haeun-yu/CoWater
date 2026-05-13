@@ -102,6 +102,36 @@ class AgentRuntime:
         port = int(os.getenv("COWATER_AGENT_PORT") or self.server.get("port") or 9010)
         return f"http://{host}:{port}"
 
+    @staticmethod
+    def _task_status(value: Any, default: str = "PENDING") -> str:
+        normalized = str(value or default).strip().upper()
+        aliases = {
+            "SUCCESS": "COMPLETED",
+            "OK": "COMPLETED",
+            "DONE": "COMPLETED",
+            "REJECTED": "ABORTED",
+            "DISPATCHED": "ASSIGNED",
+            "RUNNING": "IN_PROGRESS",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
+            return normalized
+        return default
+
+    @staticmethod
+    def _mission_status(value: Any, default: str = "IN_PROGRESS") -> str:
+        normalized = str(value or default).strip().upper()
+        aliases = {
+            "PENDING": "READY",
+            "PLANNED": "READY",
+            "RUNNING": "IN_PROGRESS",
+            "ABORTED": "CANCELLED",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"READY", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"}:
+            return normalized
+        return default
+
     def register(self) -> None:
         if self.identity.get("registry_id") and self.identity.get("token"):
             self.state.registry_id = int(self.identity["registry_id"])
@@ -159,7 +189,7 @@ class AgentRuntime:
         for mission in missions:
             if not isinstance(mission, dict):
                 continue
-            if str(mission.get("status") or "") not in {"approved", "running", "needs_review"}:
+            if str(mission.get("status") or "").upper() not in {"READY", "IN_PROGRESS", "FAILED"}:
                 continue
             dispatch_state = ((mission.get("metadata") or {}).get("dispatch_state") or {})
             if not isinstance(dispatch_state, dict):
@@ -167,12 +197,12 @@ class AgentRuntime:
             for step_state in dispatch_state.get("steps") or []:
                 if not isinstance(step_state, dict):
                     continue
-                if str(step_state.get("status") or "") in {"completed", "failed"}:
+                if self._task_status(step_state.get("status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
                     continue
                 for task_state in step_state.get("tasks") or []:
                     if not isinstance(task_state, dict):
                         continue
-                    if str(task_state.get("execution_status") or "") in {"completed", "failed"}:
+                    if self._task_status(task_state.get("execution_status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
                         continue
                     try:
                         device_id = int(task_state.get("target_device_id") or 0)
@@ -205,12 +235,18 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_id"),
+            "environment_state": assignment.get("environment_state"),
+            "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
             "force_parent_routing": bool(assignment.get("force_parent_routing", False)),
         }
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_id")
+        self.state.environment_state = assignment.get("environment_state")
+        self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
         self.state.force_parent_routing = bool(signature["force_parent_routing"])
         if self._last_assignment_signature != signature:
@@ -237,6 +273,9 @@ class AgentRuntime:
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
+            gateway_agent_id=self.state.gateway_agent_id,
+            environment_state=self.state.environment_state,
+            active_mediums=list(self.state.active_mediums or []),
         )
 
     async def simulation_loop(self) -> None:
@@ -263,7 +302,7 @@ class AgentRuntime:
                     # 완료/실패 상태인 task만 제거 대상
                     removable = [
                         k for k, v in self.state.tasks.items()
-                        if isinstance(v, dict) and str(v.get("status") or "").lower() in {"completed", "failed"}
+                        if isinstance(v, dict) and self._task_status(v.get("status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}
                     ]
                     for k in removable[:len(self.state.tasks) - max_tasks]:
                         self.state.tasks.pop(k, None)
@@ -392,7 +431,7 @@ class AgentRuntime:
                                     "params": {},
                                 }
                             ],
-                            "status": "pending_approval",
+                            "status": "READY",
                             "created_at": utc_now(),
                         }
                         try:
@@ -460,8 +499,8 @@ class AgentRuntime:
                     source_agent_id=self.state.agent_id,
                     device_id=0,  # System-level event
                     device_name="system",
-                    old_status="operational",
-                    new_status="degraded",
+                    old_status="OPERATIONAL",
+                    new_status="DEGRADED",
                     reason=f"LLM error: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
                 )
             )
@@ -591,7 +630,7 @@ class AgentRuntime:
                 {
                     "step_id": step["step_id"],
                     "depends_on": list(step.get("depends_on") or []),
-                    "status": "pending",
+                    "status": "PENDING",
                     "tasks": [
                         {
                             "task_id": task["task_id"],
@@ -603,8 +642,8 @@ class AgentRuntime:
                             "target_device_name": task["target_device_name"],
                             "route_agent_id": task["route_agent_id"],
                             "route_agent_name": task["route_agent_name"],
-                            "dispatch_status": "pending",
-                            "execution_status": "pending",
+                            "dispatch_status": "PENDING",
+                            "execution_status": "PENDING",
                         }
                         for task in step.get("tasks") or []
                     ],
@@ -686,7 +725,8 @@ class AgentRuntime:
         for mission in missions:
             if not isinstance(mission, dict):
                 continue
-            if str(mission.get("status") or "") != "needs_review":
+            mission_status = str(mission.get("status") or "").upper()
+            if mission_status != "FAILED":
                 continue
             dispatch_result = ((mission.get("metadata") or {}).get("dispatch_state") or {})
             if not isinstance(dispatch_result, dict):
@@ -703,7 +743,7 @@ class AgentRuntime:
                 {
                     "mission_id": mission.get("mission_id"),
                     "alert_id": mission.get("alert_id"),
-                    "status": mission.get("status"),
+                    "status": mission_status,
                     "reason": (mission.get("final_result") or {}).get("reason"),
                     "notes": mission.get("summary"),
                     "manual_intervention": intervention,
@@ -950,13 +990,13 @@ class AgentRuntime:
             mission.setdefault("timeline", []).append(
                 {
                     "timestamp": utc_now(),
-                    "type": "user_reapproval",
+                    "type": "USER_REAPPROVAL",
                     "message": "User reapproval recorded.",
                     "data": {"approval_id": approval_id, "approved": approved},
                 }
             )
             # ✅ Record mission reapproval decision timeline event (Ch.18-20)
-            event_type = "mission_approved" if approved else "mission_rejected"
+            event_type = "MISSION_APPROVED" if approved else "MISSION_REJECTED"
             try:
                 self.registry_client.append_mission_timeline_event(
                     mission_id=mission_id,
@@ -972,9 +1012,9 @@ class AgentRuntime:
             except Exception as e:
                 logger.debug(f"Failed to record reapproval timeline: {e}")
             if not approved:
-                mission["status"] = "failed"
+                mission["status"] = "FAILED"
                 mission["completed_at"] = utc_now()
-                mission["final_result"] = {"status": "failed", "reason": "user rejected mission reapproval"}
+                mission["final_result"] = {"status": "FAILED", "reason": "user rejected mission reapproval"}
                 self.registry_client.replace_mission(mission_id, mission)
                 return {"approval": approval, "mission": mission}
             dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
@@ -991,7 +1031,7 @@ class AgentRuntime:
             )
             if isinstance(current_step_def, dict) and isinstance(current_step_state, dict):
                 self._prepare_step_recovery(current_step_def, current_step_state, devices, mode=recovery_mode)
-            mission["status"] = "running"
+            mission["status"] = "IN_PROGRESS"
             mission["completed_at"] = None
             mission["final_result"] = {}
             mission = self._sync_mission_from_dispatch_state(mission, dispatch_state)
@@ -1001,7 +1041,7 @@ class AgentRuntime:
         if str(approval.get("target_type") or "") != "mission_proposal":
             return {"approval": approval, "mission": None}
         proposal = self.registry_client.get_mission_proposal(str(approval.get("target_id")))
-        proposal["status"] = "approved" if approved else "rejected"
+        proposal["status"] = "APPROVED" if approved else "CANCELLED"
         proposal = self.registry_client.create_mission_proposal(proposal)
         if not approved:
             fingerprint = str((proposal.get("metadata") or {}).get("fingerprint") or "")
@@ -1014,7 +1054,7 @@ class AgentRuntime:
         try:
             self.registry_client.append_mission_timeline_event(
                 mission_id=mission.get("mission_id", ""),
-                event_type="mission_approved",
+                event_type="MISSION_APPROVED",
                 actor=f"user_{decided_by}",
                 details={
                     "approval_id": str(approval.get("approval_id") or approval_id),
@@ -1049,8 +1089,8 @@ class AgentRuntime:
             "missions": missions,
             "devices.connected_count": len([device for device in devices if bool(device.get("connected"))]),
             "alerts.waiting_count": len([alert for alert in alerts if str(alert.get("status") or "") in {"waiting", "registered", "processing"}]),
-            "missions.running_count": len([mission for mission in missions if str(mission.get("status") or "") == "running"]),
-            "missions.needs_review_count": len([mission for mission in missions if str(mission.get("status") or "") == "needs_review"]),
+            "missions.in_progress_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "IN_PROGRESS"]),
+            "missions.failed_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "FAILED"]),
         }
 
     def _value_at_path(self, source: dict[str, Any], field_name: str) -> Any:
@@ -1203,13 +1243,13 @@ class AgentRuntime:
         timeline = [
             {
                 "timestamp": utc_now(),
-                "type": "mission_created",
+                "type": "MISSION_CREATED",
                 "message": "Mission created from approved proposal.",
                 "data": {"proposal_id": proposal.get("proposal_id"), "approval_id": approval_id},
             },
             {
                 "timestamp": utc_now(),
-                "type": "user_approval",
+                "type": "USER_APPROVAL",
                 "message": "User approval recorded.",
                 "data": {"approval_id": approval_id},
             },
@@ -1219,7 +1259,7 @@ class AgentRuntime:
             "title": proposal.get("title") or "Mission",
             "mission_type": proposal.get("mission_type") or "generic_mission",
             "goal": proposal.get("goal") or "",
-            "status": "approved",
+            "status": "READY",
             "summary": proposal.get("summary") or "",
             "source": proposal.get("source") or "system_agent",
             "alert_id": proposal.get("alert_id"),
@@ -1248,14 +1288,14 @@ class AgentRuntime:
             step_state = next((item for item in step_states if isinstance(item, dict) and str(item.get("step_id") or "") == step_id), None)
             if not isinstance(step_state, dict):
                 continue
-            mission_step["status"] = step_state.get("status") or mission_step.get("status") or "pending"
+            mission_step["status"] = self._task_status(step_state.get("status") or mission_step.get("status"))
             task_states = step_state.get("tasks") or []
             for mission_task in mission_step.get("tasks") or []:
                 state = next((item for item in task_states if isinstance(item, dict) and str(item.get("logical_task_id") or item.get("task_id") or "") == str(mission_task.get("logical_task_id") or mission_task.get("task_id") or "")), None)
                 if not isinstance(state, dict):
                     continue
-                mission_task["dispatch_status"] = state.get("dispatch_status")
-                mission_task["execution_status"] = state.get("execution_status")
+                mission_task["dispatch_status"] = self._task_status(state.get("dispatch_status"))
+                mission_task["execution_status"] = self._task_status(state.get("execution_status"))
                 mission_task["attempt"] = state.get("attempt", mission_task.get("attempt", 0))
                 mission_task["attempted_device_ids"] = state.get("attempted_device_ids") or mission_task.get("attempted_device_ids") or []
                 mission_task["completed_at"] = state.get("completed_at")
@@ -1274,7 +1314,7 @@ class AgentRuntime:
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "step_started",
+                "type": "STEP_STARTED",
                 "message": f"Step {step_id} started.",
                 "data": {
                     "step_id": step_id,
@@ -1289,7 +1329,7 @@ class AgentRuntime:
             mission.setdefault("timeline", []).append(
                 {
                     "timestamp": utc_now(),
-                    "type": "task_started",
+                    "type": "TASK_STARTED",
                     "message": f"Task {task_id} dispatched for execution.",
                     "data": {
                         "step_id": step_id,
@@ -1335,10 +1375,10 @@ class AgentRuntime:
             "acceptance_status": raw_result.get("acceptance_status"),
             "started_at": raw_result.get("started_at") or raw_result.get("accepted_at"),
             "finished_at": raw_result.get("finished_at") or raw_result.get("reported_at"),
-            "success": normalized_status == "completed",
+            "success": normalized_status == "COMPLETED",
             "failure_reason": raw_result.get("reason") or raw_result.get("error") or raw_result.get("failure_message"),
             "failure_category": self._standardize_failure_category(
-                raw_result.get("failure_category") or execution_log.get("failure_category") or ("unknown" if normalized_status != "completed" else None)
+                raw_result.get("failure_category") or execution_log.get("failure_category") or ("unknown" if normalized_status != "COMPLETED" else None)
             ),
             "location": (
                 raw_result.get("location")
@@ -1358,23 +1398,23 @@ class AgentRuntime:
         devices = self.registry_client.list_devices()
         steps = mission.get("steps") or []
         if not steps:
-            mission["status"] = "failed"
+            mission["status"] = "FAILED"
             mission["completed_at"] = utc_now()
-            mission["final_result"] = {"status": "failed", "reason": "no_steps_generated"}
+            mission["final_result"] = {"status": "FAILED", "reason": "no_steps_generated"}
             mission.setdefault("timeline", []).append({
                 "timestamp": utc_now(),
-                "type": "dispatch_failed",
+                "type": "DISPATCH_FAILED",
                 "message": "Mission has no steps — no capable device found.",
                 "data": {"mission_id": mission.get("mission_id")},
             })
             self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
             return mission
-        mission["status"] = "running"
+        mission["status"] = "IN_PROGRESS"
         mission["started_at"] = utc_now()
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "mission_started",
+                "type": "MISSION_STARTED",
                 "message": "Mission execution started.",
                 "data": {"mission_id": mission.get("mission_id")},
             }
@@ -1394,15 +1434,15 @@ class AgentRuntime:
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "task_dispatched" if dispatch.get("delivered") else "dispatch_failed",
+                "type": "TASK_DISPATCHED" if dispatch.get("delivered") else "DISPATCH_FAILED",
                 "message": "Initial mission step dispatched." if dispatch.get("delivered") else "Initial mission dispatch failed.",
                 "data": dispatch,
             }
         )
         if not dispatch.get("delivered"):
-            mission["status"] = "failed"
+            mission["status"] = "FAILED"
             mission["completed_at"] = utc_now()
-            mission["final_result"] = {"status": "failed", "reason": dispatch.get("error") or "dispatch_failed"}
+            mission["final_result"] = {"status": "FAILED", "reason": dispatch.get("error") or "dispatch_failed"}
         self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
         return mission
 
@@ -1685,7 +1725,12 @@ class AgentRuntime:
         return raw
 
     def _device_supported_actions(self, device: dict[str, Any]) -> set[str]:
-        actions = set(str(v).lower() for v in (device.get("actions") or {}).get("custom", []))
+        actions_payload = device.get("actions") or []
+        if isinstance(actions_payload, dict):
+            action_values = list(actions_payload.get("custom", []) or []) + list(actions_payload.get("core", []) or [])
+        else:
+            action_values = list(actions_payload or [])
+        actions = set(str(v).lower() for v in action_values)
         agent = device.get("agent") or {}
         if isinstance(agent, dict):
             actions.update(str(v).lower() for v in agent.get("available_actions") or [])
@@ -1806,7 +1851,7 @@ class AgentRuntime:
                                 for task in step.get("tasks", []):
                                     if task.get("task_id") == task_id:
                                         # Task 상태 업데이트
-                                        task["execution_status"] = task_result.get("status", "completed")
+                                        task["execution_status"] = self._task_status(task_result.get("status"), "COMPLETED")
                                         task["result"] = task_result
                                         if mission not in missions_to_update:
                                             missions_to_update.append(mission)
@@ -1837,8 +1882,8 @@ class AgentRuntime:
         task_states = [task for task in (step_state.get("tasks") or []) if isinstance(task, dict)]
         if not task_states:
             return False
-        terminal_statuses = {"completed", "failed"}
-        return all(str(task.get("execution_status") or "pending") in terminal_statuses for task in task_states)
+        terminal_statuses = {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}
+        return all(self._task_status(task.get("execution_status")) in terminal_statuses for task in task_states)
 
     def _evaluate_step(
         self,
@@ -1906,7 +1951,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             if int(task_state.get("attempt") or 0) < max_retries:
                 return True
@@ -1921,7 +1966,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             logical_task_id = str(task_state.get("logical_task_id") or task_state.get("task_id") or "")
             task_def = next(
@@ -1975,7 +2020,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             logical_task_id = str(task_state.get("logical_task_id") or task_state.get("task_id") or "")
             task_def = next(
@@ -2035,8 +2080,8 @@ class AgentRuntime:
                     "target_device_name": rebuilt["target_device_name"],
                     "route_agent_id": rebuilt["route_agent_id"],
                     "route_agent_name": rebuilt["route_agent_name"],
-                    "dispatch_status": "pending",
-                    "execution_status": "pending",
+                    "dispatch_status": "PENDING",
+                    "execution_status": "PENDING",
                     "dispatch": None,
                     "execution_result": None,
                     "completed_at": None,
@@ -2046,7 +2091,7 @@ class AgentRuntime:
             recovered_any = True
 
         if recovered_any:
-            step_state["status"] = "pending"
+            step_state["status"] = "PENDING"
         return recovered_any
 
     async def _dispatch_next_step(
@@ -2060,6 +2105,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         dispatch_result = dict(response.get("dispatch_result") or {})
         step_states = dispatch_result.get("steps") or []
+        mission_id = str(response.get("mission_id") or response.get("response_id") or "")
         if not isinstance(step_states, list):
             step_states = []
         for step in mission_steps:
@@ -2070,14 +2116,14 @@ class AgentRuntime:
                 ),
                 None,
             )
-            if step_state and step_state.get("status") in {"dispatched", "completed"}:
+            if step_state and self._task_status(step_state.get("status")) in {"ASSIGNED", "IN_PROGRESS", "COMPLETED"}:
                 continue
             depends_on = [str(dep) for dep in (step.get("depends_on") or [])]
             if any(
                 not any(
                     isinstance(state, dict)
                     and str(state.get("step_id")) == dep_step_id
-                    and state.get("status") == "completed"
+                    and self._task_status(state.get("status")) == "COMPLETED"
                     for state in step_states
                 )
                 for dep_step_id in depends_on
@@ -2087,7 +2133,7 @@ class AgentRuntime:
             try:
                 self.registry_client.append_mission_timeline_event(
                     mission_id=mission_id,
-                    event_type="step_started",
+                    event_type="STEP_STARTED",
                     actor="system",
                     details={
                         "step_type": step.get("step_type", "unknown"),
@@ -2129,7 +2175,6 @@ class AgentRuntime:
                 ]
             )
             delivery_failed = False
-            mission_id = str(response.get("mission_id") or response.get("response_id") or "")
             for (task, _task_response), dispatch in zip(task_requests, dispatches):
                 task_results.append(
                     {
@@ -2157,7 +2202,7 @@ class AgentRuntime:
                                 try:
                                     self.registry_client.append_mission_timeline_event(
                                         mission_id=mission_id,
-                                        event_type="task_assigned",
+                                        event_type="TASK_ASSIGNED",
                                         actor="system",
                                         details={
                                             "action": task["action"],
@@ -2170,7 +2215,7 @@ class AgentRuntime:
                                 except Exception as e:
                                     logger.debug(f"Failed to record task_assigned timeline: {e}")
                             task_state["dispatch"] = dispatch
-                            task_state["dispatch_status"] = "dispatched" if dispatch.get("delivered") else "failed"
+                            task_state["dispatch_status"] = "ASSIGNED" if dispatch.get("delivered") else "FAILED"
                             task_state["acceptance_status"] = dispatch.get("acceptance_status")
                             task_state["failure_message"] = dispatch.get("reason")
                             task_state["dispatched_task_id"] = (
@@ -2178,19 +2223,19 @@ class AgentRuntime:
                             )
                             break
             if isinstance(step_state, dict):
-                step_state["status"] = "failed" if delivery_failed else "dispatched"
+                step_state["status"] = "FAILED" if delivery_failed else "ASSIGNED"
             dispatch_result["steps"] = step_states
             if delivery_failed:
                 # ✅ Record failed task dispatch as task_failed timeline event (Ch.18-20)
                 for (task, _task_response), dispatch in zip(task_requests, dispatches):
                     if not dispatch.get("delivered"):
                         try:
-                            self.registry_client.append_mission_timeline_event(
-                                mission_id=mission_id,
-                                event_type="task_failed",
-                                actor="system",
-                                details={
-                                    "dispatch_error": dispatch.get("error", "unknown"),
+                                self.registry_client.append_mission_timeline_event(
+                                    mission_id=mission_id,
+                                    event_type="TASK_FAILED",
+                                    actor="system",
+                                    details={
+                                        "dispatch_error": dispatch.get("error", "unknown"),
                                     "failure_category": "communication",
                                     "failure_message": f"Task dispatch failed: {dispatch.get('error', 'unknown')}",
                                 },
@@ -2456,14 +2501,14 @@ class AgentRuntime:
             return
 
         started_at = utc_now()
-        request["status"] = "running"
+        request["status"] = "IN_PROGRESS"
         request["started_at"] = started_at
         request["updated_at"] = started_at
 
         try:
             result = await self.handle_command_with_llm(command)
             finished_at = utc_now()
-            request["status"] = "completed"
+            request["status"] = "COMPLETED"
             request["result"] = result
             request["updated_at"] = finished_at
             request["finished_at"] = finished_at
@@ -2476,7 +2521,7 @@ class AgentRuntime:
             )
         except Exception as exc:
             finished_at = utc_now()
-            request["status"] = "failed"
+            request["status"] = "FAILED"
             request["error"] = str(exc)
             request["updated_at"] = finished_at
             request["finished_at"] = finished_at
@@ -2507,8 +2552,8 @@ class AgentRuntime:
                     source_agent_id=self.state.agent_id,
                     device_id=0,  # System-level event
                     device_name="system",
-                    old_status="operational",
-                    new_status="degraded",
+                    old_status="OPERATIONAL",
+                    new_status="DEGRADED",
                     reason=f"LLM error during command: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
                 )
             )
@@ -2765,7 +2810,7 @@ class AgentRuntime:
         mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         device_id = str(payload.get("device_id") or "")
         agent_id = str(payload.get("agent_id") or "")
-        status = str(payload.get("status") or "failed").lower()
+        status = self._task_status(payload.get("status"), "FAILED")
         error = str(payload.get("error") or "Unknown error")
         command = payload.get("command") or {}
         execution_result = payload.get("execution_result") or {}
@@ -2812,7 +2857,7 @@ class AgentRuntime:
                 "note": "No related mission found - failure logged"
             }
 
-        if status in {"completed", "success", "ok"}:
+        if status == "COMPLETED":
             mission_result_payload = {
                 "mission_id": mission_id,
                 "response_id": mission_id,
@@ -2820,7 +2865,7 @@ class AgentRuntime:
                 "step_id": str(payload.get("step_id") or "default"),
                 "task_id": task_id,
                 "source_agent_id": agent_id or device_id or "unknown",
-                "execution_status": "completed",
+                "execution_status": "COMPLETED",
                 "execution_log": {
                     "source_agent_id": agent_id or device_id or "unknown",
                     "source_device_id": device_id,
@@ -2858,14 +2903,14 @@ class AgentRuntime:
             "reporter": agent_id or device_id or "unknown",
             "step_id": str(payload.get("step_id") or "default"),
             "task_id": task_id,
-            "status": "failed" if status != "rejected" else "rejected",
+            "status": "ABORTED" if status == "ABORTED" else "FAILED",
             "payload": execution_result,
             "received_at": utc_now(),
             "error": error,
         }
         execution_results.append(failure_entry)
-        retry_count = len([e for e in execution_results if str(e.get("task_id") or "") == task_id and str(e.get("status") or "") in {"failed", "rejected"}])
-        decision = "abort_mission" if retry_count >= 2 or status == "rejected" else "retry_step"
+        retry_count = len([e for e in execution_results if str(e.get("task_id") or "") in {task_id} and str(e.get("status") or "") in {"FAILED", "ABORTED"}])
+        decision = "abort_mission" if retry_count >= 2 or status == "ABORTED" else "retry_step"
         dispatch_state["execution_results"] = execution_results
         dispatch_state["last_failure"] = {
             "task_id": task_id,
@@ -2880,15 +2925,15 @@ class AgentRuntime:
                 if not isinstance(task_state, dict):
                     continue
                 if str(task_state.get("task_id") or "") == task_id:
-                    task_state["execution_status"] = "failed" if status != "rejected" else "rejected"
+                    task_state["execution_status"] = "ABORTED" if status == "ABORTED" else "FAILED"
                     task_state["failure_message"] = error
                     task_state["completed_at"] = utc_now()
-                    step_state["status"] = "failed"
+                    step_state["status"] = "FAILED"
         current_mission["metadata"] = {**dict(current_mission.get("metadata") or {}), "dispatch_state": dispatch_state}
         current_mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "warning",
+                "type": "WARNING",
                 "message": f"Warning raised for task {task_id}.",
                 "data": {"task_id": task_id, "error": error, "decision": decision},
             }
@@ -2896,15 +2941,15 @@ class AgentRuntime:
         current_mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "task_failure",
+                "type": "TASK_FAILURE",
                 "message": f"Task {task_id} reported {status}.",
                 "data": {"task_id": task_id, "error": error, "decision": decision},
             }
         )
-        current_mission["status"] = "failed" if decision == "abort_mission" else "running"
+        current_mission["status"] = "FAILED" if decision == "abort_mission" else "IN_PROGRESS"
         if decision == "abort_mission":
             current_mission["completed_at"] = utc_now()
-            current_mission["final_result"] = {"status": "failed", "reason": error}
+            current_mission["final_result"] = {"status": "FAILED", "reason": error}
         current_mission = self._sync_mission_from_dispatch_state(current_mission, dispatch_state)
         self.registry_client.replace_mission(mission_id, current_mission)
         
@@ -2931,13 +2976,13 @@ class AgentRuntime:
         mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         reporter = str(payload.get("source_agent_id") or payload.get("reporter") or "unknown")
         step_id = str(payload.get("step_id") or "")
-        execution_status = str(payload.get("execution_status") or "completed").lower()
+        execution_status = self._task_status(payload.get("execution_status"), "COMPLETED")
         execution_log = payload.get("execution_log") or {}
 
         if not mission_id:
             return {"received": False, "message_type": "mission.result", "error": "mission_id required"}
 
-        normalized_status = "completed" if execution_status == "completed" else "failed"
+        normalized_status = "COMPLETED" if execution_status == "COMPLETED" else "FAILED"
         async with self._mission_lock:
             devices = self.registry_client.list_devices()
             try:
@@ -3036,7 +3081,7 @@ class AgentRuntime:
                                 self._release_device(int(task_state.get("target_device_id") or 0), reason="task_result_received")
                                 # ✅ Record task completion/failure timeline event (Ch.18-20)
                                 try:
-                                    event_type = "task_completed" if normalized_status == "completed" else "task_failed"
+                                    event_type = "TASK_COMPLETED" if normalized_status == "COMPLETED" else "TASK_FAILED"
                                     self.registry_client.append_mission_timeline_event(
                                         mission_id=mission_id,
                                         event_type=event_type,
@@ -3053,17 +3098,17 @@ class AgentRuntime:
                                 except Exception as e:
                                     logging.getLogger(__name__).debug(f"Failed to record task completion timeline: {e}")
                         task_statuses = [
-                            str(task_state.get("execution_status") or "pending")
+                            self._task_status(task_state.get("execution_status"))
                             for task_state in item.get("tasks") or []
                             if isinstance(task_state, dict)
                         ]
-                        if any(status == "failed" for status in task_statuses):
-                            item["status"] = "failed"
-                        elif task_statuses and all(status == "completed" for status in task_statuses):
-                            item["status"] = "completed"
+                        if any(status in {"FAILED", "ABORTED", "CANCELLED"} for status in task_statuses):
+                            item["status"] = "FAILED"
+                        elif task_statuses and all(status == "COMPLETED" for status in task_statuses):
+                            item["status"] = "COMPLETED"
                             item["completed_at"] = utc_now()
                         else:
-                            item["status"] = "dispatched"
+                            item["status"] = "IN_PROGRESS"
                         break
 
                 current_step_def = next(
@@ -3103,7 +3148,7 @@ class AgentRuntime:
                         mission.setdefault("timeline", []).append(
                             {
                                 "timestamp": utc_now(),
-                                "type": "plan_changed",
+                                "type": "PLAN_CHANGED",
                                 "message": f"Mission plan changed after step {step_id}.",
                                 "data": {
                                     "step_id": step_id,
@@ -3134,10 +3179,32 @@ class AgentRuntime:
                                 },
                             }
                         )
+                        try:
+                            self.registry_client.ingest_event(
+                                {
+                                    "source_system": "system_agent",
+                                    "source_agent_id": str(self.state.agent_id),
+                                    "source_role": str(self.state.role or "mission_planner"),
+                                    "event_type": "USER_REPLAN_REQUEST",
+                                    "severity": "INFO",
+                                    "title": "User replan requested",
+                                    "description": f"Mission {mission_id} requires replan or reapproval.",
+                                    "target_type": "MISSION",
+                                    "target_id": mission_id,
+                                    "data": {
+                                        "approval_id": reapproval.get("approval_id"),
+                                        "step_id": step_id,
+                                        "reason": step_evaluation.get("reason"),
+                                    },
+                                    "target_agents": ["MissionPlanner", "InsightReporter"],
+                                }
+                            )
+                        except Exception as exc:
+                            logger.debug(f"Failed to record USER_REPLAN_REQUEST event: {exc}")
                         mission.setdefault("timeline", []).append(
                             {
                                 "timestamp": utc_now(),
-                                "type": "user_reapproval_requested",
+                                "type": "USER_REAPPROVAL_REQUESTED",
                                 "message": "Mission reapproval requested.",
                                 "data": {
                                     "approval_id": reapproval.get("approval_id"),
@@ -3184,7 +3251,7 @@ class AgentRuntime:
                             ),
                             None,
                         )
-                        if step_state and step_state.get("status") in {"dispatched", "completed"}:
+                        if step_state and self._task_status(step_state.get("status")) in {"ASSIGNED", "IN_PROGRESS", "COMPLETED"}:
                             continue
                         next_step = candidate
                         break
@@ -3233,7 +3300,7 @@ class AgentRuntime:
                         self._append_dispatch_timeline_entries(mission, retry_dispatch, mission_steps)
 
                 all_step_states_completed = bool(step_states) and all(
-                    isinstance(item, dict) and str(item.get("status") or "").lower() == "completed"
+                    isinstance(item, dict) and self._task_status(item.get("status")) == "COMPLETED"
                     for item in step_states
                 )
                 planned_step_ids = [
@@ -3246,25 +3313,28 @@ class AgentRuntime:
                     for step_key, evaluation in step_evaluations.items()
                     if isinstance(evaluation, dict) and evaluation.get("decision") == "proceed_next_step"
                 }
-                aggregate_status = "running"
-                if step_evaluation and step_evaluation.get("decision") == "manual_intervention_required":
-                    aggregate_status = "needs_review"
+                aggregate_status = "IN_PROGRESS"
+                manual_intervention_required = bool(
+                    step_evaluation and step_evaluation.get("decision") == "manual_intervention_required"
+                )
+                if manual_intervention_required:
+                    aggregate_status = "FAILED"
                 elif step_evaluation and step_evaluation.get("decision") == "abort_mission":
-                    aggregate_status = "failed"
+                    aggregate_status = "FAILED"
                 elif all_step_states_completed:
-                    aggregate_status = "completed"
+                    aggregate_status = "COMPLETED"
                 elif planned_step_ids and all(step in proceed_step_ids for step in planned_step_ids):
-                    aggregate_status = "completed"
+                    aggregate_status = "COMPLETED"
 
-                if aggregate_status in {"failed", "needs_review"}:
+                if aggregate_status == "FAILED":
                     self._release_response_devices(dispatch_state, reason=aggregate_status)
-                elif aggregate_status == "completed":
+                elif aggregate_status == "COMPLETED":
                     self._release_response_devices(dispatch_state, reason="mission_completed")
 
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "device_result_reported",
+                        "type": "DEVICE_RESULT_REPORTED",
                         "message": f"Task result reported by {reporter}.",
                         "data": {
                             "step_id": step_id,
@@ -3278,10 +3348,10 @@ class AgentRuntime:
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "task_completed" if normalized_status == "completed" else "warning",
+                        "type": "TASK_COMPLETED" if normalized_status == "COMPLETED" else "WARNING",
                         "message": (
                             f"Task {task_id} completed."
-                            if normalized_status == "completed"
+                            if normalized_status == "COMPLETED"
                             else f"Task {task_id} reported non-success status."
                         ),
                         "data": {
@@ -3296,22 +3366,22 @@ class AgentRuntime:
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "agent_judgement",
+                        "type": "AGENT_JUDGEMENT",
                         "message": "System Agent updated mission evaluation.",
                         "data": step_evaluation or {"status": aggregate_status},
                     }
                 )
                 mission["status"] = aggregate_status
-                if aggregate_status == "completed":
+                if aggregate_status == "COMPLETED":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
-                        "status": "completed",
+                        "status": "COMPLETED",
                         "summary": f"Mission completed after step {step_id}.",
                     }
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "mission_completed",
+                            "type": "MISSION_COMPLETED",
                             "message": "Mission completed.",
                             "data": {"mission_id": mission_id},
                         }
@@ -3322,16 +3392,16 @@ class AgentRuntime:
                             self.registry_client.complete_alert(alert_id, notes="Mission completed")
                         except Exception as exc:
                             logger.debug(f"Failed to complete alert {alert_id}: {exc}")
-                elif aggregate_status == "failed":
+                elif aggregate_status == "FAILED":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
-                        "status": "failed",
+                        "status": "FAILED",
                         "reason": (step_evaluation or {}).get("reason") or "task execution failure",
                     }
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "mission_failed",
+                            "type": "MISSION_FAILED",
                             "message": "Mission failed.",
                             "data": {
                                 "mission_id": mission_id,
@@ -3345,11 +3415,11 @@ class AgentRuntime:
                             self.registry_client.acknowledge_alert(alert_id, approved=False, notes="Mission failed")
                         except Exception as exc:
                             logger.debug(f"Failed to mark alert {alert_id} as failed: {exc}")
-                elif aggregate_status == "needs_review":
+                if manual_intervention_required:
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "warning",
+                            "type": "WARNING",
                             "message": "Mission requires manual review.",
                             "data": {
                                 "mission_id": mission_id,

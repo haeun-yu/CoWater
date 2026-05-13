@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 from dataclasses import asdict
 
-from src.core.models import MissionRecord
+from src.core.models import MissionRecord, normalize_mission_status, normalize_task_status
 from src.db.connection import DatabaseConnection, get_db
 from src.db.schema import init_schema
 
@@ -54,7 +54,7 @@ class MissionRegistry:
             response_id=response_id,
             alert_id=alert_id,
             event_id=event_id,
-            status="pending",
+            status="READY",
             metadata=metadata or {},
         )
         
@@ -113,10 +113,11 @@ class MissionRegistry:
     
     def list_missions_by_status(self, status: str) -> List[MissionRecord]:
         """특정 상태의 Mission 목록 반환"""
+        normalized_status = normalize_mission_status(status)
         if self.use_db and self.db:
             cursor = self.db.execute(
                 "SELECT mission_id FROM missions WHERE status = ? ORDER BY mission_id",
-                (status,)
+                (normalized_status,)
             )
             results = cursor.fetchall()
             missions = []
@@ -126,7 +127,7 @@ class MissionRegistry:
                     missions.append(mission)
             return missions
         else:
-            return [m for m in self._missions.values() if m.status == status]
+            return [m for m in self._missions.values() if normalize_mission_status(m.status) == normalized_status]
     
     def update_mission_status(self, mission_id: str, status: str) -> MissionRecord:
         """Mission 상태 업데이트"""
@@ -159,13 +160,13 @@ class MissionRegistry:
         if step_state is None:
             step_state = {
                 "step_id": step_id,
-                "status": execution_result.get("status", "pending"),
+                "status": normalize_task_status(execution_result.get("status")),
                 "tasks": execution_result.get("tasks", []),
                 "execution_results": [],
             }
             mission.step_states.append(step_state)
         else:
-            step_state["status"] = execution_result.get("status", step_state.get("status"))
+            step_state["status"] = normalize_task_status(execution_result.get("status", step_state.get("status")))
             if "tasks" in execution_result:
                 step_state["tasks"] = execution_result["tasks"]
         
@@ -190,7 +191,7 @@ class MissionRegistry:
         """Mission 완료 및 보고서 저장"""
         mission = self.get_mission(mission_id)
         mission.completion_report = completion_report
-        mission.touch("completed")
+        mission.touch("COMPLETED")
         
         if self.use_db and self.db:
             self._save_mission_to_db(mission)
@@ -207,11 +208,11 @@ class MissionRegistry:
         """Mission abort (실패)"""
         mission = self.get_mission(mission_id)
         mission.completion_report = {
-            "status": "failed",
+            "status": "FAILED",
             "reason": reason,
             "timestamp": mission.updated_at,
         }
-        mission.touch("failed")
+        mission.touch("FAILED")
         
         if self.use_db and self.db:
             self._save_mission_to_db(mission)
@@ -225,10 +226,11 @@ class MissionRegistry:
         all_missions = self.list_missions()
         return {
             "total": len(all_missions),
-            "pending": len([m for m in all_missions if m.status == "pending"]),
-            "in_progress": len([m for m in all_missions if m.status == "in_progress"]),
-            "completed": len([m for m in all_missions if m.status == "completed"]),
-            "failed": len([m for m in all_missions if m.status == "failed"]),
+            "ready": len([m for m in all_missions if normalize_mission_status(m.status) == "READY"]),
+            "in_progress": len([m for m in all_missions if normalize_mission_status(m.status) == "IN_PROGRESS"]),
+            "completed": len([m for m in all_missions if normalize_mission_status(m.status) == "COMPLETED"]),
+            "failed": len([m for m in all_missions if normalize_mission_status(m.status) == "FAILED"]),
+            "cancelled": len([m for m in all_missions if normalize_mission_status(m.status) == "CANCELLED"]),
         }
 
     def reset(self) -> None:

@@ -5,7 +5,7 @@ Device들로부터 정기적으로 수신되는 healthcheck를 추적하여:
 1. Offline Device 감지: 30초 이상 healthcheck 없으면 offline 표시
 2. 자동 재할당: Middle Agent offline 시, 자식 devices를 다른 parent로 자동 재할당
 
-Moth WebSocket을 통해 device.healthcheck topic을 수신합니다.
+Moth WebSocket을 통해 agents 채널의 DEVICE_HEALTHCHECK 이벤트를 수신합니다.
 """
 
 from __future__ import annotations

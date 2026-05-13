@@ -27,19 +27,18 @@ class EventSeverity(Enum):
     """Event 심각도"""
     INFO = "INFO"
     WARNING = "WARNING"
-    ERROR = "ERROR"
     CRITICAL = "CRITICAL"
 
 
 class EventType(Enum):
     """Event 유형"""
-    STEP_EVALUATION = "step_evaluation"
-    TASK_EXECUTION = "task_execution"
-    RECOVERY_ACTION = "recovery_action"
-    MISSION_STATE_CHANGE = "mission_state_change"
-    ALERT_GENERATED = "alert_generated"
-    DEVICE_STATUS_CHANGE = "device_status_change"
-    POLICY_DECISION = "policy_decision"
+    STEP_EVALUATION = "SYS_MISSION_UPDATED"
+    TASK_EXECUTION = "SYS_TASK_RESULT"
+    RECOVERY_ACTION = "SYS_MISSION_UPDATED"
+    MISSION_STATE_CHANGE = "SYS_MISSION_UPDATED"
+    ALERT_GENERATED = "SYS_ANOMALY_DETECTED"
+    DEVICE_STATUS_CHANGE = "SYS_ANOMALY_DETECTED"
+    POLICY_DECISION = "SYS_POLICY_DECISION"
 
 
 class StateChangeEvent:
@@ -86,7 +85,8 @@ class StateChangeEvent:
         if isinstance(severity, EventSeverity):
             self.severity = severity.value
         else:
-            self.severity = str(severity).upper()
+            normalized_severity = str(severity).upper()
+            self.severity = "WARNING" if normalized_severity == "ERROR" else normalized_severity
         
         self.source_system = str(source_system)
         self.source_agent_id = source_agent_id
@@ -107,10 +107,22 @@ class StateChangeEvent:
             "source_agent_id": self.source_agent_id,
             "title": self.title,
             "description": self.description,
-            "related_ids": self.related_ids,
-            "metrics": self.metrics,
-            "recovery_history": self.recovery_history,
+            "target_agents": self._default_target_agents(),
+            "data": {
+                "related_ids": self.related_ids,
+                "metrics": self.metrics,
+                "recovery_history": self.recovery_history,
+            },
         }
+
+    def _default_target_agents(self) -> list[str]:
+        routing = {
+            "SYS_TASK_RESULT": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
+            "SYS_ANOMALY_DETECTED": ["PolicyManager", "InsightReporter"],
+            "SYS_POLICY_DECISION": ["MissionPlanner", "InsightReporter"],
+            "SYS_MISSION_UPDATED": ["InsightReporter", "SystemSentinel"],
+        }
+        return routing.get(self.event_type, ["InsightReporter"])
 
     def __repr__(self) -> str:
         return (
@@ -236,7 +248,7 @@ def create_recovery_action_event(
         affected_task_ids: 영향받는 task ID 목록
         reason: 복구 이유
     """
-    severity = EventSeverity.WARNING if action == "retry_same_step" else EventSeverity.ERROR
+    severity = EventSeverity.WARNING if action == "retry_same_step" else EventSeverity.WARNING
     
     return StateChangeEvent(
         event_type=EventType.RECOVERY_ACTION,
@@ -270,11 +282,11 @@ def create_mission_state_change_event(
     Args:
         source_agent_id: System Agent ID
         mission_id: Mission ID
-        old_state: 이전 상태 (pending, running, completed, failed, aborted)
+        old_state: 이전 상태 (READY, IN_PROGRESS, COMPLETED, FAILED, CANCELLED)
         new_state: 새로운 상태
         reason: 상태 변화 이유
     """
-    severity = EventSeverity.INFO if new_state == "completed" else EventSeverity.WARNING
+    severity = EventSeverity.INFO if str(new_state).upper() == "COMPLETED" else EventSeverity.WARNING
     
     return StateChangeEvent(
         event_type=EventType.MISSION_STATE_CHANGE,

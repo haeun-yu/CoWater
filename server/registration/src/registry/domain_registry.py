@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from src.db.connection import DatabaseConnection, get_db
 from src.db.schema import init_schema
+from src.core.models import normalize_approval_status, normalize_mission_status, normalize_proposal_status
 
 
 def utc_now_iso() -> str:
@@ -26,6 +27,31 @@ def _loads(raw: str | bytes | None) -> dict[str, Any]:
     if not raw:
         return {}
     return json.loads(raw)
+
+
+def _normalize_severity(value: Any, default: str = "INFO") -> str:
+    normalized = str(value or default).strip().upper()
+    if normalized in {"INFO", "INFORMATION"}:
+        return "INFO"
+    if normalized in {"WARNING", "WARN"}:
+        return "WARNING"
+    if normalized == "CRITICAL":
+        return "CRITICAL"
+    return default
+
+
+def _upper_status_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"status", "state", "execution_status", "dispatch_status", "acceptance_status"} and item is not None:
+                normalized[key] = str(item).upper()
+            else:
+                normalized[key] = _upper_status_payload(item)
+        return normalized
+    if isinstance(value, list):
+        return [_upper_status_payload(item) for item in value]
+    return value
 
 
 @dataclass
@@ -67,7 +93,7 @@ class InsightRecord(DomainRecord):
     insight_id: str
     summary: str
     reason_summary: str
-    severity: str = "INFORMATION"
+    severity: str = "INFO"
     recommended_action: str | None = None
     confidence_level: str = "medium"
     related_event_id: str | None = None
@@ -85,15 +111,20 @@ class ApprovalRecord(DomainRecord):
     target_id: str
     summary: str
     requested_action: str
-    status: str = "pending"
+    status: str = "PENDING"
     requested_by: str = "system_agent"
     decided_by: str | None = None
     decision_notes: str | None = None
     related_insight_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    status_reason: str | None = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     decided_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _upper_status_payload(deepcopy(self.__dict__))
 
 
 @dataclass
@@ -102,7 +133,18 @@ class MissionProposalRecord(DomainRecord):
     title: str
     mission_type: str
     goal: str
-    status: str = "pending_approval"
+    status: str = "PROPOSED"
+    selected: bool = False
+    priority: str | None = "NORMAL"
+    source_event_id: str | None = None
+    target_area: str | None = None
+    target_position: dict[str, Any] | None = None
+    requires_approval: bool = True
+    reason: str | None = None
+    limitations: str | None = None
+    created_by: dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    approved_by_user_id: str | None = None
+    approved_at: str | None = None
     summary: str = ""
     source: str = "system_agent"
     alert_id: str | None = None
@@ -112,6 +154,31 @@ class MissionProposalRecord(DomainRecord):
     approval_id: str | None = None
     steps: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    status_reason: str | None = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _upper_status_payload(deepcopy(self.__dict__))
+        payload["id"] = payload["proposal_id"]
+        payload["type"] = payload["mission_type"]
+        payload.setdefault("source_event_id", payload.get("event_id"))
+        return payload
+
+
+@dataclass
+class AgentConnectionRecord(DomainRecord):
+    connection_id: str
+    agent_a_id: str
+    agent_b_id: str
+    connection_type: str
+    relation_level: str = "PEER"
+    parent_agent_id: str | None = None
+    mission_id: str | None = None
+    reason: str | None = None
+    profile: dict[str, Any] = field(default_factory=dict)
+    deleted_at: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -122,7 +189,15 @@ class MissionRecord(DomainRecord):
     title: str
     mission_type: str
     goal: str
-    status: str = "pending_approval"
+    status: str = "READY"
+    priority: str | None = "NORMAL"
+    source_event_id: str | None = None
+    source_proposal_id: str | None = None
+    target_area: str | None = None
+    target_position: dict[str, Any] | None = None
+    created_by: dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    approved_by_user_id: str | None = None
+    result_summary: str | None = None
     summary: str = ""
     source: str = "system_agent"
     alert_id: str | None = None
@@ -137,11 +212,22 @@ class MissionRecord(DomainRecord):
     device_execution_results: list[dict[str, Any]] = field(default_factory=list)
     final_result: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    status_reason: str | None = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     approved_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _upper_status_payload(deepcopy(self.__dict__))
+        payload["id"] = payload["mission_id"]
+        payload["type"] = payload["mission_type"]
+        payload.setdefault("source_event_id", payload.get("event_id"))
+        payload.setdefault("source_proposal_id", payload.get("proposal_id"))
+        payload.setdefault("result_summary", payload.get("summary") or payload.get("status_reason"))
+        return payload
 
 
 T = TypeVar("T", bound=DomainRecord)
@@ -238,13 +324,25 @@ class DomainRegistry:
         elif record_type == "mission_proposals":
             payload["proposal_id"] = payload.get("proposal_id") or payload.get("record_id") or ""
             payload["title"] = payload.get("title") or "Mission Proposal"
-            payload["mission_type"] = payload.get("mission_type") or "generic_mission"
+            payload["mission_type"] = payload.get("mission_type") or payload.get("type") or "OPERATION"
             payload["goal"] = payload.get("goal") or ""
+            payload["source_event_id"] = payload.get("source_event_id") or payload.get("event_id")
+            payload["created_by"] = payload.get("created_by") or {"type": "SYSTEM", "id": "system"}
+        elif record_type == "agent_connections":
+            payload["connection_id"] = payload.get("connection_id") or payload.get("record_id") or ""
+            payload["agent_a_id"] = payload.get("agent_a_id") or ""
+            payload["agent_b_id"] = payload.get("agent_b_id") or ""
+            payload["connection_type"] = payload.get("connection_type") or "RELAY"
+            payload["relation_level"] = payload.get("relation_level") or "PEER"
+            payload["profile"] = payload.get("profile") or {}
         elif record_type == "missions":
             payload["mission_id"] = payload.get("mission_id") or payload.get("record_id") or ""
             payload["title"] = payload.get("title") or "Mission"
-            payload["mission_type"] = payload.get("mission_type") or "generic_mission"
+            payload["mission_type"] = payload.get("mission_type") or payload.get("type") or "OPERATION"
             payload["goal"] = payload.get("goal") or ""
+            payload["source_event_id"] = payload.get("source_event_id") or payload.get("event_id")
+            payload["source_proposal_id"] = payload.get("source_proposal_id") or payload.get("proposal_id")
+            payload["created_by"] = payload.get("created_by") or {"type": "SYSTEM", "id": "system"}
         return payload
 
     def reset(self) -> None:
@@ -323,7 +421,7 @@ class DomainRegistry:
                 "insight_id": insight_id,
                 "summary": str(payload.get("summary") or data.get("summary") or ""),
                 "reason_summary": str(payload.get("reason_summary") or data.get("reason_summary") or ""),
-                "severity": str(payload.get("severity") or data.get("severity") or "INFORMATION").upper(),
+                "severity": _normalize_severity(payload.get("severity") or data.get("severity")),
                 "recommended_action": payload.get("recommended_action", data.get("recommended_action")),
                 "confidence_level": str(payload.get("confidence_level") or data.get("confidence_level") or "medium"),
                 "related_event_id": payload.get("related_event_id", data.get("related_event_id")),
@@ -357,7 +455,7 @@ class DomainRegistry:
                 "target_id": str(payload.get("target_id") or data.get("target_id") or ""),
                 "summary": str(payload.get("summary") or data.get("summary") or ""),
                 "requested_action": str(payload.get("requested_action") or data.get("requested_action") or "review"),
-                "status": str(payload.get("status") or data.get("status") or "pending"),
+                "status": normalize_approval_status(payload.get("status") or data.get("status") or "PENDING"),
                 "requested_by": str(payload.get("requested_by") or data.get("requested_by") or "system_agent"),
                 "decided_by": payload.get("decided_by", data.get("decided_by")),
                 "decision_notes": payload.get("decision_notes", data.get("decision_notes")),
@@ -379,7 +477,7 @@ class DomainRegistry:
 
     def decide_approval(self, approval_id: str, approved: bool, *, decided_by: str, notes: str | None = None) -> ApprovalRecord:
         approval = self.get_approval(approval_id)
-        approval.status = "approved" if approved else "rejected"
+        approval.status = normalize_approval_status("APPROVED" if approved else "REJECTED")
         approval.decided_by = decided_by
         approval.decision_notes = notes
         approval.decided_at = utc_now_iso()
@@ -400,8 +498,21 @@ class DomainRegistry:
                 "title": str(payload.get("title") or data.get("title") or "Mission Proposal"),
                 "mission_type": str(payload.get("mission_type") or data.get("mission_type") or "generic_mission"),
                 "goal": str(payload.get("goal") or data.get("goal") or ""),
-                "status": str(payload.get("status") or data.get("status") or "pending_approval"),
+                "status": normalize_proposal_status(payload.get("status") or data.get("status") or "PROPOSED"),
+                "selected": bool(payload.get("selected", data.get("selected", False))),
+                "priority": str(payload.get("priority") or data.get("priority") or "NORMAL").upper(),
+                "source_event_id": payload.get("source_event_id", payload.get("event_id", data.get("source_event_id"))),
+                "target_area": payload.get("target_area", data.get("target_area")),
+                "target_position": deepcopy(payload.get("target_position") or data.get("target_position")),
+                "requires_approval": bool(payload.get("requires_approval", data.get("requires_approval", True))),
+                "reason": payload.get("reason", data.get("reason")),
+                "limitations": payload.get("limitations", data.get("limitations")),
+                "created_by": deepcopy(payload.get("created_by") or data.get("created_by") or {"type": "SYSTEM", "id": "system"}),
+                "approved_by_user_id": payload.get("approved_by_user_id", data.get("approved_by_user_id")),
+                "approved_at": payload.get("approved_at", data.get("approved_at")),
                 "summary": str(payload.get("summary") or data.get("summary") or ""),
+                "status_reason": payload.get("status_reason", data.get("status_reason")),
+                "status_updated_at": payload.get("status_updated_at", data.get("status_updated_at") or utc_now_iso()),
                 "source": str(payload.get("source") or data.get("source") or "system_agent"),
                 "alert_id": payload.get("alert_id", data.get("alert_id")),
                 "event_id": payload.get("event_id", data.get("event_id")),
@@ -416,6 +527,54 @@ class DomainRegistry:
         record = MissionProposalRecord(**data)
         self._save("mission_proposals", proposal_id, record.to_dict(), created_at=record.created_at)
         return record
+
+    def create_agent_connection(self, payload: dict[str, Any]) -> AgentConnectionRecord:
+        connection_id = str(payload.get("connection_id") or payload.get("id") or f"conn-{uuid4()}")
+        try:
+            existing = self.get_agent_connection(connection_id)
+            data = existing.to_dict()
+        except KeyError:
+            data = {}
+        data.update(
+            {
+                "connection_id": connection_id,
+                "agent_a_id": str(payload.get("agent_a_id") or data.get("agent_a_id") or ""),
+                "agent_b_id": str(payload.get("agent_b_id") or data.get("agent_b_id") or ""),
+                "connection_type": str(payload.get("connection_type") or data.get("connection_type") or "RELAY"),
+                "relation_level": str(payload.get("relation_level") or data.get("relation_level") or "PEER"),
+                "parent_agent_id": payload.get("parent_agent_id", data.get("parent_agent_id")),
+                "mission_id": payload.get("mission_id", data.get("mission_id")),
+                "reason": payload.get("reason", data.get("reason")),
+                "profile": deepcopy(payload.get("profile") or data.get("profile") or {}),
+                "deleted_at": payload.get("deleted_at", data.get("deleted_at")),
+                "created_at": data.get("created_at") or utc_now_iso(),
+            }
+        )
+        record = AgentConnectionRecord(**data)
+        self._save("agent_connections", connection_id, record.to_dict(), created_at=record.created_at)
+        return record
+
+    def list_agent_connections(self, limit: int | None = None, offset: int = 0) -> list[AgentConnectionRecord]:
+        return self._list("agent_connections", AgentConnectionRecord, limit=limit, offset=offset)
+
+    def get_agent_connection(self, connection_id: str) -> AgentConnectionRecord:
+        return self._load("agent_connections", str(connection_id), AgentConnectionRecord)
+
+    def update_agent_connection(self, connection_id: str, payload: dict[str, Any]) -> AgentConnectionRecord:
+        record = self.get_agent_connection(connection_id)
+        data = record.to_dict()
+        data.update(payload)
+        data["connection_id"] = connection_id
+        data["updated_at"] = utc_now_iso()
+        updated = AgentConnectionRecord(**data)
+        self._save("agent_connections", connection_id, updated.to_dict(), created_at=updated.created_at)
+        return updated
+
+    def delete_agent_connection(self, connection_id: str) -> None:
+        record = self.get_agent_connection(connection_id)
+        record.deleted_at = utc_now_iso()
+        record.updated_at = record.deleted_at
+        self._save("agent_connections", connection_id, record.to_dict(), created_at=record.created_at)
 
     def list_mission_proposals(self, limit: int | None = None, offset: int = 0) -> list[MissionProposalRecord]:
         return self._list("mission_proposals", MissionProposalRecord, limit=limit, offset=offset)
@@ -436,8 +595,18 @@ class DomainRegistry:
                 "title": str(payload.get("title") or data.get("title") or "Mission"),
                 "mission_type": str(payload.get("mission_type") or data.get("mission_type") or "generic_mission"),
                 "goal": str(payload.get("goal") or data.get("goal") or ""),
-                "status": str(payload.get("status") or data.get("status") or "pending_approval"),
+                "status": normalize_mission_status(payload.get("status") or data.get("status") or "READY"),
+                "priority": str(payload.get("priority") or data.get("priority") or "NORMAL").upper(),
+                "source_event_id": payload.get("source_event_id", payload.get("event_id", data.get("source_event_id"))),
+                "source_proposal_id": payload.get("source_proposal_id", payload.get("proposal_id", data.get("source_proposal_id"))),
+                "target_area": payload.get("target_area", data.get("target_area")),
+                "target_position": deepcopy(payload.get("target_position") or data.get("target_position")),
+                "created_by": deepcopy(payload.get("created_by") or data.get("created_by") or {"type": "SYSTEM", "id": "system"}),
+                "approved_by_user_id": payload.get("approved_by_user_id", data.get("approved_by_user_id")),
+                "result_summary": payload.get("result_summary", data.get("result_summary")),
                 "summary": str(payload.get("summary") or data.get("summary") or ""),
+                "status_reason": payload.get("status_reason", data.get("status_reason")),
+                "status_updated_at": payload.get("status_updated_at", data.get("status_updated_at") or utc_now_iso()),
                 "source": str(payload.get("source") or data.get("source") or "system_agent"),
                 "alert_id": payload.get("alert_id", data.get("alert_id")),
                 "event_id": payload.get("event_id", data.get("event_id")),
