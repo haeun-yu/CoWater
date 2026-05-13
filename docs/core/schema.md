@@ -227,7 +227,7 @@
 {
   "id": "string (uuid)",
 
-  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
+  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, SYS_MISSION_COMPLETED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
 
   "severity": "INFO | WARNING | CRITICAL",
   "status": "OPEN | HANDLED | RESOLVED",
@@ -245,7 +245,7 @@
     // Event 타입별로 다름
     // 예: { original_request: "...", capability_gap: {...} }
     // 예: SYS_ANOMALY_DETECTED -> { anomaly_type: "LOW_BATTERY", ... }
-    // 예: SYS_TASK_RESULT -> { status: "FAILED", error_type: "...", ... }
+    // 예: SYS_TASK_FAILED -> { status: "FAILED", error_type: "...", ... }
     // 중요: 전체 Proposal/Mission/Task 데이터 저장 금지
   },
 
@@ -275,7 +275,7 @@
 
   "type": "OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY",
 
-  "status": "PROPOSED | REPLANNING | APPROVED | CANCELLED | EXPIRED",
+  "status": "PROPOSED | APPROVED | CANCELLED | EXPIRED",
 
   "selected": "boolean", // true = 사용자가 이 Proposal을 선택함
 
@@ -318,19 +318,17 @@
 
 - **PROPOSED**: System Agent가 생성, 사용자 선택 대기 중
   - → APPROVED: 사용자가 선택(selected=true) → 재검증 완료 → Mission 생성
-  - → REPLANNING: 이전 Proposal 불채택으로 재계획 필요
   - → CANCELLED: 사용자가 거절
   - → EXPIRED: 유효기간 만료
 - **APPROVED** (고정 상태): 사용자가 이 Proposal을 선택/승인함. Proposal은 승인 시점까지만 추적하며, 이후에는 상태를 변경하지 않음
   - **참고**: Mission의 최종 결과(COMPLETED/FAILED/CANCELLED)는 Proposal.status에 반영되지 않음. 실행 결과는 Mission.status만 추적
-- **REPLANNING**: 이전 Proposal이 채택되지 않았으므로 재계획 중 (status_reason 필드에 불채택 이유 기록)
 - **CANCELLED**: 사용자가 거절 (status_reason에 거절 사유 기록)
 - **EXPIRED**: 장시간 선택 안 됨
 
 **필드 상세**:
 
 - `selected`: 사용자가 이 Proposal을 선택했는지 여부 (true = 승인 절차 진행 중, false = 미선택)
-- `reason`: REPLANNING 상태일 때, 이전 Proposal이 왜 채택되지 않았는지 기록 (사용자 피드백 요약)
+- `reason`: Proposal 재생성 또는 거절 사유를 기록하는 보조 필드 (사용자 피드백 요약)
 - `limitations`: 사용자가 반드시 알아야 할 제약 사항이나 잠재적 위험 요소 (조건부 정보로, 최종 판단에 도움)
 - `status_updated_at`: 마지막으로 상태가 변경된 시점 (모든 상태 전이 추적)
 - `status_reason`: 현재 상태에 대한 사유 또는 설명 (취소/거절/재계획 사유 기록)
@@ -581,8 +579,8 @@
 
 ```
 Policy: "Low Battery Auto-Return"
-  ├─ Rule-1: conditions=[battery<20%] → action=AUTO_CREATE_MISSION
-  └─ Rule-2: conditions=[battery 20-30%] → action=CREATE_EVENT
+  ├─ Rule-1: conditions=[battery<10%] → action=AUTO_CREATE_MISSION
+  └─ Rule-2: conditions=[battery 10-30%] → action=CREATE_EVENT
 ```
 
 ---

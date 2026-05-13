@@ -46,8 +46,8 @@ def check_gateway(source: Device, target: Device) -> bool:
         return True
     
     # 규칙 2: 계층 관계 (Parent → Child)
-    # source가 target의 parent gateway인 경우
-    if source.device_id == target.gateway_agent_id:
+    # source의 Agent가 target의 gateway Agent인 경우
+    if source.device_agent_id == target.gateway_agent_id:
         return True
     
     return False

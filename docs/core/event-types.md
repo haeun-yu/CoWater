@@ -56,7 +56,8 @@ System Agent 간의 의사결정 프로세스를 이벤트로 추적.
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
 | **SYS_TASK_DISPATCHED** | DeviceBridge | SystemSentinel, InsightReporter | Device에 Task 전달 | `{"task_id": "...", "device_id": "...", "action": "...", "timestamp": ...}` |
-| **SYS_TASK_RESULT** | DeviceBridge | MissionPlanner, SystemSentinel, InsightReporter | Device로부터 Task 결과 수신 | `{"task_id": "...", "status": "COMPLETED", "result": {...}}` |
+| **SYS_TASK_COMPLETED** | DeviceBridge | MissionPlanner, SystemSentinel, InsightReporter | Device가 Task를 성공 완료 | `{"task_id": "...", "status": "COMPLETED", "result": {...}}` |
+| **SYS_TASK_FAILED** | DeviceBridge | MissionPlanner, SystemSentinel, InsightReporter | Device가 Task 실행 중 실패 | `{"task_id": "...", "status": "FAILED", "reason": "..."}` |
 
 ### 2.3 이상 징후 (SystemSentinel → others)
 
@@ -74,7 +75,8 @@ System Agent 간의 의사결정 프로세스를 이벤트로 추적.
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **SYS_MISSION_UPDATED** | MissionPlanner | InsightReporter, SystemSentinel | Mission 상태 변화 (READY, IN_PROGRESS, COMPLETED, FAILED, CANCELLED 등) | `{"mission_id": "...", "status": "COMPLETED", "elapsed_time_s": 3600}` |
+| **SYS_MISSION_UPDATED** | MissionPlanner | InsightReporter, SystemSentinel | Mission 상태 변화 (READY, IN_PROGRESS, FAILED, CANCELLED, EXPIRED 등) | `{"mission_id": "...", "status": "READY", "elapsed_time_s": 3600}` |
+| **SYS_MISSION_COMPLETED** | MissionPlanner | InsightReporter, SystemSentinel | Mission 최종 완료 | `{"mission_id": "...", "status": "COMPLETED", "elapsed_time_s": 3600}` |
 | **SYS_MISSION_REPLAN_REQUESTED** | MissionPlanner | InsightReporter | 재계획 또는 재승인 필요 시점 기록 | `{"mission_id": "...", "reason": "...", "step_id": "..."}` |
 
 ### 2.6 리포트 생성 (InsightReporter → clients)
@@ -111,7 +113,7 @@ Device가 발행하는 상태 신호 (MEB를 통해 System에 전파).
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **DEVICE_HEALTHCHECK** | Device (MEB relay: DeviceBridge) | SystemSentinel, InsightReporter | 주기적 (예: 10초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}}` |
+| **DEVICE_HEALTHCHECK** | Device (MEB relay: DeviceBridge) | SystemSentinel, InsightReporter | 주기적 (예: 1초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}}` |
 
 ### 4.2 환경 변화 감지
 
@@ -137,7 +139,8 @@ subscribe_to_events = [
 # MissionPlanner
 subscribe_to_events = [
     "SYS_INTENT_CLASSIFIED",
-    "SYS_TASK_RESULT",
+    "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED",
     "SYS_ANOMALY_DETECTED",
     "SYS_POLICY_DECISION",
     "SYS_AGENT_CONNECTION_CREATED",
@@ -155,17 +158,20 @@ subscribe_to_events = [
     "DEVICE_HEALTHCHECK",
     "ENV_STATE_CHANGED",
     "SYS_TASK_DISPATCHED",
-    "SYS_TASK_RESULT"
+    "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED"
 ]
 
 # InsightReporter
 subscribe_to_events = [
     "SYS_INTENT_CLASSIFIED",
     "SYS_TASK_DISPATCHED",
-    "SYS_TASK_RESULT",
+    "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED",
     "SYS_ANOMALY_DETECTED",
     "SYS_POLICY_DECISION",
     "SYS_MISSION_UPDATED",
+    "SYS_MISSION_COMPLETED",
     "DEVICE_HEALTHCHECK"
 ]
 ```
@@ -219,12 +225,12 @@ class BaseAgent:
         )
 ```
 
-### 6.2 예시: MissionPlanner가 Task 결과 수신 후 Mission 업데이트
+### 6.2 예시: MissionPlanner가 Task 완료/실패 수신 후 Mission 업데이트
 
 ```python
 class MissionPlanner(BaseAgent):
-    async def on_sys_task_result(self, payload: dict):
-        """SYS_TASK_RESULT 이벤트 수신"""
+    async def on_task_result(self, payload: dict):
+        """SYS_TASK_COMPLETED / SYS_TASK_FAILED 이벤트 수신"""
         task_id = payload["task_id"]
         status = payload["status"]
         
@@ -235,7 +241,7 @@ class MissionPlanner(BaseAgent):
         
         # 다른 Agent에 알림
         await self.publish_event(
-            event_type="SYS_MISSION_UPDATED",
+            event_type="SYS_MISSION_COMPLETED" if status == "COMPLETED" else "SYS_MISSION_UPDATED",
             payload={
                 "mission_id": mission.id,
                 "status": mission.status,
@@ -275,12 +281,13 @@ MissionPlanner
             │
             └─ A2A: POST DeviceBridge:9110/message:send (task.result)
                 │
-                └─ MEB: SYS_TASK_RESULT
-                   target_agents: [MissionPlanner, SystemSentinel]
+                ├─ MEB: SYS_TASK_COMPLETED
+                │  target_agents: [MissionPlanner, SystemSentinel]
+                │
+                └─ MissionPlanner: Mission 상태 업데이트
                     │
-                    └─ MissionPlanner: Mission 상태 업데이트
-                        │
-                        └─ MEB: SYS_MISSION_UPDATED (COMPLETED)
+                    └─ MEB: SYS_MISSION_COMPLETED
+                       target_agents: [InsightReporter, SystemSentinel]
 ```
 
 ### 7.2 이상 징후 → 자동 대응
@@ -288,7 +295,7 @@ MissionPlanner
 ```
 SystemSentinel (감시 루프)
     │
-    ├─ 규칙: battery < 20% 감지
+    ├─ 규칙: battery < 30% 감지
     │
     └─ MEB: SYS_ANOMALY_DETECTED
        target_agents: [PolicyManager]
@@ -323,7 +330,7 @@ SystemSentinel (감시 루프)
 이벤트 구조 변경 시:
 ```json
 {
-  "event_type": "SYS_TASK_RESULT",
+  "event_type": "SYS_TASK_COMPLETED",
   "version": "1.0",  // 스키마 버전
   "payload": { ... }
 }

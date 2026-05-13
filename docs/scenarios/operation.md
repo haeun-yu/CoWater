@@ -173,9 +173,9 @@ MissionPlanner이 Proposal-1 재검증:
 
 ✓ ROV-1 상태 재확인 (DeviceBridge의 최신 보고 기반)
   - status: 여전히 ONLINE? → YES
-  - battery >= 30%? → NO (battery = 15%)
+  - battery > 30%? → NO (battery = 15%)
   ↓
-  ❌ 배터리 부족으로 승인 불가
+  ⚠️ 배터리 경고 상태이므로 사용자에게 재확인
 
 MissionPlanner 응답 (RequestHandler를 통해 사용자에게 전달):
 "선택하신 Proposal의 Device 상태가 변경되었습니다.
@@ -294,7 +294,8 @@ Proposal-1: [Device-1 상태 리포트, Device-3 배터리 체크]
 #### **시나리오 B: 문제 감지 (`SYS_ANOMALY_DETECTED`)**
 ```
 System Agent가 모니터링 중 문제 발견:
-  - Device 배터리 < 30%
+- Device 배터리 < 30%
+- Device 배터리 < 30%
   - Device OFFLINE > 10분
   - Task 반복 실패
   - AgentConnection 신호 약화
@@ -302,33 +303,33 @@ System Agent가 모니터링 중 문제 발견:
 → `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=LOW_BATTERY | DEVICE_OFFLINE | TASK_FAILURE` 등)
 → 심각도(severity)에 따라:
    ├─ INFO: 알림만 전달, Proposal 생성 X
-   ├─ WARNING: Proposal 생성, 사용자 선택 대기
+   ├─ WARNING: Proposal 생성 또는 사용자 재확인
    └─ CRITICAL: AUTO_CREATE_MISSION (승인 없이)
 ```
 
 **예시**:
 ```
-Heartbeat: Device-ROV의 배터리 = 18% (임계값: 30%)
+Heartbeat: Device-ROV의 배터리 = 18% (경고 임계값: 30%)
   ↓
 System Agent: `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=LOW_BATTERY`)
   ↓
 Rule Engine (PROBLEM_DETECTION):
-  conditions: [battery < 20%]
+  conditions: [battery < 10%]
   action: AUTO_CREATE_MISSION (RETURN_TO_BASE)
   ↓
-Mission 직접 생성 (Proposal 건너뜀)
+10~30% 구간: Proposal 생성 또는 사용자 확인
   ↓
 Device Agent: 즉시 기지로 복귀
 ```
 
-#### **시나리오 C: Task 실패 감지 (`SYS_TASK_RESULT`, status=FAILED)**
+#### **시나리오 C: Task 실패 감지 (`SYS_TASK_FAILED`, status=FAILED)**
 ```
 Device Agent가 Task 실패 보고:
   - Hardware error
   - Timeout
   - Communication error
   
-→ `SYS_TASK_RESULT` Event 발행 (`status=FAILED`)
+→ `SYS_TASK_FAILED` Event 발행 (`status=FAILED`)
 → Mission FAILED로 상태 변경
 → Rule Engine: CREATE_PROPOSAL 실행
 → 재시도 옵션 Proposal 생성
@@ -339,7 +340,7 @@ Device Agent가 Task 실패 보고:
 Task-2 (고해상도 촬영) 실행 중:
   Device에서: "High Res Camera Hardware Failure"
   ↓
-`SYS_TASK_RESULT` Event (`status=FAILED`)
+`SYS_TASK_FAILED` Event (`status=FAILED`)
   ↓
 System: Mission FAILED, Task FAILED 처리
   ↓
@@ -354,7 +355,7 @@ Rule Engine:
 ### **System Agent의 판단 흐름**
 
 ```
-1. Event 수신 (`SYS_INTENT_CLASSIFIED` / `SYS_ANOMALY_DETECTED` / `SYS_TASK_RESULT` / ...)
+1. Event 수신 (`SYS_INTENT_CLASSIFIED` / `SYS_ANOMALY_DETECTED` / `SYS_TASK_COMPLETED` / `SYS_TASK_FAILED` / ...)
    ↓
 2. Event 해석
    - 목적: 무엇이 필요한가?
@@ -366,7 +367,7 @@ Rule Engine:
    ↓
 4. Rule / Config 적용
    - 이 상황에 매칭되는 Rule이 있는가?
-   - Config 기준값 적용 (예: min_battery_for_task = 30%)
+   - Config 기준값 적용 (예: warning_battery_percent = 30%, critical_battery_percent = 10%)
    ↓
 5. Proposal 생성 또는 Auto-Mission
    - Rule.action = CREATE_PROPOSAL → Proposal 생성 (사용자 선택)
@@ -576,7 +577,7 @@ Rule을 통해 자동으로 재시도할 수도 있습니다:
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_FAILED" },
     { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "task.error_type", operator: "EQ", value: "Timeout" }
   ],

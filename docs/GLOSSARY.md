@@ -95,7 +95,7 @@
 | **정의**    | **시스템에서 발생한 의미 있는 변화** (Rule 실행의 트리거, 감사 기록)                                    |
 | **타입**    | System Layer는 `SYS_*`, Device Layer는 `DEVICE_*`, 환경 변화는 `ENV_STATE_CHANGED` 사용 |
 | **심각도**  | INFO, WARNING, CRITICAL                                                                                 |
-| **예시**    | `SYS_INTENT_CLASSIFIED`, `SYS_TASK_RESULT`, `SYS_ANOMALY_DETECTED`, `SYS_MISSION_UPDATED`, `DEVICE_HEALTHCHECK`, `ENV_STATE_CHANGED` |
+| **예시**    | `SYS_INTENT_CLASSIFIED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED`, `SYS_ANOMALY_DETECTED`, `SYS_MISSION_UPDATED`, `SYS_MISSION_COMPLETED`, `DEVICE_HEALTHCHECK`, `ENV_STATE_CHANGED` |
 | **사용 예** | "배터리 부족 사건이 발생하여 복귀 미션이 자동 생성되었습니다"                                           |
 
 ---
@@ -165,7 +165,7 @@
 | ------------- | --------------------------------------------------------------------------------------------------- |
 | **정의**      | **"만약 A라면, B를 하라" 실전 판단과 트리거**                                                       |
 | **구조**      | Conditions + Action                                                                                 |
-| **예시**      | IF (battery < 20%) THEN (CREATE_MISSION with type=RETURN)                                           |
+| **예시**      | IF (battery < 10%) THEN (CREATE_MISSION with type=RETURN)                                           |
 | **실행**      | Event 발생 시 Rule Engine이 조건 매칭 후 자동 실행                                                  |
 | **관리**      | enabled 플래그, priority(실행 순서) 제어                                                            |
 | **액션 타입** | CREATE_EVENT, CREATE_PROPOSAL, AUTO_CREATE_MISSION, ALLOW_AGENT_CONNECTION, REQUIRE_APPROVAL, BLOCK |

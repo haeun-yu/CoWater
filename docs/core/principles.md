@@ -111,7 +111,7 @@ AgentConnection 타입:
 Event: 모든 중요한 사건 객체화
 ├─ SYS_INTENT_CLASSIFIED (사용자 요청 해석)
 ├─ SYS_ANOMALY_DETECTED (배터리 부족, 오프라인, 긴급 위험 등)
-├─ SYS_TASK_RESULT (작업 완료/실패/거절)
+├─ SYS_TASK_COMPLETED / SYS_TASK_FAILED (작업 완료/실패/거절)
 ├─ SYS_MISSION_UPDATED (Mission 상태 변화)
 └─ ...
 
@@ -320,8 +320,8 @@ Physical Constraint      Software Solution
 
 **구체화**:
 
-- Policy가 정의된 경우: `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → RETURN_TO_BASE Mission 자동 생성
-- Policy가 없는 경우: "배터리가 낮으니 귀환하시겠습니까?" 제안 (사용자 선택)
+- Policy가 정의된 경우: `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` 중 `battery_percent <= 10` → RETURN_TO_BASE Mission 자동 생성
+- Policy가 없는 경우: `battery_percent <= 30` 구간에서는 경고만 하고 사용자 선택을 요청
 - `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)`는 예외: 즉시 자동 대응 후 보고
 
 **왜 필요한가?**
@@ -352,11 +352,11 @@ Physical Constraint      Software Solution
 **구체화**:
 
 - 사용자가 "이 Device에 이 Task를 할당하라"고 명령하면, System은 우선 수행
-- 하지만 시스템이 위험을 감지했다면 경고: "배터리 10%인데 먼 곳으로 보내려 합니다"
+- 하지만 시스템이 위험을 감지했다면 경고: "배터리 30% 이하인데 먼 곳으로 보내려 합니다"
   - 이것은 정책상 경고이지만, 사용자의 override 선택을 존중함
 - Device Agent는 **실제로 수행 불가능한 경우** 거절:
   - **물리적 불가능**: 센서가 없음, 깊이/거리 초과, 하드웨어 오류
-  - (배터리 20% 미만 같은 정책 판단은 System과 협의하지만, 절대적 위험이면 거절 가능)
+  - (배터리 10% 미만 같은 절대적 위험은 Device Agent가 거절 가능)
 - 모든 override 사항은 기록됨
 
 **왜 필요한가?**

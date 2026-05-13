@@ -95,7 +95,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **출력 (Event로 발행)**:
 - `DEVICE_HEALTHCHECK` → SystemSentinel 구독 (지속적 모니터링)
 - `ENV_STATE_CHANGED` → SystemSentinel 구독 (환경 상태 변화 전달)
-- `SYS_TASK_RESULT` → MissionPlanner 구독 (Task 진행 추적)
+- `SYS_TASK_COMPLETED` / `SYS_TASK_FAILED` → MissionPlanner 구독 (Task 진행 추적)
 - 목적지 라우팅 정보가 필요한 경우 적절한 Agent로 전달
 - DB 쓰기: devices 상태 (배터리, 위치, 신호, 마지막_하트비트), sensors 센서 데이터
 
@@ -116,14 +116,14 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 **입력**:
 - `SYS_INTENT_CLASSIFIED` (type=MISSION)
 - `SYS_POLICY_DECISION`
-- `SYS_TASK_RESULT` 이벤트 (DeviceBridge로부터)
+- `SYS_TASK_COMPLETED` / `SYS_TASK_FAILED` 이벤트 (DeviceBridge로부터)
 - `SYS_AGENT_CONNECTION_CREATED` 이벤트 (SystemSentinel로부터)
 
 **처리**:
 1. **Proposal 생성** (Capability Matching, AgentConnection 확인)
 2. **사용자 선택 → Mission 생성** (상태 재검증)
 3. **Task 할당** → DeviceBridge에 요청
-4. **진행 추적** → SYS_TASK_RESULT 수신 후 상태 갱신
+4. **진행 추적** → SYS_TASK_COMPLETED / SYS_TASK_FAILED 수신 후 상태 갱신
 5. **규칙 기반 임무** (PolicyManager로부터 긴급 미션 요청 처리)
 
 **출력**:
@@ -170,7 +170,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
 - 모든 이벤트 (감시 목적)
 
 **처리**:
-- Battery < 20% → `SYS_ANOMALY_DETECTED {anomaly_type: LOW_BATTERY}`
+- Battery < 30% → `SYS_ANOMALY_DETECTED {anomaly_type: LOW_BATTERY}`
 - Signal < 30% → `SYS_ANOMALY_DETECTED {anomaly_type: SIGNAL_LOSS}`
 - Heartbeat timeout → `SYS_ANOMALY_DETECTED {anomaly_type: DEVICE_OFFLINE}`
 - Mission overdue → `SYS_ANOMALY_DETECTED {anomaly_type: MISSION_TIMEOUT}`
@@ -226,7 +226,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    │
    └─【수신】Device Agent로부터 상태/결과 수집 및 Event 발행
       ├─ DEVICE_HEALTHCHECK (정기적: 배터리, 신호, 위치)
-      ├─ SYS_TASK_RESULT (Task 완료/실패)
+      ├─ SYS_TASK_COMPLETED / SYS_TASK_FAILED (Task 완료/실패)
       ├─ ENV_STATE_CHANGED (환경 상태 변화)
       └─ 즉각적 문제 보고 (오류, 센서 이상, 안전 경고)
    ↓
@@ -237,7 +237,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    ↓
 6. SystemSentinel (지속적 감시)
    ├─ DEVICE_HEALTHCHECK Event 모니터링 → 상태 추적
-   ├─ SYS_TASK_RESULT Event 분석 → Task 진행 추적
+   ├─ SYS_TASK_COMPLETED / SYS_TASK_FAILED Event 분석 → Task 진행 추적
    ├─ 이상 징후 감지 (배터리 부족, 신호 손실, Heartbeat 타임아웃)
    └─ SYS_ANOMALY_DETECTED Event 발행 → PolicyManager로 연쇄
    ↓
@@ -288,7 +288,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 전환합니다
    ↓
 10. Device Agent (AUV-01): Task 완료
     ├─ 최종 healthcheck 전송 (완료 상태)
-    └─ SYS_TASK_RESULT Event 발행: COMPLETED
+    └─ SYS_TASK_COMPLETED Event 발행: COMPLETED
     ↓
 11. DeviceBridge【수신】: A2A task.result 메시지 수신
     └─ MissionPlanner에 Task 완료 알림

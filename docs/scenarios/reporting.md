@@ -42,8 +42,8 @@ graph TD
 | **요청** | `SYS_INTENT_CLASSIFIED` | 사용자가 "A 구역 촬영" 요청 | INFO |
 | **거절** | `SYS_INTENT_REJECTED` | 수행 불가능한 요청 | INFO |
 | **감지** | `SYS_ANOMALY_DETECTED` | 배터리 < 30% 감지, 충돌 위험 감지, Device 오프라인 | WARNING / CRITICAL |
-| **실패** | `SYS_TASK_RESULT` | Task 하드웨어 오류 (`status=FAILED`) | WARNING |
-| **상태** | `SYS_MISSION_UPDATED` | Mission 상태 변화 | INFO |
+| **완료/실패** | `SYS_TASK_COMPLETED` / `SYS_TASK_FAILED` | Task 성공 또는 실패 결과 | WARNING |
+| **상태** | `SYS_MISSION_UPDATED` / `SYS_MISSION_COMPLETED` | Mission 상태 변화 | INFO |
 | **의사결정** | `SYS_MISSION_REPLAN_REQUESTED` | 재계획/재승인 요청 | WARNING |
 
 **Event 기록 방식**:
@@ -53,7 +53,7 @@ Event {
   id: "event-12345",
   
   // 무엇이 일어났는가?
-  type: "SYS_TASK_RESULT",
+  type: "SYS_TASK_FAILED",
   severity: "WARNING",
   status: "OPEN" → "RESOLVED",  // 처리 여부
   
@@ -134,7 +134,7 @@ Event (별도 테이블)
 [
   { entity_type: "MISSION", entity_id: "mission-1", event_type: "SYS_MISSION_UPDATED", old_status: "READY", new_status: "IN_PROGRESS", timestamp: "2026-05-12T10:31:00Z" },
   { entity_type: "MISSION", entity_id: "mission-1", event_type: "SYS_MISSION_UPDATED", old_status: "IN_PROGRESS", new_status: "FAILED", timestamp: "2026-05-12T10:45:00Z", reason: "task_failure" },
-  { entity_type: "TASK", entity_id: "task-2", event_type: "SYS_TASK_RESULT", old_status: "IN_PROGRESS", new_status: "FAILED", timestamp: "2026-05-12T10:45:00Z", error: "CAM_001" }
+  { entity_type: "TASK", entity_id: "task-2", event_type: "SYS_TASK_FAILED", old_status: "IN_PROGRESS", new_status: "FAILED", timestamp: "2026-05-12T10:45:00Z", error: "CAM_001" }
 ]
 ```
 
@@ -143,7 +143,7 @@ Event (별도 테이블)
 - Event 테이블: 모든 상태 변화 기록 (status_changed, 이유, 타임스탬프)
   ```
   Event {
-    type: "SYS_TASK_RESULT",
+    type: "SYS_TASK_FAILED",
     target_type: "TASK",
     target_id: "task-2",
     data: {
@@ -317,7 +317,7 @@ ORDER BY created_at DESC;
 Mission FAILED
   ↓
 Report Agent: 실패 원인 추적
-  1. `SYS_TASK_RESULT` Event 확인 (`status=FAILED`)
+  1. `SYS_TASK_FAILED` Event 확인 (`status=FAILED`)
   2. Device/Agent 상태 확인
   3. 네트워크/통신 상태 확인
   4. 타임스탬프 분석 (병목 지점)
@@ -348,7 +348,7 @@ Report에 기록
 ```typescript
 Rule {
   name: "Task Failure Root Cause Analysis",
-  trigger: "`SYS_TASK_RESULT` Event (`status=FAILED`)",
+  trigger: "`SYS_TASK_FAILED` Event (`status=FAILED`)",
   analysis: [
     {
       condition: "error_code == 'CAM_001'",
@@ -456,13 +456,13 @@ graph TD
   ↓
 개선 후보 1:
   - 변경: Policy (자동 대응 강화)
-  - 내용: 배터리 < 20%일 때 자동으로 RETURN_TO_BASE Mission 생성
+  - 내용: 배터리 < 10%일 때 자동으로 RETURN_TO_BASE Mission 생성
   - 영향: 사용자 승인 불필요, 더 높은 신뢰성
   - 위험: 사용자가 원하지 않는 시점에 작업 중단
 
 개선 후보 2:
   - 변경: Config (임계값 조정)
-  - 내용: min_battery_for_task를 30%에서 50%로 상향
+  - 내용: warning_battery_percent를 30%에서 50%로 상향
   - 영향: 더 많은 작업이 "불가능" 판정
   - 위험: 유휴 장비 증가
 
@@ -480,7 +480,7 @@ Improvement {
   id: "improvement-1",
   
   title: "Auto-Return Policy for Low Battery",
-  description: "배터리 < 20%일 때 자동 기지 복귀",
+  description: "배터리 < 10%일 때 자동 기지 복귀",
   
   // 개선 근거
   source: "실패 패턴 분석",

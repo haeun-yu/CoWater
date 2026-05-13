@@ -457,7 +457,7 @@ def can_perform_task(task: Task, device: Device) -> tuple[bool, str]:
 
 **리소스**:
 
-- Battery: 최소 임계값 (예: 20%)
+- Battery: 권장 최소 임계값 (예: 30%, 사용자 override 가능)
 - Position: 목표 위치 도달 가능성 (GPS/SLAM 기반)
 - Communication: 필요한 매체 가용성
 - Time: Task 완료까지 필요한 시간 vs 배터리 남은 시간
@@ -469,7 +469,7 @@ def check_resources(task: Task, device: Device) -> tuple[bool, str]:
     """
 
     # 배터리 확인
-    if device.battery_percent < BATTERY_THRESHOLD:  # e.g., 20%
+    if device.battery_percent < BATTERY_THRESHOLD:  # e.g., 30%, user override 가능
         return False, f"Low battery: {device.battery_percent}%"
 
     # 위치 확인 (target_area가 있는 경우)
@@ -687,7 +687,7 @@ class CommunicationManager:
 
 ### 4.1 Heartbeat 메시지
 
-**주기**: 30초마다 System Agent로 전송
+**주기**: 1초마다 System Agent로 전송
 
 ```json
 {
@@ -754,9 +754,8 @@ def send_problem_report(problem_type: str, details: dict):
 
 **System Agent 관점** (registry 기반 감시):
 
-- 정상: 30초 내 Heartbeat 수신
-- WARNING: 60초 이상 미수신
-- CRITICAL: 120초 이상 미수신 → 장비 오프라인 판단
+  - 정상: 10초 내 Heartbeat 수신
+  - 10초 이상 미수신 → 장비 오프라인 판단
 
 ```python
 # System Agent의 monitoring
@@ -770,7 +769,7 @@ def check_device_heartbeat(device_id: str):
 
     elapsed = utc_now_iso() - last_heartbeat
 
-    if elapsed > 120000:  # 120초
+    if elapsed > 10000:  # 10초
         create_event(
             type="SYS_ANOMALY_DETECTED",
             severity="CRITICAL",
@@ -792,7 +791,7 @@ def check_device_heartbeat(device_id: str):
 def handle_low_battery():
     """배터리가 임계값 아래로 떨어졌을 때"""
 
-    if self.battery_percent <= CRITICAL_THRESHOLD:  # e.g., 15%
+    if self.battery_percent <= CRITICAL_THRESHOLD:  # e.g., 10%
         # 1. 진행 중인 Task 중지
         cancel_current_task("Battery critical")
 
@@ -1042,12 +1041,12 @@ system_agent:
     port: 8000
     protocol: "HTTP"
     path: "/api/agent"
-  heartbeat_interval_sec: 30
-  heartbeat_timeout_sec: 120
+  heartbeat_interval_sec: 1
+  heartbeat_timeout_sec: 10
 
 physical_constraints:
   battery:
-    critical_threshold_percent: 15
+    critical_threshold_percent: 10
     warning_threshold_percent: 30
   depth:
     max_depth_m: 1000
@@ -1483,10 +1482,10 @@ class ConfigurationUpdateHandler:
     [ ] 3.3. RF/WiFi/LTE Driver
     [ ] 3.4. 드라이버 선택 로직
 
-[ ] 4. Heartbeat & Health Check
-    [ ] 4.1. 정기 Heartbeat 전송 (30초)
-    [ ] 4.2. Problem Report (즉각적)
-    [ ] 4.3. 센서 데이터 수집
+    [ ] 4. Heartbeat & Health Check
+        [ ] 4.1. 정기 Heartbeat 전송 (1초)
+        [ ] 4.2. Problem Report (즉각적)
+        [ ] 4.3. 센서 데이터 수집
 
 [ ] 5. Local Safety Behavior
     [ ] 5.1. 배터리 부족 대응

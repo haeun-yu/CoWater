@@ -56,7 +56,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 - **[lifecycle.md](scenarios/lifecycle.md)**: Device 생명주기 (등록→준비→운영→제거)
 - **[operation.md](scenarios/operation.md)**: 사용자 명령 → Proposal → Mission → Task 실행 흐름
-- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (`SYS_ANOMALY_DETECTED`, `SYS_TASK_RESULT`, `SYS_INTENT_REJECTED`)
+- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (`SYS_ANOMALY_DETECTED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED`, `SYS_INTENT_REJECTED`)
 - **[reporting.md](scenarios/reporting.md)**: Event 기록, Report 생성, 실패 분석, 피드백 수집
 - **[administration.md](scenarios/administration.md)**: 시스템 설정, 정책 관리, 승인 규칙
 
@@ -106,7 +106,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 #### 2️⃣ MissionPlanner (포트 9111, 4일)
 - [ ] 3단계 Proposal 생성 (규칙 기반 + LLM + 검증)
 - [ ] 여러 대안 생성 (최적/빠른/안전)
-- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
+- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
 - [ ] MEB: SYS_MISSION_UPDATED 발행
 - [ ] Mission 생명주기 관리
 
@@ -114,7 +114,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 - [ ] A2A 엔드포인트: POST /message:send
 - [ ] task.assign, task.result, child.register, layer.assignment 처리
 - [ ] Device Endpoint 관리
-- [ ] MEB: SYS_TASK_DISPATCHED, SYS_TASK_RESULT 발행
+- [ ] MEB: SYS_TASK_DISPATCHED, SYS_TASK_COMPLETED, SYS_TASK_FAILED 발행
 
 #### 4️⃣ PolicyManager (포트 9112, 2일)
 - [ ] Policy 등록/관리
@@ -124,11 +124,11 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 - [ ] MEB: SYS_POLICY_DECISION 발행
 
 #### 5️⃣ SystemSentinel (포트 9113, 3일)
-- [ ] Device 건전성 감시 루프 (2초 interval)
+- [ ] Device 건전성 감시 루프 (1초 interval)
 - [ ] 규칙 기반: 배터리, Heartbeat, 센서 이상 탐지
 - [ ] AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - [ ] LLM 기반: 복합 패턴 분석
-- [ ] 구독: DEVICE_HEALTHCHECK, ENV_STATE_CHANGED, SYS_TASK_DISPATCHED, SYS_TASK_RESULT
+- [ ] 구독: DEVICE_HEALTHCHECK, ENV_STATE_CHANGED, SYS_TASK_DISPATCHED, SYS_TASK_COMPLETED, SYS_TASK_FAILED
 - [ ] MEB: SYS_ANOMALY_DETECTED, SYS_AGENT_CONNECTION_* 발행
 
 #### 6️⃣ InsightReporter (포트 9114, 2일)

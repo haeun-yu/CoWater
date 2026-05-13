@@ -165,7 +165,7 @@ Device Agent → [tracks endpoint] → 센서 스트림 읽음
 ```
 
 **5단계: 준비 완료**
-- `heartbeat` 송신 시작 (30초 주기)
+- `heartbeat` 송신 시작 (1초 주기)
 - System Agent로부터 Task 할당 수신 가능
 - Device-Device 협력 가능
 
@@ -467,7 +467,7 @@ Task-1 {
 
 **P5 적용 (Device Agent의 최종 판단)**:
 - Device Agent는 Task 수행 중 문제 발생 시 즉시 중단 가능
-- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_RESULT(status=FAILED)` 보고 가능
+- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_FAILED(status=FAILED)` 보고 가능
 - System Agent는 Device Agent의 판단을 존중하고 대체안 제시 (거절 불가)
 
 **Device/Agent 문제 발생 시**:
@@ -502,7 +502,7 @@ Task-3: COMPLETED
 **액션**:
 - Mission 결과 요약 저장
 - Report 생성
-- Event 발행: `SYS_MISSION_UPDATED` (`status=COMPLETED`)
+- Event 발행: `SYS_MISSION_COMPLETED` (`status=COMPLETED`)
 
 **다음**:
 - Report 조회 가능
@@ -533,7 +533,7 @@ Task-3: CANCELLED  // 남은 Task 자동 취소
 **액션**:
 - 현재 Task 중단
 - 남은 Task 모두 CANCELLED
-- `SYS_TASK_RESULT(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
+- `SYS_TASK_FAILED(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
 - Rule Engine이 자동 대응 결정 (재시도, 다른 Device로 재실행 등)
 
 **P7 적용 (사용자 결정 우선)**:
@@ -755,8 +755,8 @@ Device Agent {
     
     // 로컬에서 발생한 모든 Event
     local_events: [
-      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-1", ... },
-      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-2", ... },
+      { type: "SYS_TASK_COMPLETED", status: "COMPLETED", task_id: "task-1", ... },
+      { type: "SYS_TASK_COMPLETED", status: "COMPLETED", task_id: "task-2", ... },
       { type: "SYS_ANOMALY_DETECTED", anomaly_type: "LOW_BATTERY", battery_percent: 45, ... }
     ]
   }
@@ -933,7 +933,7 @@ Table mission_timeline {
   id: UUID,
   mission_id: string,
   
-  event_type: enum,  // SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
+  event_type: enum,  // SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
   occurred_at: timestamp,
   recorded_at: timestamp,
   

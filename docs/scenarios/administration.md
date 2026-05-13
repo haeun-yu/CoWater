@@ -195,24 +195,24 @@ USER_MODIFIED Event 기록
 Config {
   // Heartbeat 및 타이머
   "device_heartbeat_interval_sec": {
-    value: 10,
+    value: 1,
     description: "Device가 System에 보내는 Heartbeat 주기"
   },
   
   "device_offline_timeout_sec": {
-    value: 600,  // 10분
+    value: 10,
     description: "이 시간 이상 Heartbeat 없으면 OFFLINE 판정"
   },
   
   // 배터리 관리
-  "min_battery_percent_for_task": {
+  "warning_battery_percent": {
     value: 30,
-    description: "새 Task 할당 최소 배터리 %"
+    description: "새 Task 할당 경고 기준 배터리 % (사용자 override 가능)"
   },
   
   "critical_battery_percent": {
     value: 10,
-    description: "배터리 이 이하면 CRITICAL로 판정, 자동 복귀"
+    description: "배터리 10% 이하면 CRITICAL로 판정, 자동 복귀"
   },
   
   // Proposal 및 추천
@@ -259,16 +259,16 @@ Config {
 ### **설정 변경 검증**:
 
 ```
-관리자가 "device_offline_timeout_sec: 600 → 300" 변경 요청
+관리자가 "device_offline_timeout_sec: 10 → 8" 변경 요청
   ↓
 System이 검증
   ├─ 값의 범위 체크 (0 < 값 < 3600)
   ├─ 다른 설정과의 충돌 체크
-  │  (offline_timeout < heartbeat_interval은 말이 안 됨)
+  │  (offline_timeout이 heartbeat 주기보다 너무 짧으면 오탐 가능)
   └─ 영향도 분석: "현재 온라인 Device 4개, offline 판정 시간 단축"
   ↓
 경고 표시
-  "Heartbeat 간격(10초)보다 짧은 타임아웃(5분)은 권장되지 않습니다.
+  "Heartbeat 간격(1초)에 비해 타임아웃이 너무 짧으면 오탐이 발생할 수 있습니다.
    기존 온라인 Device 4개 중 일부가 OFFLINE으로 오판될 수 있습니다."
   ↓
 관리자 승인 또는 취소
@@ -398,7 +398,7 @@ AutoResponsePolicy {
       condition: {
         event_type: "SYS_ANOMALY_DETECTED",
         anomaly_type: "LOW_BATTERY",
-        battery_percent: "LT 20"  // 20% 미만만
+        battery_percent: "LT 10"  // 10% 미만만
       },
       
       // 자동 실행
@@ -443,7 +443,7 @@ AutoResponsePolicy {
       
       trigger: "`SYS_ANOMALY_DETECTED` Event (`anomaly_type=DEVICE_OFFLINE`)",
       condition: {
-        offline_duration_sec: "GT 300"  // 5분 이상
+        offline_duration_sec: "GT 10"  // 10초 이상
       },
       
       auto_action: {
@@ -463,7 +463,7 @@ AutoResponsePolicy {
 관리자가 "auto-low-battery-return" 활성화 검토
   ↓
 위험도 분석
-  - "배터리 < 20%일 때 자동으로 기지 복귀"
+  - "배터리 < 10%일 때 자동으로 기지 복귀"
   - "장점: 안전성 향상, 배터리 관리 자동화"
   - "위험: 사용자가 원하지 않는 시점 작업 중단"
   ↓

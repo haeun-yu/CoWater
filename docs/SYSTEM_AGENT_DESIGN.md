@@ -47,7 +47,7 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 - **LLM**: 정책 매칭 및 대응 결정
 
 ### SystemSentinel (포트 9113)
-- Device 건전성 감시 (2초 interval)
+- Device 건전성 감시 (1초 interval, 10초 무응답 시 offline)
 - 규칙 기반: 배터리, Heartbeat timeout, 센서 이상 감지
 - AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - AgentConnection CRUD & 상태 관리

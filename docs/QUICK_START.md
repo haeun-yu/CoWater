@@ -142,7 +142,7 @@ Device Agent 시작 시 자동으로 다음이 수행됩니다:
                    (device_id, agent_id, stream URLs 획득)
                    → 로컬에 저장
                    ↓
-3️⃣ Heartbeat 시작      → 30초 주기로 System Agent로 상태 보고
+3️⃣ Heartbeat 시작      → 1초 주기로 System Agent로 상태 보고
 ```
 
 **주요 파일:**
@@ -187,12 +187,12 @@ python device_agent.py --type usv --layer lower --port 9122
       "protocol": "HTTP",
       "path": "/api/agent"
     },
-    "heartbeat_interval_sec": 30,
-    "heartbeat_timeout_sec": 120
+    "heartbeat_interval_sec": 1,
+    "heartbeat_timeout_sec": 10
   },
   "physical_constraints": {
     "battery": {
-      "critical_threshold_percent": 15,
+      "critical_threshold_percent": 10,
       "warning_threshold_percent": 30
     },
     "depth": {
