@@ -755,6 +755,149 @@ Policy: "Low Battery Auto-Return"
 
 ---
 
+## 13a. Policy (정책 - 고수준)
+
+```json
+{
+  "id": "string (uuid)",
+  "name": "string",
+  "description": "string | null",
+  
+  "enabled": "boolean",
+  "priority": "number",  // 1(높음) ~ 100(낮음)
+  
+  "scope": "SYSTEM | DEVICE_TYPE | DEVICE_ID",
+  "target_device_type": "USV | AUV | ROV | null",  // scope=DEVICE_TYPE인 경우
+  "target_device_id": "string (uuid) | null",      // scope=DEVICE_ID인 경우
+  
+  "rules": ["string (uuid)"],  // 포함된 Rule 목록
+  
+  "created_by": {
+    "type": "USER | SYSTEM",
+    "id": "string (uuid)"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**특성** (agent-implementation.md 참고):
+
+- **scope**: Policy 적용 범위
+  - `SYSTEM`: 모든 Device에 적용
+  - `DEVICE_TYPE`: 특정 Device 타입에만 적용 (예: AUV만)
+  - `DEVICE_ID`: 특정 Device 하나에만 적용
+- **rules[]**: 이 Policy가 포함하는 Rule ID 목록
+  - Rule은 Policy와는 독립적으로 존재 가능 (여러 Policy에서 재사용 가능)
+- **priority**: 여러 Policy가 동시에 트리거될 때 실행 순서
+
+---
+
+## 13b. Rule (규칙 - 저수준, Event 기반)
+
+```json
+{
+  "id": "string (uuid)",
+  "policy_id": "string (uuid) | null",  // 소속 Policy (optional)
+  
+  "name": "string",
+  "description": "string | null",
+  "enabled": "boolean",
+  "priority": "number",  // 1(높음) ~ 100(낮음), Policy 내 실행 순서
+  
+  "trigger": {
+    "event_type": "string"  // DEVICE_HEALTHCHECK, SYS_TASK_DISPATCHED, SYS_ALERT 등
+  },
+  
+  "condition": "string",  // SQL WHERE 스타일
+  // 예: "device.battery < 30 AND device.status = 'ONLINE'"
+  // 연산자: ==, !=, <, >, <=, >=, IN, BETWEEN, LIKE
+  // 피연산자: device.*, task.*, system.*
+  
+  "action": {
+    "type": "ALERT | AUTO_TASK | DEVICE_STATE_CHANGE | POLICY_EXECUTE | NOTIFY",
+    
+    // type=ALERT
+    "severity": "INFO | WARNING | CRITICAL",
+    "message": "string",  // 템플릿 변수 가능: {{ device.battery }}
+    
+    // type=AUTO_TASK
+    "task_title": "string",
+    "required_action": "string",
+    "parameters": {},
+    "timeout_sec": "number",
+    "auto_create_mission": "boolean",
+    
+    // type=DEVICE_STATE_CHANGE
+    "target_device_id": "string (uuid)",
+    "new_status": "OFFLINE | DEGRADED | REMOVED",
+    
+    // type=POLICY_EXECUTE
+    "target_policy_id": "string (uuid)",
+    
+    // type=NOTIFY
+    "channels": ["slack", "email", "sms"],
+    "recipients": ["email@example.com"]
+  },
+  
+  "created_by": {
+    "type": "USER | SYSTEM",
+    "id": "string (uuid)"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**특성** (rule-engine-implementation.md 참고):
+
+- **trigger**: Rule을 발동하는 Event 타입
+  - 예: `DEVICE_HEALTHCHECK` (Device Heartbeat), `SYS_TASK_DISPATCHED` (Task 할당)
+- **condition**: 실행 조건 (SQL WHERE 스타일)
+  - 조건이 없으면 (null/empty) trigger만 일치해도 실행
+  - 조건이 있으면 AND/OR로 복합 조건 가능
+- **action**: 조건 일치 시 실행할 동작
+  - **ALERT**: 경고 메시지 발행 (severity 수준 다름)
+  - **AUTO_TASK**: 자동으로 새 Task 생성 (Mission 생성 옵션)
+  - **DEVICE_STATE_CHANGE**: Device 상태 강제 변경 (OFFLINE 처리 등)
+  - **POLICY_EXECUTE**: 다른 Policy 실행 (연쇄 실행)
+  - **NOTIFY**: 사용자 알림 (Slack, Email, SMS)
+- **priority**: 같은 Event에 여러 Rule이 매칭될 때 실행 순서
+  - 숫자가 작을수록 먼저 실행
+
+**action.message의 템플릿 변수**:
+
+```
+{{ device.device_id }}      # Device ID
+{{ device.battery_percent }} # 배터리 %
+{{ device.status }}          # Device 상태
+{{ task.task_id }}           # Task ID
+{{ task.required_action }}   # Task 액션
+{{ system.time }}            # 현재 시간
+```
+
+**Rule 평가 흐름** (rule-engine-implementation.md 참고):
+
+```
+Event 발생
+  ↓
+PolicyManager.handle_event(event)
+  ↓
+RuleEngine.process_event(event)
+  ↓
+trigger 일치하는 모든 Rule 찾기
+  ↓
+각 Rule의 condition 평가
+  ↓
+조건 일치 Rule을 priority 순서로 정렬
+  ↓
+각 Rule의 action 실행
+```
+
+---
+
 ## 14. Sensor (센서)
 
 ```json

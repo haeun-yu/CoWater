@@ -832,31 +832,30 @@ def handle_communication_loss():
     # - 미처리 Task 확인 및 계속
 ```
 
-### 5.3 충돌/물리적 문제 감지
+### 5.3 배터리 부족 (낮음) 시
 
 ```python
-def check_physical_safety():
-    """정기적으로 안전 상태 확인"""
+def handle_low_battery_warning():
+    """배터리가 WARNING 임계값 아래로 떨어졌을 때"""
 
-    # IMU 기반 충돌 감지
-    if detect_collision():
-        pause_current_task()
+    if self.battery_percent <= WARNING_THRESHOLD:  # e.g., 30%
+        # 1. System Agent에 경고 알림
         send_problem_report(
-            problem_type="COLLISION",
-            details={"impact_force": measure_impact()}
+            problem_type="LOW_BATTERY",
+            severity="WARNING",
+            details={"battery_percent": self.battery_percent}
         )
-        return False
-
-    # 센서 오류 감지
-    if sensor_health_check_failed():
-        send_problem_report(
-            problem_type="SENSOR_ERROR",
-            details={"failed_sensors": ["lidar", "depth"]}
-        )
-        return False
-
-    return True
+        
+        # 2. 로깅 및 상태 저장
+        logger.warning(f"Battery low: {self.battery_percent}%")
+        
+        # 3. 진행 중인 Task 계속 수행 (System Agent의 Policy가 결정)
+        # Device Agent는 상태만 보고하고, 결정은 System Agent에 위임
 ```
+
+**배터리 상태 보고 타이밍**:
+- **정기**: Heartbeat 발송 시 (1초마다) battery_percent 포함
+- **즉각**: WARNING/CRITICAL 임계값 도달 시 Problem Report 발송
 
 ---
 
@@ -1325,21 +1324,30 @@ class InterDeviceCommunicationFailureHandler:
 
 ---
 
-### 10.6 Heartbeat 타임아웃 정책
+### 10.6 Heartbeat 타임아웃 정책 (SystemSentinel 담당)
 
-DeviceBridge가 Device Agent의 Heartbeat 부재를 감지했을 때:
+SystemSentinel이 Device Agent의 Heartbeat 부재를 감지하여 offline 처리:
+
+**아키텍처**:
+- **Device Agent**: Moth MEB을 통해 **1초마다** Heartbeat 발송
+- **SystemSentinel**: MEB 구독하여 Heartbeat 수신 → **10초 이상 없으면 offline 처리**
 
 ```python
 class HeartbeatTimeoutPolicy:
-    """Heartbeat 타임아웃 감시"""
+    """Heartbeat 타임아웃 감시 (SystemSentinel)"""
     
-    HEARTBEAT_TIMEOUT_SEC = 60  # Device는 30초마다 Heartbeat 전송
-                                 # 60초 이상 없으면 timeout
+    HEARTBEAT_TIMEOUT_SEC = 10  # Device는 1초마다 Heartbeat 발송 (Moth MEB)
+                                 # 10초 이상 없으면 offline으로 판정
     
     def monitor_heartbeats(self):
         """
-        등록된 모든 Device의 Heartbeat 감시
-        (DeviceBridge 또는 SystemSentinel이 수행)
+        등록된 모든 Device의 Heartbeat 감시 (SystemSentinel)
+        
+        Flow:
+        1. SystemSentinel이 "agents" MEB 채널을 구독
+        2. Device Agent가 1초마다 DEVICE_HEALTHCHECK 이벤트 발행
+        3. SystemSentinel이 수신하여 last_heartbeat_at 갱신
+        4. 10초 이상 수신 없으면 offline 처리
         """
         
         for device in self.get_all_devices():
