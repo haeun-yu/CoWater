@@ -91,7 +91,7 @@
 ```
 사용자 요청 (자연어)
   ↓
-EVENT: USER_COMMAND
+EVENT: SYS_INTENT_CLASSIFIED
   ↓ [System Agent]
 PROPOSAL (솔루션 세트)
   ├─ Proposal-1: [Task-A → Task-B → Task-C]
@@ -113,7 +113,7 @@ REPORT (결과 요약)
   - 여러 Task의 조합이 사전에 검증됨
   - 사용자는 Proposal 전체를 선택 (개별 Task 조합 불가)
 - **Mission**: 사용자 승인 후 **실제 실행 단위**
-  - 승인 상태(APPROVED) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED)
+  - 준비 상태(READY) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED)
 - **Task**: Mission의 **세부 실행 항목**
   - 대기(PENDING) → Device 수신(ASSIGNED) → 진행 중(IN_PROGRESS) → 완료(COMPLETED/FAILED/CANCELLED/ABORTED)
 
@@ -132,10 +132,11 @@ REPORT (결과 요약)
 
 **Event 타입**:
 
-- `USER_COMMAND` - 사용자 요청
-- `PROBLEM_DETECTED` - 문제 감지 (LOW_BATTERY, OFFLINE 등)
-- `TASK_FAILED` - Task 실패
-- `CRITICAL_HAZARD` - 긴급 상황
+- `SYS_INTENT_CLASSIFIED` - 사용자 요청 해석 완료
+- `SYS_ANOMALY_DETECTED` - 문제 감지 (`anomaly_type=LOW_BATTERY`, `DEVICE_OFFLINE`, `CRITICAL_HAZARD` 등)
+- `SYS_TASK_RESULT` - Task 결과 수신 (COMPLETED, FAILED, ABORTED)
+- `SYS_MISSION_UPDATED` - Mission 상태 변화
+- `DEVICE_HEALTHCHECK`, `ENV_STATE_CHANGED` - Device 계층 상태 신호
 - 기타 운영 이벤트
 
 **중요 원칙** (ADR-005):
@@ -166,7 +167,7 @@ System 동작 (변함)
 - **Policy**: "언제 자동화할 것인가?" (개념 수준)
   - 예: "Critical 상황은 자동 대응 허용"
 - **Rule**: Policy를 구체화한 규칙 (실행 수준)
-  - 예: "CRITICAL_HAZARD 이벤트 발생 시 EMERGENCY_STOP Mission 자동 생성"
+  - 예: "`SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` 발생 시 EMERGENCY_STOP Mission 자동 생성"
 - **Config**: Rule/System에서 참조하는 설정값 (파라미터 수준)
   - 예: `low_battery_threshold = 20%`, `max_proposal_options = 3`
 

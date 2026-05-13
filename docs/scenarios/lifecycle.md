@@ -303,11 +303,11 @@ Task-1 {
 
 **P5 적용 (Device Agent의 최종 판단)**:
 - Device Agent는 Task 수행 중 문제 발생 시 즉시 중단 가능
-- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 Task FAILED 보고 가능
+- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_RESULT(status=FAILED)` 보고 가능
 - System Agent는 Device Agent의 판단을 존중하고 대체안 제시 (거절 불가)
 
 **Device/Agent 문제 발생 시**:
-- OFFLINE, LOW_BATTERY 등의 Event 발행
+- `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=DEVICE_OFFLINE`, `LOW_BATTERY` 등)
 - Rule Engine이 자동 대응 결정
 
 **다음**:
@@ -338,7 +338,7 @@ Task-3: COMPLETED
 **액션**:
 - Mission 결과 요약 저장
 - Report 생성
-- Event 발행: MISSION_COMPLETED
+- Event 발행: `SYS_MISSION_UPDATED` (`status=COMPLETED`)
 
 **다음**:
 - Report 조회 가능
@@ -369,7 +369,7 @@ Task-3: CANCELLED  // 남은 Task 자동 취소
 **액션**:
 - 현재 Task 중단
 - 남은 Task 모두 CANCELLED
-- TASK_FAILED 또는 MISSION_FAILED Event 발행
+- `SYS_TASK_RESULT(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
 - Rule Engine이 자동 대응 결정 (재시도, 다른 Device로 재실행 등)
 
 **P7 적용 (사용자 결정 우선)**:
@@ -481,7 +481,7 @@ Task-1 실행 중 (Device: ONLINE, battery: 80%)
   ↓
 Heartbeat: Device OFFLINE (network 끊김)
   ↓
-System: LOW_CONNECTION Event 발행
+System: `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=DEVICE_OFFLINE`)
   ↓
 Rule Engine: 상황별 판단
   ├─ Critical이면: EMERGENCY_ABORT 신호
@@ -513,7 +513,7 @@ Device Agent: 정상 실행
 Network Partition 발생
   ↓
 Device: System과 통신 불가능
-System: Heartbeat 타임아웃 감지 → HEARTBEAT_LOST Event
+System: Heartbeat 타임아웃 감지 → `SYS_ANOMALY_DETECTED` Event (`anomaly_type=DEVICE_OFFLINE`)
 ```
 
 **Phase 2: 로컬 자율 운영 (Edge-Side Resilience)**
@@ -591,9 +591,9 @@ Device Agent {
     
     // 로컬에서 발생한 모든 Event
     local_events: [
-      { type: "TASK_COMPLETED", task_id: "task-1", ... },
-      { type: "TASK_COMPLETED", task_id: "task-2", ... },
-      { type: "LOW_BATTERY_WARNING", battery_percent: 45, ... }
+      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-1", ... },
+      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-2", ... },
+      { type: "SYS_ANOMALY_DETECTED", anomaly_type: "LOW_BATTERY", battery_percent: 45, ... }
     ]
   }
   
@@ -769,7 +769,7 @@ Table mission_timeline {
   id: UUID,
   mission_id: string,
   
-  event_type: enum,  // TASK_COMPLETED, OFFLINE, RECONNECTED 등
+  event_type: enum,  // SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
   occurred_at: timestamp,
   recorded_at: timestamp,
   
@@ -789,7 +789,7 @@ Table device_state_snapshots {
   
   // 스냅샷 시점
   timestamp: timestamp,
-  event_type: enum,  // OFFLINE, RECONNECT, STATUS_CHANGE
+  event_type: enum,  // SYS_ANOMALY_DETECTED, ENV_STATE_CHANGED, SYS_MISSION_UPDATED 등
   
   // 상태
   status: enum,

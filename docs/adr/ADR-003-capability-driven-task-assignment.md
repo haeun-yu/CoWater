@@ -90,7 +90,7 @@ Device {
 4️⃣ 최종 판단
    조건을 만족하는 Device가 없음
    → Proposal을 생성하지 않음
-   → USER_COMMAND_FAILED 이벤트 생성
+   → SYS_INTENT_REJECTED 이벤트 생성
    → 사용자에게 명확한 이유 제시
 ```
 
@@ -120,7 +120,7 @@ Device {
 **이벤트 생성**:
 ```typescript
 Event {
-  type: "USER_COMMAND_FAILED"
+  type: "SYS_INTENT_REJECTED"
   target_type: "SYSTEM"
   actor_type: "USER"
   severity: "INFO"

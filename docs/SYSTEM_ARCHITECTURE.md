@@ -89,10 +89,10 @@ Stream Layer (Moth - 실시간 데이터)
 │     └─ AgentConnection 기반 A2A 통신 (BFS 경로)
 │
 └─ meb 채널 ("agents" - 송수신)
-   ├─ device.healthcheck (Device 주기적 신호, 배터리/위치/상태 포함)
+   ├─ DEVICE_HEALTHCHECK (Device 주기적 신호, 배터리/위치/상태 포함)
    └─ MEB Events (event_type + target_agents)
       └─ System Layer (System Agent ↔ System Agent)
-         └─ sys.intent.classified, sys.task.dispatched, sys.policy.decision, ...
+         └─ SYS_INTENT_CLASSIFIED, SYS_TASK_DISPATCHED, SYS_POLICY_DECISION, ...
 ```
 
 ---
@@ -152,10 +152,10 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
    └─ 문제 발생 시 즉시 보고 (오류, 안전 경고)
    ↓
 6. SystemSentinel (지속적 감시)
-   ├─ device.healthcheck Event 수신 → 상태 모니터링
-   ├─ sys.task.dispatched Event 수신 → Task 할당 추적
+   ├─ DEVICE_HEALTHCHECK Event 수신 → 상태 모니터링
+   ├─ SYS_TASK_DISPATCHED Event 수신 → Task 할당 추적
    ├─ 비정상 감지: 배터리 부족, 신호 손실, Heartbeat 타임아웃 등
-   └─ 이상 징후 감지 시 sys.anomaly.detected Event 발행 → PolicyManager 연쇄
+   └─ 이상 징후 감지 시 SYS_ANOMALY_DETECTED Event 발행 → PolicyManager 연쇄
    ↓
 7. InsightReporter (필요한 경우)
    └─ 모든 Event 기록 → Report 생성 → 사용자 보고
@@ -177,7 +177,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 | **Device**          | 물리 무인체 (USV, AUV, ROV)                                  | [schema.md#device](core/schema.md)          |
 | **Proposal**        | 여러 솔루션 세트 (PROPOSED → APPROVED, 승인 시점까지만 추적) | [schema.md#proposal](core/schema.md)        |
 | **Mission**         | 승인된 Proposal을 기반으로 실행되는 임무                     | [schema.md#mission](core/schema.md)         |
-| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS)  | [schema.md#task](core/schema.md)            |
+| **Task**            | Mission의 세부 실행 항목 (PENDING → ASSIGNED → IN_PROGRESS → COMPLETED / FAILED / CANCELLED / ABORTED) | [schema.md#task](core/schema.md)            |
 | **Event**           | 시스템에서 발생한 중요한 사건 (Rule Engine 트리거)           | [schema.md#event](core/schema.md)           |
 | **AgentConnection** | Device Agent 간 협력 관계 (RELAY, COORDINATE 등, 소프트삭제) | [schema.md#agentconnection](core/schema.md) |
 
@@ -278,7 +278,7 @@ CoWater의 5가지 시나리오별 프로세스:
 - 3-2 Communication Failure 처리
 - 3-3 Resource Shortage (배터리, 스토리지 등)
 - 3-4 Sensor Failure 처리
-- 3-5 CRITICAL_HAZARD 프리엠션 및 긴급 정지
+- 3-5 `SYS_ANOMALY_DETECTED` 기반 프리엠션 및 긴급 정지
 
 👉 [**Exception Handling**](scenarios/exceptions.md)
 
@@ -358,7 +358,7 @@ Phase 1: Manual Approval
 
 Phase 2: Partial Automation
   └─ 정책이 정의된 상황에서만 자동 Mission 생성/실행
-  └─ LOW_BATTERY, CRITICAL_HAZARD 등 사전 정의된 규칙만 자동화
+  └─ `SYS_ANOMALY_DETECTED`의 `anomaly_type` 기준 사전 정의 규칙만 자동화
 
 Phase 3: Full Autonomous
   └─ Device 자율성 강화

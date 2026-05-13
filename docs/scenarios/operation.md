@@ -21,10 +21,10 @@
 
 ```mermaid
 graph TD
-    A["사용자 요청<br/>자연어"] -->|USER_COMMAND<br/>이벤트| B["RequestHandler<br/>의도 해석"]
+    A["사용자 요청<br/>자연어"] -->|SYS_INTENT_CLASSIFIED<br/>이벤트| B["RequestHandler<br/>의도 해석"]
     B -->|역량 매칭<br/>Capability Matching| C{"수행<br/>가능?"}
     C -->|YES| D["MissionPlanner<br/>여러 Proposal<br/>생성"]
-    C -->|NO| E["USER_COMMAND_FAILED<br/>이벤트"]
+    C -->|NO| E["SYS_INTENT_REJECTED<br/>이벤트"]
     D -->|화면에 표시| F["사용자 선택<br/>및 승인"]
     F -->|Proposal.selected=true| G["MissionPlanner<br/>상태 재검증<br/>Device/Agent 확인"]
     G -->|유효| H["MissionPlanner<br/>Mission 생성<br/>Task 할당"]
@@ -43,9 +43,9 @@ graph TD
 ```
 사용자가 UI에서: "A 구역 바닥면을 고해상도로 촬영해줘"
   ↓
-System이 USER_COMMAND 이벤트 생성
+System이 `SYS_INTENT_CLASSIFIED` 이벤트 생성
 {
-  type: "USER_COMMAND",
+  type: "SYS_INTENT_CLASSIFIED",
   actor_type: "USER",
   actor_id: "user-001",
   data: {
@@ -94,7 +94,7 @@ Step 3: MissionPlanner - Capability Matching 결과 (P5: Strict Matching)
 
 Step 4: 최종 판단
   수행 가능한 Device 없음 → Proposal 생성 X
-  USER_COMMAND_FAILED 이벤트 발행
+  `SYS_INTENT_REJECTED` 이벤트 발행
 ```
 
 **명시적 거절** (ADR-003):
@@ -291,7 +291,7 @@ Proposal-1: [Device-1 상태 리포트, Device-3 배터리 체크]
 사용자 선택: 승인 → Mission 생성
 ```
 
-#### **시나리오 B: 문제 감지 (PROBLEM_DETECTED)**
+#### **시나리오 B: 문제 감지 (`SYS_ANOMALY_DETECTED`)**
 ```
 System Agent가 모니터링 중 문제 발견:
   - Device 배터리 < 30%
@@ -299,7 +299,7 @@ System Agent가 모니터링 중 문제 발견:
   - Task 반복 실패
   - AgentConnection 신호 약화
   
-→ PROBLEM_DETECTED Event 발행
+→ `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=LOW_BATTERY | DEVICE_OFFLINE | TASK_FAILURE` 등)
 → 심각도(severity)에 따라:
    ├─ INFO: 알림만 전달, Proposal 생성 X
    ├─ WARNING: Proposal 생성, 사용자 선택 대기
@@ -310,7 +310,7 @@ System Agent가 모니터링 중 문제 발견:
 ```
 Heartbeat: Device-ROV의 배터리 = 18% (임계값: 30%)
   ↓
-System Agent: LOW_BATTERY Event 발행
+System Agent: `SYS_ANOMALY_DETECTED` Event 발행 (`anomaly_type=LOW_BATTERY`)
   ↓
 Rule Engine (PROBLEM_DETECTION):
   conditions: [battery < 20%]
@@ -321,14 +321,14 @@ Mission 직접 생성 (Proposal 건너뜀)
 Device Agent: 즉시 기지로 복귀
 ```
 
-#### **시나리오 C: Task 실패 감지 (TASK_FAILED)**
+#### **시나리오 C: Task 실패 감지 (`SYS_TASK_RESULT`, status=FAILED)**
 ```
 Device Agent가 Task 실패 보고:
   - Hardware error
   - Timeout
   - Communication error
   
-→ TASK_FAILED Event 발행
+→ `SYS_TASK_RESULT` Event 발행 (`status=FAILED`)
 → Mission FAILED로 상태 변경
 → Rule Engine: CREATE_PROPOSAL 실행
 → 재시도 옵션 Proposal 생성
@@ -339,7 +339,7 @@ Device Agent가 Task 실패 보고:
 Task-2 (고해상도 촬영) 실행 중:
   Device에서: "High Res Camera Hardware Failure"
   ↓
-TASK_FAILED Event
+`SYS_TASK_RESULT` Event (`status=FAILED`)
   ↓
 System: Mission FAILED, Task FAILED 처리
   ↓
@@ -354,7 +354,7 @@ Rule Engine:
 ### **System Agent의 판단 흐름**
 
 ```
-1. Event 수신 (OPERATION_TRIGGERED / PROBLEM_DETECTED / TASK_FAILED / ...)
+1. Event 수신 (`SYS_INTENT_CLASSIFIED` / `SYS_ANOMALY_DETECTED` / `SYS_TASK_RESULT` / ...)
    ↓
 2. Event 해석
    - 목적: 무엇이 필요한가?
@@ -400,9 +400,10 @@ Mission-1 (A 구역 촬영) FAILED
    ↓
 2. System Agent: 기존 Mission 정보 기반 Event 생성
    {
-     type: "MISSION_RETRY_REQUEST",
+     type: "SYS_MISSION_UPDATED",
      source_mission_id: "mission-1",
-     retry_strategy: "SAME_DEVICE"
+     retry_strategy: "SAME_DEVICE",
+     status: "FAILED"
    }
    ↓
 3. 현재 Device/Agent 상태 재확인
@@ -497,9 +498,9 @@ AND sequence >= 2;  -- Task-2 이후만 복사
 ```
 1. 사용자가 "재계획 필요" 선택
    ↓
-2. System Agent: 새로운 USER_COMMAND 처리
+2. System Agent: 새로운 `SYS_MISSION_REPLAN_REQUESTED` 처리
    {
-     type: "USER_REPLAN_REQUEST",
+     type: "SYS_MISSION_REPLAN_REQUESTED",
      original_mission_id: "mission-1",
      context: "이전 Task-2 실패, 환경 재평가 필요"
    }
@@ -575,7 +576,8 @@ Rule을 통해 자동으로 재시도할 수도 있습니다:
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "TASK_FAILED" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "task.error_type", operator: "EQ", value: "Timeout" }
   ],
   action: {

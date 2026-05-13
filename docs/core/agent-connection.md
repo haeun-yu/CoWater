@@ -172,13 +172,13 @@ async def on_device_detected(device: Device):
             
             await self.registry.post_agent_connection(conn)
             await self.publish_event(
-                event_type="sys.agent_connection.created",
+                event_type="SYS_AGENT_CONNECTION_CREATED",
                 payload={"connection_id": conn.id},
                 target_agents=["MissionPlanner"]
             )
 ```
 
-**MEB 이벤트**: `sys.agent_connection.created`
+**MEB 이벤트**: `SYS_AGENT_CONNECTION_CREATED`
 
 ### 3.2 삭제 (Delete) - Soft Delete
 
@@ -198,13 +198,13 @@ async def delete_connection(conn_id: str):
     await self.registry.put_agent_connection(conn_id, conn)
     
     await self.publish_event(
-        event_type="sys.agent_connection.deleted",
+        event_type="SYS_AGENT_CONNECTION_DELETED",
         payload={"connection_id": conn_id, "reason": "environment_change|stale_ttl"},
         target_agents=["MissionPlanner"]
     )
 ```
 
-**MEB 이벤트**: `sys.agent_connection.deleted`
+**MEB 이벤트**: `SYS_AGENT_CONNECTION_DELETED`
 
 ---
 
@@ -236,9 +236,9 @@ GET    /devices/{id}/connections       # Device별 연결 조회
 class DeviceAgent:
     async def on_agent_connection_event(self, event_type: str, payload: dict):
         """AgentConnection 변경 이벤트 → 즉시 캐시 갱신"""
-        if event_type == "sys.agent_connection.created":
+        if event_type == "SYS_AGENT_CONNECTION_CREATED":
             self.local_connections_cache[payload["connection_id"]] = payload
-        elif event_type == "sys.agent_connection.deleted":
+        elif event_type == "SYS_AGENT_CONNECTION_DELETED":
             self.local_connections_cache.pop(payload["connection_id"], None)
     
     async def periodic_sync_connections(self):
@@ -259,8 +259,8 @@ AgentConnection 관련 MEB 이벤트 (총 4가지):
 
 | event_type | 발행자 | 구독자 | 발행 시점 |
 |-----------|--------|--------|---------|
-| **sys.agent_connection.created** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 |
-| **sys.agent_connection.deleted** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 변화, TTL 만료 등) |
+| **SYS_AGENT_CONNECTION_CREATED** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 |
+| **SYS_AGENT_CONNECTION_DELETED** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 변화, TTL 만료 등) |
 
 ---
 
@@ -271,7 +271,7 @@ AgentConnection 관련 MEB 이벤트 (총 4가지):
 ```
 Device A (USV) 시작
     ↓
-device.healthcheck MEB 발행
+DEVICE_HEALTHCHECK MEB 발행
     ↓
 SystemSentinel 수신
     ├─ 3단계 필터링 수행
@@ -279,7 +279,7 @@ SystemSentinel 수신
     │  └─ Gateway ✓, 매체 (Acoustic) ✓, 환경 (SURFACE-UNDERWATER) ✓
     │
     └─ AgentConnection 생성
-        └─ MEB: sys.agent_connection.created
+        └─ MEB: SYS_AGENT_CONNECTION_CREATED
            target_agents: [MissionPlanner]
             ↓
             MissionPlanner
@@ -296,7 +296,7 @@ depth > 5.0m (수중 진입)
     ↓
 environment_state: SURFACE → UNDERWATER 변경
     ↓
-device.healthcheck 발행 (meb pub 채널)
+DEVICE_HEALTHCHECK 발행 (meb pub 채널)
     └─ {"device_id": "USV-01", "environment_state": "UNDERWATER", ...}
     ↓
 SystemSentinel 수신 (healthcheck에서 environment_state 변화 감지)
@@ -304,7 +304,7 @@ SystemSentinel 수신 (healthcheck에서 environment_state 변화 감지)
     │  └─ (예) USV-ROV 연결: 환경 교차 → Acoustic만 가능?
     │
     └─ 조건 불만족 시 deleted_at 설정
-        └─ MEB: sys.agent_connection.deleted
+        └─ MEB: SYS_AGENT_CONNECTION_DELETED
 ```
 
 ---

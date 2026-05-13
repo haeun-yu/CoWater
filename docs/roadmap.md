@@ -56,7 +56,7 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 - **[lifecycle.md](scenarios/lifecycle.md)**: Device 생명주기 (등록→준비→운영→제거)
 - **[operation.md](scenarios/operation.md)**: 사용자 명령 → Proposal → Mission → Task 실행 흐름
-- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (LOST, OFFLINE, CRITICAL_HAZARD)
+- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (`SYS_ANOMALY_DETECTED`, `SYS_TASK_RESULT`, `SYS_INTENT_REJECTED`)
 - **[reporting.md](scenarios/reporting.md)**: Event 기록, Report 생성, 실패 분석, 피드백 수집
 - **[administration.md](scenarios/administration.md)**: 시스템 설정, 정책 관리, 승인 규칙
 
@@ -100,36 +100,36 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 #### 1️⃣ RequestHandler (포트 9116, 3일)
 - [ ] Intent 분류 LLM 프롬프트
 - [ ] /agents/{token}/command 엔드포인트
-- [ ] MEB: sys.intent.classified 발행
+- [ ] MEB: SYS_INTENT_CLASSIFIED 발행
 - [ ] Fleet 상태 요약 API
 
 #### 2️⃣ MissionPlanner (포트 9111, 4일)
 - [ ] 3단계 Proposal 생성 (규칙 기반 + LLM + 검증)
 - [ ] 여러 대안 생성 (최적/빠른/안전)
-- [ ] 구독: sys.intent.classified, sys.task.result, sys.anomaly.detected, sys.policy.decision
-- [ ] MEB: sys.mission.updated 발행
+- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
+- [ ] MEB: SYS_MISSION_UPDATED 발행
 - [ ] Mission 생명주기 관리
 
 #### 3️⃣ DeviceBridge (포트 9110, 3일)
 - [ ] A2A 엔드포인트: POST /message:send
 - [ ] task.assign, task.result, child.register, layer.assignment 처리
 - [ ] Device Endpoint 관리
-- [ ] MEB: sys.task.dispatched, sys.task.result 발행
+- [ ] MEB: SYS_TASK_DISPATCHED, SYS_TASK_RESULT 발행
 
 #### 4️⃣ PolicyManager (포트 9112, 2일)
 - [ ] Policy 등록/관리
 - [ ] LLM 기반 Policy 매칭
 - [ ] auto_execute 정책 실행
-- [ ] 구독: sys.intent.classified, sys.anomaly.detected
-- [ ] MEB: sys.policy.decision 발행
+- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_ANOMALY_DETECTED
+- [ ] MEB: SYS_POLICY_DECISION 발행
 
 #### 5️⃣ SystemSentinel (포트 9113, 3일)
 - [ ] Device 건전성 감시 루프 (2초 interval)
 - [ ] 규칙 기반: 배터리, Heartbeat, 센서 이상 탐지
 - [ ] AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - [ ] LLM 기반: 복합 패턴 분석
-- [ ] 구독: device.healthcheck, ENV_STATE_CHANGED, sys.task.dispatched, sys.task.result
-- [ ] MEB: sys.anomaly.detected, sys.agent_connection.* 발행
+- [ ] 구독: DEVICE_HEALTHCHECK, ENV_STATE_CHANGED, SYS_TASK_DISPATCHED, SYS_TASK_RESULT
+- [ ] MEB: SYS_ANOMALY_DETECTED, SYS_AGENT_CONNECTION_* 발행
 
 #### 6️⃣ InsightReporter (포트 9114, 2일)
 - [ ] 데이터 조회 (Mission, Device, Event)
@@ -194,8 +194,8 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 #### 3-1. Phase 1 → Phase 2 전환
 - [ ] **자동화 정책 구현**
-  - LOW_BATTERY → RETURN_TO_BASE 자동 Mission
-  - CRITICAL_HAZARD → EMERGENCY_STOP 자동 Mission
+  - `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → RETURN_TO_BASE 자동 Mission
+  - `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` → EMERGENCY_STOP 자동 Mission
   - 예상: 2주
 
 - [ ] **User Feedback Loop**

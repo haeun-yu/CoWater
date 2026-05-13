@@ -90,13 +90,13 @@
 
 ### Event (사건)
 
-| 속성        | 내용                                                                 |
-| ----------- | -------------------------------------------------------------------- |
-| **정의**    | **시스템에서 발생한 의미 있는 변화** (Rule 실행의 트리거, 감사 기록) |
-| **타입**    | USER_COMMAND, PROBLEM_DETECTED, TASK_FAILED, CRITICAL_HAZARD 등      |
-| **심각도**  | INFO, WARNING, CRITICAL                                              |
-| **예시**    | "LOW_BATTERY Event", "TASK_COMPLETED Event"                          |
-| **사용 예** | "배터리 부족 사건이 발생하여 복귀 미션이 자동 생성되었습니다"        |
+| 속성        | 내용                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------- |
+| **정의**    | **시스템에서 발생한 의미 있는 변화** (Rule 실행의 트리거, 감사 기록)                                    |
+| **타입**    | System Layer는 `SYS_*`, Device Layer는 `DEVICE_*`, 환경 변화는 `ENV_STATE_CHANGED` 사용 |
+| **심각도**  | INFO, WARNING, CRITICAL                                                                                 |
+| **예시**    | `SYS_INTENT_CLASSIFIED`, `SYS_TASK_RESULT`, `SYS_ANOMALY_DETECTED`, `SYS_MISSION_UPDATED`, `DEVICE_HEALTHCHECK`, `ENV_STATE_CHANGED` |
+| **사용 예** | "배터리 부족 사건이 발생하여 복귀 미션이 자동 생성되었습니다"                                           |
 
 ---
 

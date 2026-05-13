@@ -227,7 +227,7 @@
 {
   "id": "string (uuid)",
 
-  "type": "string", // USER_COMMAND, PROBLEM_DETECTED, TASK_FAILED, CRITICAL_HAZARD 등
+  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
 
   "severity": "INFO | WARNING | CRITICAL",
   "status": "OPEN | HANDLED | RESOLVED",
@@ -244,6 +244,8 @@
   "data": {
     // Event 타입별로 다름
     // 예: { original_request: "...", capability_gap: {...} }
+    // 예: SYS_ANOMALY_DETECTED -> { anomaly_type: "LOW_BATTERY", ... }
+    // 예: SYS_TASK_RESULT -> { status: "FAILED", error_type: "...", ... }
     // 중요: 전체 Proposal/Mission/Task 데이터 저장 금지
   },
 
@@ -257,6 +259,7 @@
 - Event는 사건의 **기록**이지 데이터의 **저장소** X
 - Proposal/Mission/Task 전체 데이터를 data에 넣지 않기
 - Rule Engine이 Event를 트리거로 삼아 실행
+- `SYS_ANOMALY_DETECTED`는 `data.anomaly_type`으로 세부 이상 종류를 구분
 
 ---
 
@@ -652,7 +655,7 @@ Policy: "Low Battery Auto-Return"
     {
       "field": "event.type",
       "operator": "EQ",
-      "value": "CRITICAL_HAZARD"
+      "value": "SYS_ANOMALY_DETECTED"
     },
     {
       "field": "event.severity",

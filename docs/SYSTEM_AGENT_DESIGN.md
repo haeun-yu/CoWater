@@ -37,7 +37,7 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 
 ### MissionPlanner (포트 9111)
 - 사용자 intent로부터 여러 대안 Proposal 생성 (3단계: 규칙 기반 + LLM + 검증)
-- Mission 생명주기 관리 (PROPOSED → APPROVED → COMPLETED)
+- Mission 생명주기 관리 (READY → IN_PROGRESS → COMPLETED / FAILED / CANCELLED)
 - Task 분배 & 진행 상황 추적
 - **LLM**: 3가지 Proposal 생성 (최적/빠른/안전)
 

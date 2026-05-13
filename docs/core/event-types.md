@@ -16,9 +16,9 @@ MEB 채널: "agents"
   URL: wss://cobot.center:8287/pang/ws/meb?channel=instant&name=agents&source=base&track=base
   
 이벤트 분류:
-  ├─ event_type: "sys.intent.classified" (System Layer)
-  ├─ event_type: "device.healthcheck" (Device Layer)
-  └─ ... (총 13가지)
+  ├─ event_type: "SYS_INTENT_CLASSIFIED" (System Layer)
+  ├─ event_type: "DEVICE_HEALTHCHECK" (Device Layer)
+  └─ ... (System Layer는 SYS_*, Device Layer는 DEVICE_*, 환경 변화는 ENV_STATE_CHANGED)
 ```
 
 ### 1.2 라우팅 메커니즘
@@ -27,7 +27,7 @@ MEB 채널: "agents"
 
 ```json
 {
-  "event_type": "sys.intent.classified",
+  "event_type": "SYS_INTENT_CLASSIFIED",
   "target_agents": ["MissionPlanner", "PolicyManager"],
   "payload": { ... }
 }
@@ -48,38 +48,40 @@ System Agent 간의 의사결정 프로세스를 이벤트로 추적.
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.intent.classified** | RequestHandler | MissionPlanner, PolicyManager, InsightReporter | 사용자 명령 해석 완료 | `{"intent": "MISSION", "goal": "...", "urgency": "high", "extracted_params": {...}}` |
+| **SYS_INTENT_CLASSIFIED** | RequestHandler | MissionPlanner, PolicyManager, InsightReporter | 사용자 명령 해석 완료 | `{"intent": "MISSION", "goal": "...", "urgency": "high", "extracted_params": {...}}` |
+| **SYS_INTENT_REJECTED** | MissionPlanner | InsightReporter | 수행 불가능한 사용자 요청 거절 | `{"original_request": "...", "reason": "...", "required_actions": [...]}` |
 
 ### 2.2 Task 전달 (DeviceBridge → others)
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.task.dispatched** | DeviceBridge | SystemSentinel, InsightReporter | Device에 Task 전달 | `{"task_id": "...", "device_id": "...", "action": "...", "timestamp": ...}` |
-| **sys.task.result** | DeviceBridge | MissionPlanner, SystemSentinel, InsightReporter | Device로부터 Task 결과 수신 | `{"task_id": "...", "status": "COMPLETED", "result": {...}}` |
+| **SYS_TASK_DISPATCHED** | DeviceBridge | SystemSentinel, InsightReporter | Device에 Task 전달 | `{"task_id": "...", "device_id": "...", "action": "...", "timestamp": ...}` |
+| **SYS_TASK_RESULT** | DeviceBridge | MissionPlanner, SystemSentinel, InsightReporter | Device로부터 Task 결과 수신 | `{"task_id": "...", "status": "COMPLETED", "result": {...}}` |
 
 ### 2.3 이상 징후 (SystemSentinel → others)
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.anomaly.detected** | SystemSentinel | PolicyManager, InsightReporter | 규칙/패턴 기반 이상 탐지 | `{"device_id": "...", "anomaly_type": "LOW_BATTERY", "severity": "critical"}` |
+| **SYS_ANOMALY_DETECTED** | SystemSentinel | PolicyManager, InsightReporter | 규칙/패턴 기반 이상 탐지 | `{"device_id": "...", "anomaly_type": "LOW_BATTERY", "severity": "critical"}` |
 
 ### 2.4 정책 결정 (PolicyManager → others)
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.policy.decision** | PolicyManager | MissionPlanner, InsightReporter | 정책 매칭 및 대응 결정 | `{"policy_id": "...", "action": "emergency_stop", "target_devices": [...], "auto_execute": true}` |
+| **SYS_POLICY_DECISION** | PolicyManager | MissionPlanner, InsightReporter | 정책 매칭 및 대응 결정 | `{"policy_id": "...", "action": "emergency_stop", "target_devices": [...], "auto_execute": true}` |
 
 ### 2.5 Mission 상태 변화 (MissionPlanner → others)
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.mission.updated** | MissionPlanner | InsightReporter, SystemSentinel | Mission 상태 변화 (PROPOSED, APPROVED, COMPLETED 등) | `{"mission_id": "...", "status": "COMPLETED", "elapsed_time_s": 3600}` |
+| **SYS_MISSION_UPDATED** | MissionPlanner | InsightReporter, SystemSentinel | Mission 상태 변화 (READY, IN_PROGRESS, COMPLETED, FAILED, CANCELLED 등) | `{"mission_id": "...", "status": "COMPLETED", "elapsed_time_s": 3600}` |
+| **SYS_MISSION_REPLAN_REQUESTED** | MissionPlanner | InsightReporter | 재계획 또는 재승인 필요 시점 기록 | `{"mission_id": "...", "reason": "...", "step_id": "..."}` |
 
 ### 2.6 리포트 생성 (InsightReporter → clients)
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.insight.report** | InsightReporter | 클라이언트 (웹 대시보드) | 데이터 분석 리포트 생성 완료 | `{"report_id": "...", "title": "...", "summary": "...", "insights": [...]}` |
+| **SYS_INSIGHT_REPORT** | InsightReporter | 클라이언트 (웹 대시보드) | 데이터 분석 리포트 생성 완료 | `{"report_id": "...", "title": "...", "summary": "...", "insights": [...]}` |
 
 ---
 
@@ -91,13 +93,13 @@ Device 간 통신 가능성을 관리하는 이벤트 (SystemSentinel 발행).
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.agent_connection.created** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 | `{"connection_id": "...", "source_device": "AUV-01", "target_device": "USV-01"}` |
+| **SYS_AGENT_CONNECTION_CREATED** | SystemSentinel | MissionPlanner | 새 AgentConnection 생성 | `{"connection_id": "...", "source_device": "AUV-01", "target_device": "USV-01"}` |
 
 ### 3.2 삭제
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **sys.agent_connection.deleted** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 조건 불만족, TTL 만료, 수동 제거) | `{"connection_id": "...", "reason": "environment_change"}` |
+| **SYS_AGENT_CONNECTION_DELETED** | SystemSentinel | MissionPlanner | AgentConnection 소프트 삭제 (환경 조건 불만족, TTL 만료, 수동 제거) | `{"connection_id": "...", "reason": "environment_change"}` |
 
 ---
 
@@ -109,13 +111,13 @@ Device가 발행하는 상태 신호 (MEB를 통해 System에 전파).
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **device.healthcheck** | Device (MEB relay: DeviceBridge) | SystemSentinel, InsightReporter | 주기적 (예: 10초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}}` |
+| **DEVICE_HEALTHCHECK** | Device (MEB relay: DeviceBridge) | SystemSentinel, InsightReporter | 주기적 (예: 10초) | `{"device_id": "AUV-01", "status": "ONLINE", "battery_percent": 85, "location": {...}}` |
 
 ### 4.2 환경 변화 감지
 
 | event_type | 발행자 | 구독자 | 발행 시점 | 페이로드 |
 |------------|--------|--------|---------|---------|
-| **ENV_STATE_CHANGED** | DeviceBridge | SystemSentinel, InsightReporter | device.healthcheck 정규화 중 `environment_state` 변화 감지 | `{"device_id": "AUV-01", "from": "SURFACE", "to": "UNDERWATER"}` |
+| **ENV_STATE_CHANGED** | DeviceBridge | SystemSentinel, InsightReporter | DEVICE_HEALTHCHECK 정규화 중 `environment_state` 변화 감지 | `{"device_id": "AUV-01", "from": "SURFACE", "to": "UNDERWATER"}` |
 
 ---
 
@@ -129,42 +131,42 @@ subscribe_to_events = []  # 구독 없음, 발행만 함
 
 # DeviceBridge
 subscribe_to_events = [
-    "sys.task.dispatched"
+    "SYS_TASK_DISPATCHED"
 ]
 
 # MissionPlanner
 subscribe_to_events = [
-    "sys.intent.classified",
-    "sys.task.result",
-    "sys.anomaly.detected",
-    "sys.policy.decision",
-    "sys.agent_connection.created",
-    "sys.agent_connection.deleted"
+    "SYS_INTENT_CLASSIFIED",
+    "SYS_TASK_RESULT",
+    "SYS_ANOMALY_DETECTED",
+    "SYS_POLICY_DECISION",
+    "SYS_AGENT_CONNECTION_CREATED",
+    "SYS_AGENT_CONNECTION_DELETED"
 ]
 
 # PolicyManager
 subscribe_to_events = [
-    "sys.intent.classified",
-    "sys.anomaly.detected"
+    "SYS_INTENT_CLASSIFIED",
+    "SYS_ANOMALY_DETECTED"
 ]
 
 # SystemSentinel
 subscribe_to_events = [
-    "device.healthcheck",
+    "DEVICE_HEALTHCHECK",
     "ENV_STATE_CHANGED",
-    "sys.task.dispatched",
-    "sys.task.result"
+    "SYS_TASK_DISPATCHED",
+    "SYS_TASK_RESULT"
 ]
 
 # InsightReporter
 subscribe_to_events = [
-    "sys.intent.classified",
-    "sys.task.dispatched",
-    "sys.task.result",
-    "sys.anomaly.detected",
-    "sys.policy.decision",
-    "sys.mission.updated",
-    "device.healthcheck"
+    "SYS_INTENT_CLASSIFIED",
+    "SYS_TASK_DISPATCHED",
+    "SYS_TASK_RESULT",
+    "SYS_ANOMALY_DETECTED",
+    "SYS_POLICY_DECISION",
+    "SYS_MISSION_UPDATED",
+    "DEVICE_HEALTHCHECK"
 ]
 ```
 
@@ -222,7 +224,7 @@ class BaseAgent:
 ```python
 class MissionPlanner(BaseAgent):
     async def on_sys_task_result(self, payload: dict):
-        """sys.task.result 이벤트 수신"""
+        """SYS_TASK_RESULT 이벤트 수신"""
         task_id = payload["task_id"]
         status = payload["status"]
         
@@ -233,7 +235,7 @@ class MissionPlanner(BaseAgent):
         
         # 다른 Agent에 알림
         await self.publish_event(
-            event_type="sys.mission.updated",
+            event_type="SYS_MISSION_UPDATED",
             payload={
                 "mission_id": mission.id,
                 "status": mission.status,
@@ -252,19 +254,19 @@ class MissionPlanner(BaseAgent):
 ```
 사용자 명령 (RequestHandler:9116)
     │
-    ├─ MEB: sys.intent.classified
+    ├─ MEB: SYS_INTENT_CLASSIFIED
     │  target_agents: [MissionPlanner, PolicyManager]
     │
     ▼
 MissionPlanner
     │
-    ├─ MEB: sys.mission.updated (PROPOSED)
+    ├─ Mission 생성 후 MEB: SYS_MISSION_UPDATED (READY)
     │
     └─ (사용자 승인)
         │
         ├─ Registry: Task 생성
         │
-        ├─ MEB: sys.task.dispatched
+        ├─ MEB: SYS_TASK_DISPATCHED
         │  target_agents: [SystemSentinel]
         │
         ├─ A2A: POST Device:9201/message:send (task.assign)
@@ -273,12 +275,12 @@ MissionPlanner
             │
             └─ A2A: POST DeviceBridge:9110/message:send (task.result)
                 │
-                └─ MEB: sys.task.result
+                └─ MEB: SYS_TASK_RESULT
                    target_agents: [MissionPlanner, SystemSentinel]
                     │
                     └─ MissionPlanner: Mission 상태 업데이트
                         │
-                        └─ MEB: sys.mission.updated (COMPLETED)
+                        └─ MEB: SYS_MISSION_UPDATED (COMPLETED)
 ```
 
 ### 7.2 이상 징후 → 자동 대응
@@ -288,12 +290,12 @@ SystemSentinel (감시 루프)
     │
     ├─ 규칙: battery < 20% 감지
     │
-    └─ MEB: sys.anomaly.detected
+    └─ MEB: SYS_ANOMALY_DETECTED
        target_agents: [PolicyManager]
            │
            ├─ PolicyManager: Policy 매칭
            │
-           ├─ MEB: sys.policy.decision
+           ├─ MEB: SYS_POLICY_DECISION
            │  target_agents: [MissionPlanner]
            │
            └─ MissionPlanner: Emergency Mission 생성
@@ -308,7 +310,10 @@ SystemSentinel (감시 루프)
 ### 8.1 신규 이벤트 타입 추가
 
 새로운 이벤트를 추가할 때:
-1. 이벤트 타입명 정의 (`sys.` 또는 `device.` 접두사)
+1. 이벤트 타입명 정의
+   - System Layer: `SYS_*`
+   - Device Layer: `DEVICE_*`
+   - 환경 변화 이벤트: `ENV_STATE_CHANGED`
 2. 페이로드 스키마 정의
 3. 구독 Agent 결정
 4. 핸들러 메서드 구현
@@ -318,7 +323,7 @@ SystemSentinel (감시 루프)
 이벤트 구조 변경 시:
 ```json
 {
-  "event_type": "sys.task.result",
+  "event_type": "SYS_TASK_RESULT",
   "version": "1.0",  // 스키마 버전
   "payload": { ... }
 }

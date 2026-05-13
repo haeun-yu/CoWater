@@ -56,7 +56,7 @@ CoWater의 핵심 철학 중 하나는 **계획과 실행의 분리**입니다.
 
 ```typescript
 // 사용자 요청이 들어오면
-USER_COMMAND 이벤트 → Proposal 생성 → 사용자 승인 기다림
+SYS_INTENT_CLASSIFIED 이벤트 → Proposal 생성 → 사용자 승인 기다림
 
 // Rule 설정
 Rule {
@@ -65,7 +65,7 @@ Rule {
   name: "User Request → Proposal"
   
   conditions: [
-    { field: "event.type", operator: "EQ", value: "USER_COMMAND" }
+    { field: "event.type", operator: "EQ", value: "SYS_INTENT_CLASSIFIED" }
   ]
   
   action: {
@@ -80,7 +80,7 @@ Rule {
 **동작**:
 ```
 사용자 "A 구역 촬영" 
-→ USER_COMMAND 이벤트 
+→ SYS_INTENT_CLASSIFIED 이벤트 
 → Rule: CREATE_PROPOSAL 실행 
 → Proposal-1, Proposal-2 생성 
 → 사용자에게 표시 
@@ -100,7 +100,8 @@ Rule {
   name: "Critical Hazard → Auto Mission"
   
   conditions: [
-    { field: "event.type", operator: "EQ", value: "CRITICAL_HAZARD" },
+    { field: "event.type", operator: "EQ", value: "SYS_ANOMALY_DETECTED" },
+    { field: "event.data.anomaly_type", operator: "EQ", value: "CRITICAL_HAZARD" },
     { field: "event.severity", operator: "EQ", value: "CRITICAL" }
   ]
   
@@ -127,11 +128,11 @@ Rule {
 
 **동작**:
 ```
-상황 1: 일반 요청 (USER_COMMAND)
+상황 1: 일반 요청 (SYS_INTENT_CLASSIFIED)
   → CREATE_PROPOSAL 
   → 사용자 승인 필요 ✅
 
-상황 2: 긴급 상황 (CRITICAL_HAZARD)
+상황 2: 긴급 상황 (SYS_ANOMALY_DETECTED + CRITICAL_HAZARD)
   → AUTO_CREATE_MISSION 
   → 즉시 Mission 생성 (승인 X) ✅
 ```
@@ -148,7 +149,8 @@ Rule {
   name: "Low Battery Detected → Return to Base"
   
   conditions: [
-    { field: "event.type", operator: "EQ", value: "LOW_BATTERY" },
+    { field: "event.type", operator: "EQ", value: "SYS_ANOMALY_DETECTED" },
+    { field: "event.data.anomaly_type", operator: "EQ", value: "LOW_BATTERY" },
     { field: "device.battery_percent", operator: "LT", value: 20 }
   ]
   
@@ -168,7 +170,7 @@ Rule {
 **동작**:
 ```
 Heartbeat: battery = 18%
-→ LOW_BATTERY 이벤트 
+→ SYS_ANOMALY_DETECTED 이벤트 (`anomaly_type=LOW_BATTERY`) 
 → Rule 조건 매칭 
 → AUTO_CREATE_MISSION 
 → RETURN Mission 직접 생성 ✅
