@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from '../services/api';
 
-export function useRegistryPreview<T>(path: string, fallback: T) {
+export function useRegistryPreview<T>(path: string, fallback: T, refetchInterval?: number) {
   return useQuery({
     queryKey: ['registry-preview', path],
     queryFn: async () => {
@@ -11,6 +11,7 @@ export function useRegistryPreview<T>(path: string, fallback: T) {
         return fallback;
       }
     },
+    refetchInterval: refetchInterval ?? 10_000,
   });
 }
 

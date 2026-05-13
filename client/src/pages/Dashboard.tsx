@@ -3,7 +3,7 @@ import { PageCard } from '../components/layout/PageCard';
 import { StatCard } from '../components/layout/StatCard';
 import { useRegistryPreview } from '../hooks/useRegistryPreview';
 import { connectionsFallback, devicesFallback, eventsFallback, missionsFallback, proposalsFallback } from '../data';
-import type { Connection, Device, EventItem, Meta, Proposal } from '../types';
+import type { Connection, Device, EventItem, Meta, Mission, Proposal } from '../types';
 
 const SceneCanvas = lazy(() => import('../components/visualization/SceneCanvas').then((module) => ({ default: module.SceneCanvas })));
 
@@ -16,11 +16,13 @@ export function DashboardPage() {
   const devices = useRegistryPreview<Device[]>('/devices', devicesFallback);
   const events = useRegistryPreview<EventItem[]>('/events', eventsFallback);
   const proposals = useRegistryPreview<Proposal[]>('/mission-proposals', proposalsFallback);
+  const missions = useRegistryPreview<Mission[]>('/missions', missionsFallback);
   const connections = useRegistryPreview<Connection[]>('/agent-connections', connectionsFallback);
 
   const deviceList = toList(devices.data, devicesFallback);
   const eventList = toList(events.data, eventsFallback);
   const proposalList = toList(proposals.data, proposalsFallback);
+  const missionList = toList(missions.data, missionsFallback);
   const connectionList = toList(connections.data, connectionsFallback);
 
   return (
@@ -95,18 +97,31 @@ export function DashboardPage() {
       <div className="grid gap-5 xl:grid-cols-2">
         <PageCard title="Mission Snapshot">
           <div className="grid gap-3">
-            {missionsFallback.map((mission) => (
-              <article key={mission.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <strong>{mission.title}</strong>
-                  <span className="text-sm text-[#8da8b5]">{mission.status}</span>
-                </div>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full bg-gradient-to-r from-[#5bc0be] to-[#7dd3fc]" style={{ width: `${mission.progress}%` }} />
-                </div>
-                <small className="mt-2 block text-[#8da8b5]">{mission.progress}% complete</small>
-              </article>
-            ))}
+            {missionList.length === 0 ? (
+              <p className="text-sm text-[#8da8b5]">No active missions</p>
+            ) : (
+              missionList.map((mission) => (
+                <article key={mission.id || mission.mission_id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <strong>{mission.title}</strong>
+                    <span className={`text-sm ${
+                      mission.status === 'COMPLETED' ? 'text-green-400' :
+                      mission.status === 'IN_PROGRESS' ? 'text-blue-400' :
+                      mission.status === 'FAILED' ? 'text-red-400' :
+                      'text-gray-400'
+                    }`}>{mission.status}</span>
+                  </div>
+                  {mission.progress !== undefined && (
+                    <>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-[#5bc0be] to-[#7dd3fc]" style={{ width: `${mission.progress}%` }} />
+                      </div>
+                      <small className="mt-2 block text-[#8da8b5]">{mission.progress}% complete</small>
+                    </>
+                  )}
+                </article>
+              ))
+            )}
           </div>
         </PageCard>
 
