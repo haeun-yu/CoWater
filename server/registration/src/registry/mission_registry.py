@@ -2,313 +2,179 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import sqlite3
+from pathlib import Path
+from typing import List
 from uuid import uuid4
-from dataclasses import asdict
 
-from src.core.models import MissionRecord, normalize_mission_status, normalize_task_status
-from src.db.connection import DatabaseConnection, get_db
-from src.db.schema import init_schema
+from src.core.models import MissionRecord, normalize_mission_status
+from src.registry.registry_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
+_CREATE_MISSIONS_SQL = """
+CREATE TABLE IF NOT EXISTS missions (
+    mission_id TEXT PRIMARY KEY,
+    source_event_id TEXT,
+    source_proposal_id TEXT,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+_CREATE_INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_missions_source_event_id ON missions(source_event_id);
+CREATE INDEX IF NOT EXISTS idx_missions_source_proposal_id ON missions(source_proposal_id);
+CREATE INDEX IF NOT EXISTS idx_missions_created_at ON missions(created_at);
+"""
+
 
 class MissionRegistry:
-    """Mission lifecycle tracking registry with optional SQLite persistence"""
-    
-    def __init__(self, use_db: bool = False, db_path: str = None) -> None:
-        """
-        Initialize Mission Registry
-        
-        Args:
-            use_db: Whether to use SQLite persistence (default: False for backward compatibility)
-            db_path: Path to SQLite database file
-        """
-        self.use_db = use_db
-        self.db: Optional[DatabaseConnection] = None
-        
-        # In-memory fallback
-        self._missions: Dict[str, MissionRecord] = {}
-        self._response_to_mission: Dict[str, str] = {}
-        
-        if self.use_db:
-            try:
-                self.db = get_db(db_path)
-                init_schema(self.db.get_connection())
-                logger.info("✅ MissionRegistry using SQLite persistence")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to initialize SQLite, falling back to memory: {e}")
-                self.use_db = False
-    
+    """Mission 실행 계획 관리 (docs 기준)"""
+
+    def __init__(self, db_path: str | None = None) -> None:
+        self._db_path = db_path or ".data/missions.db"
+
+        if self._db_path != ":memory:":
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        try:
+            with self._connect() as conn:
+                conn.execute(_CREATE_MISSIONS_SQL)
+                for sql in _CREATE_INDEXES_SQL.split(";"):
+                    if sql.strip():
+                        conn.execute(sql)
+                conn.commit()
+            logger.info(f"MissionRegistry DB 초기화: {self._db_path}")
+        except Exception as e:
+            logger.error(f"MissionRegistry DB 초기화 실패: {e}")
+
+    def _row_to_mission(self, row: sqlite3.Row) -> MissionRecord:
+        data = json.loads(row["data"])
+        data.setdefault("mission_id", row["mission_id"])
+        data.setdefault("source_event_id", row["source_event_id"])
+        data.setdefault("source_proposal_id", row["source_proposal_id"])
+        data.setdefault("created_at", row["created_at"])
+        data.setdefault("updated_at", row["updated_at"])
+        return MissionRecord(**data)
+
+    def _persist_mission(self, mission: MissionRecord) -> None:
+        data = mission.to_dict()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO missions (mission_id, source_event_id, source_proposal_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (mission.mission_id, mission.source_event_id, mission.source_proposal_id, json.dumps(data), mission.created_at, mission.updated_at),
+            )
+            conn.commit()
+
     def create_mission(
         self,
-        response_id: str,
-        alert_id: str,
-        event_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        title: str,
+        type: str,
+        source_event_id: str | None = None,
+        source_proposal_id: str | None = None,
+        status: str = "READY",
+        priority: str = "NORMAL",
+        **kwargs
     ) -> MissionRecord:
         """새 Mission 생성"""
-        mission_id = f"mission-{uuid4()}"
         mission = MissionRecord(
-            mission_id=mission_id,
-            response_id=response_id,
-            alert_id=alert_id,
-            event_id=event_id,
-            status="READY",
-            metadata=metadata or {},
+            mission_id=str(uuid4()),
+            title=title,
+            type=type,
+            status=normalize_mission_status(status),
+            priority=priority,
+            source_event_id=source_event_id,
+            source_proposal_id=source_proposal_id,
+            target_area=kwargs.get("target_area"),
+            target_position=kwargs.get("target_position"),
+            created_by=kwargs.get("created_by", {"type": "SYSTEM", "id": "system"}),
+            approved_by_user_id=kwargs.get("approved_by_user_id"),
+            approved_at=kwargs.get("approved_at"),
+            status_updated_at=utc_now_iso(),
+            status_reason=kwargs.get("status_reason"),
+            result_summary=kwargs.get("result_summary"),
+            created_at=utc_now_iso(),
+            updated_at=utc_now_iso(),
         )
-        
-        if self.use_db and self.db:
-            self._save_mission_to_db(mission)
-        else:
-            self._missions[mission_id] = mission
-            self._response_to_mission[response_id] = mission_id
-        
+        self._persist_mission(mission)
         return mission
-    
+
     def get_mission(self, mission_id: str) -> MissionRecord:
         """Mission 조회"""
-        if self.use_db and self.db:
-            mission = self._load_mission_from_db(mission_id)
-            if mission is None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT mission_id, source_event_id, source_proposal_id, data, created_at, updated_at FROM missions WHERE mission_id = ?",
+                (mission_id,)
+            ).fetchone()
+            if not row:
                 raise KeyError(f"Mission not found: {mission_id}")
-            return mission
-        else:
-            mission = self._missions.get(mission_id)
-            if mission is None:
-                raise KeyError(f"Mission not found: {mission_id}")
-            return mission
-    
-    def get_mission_by_response(self, response_id: str) -> Optional[MissionRecord]:
-        """Response로부터 관련 Mission 조회"""
-        if self.use_db and self.db:
-            cursor = self.db.execute(
-                "SELECT mission_id FROM missions WHERE response_id = ?",
-                (response_id,)
-            )
-            result = cursor.fetchone()
-            if result:
-                mission_id = result[0]
-                return self._load_mission_from_db(mission_id)
-            return None
-        else:
-            mission_id = self._response_to_mission.get(response_id)
-            if mission_id is None:
-                return None
-            return self._missions.get(mission_id)
-    
-    def list_missions(self) -> List[MissionRecord]:
-        """모든 Mission 목록 반환"""
-        if self.use_db and self.db:
-            cursor = self.db.execute("SELECT mission_id FROM missions ORDER BY mission_id")
-            results = cursor.fetchall()
-            missions = []
-            for row in results:
-                mission = self._load_mission_from_db(row[0])
-                if mission:
-                    missions.append(mission)
-            return missions
-        else:
-            return [self._missions[mission_id] for mission_id in sorted(self._missions)]
-    
+            return self._row_to_mission(row)
+
+    def list_missions(self, limit: int = 100, offset: int = 0) -> List[MissionRecord]:
+        """Mission 목록 조회"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT mission_id, source_event_id, source_proposal_id, data, created_at, updated_at FROM missions ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset)
+            ).fetchall()
+            return [self._row_to_mission(row) for row in rows]
+
     def list_missions_by_status(self, status: str) -> List[MissionRecord]:
-        """특정 상태의 Mission 목록 반환"""
+        """상태별 Mission 목록 조회"""
         normalized_status = normalize_mission_status(status)
-        if self.use_db and self.db:
-            cursor = self.db.execute(
-                "SELECT mission_id FROM missions WHERE status = ? ORDER BY mission_id",
-                (normalized_status,)
-            )
-            results = cursor.fetchall()
-            missions = []
-            for row in results:
-                mission = self._load_mission_from_db(row[0])
-                if mission:
+        missions = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT mission_id, source_event_id, source_proposal_id, data, created_at, updated_at FROM missions ORDER BY created_at DESC"
+            ).fetchall()
+            for row in rows:
+                mission = self._row_to_mission(row)
+                if mission.status == normalized_status:
                     missions.append(mission)
-            return missions
-        else:
-            return [m for m in self._missions.values() if normalize_mission_status(m.status) == normalized_status]
-    
-    def update_mission_status(self, mission_id: str, status: str) -> MissionRecord:
+        return missions
+
+    def update_mission_status(self, mission_id: str, status: str, reason: str | None = None) -> MissionRecord:
         """Mission 상태 업데이트"""
         mission = self.get_mission(mission_id)
-        mission.touch(status)
-        
-        if self.use_db and self.db:
-            self._save_mission_to_db(mission)
-        else:
-            self._missions[mission_id] = mission
-        
+        mission.touch(status, reason)
+        self._persist_mission(mission)
         return mission
 
-    def record_step_execution(
-        self,
-        mission_id: str,
-        step_id: str,
-        execution_result: Dict[str, Any],
-    ) -> MissionRecord:
-        """Step 실행 결과 기록"""
+    def update_mission(self, mission_id: str, **kwargs) -> MissionRecord:
+        """Mission 정보 업데이트"""
         mission = self.get_mission(mission_id)
-        
-        # Find or create step state
-        step_state = None
-        for state in mission.step_states:
-            if state.get("step_id") == step_id:
-                step_state = state
-                break
-        
-        if step_state is None:
-            step_state = {
-                "step_id": step_id,
-                "status": normalize_task_status(execution_result.get("status")),
-                "tasks": execution_result.get("tasks", []),
-                "execution_results": [],
-            }
-            mission.step_states.append(step_state)
-        else:
-            step_state["status"] = normalize_task_status(execution_result.get("status", step_state.get("status")))
-            if "tasks" in execution_result:
-                step_state["tasks"] = execution_result["tasks"]
-        
-        # Append execution results
-        if "execution_results" in execution_result:
-            step_state["execution_results"].extend(execution_result["execution_results"])
-        
-        mission.touch()
-        
-        if self.use_db and self.db:
-            self._save_mission_to_db(mission)
-        else:
-            self._missions[mission_id] = mission
-        
+        for key, value in kwargs.items():
+            if hasattr(mission, key):
+                setattr(mission, key, value)
+        mission.updated_at = utc_now_iso()
+        self._persist_mission(mission)
         return mission
 
-    def complete_mission(
-        self,
-        mission_id: str,
-        completion_report: Dict[str, Any],
-    ) -> MissionRecord:
-        """Mission 완료 및 보고서 저장"""
-        mission = self.get_mission(mission_id)
-        mission.completion_report = completion_report
-        mission.touch("COMPLETED")
-        
-        if self.use_db and self.db:
-            self._save_mission_to_db(mission)
-        else:
-            self._missions[mission_id] = mission
-        
-        return mission
-
-    def abort_mission(
-        self,
-        mission_id: str,
-        reason: str,
-    ) -> MissionRecord:
-        """Mission abort (실패)"""
-        mission = self.get_mission(mission_id)
-        mission.completion_report = {
-            "status": "FAILED",
-            "reason": reason,
-            "timestamp": mission.updated_at,
-        }
-        mission.touch("FAILED")
-        
-        if self.use_db and self.db:
-            self._save_mission_to_db(mission)
-        else:
-            self._missions[mission_id] = mission
-        
-        return mission
-
-    def get_mission_stats(self) -> Dict[str, Any]:
-        """Mission 통계 반환"""
-        all_missions = self.list_missions()
+    def get_mission_stats(self) -> dict:
+        """Mission 통계"""
+        missions = self.list_missions(limit=10000)
         return {
-            "total": len(all_missions),
-            "ready": len([m for m in all_missions if normalize_mission_status(m.status) == "READY"]),
-            "in_progress": len([m for m in all_missions if normalize_mission_status(m.status) == "IN_PROGRESS"]),
-            "completed": len([m for m in all_missions if normalize_mission_status(m.status) == "COMPLETED"]),
-            "failed": len([m for m in all_missions if normalize_mission_status(m.status) == "FAILED"]),
-            "cancelled": len([m for m in all_missions if normalize_mission_status(m.status) == "CANCELLED"]),
+            "total": len(missions),
+            "ready": len([m for m in missions if m.status == "READY"]),
+            "in_progress": len([m for m in missions if m.status == "IN_PROGRESS"]),
+            "completed": len([m for m in missions if m.status == "COMPLETED"]),
+            "failed": len([m for m in missions if m.status == "FAILED"]),
+            "cancelled": len([m for m in missions if m.status == "CANCELLED"]),
         }
 
     def reset(self) -> None:
-        """모든 Mission 초기화"""
-        if self.use_db and self.db:
-            cursor = self.db.execute("DELETE FROM missions")
-            self.db.commit()
-            logger.info("✅ Cleared all missions from SQLite")
-        else:
-            self._missions.clear()
-            self._response_to_mission.clear()
-            logger.info("✅ Cleared all missions from memory")
-    
-    # ======================== Private DB Methods ========================
-    
-    def _save_mission_to_db(self, mission: MissionRecord) -> None:
-        """Save mission to SQLite database"""
-        if not self.db:
-            return
-        
-        try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            # Convert complex types to JSON strings
-            step_states_json = json.dumps([asdict(s) if hasattr(s, '__dataclass_fields__') else s for s in mission.step_states])
-            completion_report_json = json.dumps(mission.completion_report)
-            metadata_json = json.dumps(mission.metadata)
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO missions 
-                (mission_id, response_id, alert_id, event_id, status, step_states, 
-                 completion_report, metadata, created_at, started_at, completed_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                mission.mission_id,
-                mission.response_id,
-                mission.alert_id,
-                mission.event_id,
-                mission.status,
-                step_states_json,
-                completion_report_json,
-                metadata_json,
-                mission.created_at,
-                mission.started_at,
-                mission.completed_at,
-                mission.updated_at,
-            ))
+        """모든 Mission 삭제 (테스트용)"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM missions")
             conn.commit()
-        except Exception as e:
-            logger.error(f"❌ Failed to save mission to DB: {e}")
-            if self.db:
-                self.db.rollback()
-    
-    def _load_mission_from_db(self, mission_id: str) -> Optional[MissionRecord]:
-        """Load mission from SQLite database"""
-        if not self.db:
-            return None
-        
-        try:
-            cursor = self.db.execute(
-                "SELECT * FROM missions WHERE mission_id = ?",
-                (mission_id,)
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                # Convert row to dict
-                mission_dict = dict(row)
-                
-                # Parse JSON fields
-                mission_dict["step_states"] = json.loads(mission_dict["step_states"])
-                mission_dict["completion_report"] = json.loads(mission_dict["completion_report"])
-                mission_dict["metadata"] = json.loads(mission_dict["metadata"])
-                
-                return MissionRecord(**mission_dict)
-            
-            return None
-        except Exception as e:
-            logger.error(f"❌ Failed to load mission from DB: {e}")
-            return None
+        logger.info("MissionRegistry 초기화 완료")

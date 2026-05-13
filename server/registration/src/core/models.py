@@ -25,7 +25,7 @@ TRACK_TYPES = Literal[
     "A2A",
 ]
 
-DEVICE_TYPES = Literal["USV", "AUV", "ROV", "CONTROL_SHIP", "SYSTEM"]
+DEVICE_TYPES = Literal["USV", "AUV", "ROV", "OTHER"]
 LAYERS = Literal["lower", "middle", "system"]
 ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFO"]
 EVENT_SEVERITIES = ALERT_SEVERITIES
@@ -436,22 +436,23 @@ class TimelineEvent:
 
 @dataclass
 class MissionRecord:
-    """Mission 라이프사이클을 추적하는 기록 (Response 기반)"""
+    """Mission 실행 계획 (docs 기준)"""
     mission_id: str
-    response_id: str
-    alert_id: str
-    event_id: str
-    status: str = "READY"
-    priority: Optional[str] = None
-    step_states: List[Dict[str, Any]] = field(default_factory=list)  # [{step_id, status, tasks, ...}]
-    completion_report: Dict[str, Any] = field(default_factory=dict)  # {...}
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    timeline: List[TimelineEvent] = field(default_factory=list)
-    status_reason: Optional[str] = None
+    title: str
+    type: str  # OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY
+    status: str  # READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+    priority: str = "NORMAL"  # LOW | NORMAL | HIGH | EMERGENCY
+    source_event_id: Optional[str] = None
+    source_proposal_id: Optional[str] = None
+    target_area: Optional[str] = None
+    target_position: Optional[Dict[str, Any]] = None
+    created_by: Dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    approved_by_user_id: Optional[str] = None
+    approved_at: Optional[str] = None
     status_updated_at: str = field(default_factory=utc_now_iso)
+    status_reason: Optional[str] = None
+    result_summary: Optional[str] = None
     created_at: str = field(default_factory=utc_now_iso)
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
     updated_at: str = field(default_factory=utc_now_iso)
 
     def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
@@ -462,53 +463,31 @@ class MissionRecord:
             self.status_updated_at = self.updated_at
         if reason is not None:
             self.status_reason = reason
-        if self.status == "IN_PROGRESS" and self.started_at is None:
-            self.started_at = utc_now_iso()
-        if self.status in {"COMPLETED", "FAILED", "CANCELLED"} and self.completed_at is None:
-            self.completed_at = utc_now_iso()
 
     def to_dict(self) -> dict[str, Any]:
-        result = asdict(self)
-        result["timeline"] = [evt.to_dict() for evt in self.timeline]
-        return _upper_status_fields(result)
-
-    def append_timeline_event(self, event: TimelineEvent) -> None:
-        """Timeline 이벤트 추가"""
-        self.timeline.append(event)
-        self.touch()
+        return asdict(self)
 
 
 @dataclass
 class EventRecord:
     event_id: str
-    source_system: str
-    source_agent_id: Optional[str]
-    source_role: Optional[str]
-    event_type: str
+    type: str  # SYS_INTENT_CLASSIFIED | SYS_TASK_RESULT | SYS_ANOMALY_DETECTED | SYS_MISSION_UPDATED | DEVICE_HEALTHCHECK | ENV_STATE_CHANGED etc.
     severity: EVENT_SEVERITIES
     actor_type: Optional[str] = None
     actor_id: Optional[str] = None
     status: str = "OPEN"
-    message: Optional[str] = None
-    title: str = ""
-    description: Optional[str] = None
     target_type: Optional[str] = None
     target_id: Optional[str] = None
+    title: str = ""
+    description: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
-    target_agents: List[str] = field(default_factory=list)
-    status_reason: Optional[str] = None
-    status_updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
-    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
+    def touch(self, status: Optional[str] = None) -> None:
         self.updated_at = utc_now_iso()
         if status is not None:
             self.status = str(status).upper()
-            self.status_updated_at = self.updated_at
-        if reason is not None:
-            self.status_reason = reason
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -891,3 +870,159 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
     if record.agent.gateway_agent_id is None and record.parent_id is not None:
         record.agent.gateway_agent_id = record.parent_id
     return record
+
+
+# ===== 새로운 도메인 모델들 (docs 기준) =====
+
+
+@dataclass
+class UserRecord:
+    user_id: str
+    name: str
+    role: str  # ADMIN | OPERATOR | VIEWER
+    status: str  # ACTIVE | DISABLED
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class AgentRecord:
+    agent_id: str
+    name: str
+    type: str  # SYSTEM_AGENT | DEVICE_AGENT
+    role: str  # REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER | DEVICE_CONTROL
+    device_id: Optional[str]
+    endpoint: Dict[str, Any]  # {host, port, protocol, path, auth_token_ref}
+    capabilities: List[str]  # WIRED | ACOUSTIC | RF | INTERNET
+    gateway_agent_id: Optional[str] = None
+    environment_state: str = "SURFACE"  # SURFACE | UNDERWATER
+    active_mediums: List[str] = field(default_factory=list)
+    last_heartbeat_at: Optional[str] = None
+    deleted_at: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ProposalTaskRecord:
+    task_id: str
+    proposal_id: str
+    title: str
+    type: str  # DEVICE_TASK | SYSTEM_TASK | REPORT_TASK | NOTIFY_TASK
+    required_action: str
+    sequence: int
+    target_area: Optional[str] = None
+    target_position: Optional[Dict[str, Any]] = None
+    recommended_device_id: Optional[str] = None
+    recommended_agent_id: Optional[str] = None
+    alternative_device_ids: List[str] = field(default_factory=list)
+    recommendation_reason: Optional[str] = None
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TaskRecord:
+    task_id: str
+    mission_id: str
+    title: str
+    type: str  # DEVICE_TASK | SYSTEM_TASK | REPORT_TASK | NOTIFY_TASK
+    required_action: str
+    status: str  # PENDING | ASSIGNED | IN_PROGRESS | COMPLETED | FAILED | CANCELLED | ABORTED
+    sequence: int
+    source_proposal_task_id: Optional[str] = None
+    assigned_device_id: Optional[str] = None
+    assigned_agent_id: Optional[str] = None
+    target_area: Optional[str] = None
+    target_position: Optional[Dict[str, Any]] = None
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    result: Dict[str, Any] = field(default_factory=dict)
+    status_updated_at: str = field(default_factory=utc_now_iso)
+    status_reason: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
+        self.updated_at = utc_now_iso()
+        if status:
+            self.status = normalize_task_status(status)
+            self.status_updated_at = self.updated_at
+        if reason is not None:
+            self.status_reason = reason
+
+
+@dataclass
+class ReportRecord:
+    report_id: str
+    type: str  # MISSION_REPORT | EVENT_REPORT | DAILY_REPORT | DEVICE_REPORT
+    target_type: str  # MISSION | EVENT | DEVICE | TASK
+    target_id: str
+    title: str
+    summary: str
+    details: Dict[str, Any] = field(default_factory=dict)
+    created_by: Dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    created_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RuleRecord:
+    rule_id: str
+    rule_type: str  # PROBLEM_DETECTION | AUTO_RESPONSE | RECOMMENDATION | APPROVAL | AGENT_CONNECTION
+    name: str
+    enabled: bool
+    priority: int
+    conditions: List[Dict[str, Any]] = field(default_factory=list)
+    action: Dict[str, Any] = field(default_factory=dict)
+    severity: str = "INFO"  # INFO | WARNING | CRITICAL
+    policy_id: Optional[str] = None
+    created_by: Dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ConfigRecord:
+    key: str
+    value: Any
+    type: str  # string | number | boolean | json
+    scope: str  # SYSTEM | PROBLEM_DETECTION | AUTO_RESPONSE | RECOMMENDATION | APPROVAL | AGENT_CONNECTION
+    description: Optional[str] = None
+    updated_by: Dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SensorRecord:
+    sensor_id: str
+    device_id: str
+    name: str
+    type: str  # CAMERA | SONAR | LIDAR | RADAR | GPS | IMU | DEPTH | TEMPERATURE | WATER_QUALITY | OTHER
+    stream_endpoint: str
+    deleted_at: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

@@ -97,32 +97,28 @@ class StateChangeEvent:
         self.recovery_history = recovery_history or []
 
     def to_dict(self) -> dict[str, Any]:
-        """Event를 dict로 직렬화 (JSON 변환용)"""
+        """Event를 dict로 직렬화 (JSON 변환용) - 새 EventRecord 형식"""
         return {
             "event_id": self.event_id,
             "created_at": self.created_at,
-            "event_type": self.event_type,
+            "type": self.event_type,
             "severity": self.severity,
-            "source_system": self.source_system,
-            "source_agent_id": self.source_agent_id,
+            "actor_type": "SYSTEM_AGENT",
+            "actor_id": str(self.source_agent_id),
             "title": self.title,
             "description": self.description,
-            "target_agents": self._default_target_agents(),
+            "target_type": "SYSTEM",
+            "target_id": "system",
+            "status": "OPEN",
             "data": {
                 "related_ids": self.related_ids,
                 "metrics": self.metrics,
                 "recovery_history": self.recovery_history,
+                "source_system": self.source_system,
+                "message": self.description,
             },
+            "updated_at": self.created_at,
         }
-
-    def _default_target_agents(self) -> list[str]:
-        routing = {
-            "SYS_TASK_RESULT": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
-            "SYS_ANOMALY_DETECTED": ["PolicyManager", "InsightReporter"],
-            "SYS_POLICY_DECISION": ["MissionPlanner", "InsightReporter"],
-            "SYS_MISSION_UPDATED": ["InsightReporter", "SystemSentinel"],
-        }
-        return routing.get(self.event_type, ["InsightReporter"])
 
     def __repr__(self) -> str:
         return (
@@ -152,20 +148,32 @@ class EventPublisher:
     def publish(self, event: StateChangeEvent) -> bool:
         """
         Event를 발행 (Registry 또는 로컬 로그)
-        
+
         Args:
             event: 발행할 event
-            
+
         Returns:
             성공 여부
         """
         # P9 (기록 가능성): 로컬 로그에 기록
         self.local_event_log.append(event)
-        
+
         # Registry로 발행
         try:
             if self.registry_client:
-                self.registry_client.ingest_event(event.to_dict())
+                event_dict = event.to_dict()
+                self.registry_client.create_event(
+                    actor_type=event_dict.get("actor_type", "SYSTEM_AGENT"),
+                    actor_id=event_dict.get("actor_id", "system"),
+                    type=event_dict.get("type", "UNKNOWN"),
+                    severity=event_dict.get("severity", "INFO"),
+                    title=event_dict.get("title", ""),
+                    description=event_dict.get("description", ""),
+                    target_type=event_dict.get("target_type", "SYSTEM"),
+                    target_id=event_dict.get("target_id", "system"),
+                    data=event_dict.get("data", {}),
+                    status=event_dict.get("status", "OPEN"),
+                )
             return True
         except Exception as e:
             # 발행 실패해도 로컬 로그는 유지 (가용성 우선)
