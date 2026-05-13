@@ -76,9 +76,23 @@ Registry Server (공용 상태 저장소 - 모든 레이어에서 접근)
 └─ A2A 통신 로그
 
 Stream Layer (Moth - 실시간 데이터)
-├─ A2A 메시지 (Agent ↔ Agent)
-├─ Telemetry (Device 센서 데이터)
-└─ Healthcheck (Device 상태 신호)
+├─ pub/sub 채널
+│  └─ Telemetry (Device 고대역폭 실시간 데이터)
+│     └─ video, lidar, audio, 센서 데이터 등
+│
+├─ A2A Protocol (HTTP POST)
+│  ├─ Device Agent ↔ System Agent (task.assign, task.result)
+│  │  ├─ task.assign (System → Device: Task 할당)
+│  │  └─ task.result (Device → System: Task 결과)
+│  │
+│  └─ Device Agent ↔ Device Agent (직접 통신, multi-hop relay)
+│     └─ AgentConnection 기반 A2A 통신 (BFS 경로)
+│
+└─ meb 채널 ("agents" - 송수신)
+   ├─ device.healthcheck (Device 주기적 신호, 배터리/위치/상태 포함)
+   └─ MEB Events (event_type + target_agents)
+      └─ System Layer (System Agent ↔ System Agent)
+         └─ sys.intent.classified, sys.task.dispatched, sys.policy.decision, ...
 ```
 
 ---
@@ -93,19 +107,19 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 
 #### System Agent 계층 (6개 전문 에이전트)
 
-| # | 에이전트 | 핵심 책임 | DB 소유권 |
-|---|---------|---------|----------|
-| 1️⃣ | **RequestHandler** | 사용자 요청 해석 & 경로 결정 (직접 처리 vs 위임) | Read-only (모든 테이블) |
-| 2️⃣ | **DeviceBridge** | 물리 장비 통신, 상태 동기화, Heartbeat 관리 | Device, Sensor |
-| 3️⃣ | **MissionPlanner** | 미션/태스크 설계, 실행 추적, 생명주기 관리 | Mission, Task, Proposal |
-| 4️⃣ | **PolicyManager** | 정책/규칙 관리, 자동 대응, 장비 생명주기 | Policy, Rule, Config |
-| 5️⃣ | **SystemSentinel** | 이상 징후 감시, Alert/Event 생성, 건전성 체크 | Alert, Event |
-| 6️⃣ | **InsightReporter** | 데이터 조회, 통계/분석, 리포트 생성 | Read-only (모든 테이블) |
+| #   | 에이전트            | 핵심 책임                                        | DB 소유권               |
+| --- | ------------------- | ------------------------------------------------ | ----------------------- |
+| 1️⃣  | **RequestHandler**  | 사용자 요청 해석 & 경로 결정 (직접 처리 vs 위임) | Read-only (모든 테이블) |
+| 2️⃣  | **DeviceBridge**    | 물리 장비 통신, 상태 동기화, Heartbeat 관리      | Device, Sensor          |
+| 3️⃣  | **MissionPlanner**  | 미션/태스크 설계, 실행 추적, 생명주기 관리       | Mission, Task, Proposal |
+| 4️⃣  | **PolicyManager**   | 정책/규칙 관리, 자동 대응, 장비 생명주기         | Policy, Rule, Config    |
+| 5️⃣  | **SystemSentinel**  | 이상 징후 감시, Alert/Event 생성, 건전성 체크    | Alert, Event            |
+| 6️⃣  | **InsightReporter** | 데이터 조회, 통계/분석, 리포트 생성              | Read-only (모든 테이블) |
 
 #### Device Agent 계층 (각 물리 장비마다 1개)
 
-| 계층 | 에이전트 | 핵심 책임 | 특성 |
-|------|---------|---------|------|
+| 계층             | 에이전트                                      | 핵심 책임                                         | 특성                      |
+| ---------------- | --------------------------------------------- | ------------------------------------------------- | ------------------------- |
 | **Device Agent** | 개별 무인체 Agent (USV-01, AUV-01, ROV-01 등) | Task 수행 판단 및 실행, 로컬 안전 행동, 상태 보고 | 자신의 Device만 직접 제어 |
 
 👉 자세한 책임 및 규칙: [**도메인 모델**](core/domain-model.md), [**설계 원칙**](core/principles.md)
@@ -148,6 +162,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 ```
 
 **DeviceBridge의 역할** (심장 같은 역할):
+
 - **송신**: MissionPlanner의 Task → Device Agent로 전달
 - **수신**: Device Agent의 Heartbeat, Task Result, Problem Report 수집
 - **발행**: 수집한 정보를 Event로 발행 (다른 Agent들이 구독)
@@ -173,11 +188,11 @@ CoWater의 핵심: **Device Agent는 물리 환경을 인식하고 자동으로 
 
 #### 📊 매체별 우선순위 (The Cost of Medium)
 
-| 매체 | 용도 | 우선순위 | 특성 |
-|------|------|---------|------|
-| **Wired (유선)** | ROV 테더, 충전 스테이션 | 1순위 | 최고 속도, 최저 지연, 물리 탯줄 필수 |
-| **RF/Internet** | 수상 장비 | 2순위 | 고속 데이터, 수중 진입 시 즉시 단절 |
-| **Acoustic (음향)** | 수중 통신 | 3순위 | 저속, 고지연, 수중 최후의 보루 |
+| 매체                | 용도                    | 우선순위 | 특성                                 |
+| ------------------- | ----------------------- | -------- | ------------------------------------ |
+| **Wired (유선)**    | ROV 테더, 충전 스테이션 | 1순위    | 최고 속도, 최저 지연, 물리 탯줄 필수 |
+| **RF/Internet**     | 수상 장비               | 2순위    | 고속 데이터, 수중 진입 시 즉시 단절  |
+| **Acoustic (음향)** | 수중 통신               | 3순위    | 저속, 고지연, 수중 최후의 보루       |
 
 #### 🔀 3단계 필터링 로직 (AgentConnection 생성)
 
