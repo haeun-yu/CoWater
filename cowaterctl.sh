@@ -4,6 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PATH="$SCRIPT_DIR/.venv"
 CONFIG_PATH="$SCRIPT_DIR/server/system-agent/config.json"
+PID_DIR="$SCRIPT_DIR/.pids"
+SVC_LOG_DIR="$SCRIPT_DIR/.logs/services"
 
 # 색상 정의
 RED='\033[0;31m'
@@ -12,9 +14,18 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 함수: tmux 세션 확인
+# 함수: PID 파일로 서비스 실행 여부 확인
 session_exists() {
-    tmux has-session -t "$1" 2>/dev/null
+    local pid_file="$PID_DIR/$1.pid"
+    if [ -f "$pid_file" ]; then
+        local pid
+        pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$pid_file"
+    fi
+    return 1
 }
 
 # 함수: 로그 출력
@@ -37,7 +48,7 @@ log_warn() {
 # 변수: 클라이언트 시작 여부
 SKIP_CLIENT=${SKIP_CLIENT:-false}
 
-# 함수: venv 활성화 및 서비스 시작
+# 함수: venv 활성화 및 서비스 시작 (nohup 기반, tmux 불필요)
 start_service() {
     local session_name=$1
     local service_type=$2
@@ -45,18 +56,23 @@ start_service() {
     local cwd=$4
 
     if session_exists "$session_name"; then
-        log_warn "Session '$session_name' already exists"
+        log_warn "Service '$session_name' already running"
         return
     fi
 
     log_info "Starting $service_type..."
 
-    # venv 활성화 + 명령 실행
-    tmux new-session -d -s "$session_name" \
-        -c "$cwd" \
-        "source $VENV_PATH/bin/activate && $cmd"
+    mkdir -p "$PID_DIR"
+    mkdir -p "$SVC_LOG_DIR"
 
-    log_success "Started $service_type (session: $session_name)"
+    local log_file="$SVC_LOG_DIR/$session_name.log"
+
+    nohup bash -c "cd '$cwd' && source '$VENV_PATH/bin/activate' && $cmd" \
+        > "$log_file" 2>&1 &
+    local pid=$!
+    echo $pid > "$PID_DIR/$session_name.pid"
+
+    log_success "Started $service_type (PID: $pid, log: $log_file)"
 }
 
 # 함수: 포트 확인 (curl 사용)
@@ -178,15 +194,32 @@ start() {
     echo "  ./cowaterctl.sh logs client"
 }
 
+# 재귀적으로 프로세스 트리 전체 종료 (macOS 호환)
+kill_tree() {
+    local pid=$1
+    local children
+    children=$(pgrep -P "$pid" 2>/dev/null || true)
+    for child in $children; do
+        kill_tree "$child"
+    done
+    kill "$pid" 2>/dev/null || true
+}
+
 stop() {
     log_info "Stopping CoWater system..."
 
     local sessions=("cowater-registry" "cowater-system-agent" "cowater-device-usv" "cowater-device-auv" "cowater-device-rov" "cowater-client")
 
     for session in "${sessions[@]}"; do
-        if session_exists "$session"; then
-            tmux kill-session -t "$session"
-            log_success "Stopped $session"
+        local pid_file="$PID_DIR/$session.pid"
+        if [ -f "$pid_file" ]; then
+            local pid
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                kill_tree "$pid"
+                log_success "Stopped $session (PID: $pid)"
+            fi
+            rm -f "$pid_file"
         fi
     done
 
@@ -226,26 +259,15 @@ status() {
 
 logs() {
     local service=$1
+    local session_name
 
     case "$service" in
-        registry)
-            tmux attach-session -t "cowater-registry"
-            ;;
-        system-agent)
-            tmux attach-session -t "cowater-system-agent"
-            ;;
-        device-usv)
-            tmux attach-session -t "cowater-device-usv"
-            ;;
-        device-auv)
-            tmux attach-session -t "cowater-device-auv"
-            ;;
-        device-rov)
-            tmux attach-session -t "cowater-device-rov"
-            ;;
-        client)
-            tmux attach-session -t "cowater-client"
-            ;;
+        registry)       session_name="cowater-registry" ;;
+        system-agent)   session_name="cowater-system-agent" ;;
+        device-usv)     session_name="cowater-device-usv" ;;
+        device-auv)     session_name="cowater-device-auv" ;;
+        device-rov)     session_name="cowater-device-rov" ;;
+        client)         session_name="cowater-client" ;;
         *)
             log_error "Unknown service: $service"
             echo ""
@@ -254,6 +276,15 @@ logs() {
             exit 1
             ;;
     esac
+
+    local log_file="$SVC_LOG_DIR/$session_name.log"
+    if [ -f "$log_file" ]; then
+        tail -f "$log_file"
+    else
+        log_error "Log file not found: $log_file"
+        log_info "Is the service running? Check: $0 status"
+        exit 1
+    fi
 }
 
 # =============================================================================

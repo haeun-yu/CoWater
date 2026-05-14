@@ -73,6 +73,21 @@ log_both "입력: $USER_COMMAND"
 log_both ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 서버 사전 체크
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if ! curl -s --max-time 2 http://127.0.0.1:9116/health >/dev/null 2>&1; then
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}  서버가 실행 중이지 않습니다 (포트 9116 응답 없음)${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  시작 방법:"
+    echo -e "  ${YELLOW}./cowaterctl.sh start --no-client${NC}"
+    echo ""
+    exit 1
+fi
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Step 1: 명령을 RequestHandler로 전달
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 section_header "Step 1: RequestHandler 호출"
@@ -110,107 +125,24 @@ if [ "$STATUS" = "ERROR" ]; then
     exit 1
 fi
 
-# Intent 추출: event에 포함되어 있거나 응답 구조에서 유추
-INTENT=$(echo "$RESPONSE" | jq -r '.event.data.intent // empty' 2>/dev/null)
-
-# Intent가 없으면 응답 구조에서 유추
-if [ -z "$INTENT" ]; then
-    HAS_PROPOSAL=$(echo "$RESPONSE" | jq 'has("proposal")' 2>/dev/null)
-    HAS_REPORT=$(echo "$RESPONSE" | jq 'has("report")' 2>/dev/null)
-    HAS_DEVICES=$(echo "$RESPONSE" | jq '.data | has("devices")' 2>/dev/null)
-
-    if [ "$HAS_PROPOSAL" = "true" ]; then
-        INTENT="MISSION"
-    elif [ "$HAS_REPORT" = "true" ]; then
-        INTENT="REPORT"
-    elif [ "$HAS_DEVICES" = "true" ]; then
-        INTENT="QUERY"
-    fi
-fi
-
+# 처리 단계 수
+STEPS=$(echo "$RESPONSE" | jq -r '.steps // "?"' 2>/dev/null)
 echo ""
-echo -e "${GREEN}✓ 응답 분석됨${NC}"
-if [ -n "$INTENT" ]; then
-    echo "추론된 Intent: $INTENT"
-    log_to_file "추론된 Intent: $INTENT"
-fi
+echo -e "${GREEN}✓ 처리 완료 (${STEPS}단계)${NC}"
+log_to_file "처리 단계: $STEPS"
 
-# Intent별 처리
-if [ -n "$INTENT" ]; then
-    case "$INTENT" in
-        QUERY)
-            section_header "Step 2: QUERY 처리 - RequestHandler가 직접 처리"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Step 2: AI 응답 출력
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+section_header "Step 2: AI 응답"
 
-            DEVICE_COUNT=$(echo "$RESPONSE" | jq '.data.devices | length' 2>/dev/null || echo "0")
-            echo "Device 목록 ($DEVICE_COUNT개):"
-            echo "$RESPONSE" | jq -r '.data.devices[] | "  • \(.name) (\(.type)): \(.connectivity_status)"' 2>/dev/null | head -10
-            log_to_file "Device 목록:"
-            echo "$RESPONSE" | jq '.data.devices' 2>/dev/null >> "$LOG_FILE"
-
-            echo ""
-            MISSION_COUNT=$(echo "$RESPONSE" | jq '.data.missions | length' 2>/dev/null || echo "0")
-            echo "진행 중인 Mission: $MISSION_COUNT개"
-            log_to_file "Mission 개수: $MISSION_COUNT"
-            if [ "$MISSION_COUNT" -gt 0 ]; then
-                echo "$RESPONSE" | jq -r '.data.missions[] | "  • \(.title) - \(.status)"' 2>/dev/null | head -5
-                log_to_file "Mission 목록:"
-                echo "$RESPONSE" | jq '.data.missions' 2>/dev/null >> "$LOG_FILE"
-            fi
-            ;;
-
-        REPORT)
-            section_header "Step 2: REPORT 처리 - 분석 리포트"
-
-            REPORT=$(echo "$RESPONSE" | jq -r '.report' 2>/dev/null)
-            if [ -n "$REPORT" ] && [ "$REPORT" != "null" ]; then
-                echo "생성된 리포트:"
-                echo "$RESPONSE" | jq '.report' 2>/dev/null
-                log_to_file "리포트:"
-                echo "$RESPONSE" | jq '.report' 2>/dev/null >> "$LOG_FILE"
-            else
-                echo "리포트 생성 중..."
-                log_to_file "리포트 생성 처리"
-            fi
-            ;;
-
-        MISSION)
-            section_header "Step 2: MISSION 처리 - 미션 계획"
-
-            PROPOSAL=$(echo "$RESPONSE" | jq '.proposal' 2>/dev/null)
-            if [ -n "$PROPOSAL" ] && [ "$PROPOSAL" != "null" ]; then
-                echo "생성된 Proposal:"
-                PROPOSAL_COUNT=$(echo "$PROPOSAL" | jq '.proposals | length' 2>/dev/null || echo "0")
-                echo "  $PROPOSAL_COUNT개의 전략 제안"
-                log_to_file "Proposal:"
-                echo "$RESPONSE" | jq '.proposal' 2>/dev/null >> "$LOG_FILE"
-
-                APPROVAL_STATUS=$(echo "$RESPONSE" | jq -r '.status' 2>/dev/null)
-                if [ "$APPROVAL_STATUS" = "PENDING_APPROVAL" ]; then
-                    section_header "Step 3: 사용자 승인 대기"
-                    echo "미션 계획이 생성되었습니다."
-                    echo "실제 시스템에서는 사용자 승인 후 실행됩니다."
-                    log_to_file "미션 생성 완료, 사용자 승인 대기"
-                fi
-            else
-                echo "미션 계획 생성 중..."
-                log_to_file "미션 계획 생성 처리"
-            fi
-            ;;
-
-        SYSTEM_CONTROL)
-            section_header "Step 2: SYSTEM_CONTROL 처리"
-            echo "시스템 제어 명령 처리 중..."
-            echo "$RESPONSE" | jq '.' 2>/dev/null | head -30
-            log_to_file "SYSTEM_CONTROL 처리:"
-            echo "$RESPONSE" | jq '.' 2>/dev/null >> "$LOG_FILE"
-            ;;
-
-        *)
-            echo ""
-            echo "Intent: $INTENT"
-            log_to_file "Intent: $INTENT"
-            ;;
-    esac
+MESSAGE=$(echo "$RESPONSE" | jq -r '.message // empty' 2>/dev/null)
+if [ -n "$MESSAGE" ]; then
+    echo "$MESSAGE"
+    log_to_file "AI 응답:"
+    log_to_file "$MESSAGE"
+else
+    echo "(응답 메시지 없음)"
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

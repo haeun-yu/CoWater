@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from agent.decision import DecisionEngine
+from agent.decision import DecisionEngine, TOOL_DEFINITIONS
+
+REACT_MAX_STEPS = 6
 from agent.event_system import (
     EventPublisher,
     create_step_evaluation_event,
@@ -883,121 +885,127 @@ class AgentRuntime:
             return await self._execute_insight_reporter(parameters)
         return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
 
-    def _classify_intent_rule_based(self, user_input: str) -> str:
-        """규칙 기반 intent 분류 (LLM 실패시 fallback)"""
-        lower_input = user_input.lower()
+    def _summarize_tool_result(self, tool_name: str, raw: Any) -> Any:
+        """LLM 히스토리에 넣을 도구 결과를 핵심 필드만 추려 간결하게 정리"""
+        if tool_name == "get_devices" and isinstance(raw, list):
+            return [
+                {
+                    "id": d.get("id"),
+                    "name": d.get("name"),
+                    "type": d.get("device_type"),
+                    "status": d.get("connectivity_status"),
+                    "battery": d.get("last_battery_percent"),
+                    "lat": d.get("latitude"),
+                    "lon": d.get("longitude"),
+                    "layer": d.get("layer"),
+                    "actions": (d.get("actions") or [])[:5],
+                    "submerged": d.get("is_submerged"),
+                }
+                for d in raw
+                if d.get("layer") != "system"  # 내부 시스템 에이전트 제외
+            ]
+        if tool_name == "get_missions" and isinstance(raw, list):
+            return [
+                {
+                    "id": m.get("mission_id"),
+                    "title": m.get("title"),
+                    "status": m.get("status"),
+                    "type": m.get("type"),
+                    "priority": m.get("priority"),
+                }
+                for m in raw
+            ]
+        if tool_name == "get_alerts" and isinstance(raw, list):
+            return [
+                {
+                    "id": a.get("id") or a.get("alert_id"),
+                    "type": a.get("alert_type") or a.get("type"),
+                    "severity": a.get("severity"),
+                    "status": a.get("status"),
+                    "created_at": a.get("created_at"),
+                }
+                for a in raw
+            ]
+        return raw
 
-        # REPORT: 리포트, 분석, 요약 키워드
-        if any(word in lower_input for word in ["리포트", "report", "분석", "요약", "analysis", "summary"]):
-            return "REPORT"
-
-        # QUERY: 상태, 조회, 정보 키워드
-        if any(word in lower_input for word in ["상태", "status", "배터리", "battery", "조회", "정보", "info", "현재"]):
-            return "QUERY"
-
-        # SYSTEM_CONTROL: 재시작, 정지, 제어 키워드
-        if any(word in lower_input for word in ["재시작", "restart", "정지", "stop", "제어", "control", "긴급", "emergency"]):
-            return "SYSTEM_CONTROL"
-
-        # 기본값: MISSION
-        return "MISSION"
+    async def _execute_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
+        if tool_name == "get_devices":
+            return self._summarize_tool_result("get_devices", self.registry_client.list_devices())
+        if tool_name == "get_missions":
+            return self._summarize_tool_result("get_missions", self.registry_client.list_missions())
+        if tool_name == "get_alerts":
+            return self._summarize_tool_result("get_alerts", self.registry_client.list_alerts())
+        if tool_name == "get_insights":
+            return self.registry_client.list_insights()
+        if tool_name == "plan_mission":
+            goal = str(tool_input.get("goal") or "")
+            return await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+        return {"error": f"알 수 없는 도구: {tool_name}"}
 
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
-        user_input = str(parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or "").strip()
-        intent = str(parameters.get("intent") or "").upper()
+        user_input = str(
+            parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or ""
+        ).strip()
 
-        # Intent 분류: LLM 기반 (필수, fallback 없음)
-        if not intent:
-            devices = self.registry_client.list_devices()
-            llm_result, llm_error = await self.decision_engine.analyze_intent(user_input, devices, self.state)
+        if not user_input:
+            return {"type": "RESPONSE", "status": "ERROR", "message": "사용자 명령이 비어 있습니다."}
 
-            # LLM 호출 실패 또는 응답 없음 → ERROR 반환 (규칙 기반 폴백 없음)
-            if llm_error:
-                error_msg = f"{llm_error.get('error_type', 'unknown')}: {llm_error.get('message', 'LLM 호출 실패')}"
-                return {
-                    "type": "RESPONSE",
-                    "status": "ERROR",
-                    "message": f"사용자 명령 분석 실패 (LLM 필수). {error_msg}"
-                }
+        tools = list(TOOL_DEFINITIONS)
+        history: list[dict[str, Any]] = []
+        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds", 30)
 
-            if not llm_result or not llm_result.get("intent_type"):
-                return {
-                    "type": "RESPONSE",
-                    "status": "ERROR",
-                    "message": "사용자 명령 분석 실패: LLM이 의도를 파악하지 못했습니다."
-                }
-
-            intent = llm_result.get("intent_type", "UNKNOWN").upper()
-
-            # 유효하지 않은 intent 거부
-            if intent not in ("QUERY", "REPORT", "MISSION", "SYSTEM_CONTROL"):
-                return {
-                    "type": "RESPONSE",
-                    "status": "ERROR",
-                    "message": f"알 수 없는 intent 타입: {intent}"
-                }
-        event = self.registry_client.ingest_event(
-            {
-                "event_type": "SYS_INTENT_CLASSIFIED",
-                "source_system": "system_agent",
-                "source_agent_id": self.state.agent_id,
-                "source_role": self.state.role,
-                "severity": "INFORMATION",
-                "message": user_input or f"{intent} request",
-                "target_type": "SYSTEM",
-                "title": "Intent classified",
-                "description": f"RequestHandler classified user request as {intent}.",
-                "data": {"intent": intent, "parameters": parameters},
-            }
-        )
-        if intent == "QUERY":
-            return {
-                "type": "RESPONSE",
-                "status": "SUCCESS",
-                "event": event,
-                "data": {"devices": self.registry_client.list_devices(), "missions": self.registry_client.list_missions()},
-            }
-
-        if intent == "REPORT":
-            devices = self.registry_client.list_devices()
-            missions = self.registry_client.list_missions()
-            insights = self.registry_client.list_insights()
-
-            report, error = await self.decision_engine.generate_fleet_report(
-                devices, missions, insights, self.state
+        for step_num in range(1, REACT_MAX_STEPS + 1):
+            step_result, error = await self.decision_engine.react_step(
+                user_input, tools, history, timeout
             )
 
-            return {
-                "type": "RESPONSE",
-                "status": "SUCCESS",
-                "event": event,
-                "report": report if report else {"report": "리포트 생성 실패"},
-                "report_source": "llm" if report and not error else "error",
-            }
+            if error:
+                error_msg = f"{error.get('error_type', 'unknown')}: {error.get('message', 'LLM 호출 실패')}"
+                return {"type": "RESPONSE", "status": "ERROR", "message": f"처리 실패 (단계 {step_num}): {error_msg}"}
 
-        # MISSION, SYSTEM_CONTROL 등: Proposal 생성
-        # (intent 분류는 이미 LLM으로 완료됨)
-        try:
-            return {
-                "type": "PROPOSAL",
-                "status": "PENDING_APPROVAL",
-                "event": event,
-                **(await self.generate_mission_proposal(
-                    {
-                        "goal": user_input or str(parameters.get("goal") or intent),
-                        "event_id": event.get("event_id"),
-                        "source": "user_intent",
-                        "location": parameters.get("location") or {},
-                    },
-                    allow_suppression=False,
-                ))
-            }
-        except RuntimeError as e:
-            return {
-                "type": "RESPONSE",
-                "status": "ERROR",
-                "message": f"미션 계획 생성 실패: {str(e)}"
-            }
+            if not step_result or not step_result.get("action"):
+                return {"type": "RESPONSE", "status": "ERROR", "message": f"LLM이 다음 행동을 결정하지 못했습니다. (단계 {step_num})"}
+
+            action = str(step_result["action"])
+            action_input = step_result.get("action_input") or {}
+            thought = step_result.get("thought", "")
+            logger.info(f"[ReAct {step_num}/{REACT_MAX_STEPS}] {action} | {thought[:80]}")
+
+            if action == "final_answer":
+                response_text = (
+                    action_input.get("response", "")
+                    if isinstance(action_input, dict)
+                    else str(action_input)
+                )
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_REQUEST_PROCESSED",
+                    "source_system": "system_agent",
+                    "source_agent_id": self.state.agent_id,
+                    "source_role": self.state.role,
+                    "severity": "INFORMATION",
+                    "message": user_input,
+                    "target_type": "SYSTEM",
+                    "title": "Request processed",
+                    "description": f"RequestHandler completed in {step_num} step(s).",
+                    "data": {"steps": step_num, "tools_used": [h["action"] for h in history]},
+                })
+                return {
+                    "type": "RESPONSE",
+                    "status": "SUCCESS",
+                    "message": response_text,
+                    "steps": step_num,
+                }
+
+            tool_result = await self._execute_tool(
+                action, action_input if isinstance(action_input, dict) else {}
+            )
+            history.append({"action": action, "input": action_input, "result": tool_result})
+
+        return {
+            "type": "RESPONSE",
+            "status": "ERROR",
+            "message": f"최대 처리 단계({REACT_MAX_STEPS})를 초과했습니다.",
+        }
 
     def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
         policy_id = str(parameters.get("policy_id") or parameters.get("id") or "").strip()

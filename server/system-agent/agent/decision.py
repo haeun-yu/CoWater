@@ -28,6 +28,40 @@ logger = logging.getLogger(__name__)
 # 생명 안전 — LLM 없이 즉각 에스컬레이션
 CRITICAL_URGENT = {"distress", "collision_risk"}
 
+# RequestHandler가 LLM에게 노출하는 도구 목록
+TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "name": "get_devices",
+        "description": "연결된 장치 목록 조회 (이름, 타입, 온라인 여부, 배터리, 위치, 가능한 액션)",
+        "parameters": {},
+    },
+    {
+        "name": "get_missions",
+        "description": "등록된 미션 목록 조회 (제목, 상태, 우선순위, 생성 시각)",
+        "parameters": {},
+    },
+    {
+        "name": "get_alerts",
+        "description": "발생한 경보 목록 조회 (심각도, 유형, 상태, 발생 시각)",
+        "parameters": {},
+    },
+    {
+        "name": "get_insights",
+        "description": "시스템 인사이트 및 성능 분석 데이터 조회",
+        "parameters": {},
+    },
+    {
+        "name": "plan_mission",
+        "description": "새 미션 계획 생성. 사용자가 작전/임무 수행을 요청할 때 사용",
+        "parameters": {"goal": "미션 목표 설명"},
+    },
+    {
+        "name": "final_answer",
+        "description": "수집한 정보를 바탕으로 사용자에게 최종 답변 전달. 필요한 정보를 모두 준비한 뒤에만 호출",
+        "parameters": {"response": "사용자에게 전달할 최종 답변 텍스트"},
+    },
+]
+
 
 class DecisionEngine:
     def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
@@ -552,30 +586,31 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         state: AgentState,
     ) -> str:
         return f"""당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다.
-운용자의 자연어 목표를 분석하여, 적절한 미션 타입과 위치 정보를 추출합니다.
+운용자의 자연어 요청을 분석하여 intent 타입을 분류합니다.
 
-## 운용자 목표
+## 운용자 요청
 "{goal}"
 
-## 가능한 미션 타입
-- mine_clearance: 기뢰 탐지 및 제거 (기뢰, 탐지, 제거, 소나 등)
-- survey: 지형/해역 조사 (조사, 탐사, 스캔, 측량 등)
-- inspection: 수중 구조물 점검 (검사, 점검, 확인 등)
-- monitoring: 실시간 모니터링 (모니터링, 감시, 관찰 등)
-- generic_mission: 기타 미션
+## Intent 타입 정의
+- QUERY: 현재 상태 조회 (장치 상태, 배터리, 위치, 미션 목록 등)
+- REPORT: 분석 리포트 요청 (요약, 분석, 인사이트, 보고서 등)
+- MISSION: 작전/미션 실행 요청 (탐지, 조사, 점검, 모니터링, 출동 등)
+- SYSTEM_CONTROL: 시스템 제어 (재시작, 정지, 긴급 명령 등)
 
 ## 현재 Fleet 상태
 {self._fleet_summary(devices)}
 
 ## 응답 지침
-- mission_type: 위 목록에서 가장 적합한 타입
-- location: 목표에서 언급된 위치 (지역명, 좌표 등) 또는 null
-- priority: CRITICAL, HIGH, NORMAL 중 하나 (기뢰=HIGH, 긴급=CRITICAL)
-- reason: 분류 근거 (목표에서 어떤 키워드/맥락으로 판단했는가)
+- intent_type: 위 4가지 중 하나
+- mission_type: MISSION일 때만 — mine_clearance | survey | inspection | monitoring | generic_mission (그 외 null)
+- location: 언급된 위치 또는 null
+- priority: CRITICAL | HIGH | NORMAL
+- reasoning: 분류 근거
 
 JSON 형식으로만 응답하세요. 설명 없이 JSON만:
 {{
-  "mission_type": "mine_clearance" | "survey" | "inspection" | "monitoring" | "generic_mission",
+  "intent_type": "QUERY" | "REPORT" | "MISSION" | "SYSTEM_CONTROL",
+  "mission_type": "<미션타입 또는 null>",
   "location": {{"area": "<지역명>" or null}},
   "priority": "CRITICAL" | "HIGH" | "NORMAL",
   "reasoning": "<분류 근거>"
@@ -695,6 +730,65 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             return json.loads(match.group())
         except json.JSONDecodeError:
             return None
+
+    # ──────────────────────────────────────────────
+    # ReAct 에이전트 루프 (N-step tool calling)
+    # ──────────────────────────────────────────────
+
+    def _react_prompt(self, user_input: str, tools: list, history: list) -> str:
+        tool_lines = []
+        for t in tools:
+            params = ""
+            if t.get("parameters"):
+                params = " | 파라미터: " + ", ".join(
+                    f"{k}: {v}" for k, v in t["parameters"].items()
+                )
+            tool_lines.append(f"  - {t['name']}: {t['description']}{params}")
+
+        history_text = ""
+        if history:
+            history_text = "\n\n## 이전 단계 결과"
+            for i, step in enumerate(history, 1):
+                inp = step.get("input")
+                inp_str = f" | 입력: {json.dumps(inp, ensure_ascii=False)}" if inp else ""
+                result_str = json.dumps(step["result"], ensure_ascii=False, default=str)
+                history_text += f"\n\n[{i}단계] 도구: {step['action']}{inp_str}\n결과: {result_str}"
+
+        return (
+            "당신은 CoWater 해양 통합 운용 플랫폼의 AI 어시스턴트입니다.\n"
+            "사용자 명령을 처리하기 위해 필요한 도구를 순서대로 호출하세요.\n\n"
+            f"## 사용자 명령\n\"{user_input}\"\n\n"
+            "## 사용 가능한 도구\n" + "\n".join(tool_lines)
+            + history_text
+            + "\n\n## 지침\n"
+            "- 명령 처리에 필요한 도구만 선택적으로 호출하세요. 불필요한 도구는 호출하지 마세요.\n"
+            "- 충분한 정보가 모이면 즉시 final_answer를 호출해 사용자에게 답변하세요.\n"
+            "- 반드시 JSON 형식으로만 응답하세요 (설명 없이 JSON만):\n\n"
+            '{"thought": "<이 단계에서 무엇을 왜 할지>", "action": "<도구명>", "action_input": {...}}'
+        )
+
+    async def react_step(
+        self,
+        user_input: str,
+        tools: list,
+        history: list,
+        timeout: Optional[int] = None,
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """ReAct 루프 단일 스텝: LLM이 다음 행동(도구 호출 또는 최종 답변)을 결정"""
+        if not self.llm_enabled or not self.llm_client:
+            return None, {"error_type": "llm_disabled", "message": "LLM disabled in config"}
+        try:
+            prompt = self._react_prompt(user_input, tools, history)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+            if error_ctx is not None:
+                return None, self._normalize_llm_error(error_ctx)
+            result = self._parse(response) if response else None
+            if not result:
+                logger.warning(f"ReAct step 파싱 실패: {(response or '')[:120]}")
+            return result, None
+        except Exception as e:
+            logger.error(f"ReAct step 오류: {type(e).__name__}: {e}")
+            return None, {"error_type": "unknown_error", "message": str(e)}
 
     # ──────────────────────────────────────────────
     # Phase 3: SystemSentinel - 복합 패턴 분석
