@@ -210,6 +210,12 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
   - 예상: 2주
 
 #### 3-2. 성능 최적화
+- [ ] **LLM 호출 최적화**
+  - LLM 응답 캐싱 (같은 fleet 상태 재사용)
+  - generate_multiple_mission_proposals() 중복 호출 감소
+  - 프롬프트 템플릿 최적화
+  - 예상: 1주
+
 - [ ] **Registry Query 최적화**
   - 인덱싱 전략
   - 캐싱 (Redis)
@@ -217,6 +223,27 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 - [ ] **Mission/Task 계획 최적화**
   - Device 선택 알고리즘 고도화
+  - 예상: 1주
+
+#### 3-3. 모니터링 & 관찰성
+- [ ] **LLM 성능 메트릭**
+  - LLM 호출 성공률 / 실패율
+  - 평균 응답 시간 (p50, p95, p99)
+  - Circuit Breaker 상태 추적
+  - 에러 유형별 분류 (timeout, invalid JSON, API error)
+  - 예상: 1주
+
+- [ ] **System Agent 메트릭**
+  - Mission 생성 지연시간
+  - Proposal 생성 지연시간
+  - Policy 평가 시간
+  - 이벤트 처리 처리량
+  - 예상: 1주
+
+- [ ] **대시보드 & 알림**
+  - Prometheus 메트릭 내보내기
+  - Grafana 대시보드 (LLM 성공률, 지연시간)
+  - 알림 규칙 (LLM 성공률 < 80%, p95 > 5초)
   - 예상: 1주
 
 ---
