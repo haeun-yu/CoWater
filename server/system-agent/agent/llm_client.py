@@ -8,6 +8,7 @@ Enhanced with error classification, retry logic, and comprehensive logging.
 
 import asyncio
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -23,6 +24,10 @@ except ImportError:
     httpx = None
 
 logger = logging.getLogger(__name__)
+
+# LLM_DEBUG=1 환경변수 설정 시 프롬프트/응답 전문 로깅
+_LLM_DEBUG = os.environ.get("LLM_DEBUG", "").strip() in ("1", "true", "yes")
+print(f"[llm_client] LLM_DEBUG={'ON' if _LLM_DEBUG else 'OFF'} (env={os.environ.get('LLM_DEBUG', '')})", flush=True)
 
 
 # ──────────────────────────────────────────────
@@ -173,6 +178,8 @@ class OllamaClient(LLMClient):
         for attempt in range(1, self.max_retries + 1):
             start_time = time.monotonic()
             try:
+                if _LLM_DEBUG:
+                    print(f"\n{'='*60}\n[LLM PROMPT → {self.model}]\n{'='*60}\n{prompt}\n{'='*60}", flush=True)
                 response = await self.client.post(
                     f"{self.endpoint}/api/generate",
                     json={
@@ -184,7 +191,7 @@ class OllamaClient(LLMClient):
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # Response validation
                 if "response" not in data:
                     error_ctx = LLMErrorContext(
@@ -200,13 +207,16 @@ class OllamaClient(LLMClient):
                         await asyncio.sleep(0.5 * (2 ** (attempt - 1)))  # Exponential backoff
                         continue
                     return None, error_ctx
-                
+
                 # Success!
                 self._failure_count = 0
                 self._circuit_open_until = 0.0
                 elapsed_ms = int((time.monotonic() - start_time) * 1000)
+                raw_response = data.get("response", "")
+                if _LLM_DEBUG:
+                    print(f"\n{'='*60}\n[LLM RESPONSE ← {self.model}] ({elapsed_ms}ms)\n{'='*60}\n{raw_response}\n{'='*60}", flush=True)
                 logger.info(f"OllamaClient generated response in {elapsed_ms}ms (attempt {attempt}/{self.max_retries})")
-                return data.get("response", ""), None
+                return raw_response, None
 
             except Exception as e:
                 elapsed_ms = int((time.monotonic() - start_time) * 1000)

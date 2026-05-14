@@ -67,7 +67,7 @@ start_service() {
 
     local log_file="$SVC_LOG_DIR/$session_name.log"
 
-    nohup bash -c "cd '$cwd' && source '$VENV_PATH/bin/activate' && $cmd" \
+    nohup env LLM_DEBUG="${LLM_DEBUG:-}" bash -c "cd '$cwd' && source '$VENV_PATH/bin/activate' && $cmd" \
         > "$log_file" 2>&1 &
     local pid=$!
     echo $pid > "$PID_DIR/$session_name.pid"

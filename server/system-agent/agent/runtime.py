@@ -905,6 +905,8 @@ class AgentRuntime:
                 if d.get("layer") != "system"  # 내부 시스템 에이전트 제외
             ]
         if tool_name == "get_missions" and isinstance(raw, list):
+            if not raw:
+                return {"message": "현재 진행 중인 미션 없음", "count": 0}
             return [
                 {
                     "id": m.get("mission_id"),
@@ -916,16 +918,38 @@ class AgentRuntime:
                 for m in raw
             ]
         if tool_name == "get_alerts" and isinstance(raw, list):
+            if not raw:
+                return {"message": "현재 활성 경보 없음", "count": 0}
             return [
                 {
-                    "id": a.get("id") or a.get("alert_id"),
-                    "type": a.get("alert_type") or a.get("type"),
-                    "severity": a.get("severity"),
-                    "status": a.get("status"),
-                    "created_at": a.get("created_at"),
+                    "경보유형": a.get("alert_type") or a.get("type"),
+                    "심각도": a.get("severity"),
+                    "상태": a.get("status"),
                 }
-                for a in raw
+                for a in raw[:10]  # 최대 10개로 제한
             ]
+        if tool_name == "get_insights" and isinstance(raw, list):
+            if not raw:
+                return {"message": "현재 인사이트 없음", "count": 0}
+            return [
+                {
+                    "id": ins.get("insight_id") or ins.get("id"),
+                    "summary": ins.get("summary"),
+                    "severity": ins.get("severity"),
+                    "recommended_action": ins.get("recommended_action"),
+                    "confidence_level": ins.get("confidence_level"),
+                }
+                for ins in raw
+            ]
+        if tool_name == "plan_mission" and isinstance(raw, dict):
+            proposal = raw.get("proposal") or {}
+            return {
+                "proposal_id": proposal.get("proposal_id"),
+                "title": proposal.get("title"),
+                "mission_type": proposal.get("mission_type"),
+                "steps_count": len(proposal.get("steps") or []),
+                "approval_id": proposal.get("approval_id"),
+            }
         return raw
 
     async def _execute_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
@@ -936,10 +960,11 @@ class AgentRuntime:
         if tool_name == "get_alerts":
             return self._summarize_tool_result("get_alerts", self.registry_client.list_alerts())
         if tool_name == "get_insights":
-            return self.registry_client.list_insights()
+            return self._summarize_tool_result("get_insights", self.registry_client.list_insights())
         if tool_name == "plan_mission":
             goal = str(tool_input.get("goal") or "")
-            return await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+            raw = await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+            return self._summarize_tool_result("plan_mission", raw)
         return {"error": f"알 수 없는 도구: {tool_name}"}
 
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -952,7 +977,7 @@ class AgentRuntime:
 
         tools = list(TOOL_DEFINITIONS)
         history: list[dict[str, Any]] = []
-        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds", 30)
+        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds")
 
         for step_num in range(1, REACT_MAX_STEPS + 1):
             step_result, error = await self.decision_engine.react_step(
@@ -964,12 +989,41 @@ class AgentRuntime:
                 return {"type": "RESPONSE", "status": "ERROR", "message": f"처리 실패 (단계 {step_num}): {error_msg}"}
 
             if not step_result or not step_result.get("action"):
-                return {"type": "RESPONSE", "status": "ERROR", "message": f"LLM이 다음 행동을 결정하지 못했습니다. (단계 {step_num})"}
+                # LLM이 {"tool_calls": []} 등 종료 신호를 보낸 경우 → 강제 final_answer 시도
+                logger.warning(f"[ReAct {step_num}] action 없는 응답, 강제 final_answer 시도")
+                break
 
             action = str(step_result["action"])
             action_input = step_result.get("action_input") or {}
             thought = step_result.get("thought", "")
             logger.info(f"[ReAct {step_num}/{REACT_MAX_STEPS}] {action} | {thought[:80]}")
+
+            if action == "generate_report":
+                devices = self.registry_client.list_devices()
+                missions = self.registry_client.list_missions()
+                insights = self.registry_client.list_insights()
+                report, _ = await self.decision_engine.generate_fleet_report(
+                    devices, missions, insights, self.state
+                )
+                report_text = (report or {}).get("report") or "리포트 생성에 실패했습니다."
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_REQUEST_PROCESSED",
+                    "source_system": "system_agent",
+                    "source_agent_id": self.state.agent_id,
+                    "source_role": self.state.role,
+                    "severity": "INFORMATION",
+                    "message": user_input,
+                    "target_type": "SYSTEM",
+                    "title": "Report generated",
+                    "description": f"RequestHandler generated fleet report in {step_num} step(s).",
+                    "data": {"steps": step_num, "tools_used": [h["action"] for h in history] + ["generate_report"]},
+                })
+                return {
+                    "type": "RESPONSE",
+                    "status": "SUCCESS",
+                    "message": report_text,
+                    "steps": step_num,
+                }
 
             if action == "final_answer":
                 response_text = (
@@ -1001,6 +1055,35 @@ class AgentRuntime:
             )
             history.append({"action": action, "input": action_input, "result": tool_result})
 
+        # 최대 단계 소진 또는 action 없는 응답 → 수집된 정보로 강제 final_answer 요청
+        logger.warning(f"[ReAct] 강제 final_answer 시도 (수집 단계: {len(history)})")
+        forced, force_error = await self.decision_engine.react_step(
+            user_input, tools, history, timeout, force_final=True
+        )
+        if not force_error and forced:
+            # {"action": "final_answer", "action_input": {"response": ...}} 형식
+            if forced.get("action") == "final_answer":
+                forced_input = forced.get("action_input") or {}
+                response_text = (
+                    forced_input.get("response", "")
+                    if isinstance(forced_input, dict)
+                    else str(forced_input)
+                )
+            # 모델이 {"answer": ...} 또는 {"response": ...} 형식으로 반환하는 경우
+            elif forced.get("answer"):
+                response_text = str(forced["answer"])
+            elif forced.get("response"):
+                response_text = str(forced["response"])
+            else:
+                response_text = None
+
+            if response_text:
+                return {
+                    "type": "RESPONSE",
+                    "status": "SUCCESS",
+                    "message": response_text,
+                    "steps": len(history) + 1,
+                }
         return {
             "type": "RESPONSE",
             "status": "ERROR",

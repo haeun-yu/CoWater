@@ -53,7 +53,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "plan_mission",
         "description": "새 미션 계획 생성. 사용자가 작전/임무 수행을 요청할 때 사용",
-        "parameters": {"goal": "미션 목표 설명"},
+        "parameters": {"goal": {"type": "string", "description": "미션 목표 설명"}},
+    },
+    {
+        "name": "generate_report",
+        "description": "현재 시스템 전체 상태 종합 리포트 생성. 장치·미션·경보·인사이트를 분석한 한국어 리포트를 자동 작성. 리포트/분석/요약 요청 시 사용",
+        "parameters": {},
     },
     {
         "name": "final_answer",
@@ -723,48 +728,152 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
     def _parse(self, response: str) -> Optional[dict[str, Any]]:
         if not response:
             return None
-        match = re.search(r'\{.*\}', response.strip(), re.DOTALL)
-        if not match:
+        # 마크다운 코드 펜스(```json ... ```) 제거
+        text = re.sub(r'```[a-zA-Z]*\n?', '', response).strip()
+
+        # 첫 번째 '{' 위치에서 시작해 중첩 괄호를 추적해 올바른 JSON 블록 추출
+        start = text.find('{')
+        if start == -1:
             return None
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i, ch in enumerate(text[start:], start):
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_string:
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        # JSON 문자열 내 리터럴 줄바꿈을 \n으로 교체 후 재시도
+                        sanitized = self._sanitize_json_string(candidate)
+                        try:
+                            return json.loads(sanitized)
+                        except json.JSONDecodeError:
+                            return None
+        return None
+
+    @staticmethod
+    def _sanitize_json_string(text: str) -> str:
+        """JSON 문자열 값 내부의 리터럴 줄바꿈/탭을 이스케이프 시퀀스로 교체"""
+        result = []
+        in_string = False
+        escape = False
+        for ch in text:
+            if escape:
+                result.append(ch)
+                escape = False
+                continue
+            if ch == '\\' and in_string:
+                result.append(ch)
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+                continue
+            if in_string and ch == '\n':
+                result.append('\\n')
+                continue
+            if in_string and ch == '\r':
+                result.append('\\r')
+                continue
+            if in_string and ch == '\t':
+                result.append('\\t')
+                continue
+            result.append(ch)
+        return ''.join(result)
 
     # ──────────────────────────────────────────────
     # ReAct 에이전트 루프 (N-step tool calling)
     # ──────────────────────────────────────────────
 
-    def _react_prompt(self, user_input: str, tools: list, history: list) -> str:
+    def _react_prompt(self, user_input: str, tools: list, history: list, *, force_final: bool = False) -> str:
+        # 도구 목록: 이름(파라미터) - 한줄 설명
         tool_lines = []
         for t in tools:
-            params = ""
-            if t.get("parameters"):
-                params = " | 파라미터: " + ", ".join(
-                    f"{k}: {v}" for k, v in t["parameters"].items()
-                )
-            tool_lines.append(f"  - {t['name']}: {t['description']}{params}")
+            name = t["name"]
+            desc = t["description"].split(".")[0]  # 첫 문장만
+            params = t.get("parameters") or {}
+            if params:
+                sig = ", ".join(f'{k}="..."' for k in params)
+                tool_lines.append(f'{name}({sig}): {desc}')
+            else:
+                tool_lines.append(f'{name}: {desc}')
+        tools_text = "\n".join(tool_lines)
 
+        # 히스토리: 도구별 자연어 요약
         history_text = ""
         if history:
-            history_text = "\n\n## 이전 단계 결과"
-            for i, step in enumerate(history, 1):
-                inp = step.get("input")
-                inp_str = f" | 입력: {json.dumps(inp, ensure_ascii=False)}" if inp else ""
-                result_str = json.dumps(step["result"], ensure_ascii=False, default=str)
-                history_text += f"\n\n[{i}단계] 도구: {step['action']}{inp_str}\n결과: {result_str}"
+            lines = []
+            for step in history:
+                result = step["result"]
+                action = step["action"]
+                if action == "get_devices" and isinstance(result, list):
+                    summary = f'장치 {len(result)}개: ' + ", ".join(
+                        f'{d.get("name","??")}({d.get("status","??")})'
+                        for d in result[:5]
+                    )
+                elif action == "get_alerts" and isinstance(result, list):
+                    # 유형+심각도 기준으로 중복 제거해 카운트
+                    from collections import Counter
+                    counts = Counter(
+                        f'{a.get("경보유형","??")}({a.get("심각도","??")})'
+                        for a in result
+                    )
+                    summary = f'경보 {len(result)}건: ' + ", ".join(
+                        f'{k} {v}건' for k, v in counts.most_common(5)
+                    )
+                elif action == "get_alerts" and isinstance(result, dict):
+                    summary = result.get("message", str(result))
+                elif action == "get_missions" and isinstance(result, list):
+                    summary = f'미션 {len(result)}건: ' + ", ".join(
+                        f'{m.get("title","??")}/{m.get("status","??")}'
+                        for m in result[:5]
+                    )
+                elif action == "get_missions" and isinstance(result, dict):
+                    summary = result.get("message", str(result))
+                elif action == "get_insights" and isinstance(result, list):
+                    summary = f'인사이트 {len(result)}건'
+                elif isinstance(result, dict) and "message" in result:
+                    summary = result["message"]
+                else:
+                    summary = json.dumps(result, ensure_ascii=False, default=str)[:200]
+                lines.append(f'[{action}] {summary}')
+            history_text = "\n수집 결과:\n" + "\n".join(lines)
+
+        if force_final:
+            return (
+                f'CoWater 해양 운용 플랫폼 AI.\n'
+                f'[수집 데이터 설명] get_devices=장치상태, get_alerts=경보목록, get_missions=미션목록, get_insights=인사이트\n'
+                f'운용자 질문: "{user_input}"\n'
+                f'{history_text}\n'
+                f'위 데이터를 CoWater 해양 운용 맥락으로 해석해 한국어로 답변. JSON만 출력:\n'
+                f'{{"thought":"요약근거","action":"final_answer","action_input":{{"response":"한국어답변"}}}}'
+            )
 
         return (
-            "당신은 CoWater 해양 통합 운용 플랫폼의 AI 어시스턴트입니다.\n"
-            "사용자 명령을 처리하기 위해 필요한 도구를 순서대로 호출하세요.\n\n"
-            f"## 사용자 명령\n\"{user_input}\"\n\n"
-            "## 사용 가능한 도구\n" + "\n".join(tool_lines)
-            + history_text
-            + "\n\n## 지침\n"
-            "- 명령 처리에 필요한 도구만 선택적으로 호출하세요. 불필요한 도구는 호출하지 마세요.\n"
-            "- 충분한 정보가 모이면 즉시 final_answer를 호출해 사용자에게 답변하세요.\n"
-            "- 반드시 JSON 형식으로만 응답하세요 (설명 없이 JSON만):\n\n"
-            '{"thought": "<이 단계에서 무엇을 왜 할지>", "action": "<도구명>", "action_input": {...}}'
+            f'CoWater 해양 운용 플랫폼 AI. JSON만 출력.\n'
+            f'명령: "{user_input}"\n\n'
+            f'도구:\n{tools_text}\n'
+            f'{history_text}\n\n'
+            f'규칙: 필요한 도구 호출 후 반드시 final_answer로 답변. 결과 없어도 final_answer 호출.\n'
+            f'예시: {{"thought":"장치 상태 확인 필요","action":"get_devices","action_input":{{}}}}\n'
+            f'출력: {{"thought":"...","action":"도구명","action_input":{{}}}}'
         )
 
     async def react_step(
@@ -773,18 +882,20 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         tools: list,
         history: list,
         timeout: Optional[int] = None,
+        *,
+        force_final: bool = False,
     ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
         """ReAct 루프 단일 스텝: LLM이 다음 행동(도구 호출 또는 최종 답변)을 결정"""
         if not self.llm_enabled or not self.llm_client:
             return None, {"error_type": "llm_disabled", "message": "LLM disabled in config"}
         try:
-            prompt = self._react_prompt(user_input, tools, history)
+            prompt = self._react_prompt(user_input, tools, history, force_final=force_final)
             response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
             if error_ctx is not None:
                 return None, self._normalize_llm_error(error_ctx)
             result = self._parse(response) if response else None
             if not result:
-                logger.warning(f"ReAct step 파싱 실패: {(response or '')[:120]}")
+                logger.warning(f"ReAct step 파싱 실패 (raw 300자): {(response or '')[:300]}")
             return result, None
         except Exception as e:
             logger.error(f"ReAct step 오류: {type(e).__name__}: {e}")
