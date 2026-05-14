@@ -955,7 +955,14 @@ class AgentRuntime:
             policy = self.registry_client.create_policy(parameters)
         return {"type": "RESPONSE", "status": "SUCCESS", "policy": policy}
 
-    async def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
+    async def generate_mission_proposal(
+        self,
+        payload: dict[str, Any],
+        *,
+        allow_suppression: bool = True,
+        _preset_mission_type: str | None = None,
+        _preset_location: dict | None = None,
+    ) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
         alert = None
@@ -966,14 +973,19 @@ class AgentRuntime:
             except Exception:
                 alert = None
 
-        # LLM으로 intent 분석 시도, 실패 시 규칙 기반 fallback
-        llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
-        if llm_intent and llm_intent.get("mission_type"):
-            mission_type = llm_intent.get("mission_type")
-            location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+        # 미리 분석된 mission_type이 있으면 사용, 없으면 LLM 분석
+        if _preset_mission_type:
+            mission_type = _preset_mission_type
+            location = _preset_location or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         else:
-            mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
-            location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+            # LLM으로 intent 분석 시도, 실패 시 규칙 기반 fallback
+            llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
+            if llm_intent and llm_intent.get("mission_type"):
+                mission_type = llm_intent.get("mission_type")
+                location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+            else:
+                mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
+                location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         suppression_fingerprint = f"{mission_type}:{goal}:{(alert or {}).get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
@@ -1050,6 +1062,8 @@ class AgentRuntime:
         사용자 대화 전용: 3개의 mission proposal을 생성하여 반환
         각 proposal은 서로 다른 전략(표준/신속/정밀)을 기반으로 함
 
+        최적화: analyze_intent는 한 번만 호출하고 결과를 재사용
+
         Returns: {
             "proposals": [proposal1, proposal2, proposal3],
             "approvals": [approval1, approval2, approval3],
@@ -1060,7 +1074,7 @@ class AgentRuntime:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
 
-        # Step 1: LLM으로 mission_type 분류 (Phase 1 기능 재사용)
+        # Step 1: LLM으로 mission_type 분류 (한 번만!)
         llm_intent, _ = await self.decision_engine.analyze_intent(goal, devices, self.state)
         if llm_intent and llm_intent.get("mission_type"):
             mission_type = llm_intent["mission_type"]
@@ -1074,7 +1088,7 @@ class AgentRuntime:
             goal, mission_type, location, devices, self.state
         )
 
-        # Step 3: 각 전략으로 proposal/approval/insight 생성
+        # Step 3: 각 전략으로 proposal/approval/insight 생성 (이미 분석된 mission_type 재사용)
         results = []
         for strategy in strategies:
             bundle = await self.generate_mission_proposal(
@@ -1085,6 +1099,8 @@ class AgentRuntime:
                     "_approach": strategy.get("approach"),  # 메타데이터용
                 },
                 allow_suppression=False,
+                _preset_mission_type=mission_type,  # 분석 결과 재사용
+                _preset_location=location,
             )
             if not bundle.get("suppressed"):
                 results.append(bundle)
