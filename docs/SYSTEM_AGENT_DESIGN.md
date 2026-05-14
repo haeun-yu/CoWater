@@ -25,13 +25,18 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 ## 2. 각 에이전트의 책임
 
 ### RequestHandler (포트 9116)
-- 사용자 자연어 명령을 intent (QUERY/MISSION/POLICY/EMERGENCY/DIRECT)로 분류
+- 사용자 자연어 명령을 intent로 분류:
+  - **QUERY**: 상태 조회 (키워드: "상태", "배터리", "status", "battery")
+  - **REPORT**: 한국어 리포트 생성 (키워드: "리포트", "분석", "요약", "report", "analysis")
+  - **MISSION**: 임무 생성 (기본)
 - 적절한 System Agent로 라우팅 또는 직접 처리
 - **LLM**: 명령 해석 및 의도 분류
 
 ### DeviceBridge (포트 9110)
 - Device Agent와의 A2A 통신 (task.assign, task.result)
-- Device healthcheck 수신 및 정규화
+- DEVICE_HEALTHCHECK 수신 및 처리
+  - Battery percent, location 정보 추출
+  - Registry의 device 정보 업데이트 (connectivity_status, battery, location)
 - Task 할당 & 결과 수집
 - Relay 메시지 처리 (Device ↔ System Agent 간 중앙 감시)
 - Task 전달 실패 → 그냥 실패 (대체 Device 선택 안 함)
@@ -55,14 +60,12 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 - 규칙 기반 이상 감지: 배터리 급감, Heartbeat timeout, 센서 이상
 - AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - AgentConnection CRUD & 상태 관리
-- **LLM**: 복합 패턴 분석
-  - 예: 배터리 급감(20% → 5%) + 신호 약화(RSSI -90dBm) + 움직임 없음 → 고장 의심
-  - 예: 여러 Device 동시 offline → 환경 문제 (e.g., 해역 GPS 음영)
 
 ### InsightReporter (포트 9114)
 - Stateless: Registry에서 실시간 데이터 조회
-- MEB 이벤트 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_*, SYS_ANOMALY_*, SYS_POLICY_*, SYS_MISSION_*
-- 이벤트 발생 시 자동으로 한국어 리포트 생성 및 발행
+- 두 가지 방식으로 리포트 생성:
+  - 1) RequestHandler의 REPORT intent → 온디맨드 리포트 생성
+  - 2) MEB 이벤트 구독 → 자동 리포트 생성 (SYS_MISSION_COMPLETED, SYS_ANOMALY_DETECTED 등)
 - **LLM**: 수치 데이터를 자연어 분석 리포트로 변환
 
 ---
