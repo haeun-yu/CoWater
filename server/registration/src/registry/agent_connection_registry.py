@@ -28,11 +28,22 @@ class AgentConnectionRecord:
     agent_a_id: str
     agent_b_id: str
     connection_type: str
-    relation_level: str = "PEER"
-    parent_agent_id: str | None = None
+    relation_level: str = "PEER"           # "PEER" | "PARENT_CHILD" — PARENT_CHILD 시 parent_agent_id 필수
+    parent_agent_id: str | None = None     # PARENT_CHILD 인 경우만 설정
     mission_id: str | None = None
     reason: str | None = None
-    profile: dict[str, Any] = field(default_factory=dict)
+    profile: dict[str, Any] = field(default_factory=lambda: {
+        "endpoint_a": None,
+        "endpoint_b": None,
+        "protocol": "A2A",
+        "transport": "HTTP",
+        "network_type": None,
+        "signal_strength": None,
+        "latency_ms": None,
+        "bandwidth_mbps": None,
+        "auth_info_ref": None,
+        "expires_at": None,
+    })
     deleted_at: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
@@ -94,6 +105,23 @@ class AgentConnectionRegistry:
             )
             conn.commit()
 
+    @staticmethod
+    def _build_profile(payload: dict[str, Any]) -> dict[str, Any]:
+        """payload 또는 기본값으로 schema 정의 profile 구성"""
+        provided = payload.get("profile") or {}
+        return {
+            "endpoint_a": provided.get("endpoint_a") or payload.get("endpoint_a"),
+            "endpoint_b": provided.get("endpoint_b") or payload.get("endpoint_b"),
+            "protocol": provided.get("protocol") or "A2A",
+            "transport": provided.get("transport") or "HTTP",
+            "network_type": provided.get("network_type"),
+            "signal_strength": provided.get("signal_strength"),
+            "latency_ms": provided.get("latency_ms"),
+            "bandwidth_mbps": provided.get("bandwidth_mbps"),
+            "auth_info_ref": provided.get("auth_info_ref"),
+            "expires_at": provided.get("expires_at"),
+        }
+
     def create_agent_connection(self, payload: dict[str, Any]) -> AgentConnectionRecord:
         """Agent Connection 생성"""
         connection_id = str(payload.get("connection_id") or payload.get("id") or f"conn-{uuid4()}")
@@ -106,7 +134,7 @@ class AgentConnectionRegistry:
             parent_agent_id=payload.get("parent_agent_id"),
             mission_id=payload.get("mission_id"),
             reason=payload.get("reason"),
-            profile=payload.get("profile") or {},
+            profile=self._build_profile(payload),
             deleted_at=payload.get("deleted_at"),
         )
         self._persist_agent_connection(agent_connection)

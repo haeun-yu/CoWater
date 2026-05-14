@@ -29,6 +29,10 @@ TRACK_TYPES = Literal[
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "OTHER"]
 LAYERS = Literal["lower", "middle", "system"]
 EVENT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFO"]
+EVENT_STATUSES = Literal["OPEN", "HANDLED", "RESOLVED"]
+
+MISSION_TYPES = Literal["OPERATION", "RESPONSE", "RECOVERY", "SURVEY", "INSPECTION", "MONITORING", "RETURN", "EMERGENCY"]
+PROPOSAL_STATUSES = Literal["PROPOSED", "APPROVED", "CANCELLED", "EXPIRED"]
 
 TASK_STATES = Literal["PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "ABORTED"]
 FAILURE_CATEGORIES = Literal["device", "communication", "sensor", "mission", "policy", "user", "unknown"]
@@ -238,6 +242,27 @@ TASK_STATUS_ALIASES: dict[str, str] = {
     "REJECTED": "ABORTED",
 }
 
+# schema.md §5 기준 canonical 이벤트 타입
+CANONICAL_EVENT_TYPES: frozenset[str] = frozenset({
+    "SYS_INTENT_CLASSIFIED",
+    "SYS_INTENT_REJECTED",
+    "SYS_TASK_DISPATCHED",
+    "SYS_TASK_COMPLETED",
+    "SYS_TASK_FAILED",
+    "SYS_ANOMALY_DETECTED",
+    "SYS_POLICY_DECISION",
+    "SYS_MISSION_UPDATED",
+    "SYS_MISSION_COMPLETED",
+    "SYS_MISSION_REPLAN_REQUESTED",
+    "SYS_INSIGHT_REPORT",
+    "SYS_REQUEST_PROCESSED",
+    "SYS_AGENT_CONNECTION_CREATED",
+    "SYS_AGENT_CONNECTION_DELETED",
+    "DEVICE_HEALTHCHECK",
+    "ENV_STATE_CHANGED",
+})
+
+# 레거시/약식 표기 → canonical 매핑
 EVENT_TYPE_ALIASES: dict[str, str] = {
     "SYS.TASK.EXECUTED": "SYS_TASK_COMPLETED",
     "SYS.MISSION.STATE_CHANGED": "SYS_MISSION_UPDATED",
@@ -249,21 +274,14 @@ EVENT_TYPE_ALIASES: dict[str, str] = {
     "MISSION_STATE_CHANGE": "SYS_MISSION_UPDATED",
     "DEVICE_STATUS_CHANGE": "SYS_ANOMALY_DETECTED",
     "POLICY_DECISION": "SYS_POLICY_DECISION",
-    "SYS_INTENT_CLASSIFIED": "SYS_INTENT_CLASSIFIED",
-    "SYS_INTENT_REJECTED": "SYS_INTENT_REJECTED",
-    "SYS_TASK_DISPATCHED": "SYS_TASK_DISPATCHED",
-    "SYS_TASK_COMPLETED": "SYS_TASK_COMPLETED",
-    "SYS_TASK_FAILED": "SYS_TASK_FAILED",
-    "SYS_ANOMALY_DETECTED": "SYS_ANOMALY_DETECTED",
-    "SYS_POLICY_DECISION": "SYS_POLICY_DECISION",
-    "SYS_MISSION_UPDATED": "SYS_MISSION_UPDATED",
-    "SYS_MISSION_COMPLETED": "SYS_MISSION_COMPLETED",
-    "SYS_MISSION_REPLAN_REQUESTED": "SYS_MISSION_REPLAN_REQUESTED",
-    "SYS_INSIGHT_REPORT": "SYS_INSIGHT_REPORT",
-    "SYS_AGENT_CONNECTION_CREATED": "SYS_AGENT_CONNECTION_CREATED",
-    "SYS_AGENT_CONNECTION_DELETED": "SYS_AGENT_CONNECTION_DELETED",
-    "DEVICE_HEALTHCHECK": "DEVICE_HEALTHCHECK",
-    "ENV_STATE_CHANGED": "ENV_STATE_CHANGED",
+    "USER_COMMAND": "SYS_INTENT_CLASSIFIED",
+    "TASK_COMPLETED": "SYS_TASK_COMPLETED",
+    "TASK_FAILED": "SYS_TASK_FAILED",
+    "MISSION_COMPLETED": "SYS_MISSION_COMPLETED",
+    "LOW_BATTERY": "SYS_ANOMALY_DETECTED",
+    "DEVICE_OFFLINE": "SYS_ANOMALY_DETECTED",
+    "HEARTBEAT_LOST": "SYS_ANOMALY_DETECTED",
+    "CRITICAL_HAZARD": "SYS_ANOMALY_DETECTED",
 }
 
 
@@ -289,25 +307,18 @@ def normalize_task_status(value: Any) -> str:
 
 
 def normalize_event_type(value: Any) -> str:
-    raw = str(value or "SYS_MISSION_UPDATED").strip()
-    if raw.startswith("sys."):
-        return EVENT_TYPE_ALIASES.get(raw.upper(), raw.replace(".", "_").upper())
-
-    normalized = raw.upper()
+    """이벤트 타입을 canonical 형식으로 정규화"""
+    normalized = str(value or "SYS_MISSION_UPDATED").strip().upper().replace(".", "_")
+    # canonical 타입이면 그대로 반환
+    if normalized in CANONICAL_EVENT_TYPES:
+        return normalized
+    # alias 매핑
     if normalized in EVENT_TYPE_ALIASES:
         return EVENT_TYPE_ALIASES[normalized]
-    if normalized.startswith("USER_COMMAND"):
-        return "SYS_INTENT_CLASSIFIED"
-    if normalized in {"TASK_COMPLETED", "SYS_TASK_COMPLETED"}:
-        return "SYS_TASK_COMPLETED"
-    if normalized in {"TASK_FAILED", "SYS_TASK_FAILED"}:
-        return "SYS_TASK_FAILED"
-    if normalized in {"MISSION_COMPLETED", "SYS_MISSION_COMPLETED"}:
-        return "SYS_MISSION_COMPLETED"
-    if normalized.startswith("MISSION_") or normalized.startswith("PROPOSAL_") or normalized.startswith("USER_"):
-        return "SYS_MISSION_UPDATED"
-    if normalized in {"LOW_BATTERY", "DEVICE_OFFLINE", "HEARTBEAT_LOST", "CRITICAL_HAZARD"}:
-        return "SYS_ANOMALY_DETECTED"
+    # SYS_ 접두어 붙여서 canonical 재확인
+    with_prefix = f"SYS_{normalized}" if not normalized.startswith("SYS_") else normalized
+    if with_prefix in CANONICAL_EVENT_TYPES:
+        return with_prefix
     return normalized
 
 
@@ -571,8 +582,8 @@ class DeviceRecord:
     parent_id: Optional[int] = None
     last_location_update: Optional[str] = None
     last_error: Optional[str] = None
-    target_type: Optional[str] = None
-    target_id: Optional[str] = None
+    target_type: Optional[str] = None   # "MISSION" | "TASK" | null — DeviceBridge가 갱신 책임
+    target_id: Optional[str] = None     # 현재 배정된 Mission/Task ID — DeviceBridge가 갱신 책임
     # ← NEW: Moth topics for telemetry & healthcheck
     healthcheck_topic: Optional[str] = None
     healthcheck_endpoint: Optional[str] = None

@@ -41,6 +41,8 @@ class MissionProposalRecord:
     created_by: dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
     approved_by_user_id: str | None = None
     approved_at: str | None = None
+    status_updated_at: str = field(default_factory=utc_now_iso)
+    status_reason: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -64,6 +66,8 @@ class MissionProposalRecord:
             "created_by": self.created_by,
             "approved_by_user_id": self.approved_by_user_id,
             "approved_at": self.approved_at,
+            "status_updated_at": self.status_updated_at,
+            "status_reason": self.status_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -130,9 +134,20 @@ class MissionProposalRegistry:
             created_by=payload.get("created_by") or {"type": "SYSTEM", "id": "system"},
             approved_by_user_id=payload.get("approved_by_user_id"),
             approved_at=payload.get("approved_at"),
+            status_reason=payload.get("status_reason"),
         )
         self._persist_mission_proposal(mission_proposal)
         return mission_proposal
+
+    def update_proposal_status(self, proposal_id: str, status: str, reason: str | None = None) -> MissionProposalRecord:
+        """Proposal 상태 업데이트 — status_updated_at 자동 갱신"""
+        proposal = self.get_mission_proposal(proposal_id)
+        proposal.status = normalize_proposal_status(status)
+        proposal.status_reason = reason
+        proposal.status_updated_at = utc_now_iso()
+        proposal.updated_at = utc_now_iso()
+        self._persist_mission_proposal(proposal)
+        return proposal
 
     def get_mission_proposal(self, proposal_id: str) -> MissionProposalRecord:
         """Mission Proposal 조회"""

@@ -306,6 +306,18 @@ def get_event(event_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="event not found") from exc
 
 
+@app.patch("/events/{event_id}/status")
+def update_event_status(event_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Event 상태 전환 (OPEN → HANDLED → RESOLVED)"""
+    new_status = str(body.get("status") or "").upper()
+    if new_status not in ("OPEN", "HANDLED", "RESOLVED"):
+        raise HTTPException(status_code=400, detail="status must be OPEN | HANDLED | RESOLVED")
+    try:
+        return event_registry.update_event_status(event_id, new_status).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="event not found") from exc
+
+
 @app.post("/a2a-logs/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_a2a_log(
     direction: str = Query(..., description="inbound or outbound"),
@@ -850,11 +862,14 @@ def delete_user(user_id: str) -> Response:
 @app.post("/agents", status_code=status.HTTP_201_CREATED)
 def create_agent(body: dict[str, Any]) -> dict[str, Any]:
     """새 Agent 생성"""
+    endpoint = body.get("endpoint") or {}
+    if not endpoint or not endpoint.get("host") or not endpoint.get("port"):
+        raise HTTPException(status_code=400, detail="endpoint.host and endpoint.port are required (ADR-004)")
     agent = agent_registry.create_agent(
         name=body.get("name", ""),
         type=body.get("type", "SYSTEM_AGENT"),
         role=body.get("role", "SYSTEM_SENTINEL"),
-        endpoint=body.get("endpoint", {}),
+        endpoint=endpoint,
         capabilities=body.get("capabilities", []),
         device_id=body.get("device_id"),
         gateway_agent_id=body.get("gateway_agent_id"),
@@ -1048,11 +1063,16 @@ def get_report(report_id: str) -> dict[str, Any]:
 
 # ======================== Rule Endpoints ========================
 
+_VALID_RULE_TYPES = {"PROBLEM_DETECTION", "AUTO_RESPONSE", "RECOMMENDATION", "APPROVAL", "AGENT_CONNECTION"}
+
 @app.post("/rules", status_code=status.HTTP_201_CREATED)
 def create_rule(body: dict[str, Any]) -> dict[str, Any]:
-    """Rule 생성"""
+    """Rule 생성 (schema.md §12 기준 rule_type 검증)"""
+    rule_type = str(body.get("rule_type") or "PROBLEM_DETECTION").upper()
+    if rule_type not in _VALID_RULE_TYPES:
+        raise HTTPException(status_code=400, detail=f"rule_type must be one of {sorted(_VALID_RULE_TYPES)}")
     rule = rule_registry.create_rule(
-        rule_type=body.get("rule_type", "PROBLEM_DETECTION"),
+        rule_type=rule_type,
         name=body.get("name", ""),
         enabled=body.get("enabled", True),
         priority=body.get("priority", 0),
