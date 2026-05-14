@@ -33,7 +33,9 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 - Device Agent와의 A2A 통신 (task.assign, task.result)
 - Device healthcheck 수신 및 정규화
 - Task 할당 & 결과 수집
-- **LLM**: Task 전달 실패 시 대체 Device 선택, relay 대상 판단
+- Relay 메시지 처리 (Device ↔ System Agent 간 중앙 감시)
+- Task 전달 실패 → 그냥 실패 (대체 Device 선택 안 함)
+- **LLM**: 없음 (규칙 기반 처리)
 
 ### MissionPlanner (포트 9111)
 - 사용자 intent로부터 여러 대안 Proposal 생성 (3단계: 규칙 기반 + LLM + 검증)
@@ -47,16 +49,20 @@ CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
 - **LLM**: 정책 매칭 및 대응 결정
 
 ### SystemSentinel (포트 9113)
-- Device 건전성 감시 (1초 interval, 10초 무응답 시 offline)
-- 규칙 기반: 배터리, Heartbeat timeout, 센서 이상 감지
+- Device heartbeat 모니터링 (각 Device마다 독립 추적)
+  - 10초 이상 heartbeat 없으면 connectivity_status를 offline으로 변경
+  - heartbeat 수신 시 온라인으로 복구
+- 규칙 기반 이상 감지: 배터리 급감, Heartbeat timeout, 센서 이상
 - AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
 - AgentConnection CRUD & 상태 관리
-- **LLM**: 복합 패턴 분석 (배터리 급감 + 신호 약화 = 고장 의심)
+- **LLM**: 복합 패턴 분석
+  - 예: 배터리 급감(20% → 5%) + 신호 약화(RSSI -90dBm) + 움직임 없음 → 고장 의심
+  - 예: 여러 Device 동시 offline → 환경 문제 (e.g., 해역 GPS 음영)
 
 ### InsightReporter (포트 9114)
 - Stateless: Registry에서 실시간 데이터 조회
-- Mission 이력, Device 상태, Event 로그 분석
-- 한국어 리포트 생성
+- MEB 이벤트 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_*, SYS_ANOMALY_*, SYS_POLICY_*, SYS_MISSION_*
+- 이벤트 발생 시 자동으로 한국어 리포트 생성 및 발행
 - **LLM**: 수치 데이터를 자연어 분석 리포트로 변환
 
 ---
