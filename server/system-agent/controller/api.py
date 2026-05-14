@@ -111,14 +111,45 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
     @app.post("/children/healthcheck")
     async def relay_child_healthcheck(payload: dict[str, Any]) -> dict[str, Any]:
         child_id = str(payload.get("agent_id") or payload.get("device_id"))
+        device_id = str(payload.get("device_id") or child_id)
         now = utc_now()
+
+        # 로컬 상태 업데이트
         child_state = runtime.state.children.get(child_id, {})
         child_state["last_healthcheck_at"] = now
         child_state["healthcheck"] = payload
         runtime.state.children[child_id] = child_state
+
+        # Registry의 device 정보 업데이트
+        try:
+            device_updates = {
+                "id": device_id,
+                "connectivity_status": payload.get("status", "offline").lower(),
+                "last_seen_at": now,
+            }
+
+            # 배터리 정보 업데이트 (있으면)
+            if "battery_percent" in payload:
+                device_updates["battery_percent"] = payload.get("battery_percent")
+
+            # 위치 정보 업데이트 (있으면)
+            if "location" in payload:
+                location = payload.get("location")
+                if isinstance(location, dict):
+                    device_updates["latitude"] = location.get("lat")
+                    device_updates["longitude"] = location.get("lon")
+
+            # Registry에 업데이트
+            runtime.registry_client.update_device(device_id, device_updates)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to update device {device_id}: {e}")
+
+        # Moth로 relay
         publisher = getattr(runtime, "moth_publisher", None)
         if publisher is not None:
             await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
+
         return {"relayed": True, "child": child_id}
 
     @app.post("/device-recovery")

@@ -873,7 +873,12 @@ class AgentRuntime:
             result = await self.handle_command_with_llm(command)
             return {"type": "COMMAND", "status": "SUCCESS", "result": result}
         if role == "system_sentinel":
-            return await self._execute_system_sentinel(parameters)
+            return {
+                "type": "STATE",
+                "status": "SUCCESS",
+                "devices": self.registry_client.list_devices(),
+                "alerts": self.registry_client.list_alerts(),
+            }
         if role == "insight_reporter":
             return await self._execute_insight_reporter(parameters)
         return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
@@ -882,7 +887,13 @@ class AgentRuntime:
         user_input = str(parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or "").strip()
         intent = str(parameters.get("intent") or "").upper()
         if not intent:
-            intent = "QUERY" if any(word in user_input.lower() for word in ["status", "battery", "상태", "배터리"]) else "MISSION"
+            lower_input = user_input.lower()
+            if any(word in lower_input for word in ["리포트", "report", "분석", "요약", "analysis", "summary"]):
+                intent = "REPORT"
+            elif any(word in lower_input for word in ["상태", "status", "배터리", "battery"]):
+                intent = "QUERY"
+            else:
+                intent = "MISSION"
         event = self.registry_client.ingest_event(
             {
                 "event_type": "SYS_INTENT_CLASSIFIED",
@@ -903,6 +914,23 @@ class AgentRuntime:
                 "status": "SUCCESS",
                 "event": event,
                 "data": {"devices": self.registry_client.list_devices(), "missions": self.registry_client.list_missions()},
+            }
+        if intent == "REPORT":
+            # InsightReporter에 리포트 생성 요청
+            devices = self.registry_client.list_devices()
+            missions = self.registry_client.list_missions()
+            insights = self.registry_client.list_insights()
+
+            report, error = await self.decision_engine.generate_fleet_report(
+                devices, missions, insights, self.state
+            )
+
+            return {
+                "type": "RESPONSE",
+                "status": "SUCCESS",
+                "event": event,
+                "report": report if report else {"report": "리포트 생성 실패"},
+                "report_source": "llm" if report and not error else "error",
             }
         return {
             "type": "PROPOSAL",
@@ -3618,28 +3646,6 @@ class AgentRuntime:
                 "task_id": task_id,
                 "reporter": reporter,
             },
-        }
-
-    # ──────────────────────────────────────────────
-    # Phase 3: SystemSentinel
-    # ──────────────────────────────────────────────
-
-    async def _execute_system_sentinel(self, parameters: dict[str, Any]) -> dict[str, Any]:
-        """Fleet 전체 복합 패턴 이상 분석"""
-        devices = self.registry_client.list_devices()
-        missions = self.registry_client.list_missions()
-        alerts = self.registry_client.list_alerts()
-
-        analysis, error = await self.decision_engine.analyze_fleet_patterns(
-            devices, missions, alerts, self.state
-        )
-
-        return {
-            "type": "ANALYSIS",
-            "status": "SUCCESS",
-            "devices": devices,
-            "analysis": analysis,
-            "analysis_source": "llm" if not error else "rule_based",
         }
 
     # ──────────────────────────────────────────────
