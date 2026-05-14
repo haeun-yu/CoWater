@@ -252,6 +252,13 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 ### Q4 2026
 
+- [ ] **Conditional Mission (조건부 미션)**
+  - 사용자 자연어 기반 조건부 명령
+  - 예: "USV로 기뢰 탐지 하는데 기뢰가 있을경우 ROV로 제거해주세요"
+  - Task 결과 기반 다음 Task 자동 실행
+  - PolicyManager Rule + Task 체이닝으로 구현
+  - 예상: 2주
+
 - [ ] **Middle-layer Agent 강화**
   - Relay 기반 미션 관리
   - 예상: 3주

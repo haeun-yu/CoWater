@@ -883,17 +883,43 @@ class AgentRuntime:
             return await self._execute_insight_reporter(parameters)
         return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
 
+    def _classify_intent_rule_based(self, user_input: str) -> str:
+        """규칙 기반 intent 분류 (LLM 실패시 fallback)"""
+        lower_input = user_input.lower()
+
+        # REPORT: 리포트, 분석, 요약 키워드
+        if any(word in lower_input for word in ["리포트", "report", "분석", "요약", "analysis", "summary"]):
+            return "REPORT"
+
+        # QUERY: 상태, 조회, 정보 키워드
+        if any(word in lower_input for word in ["상태", "status", "배터리", "battery", "조회", "정보", "info", "현재"]):
+            return "QUERY"
+
+        # SYSTEM_CONTROL: 재시작, 정지, 제어 키워드
+        if any(word in lower_input for word in ["재시작", "restart", "정지", "stop", "제어", "control", "긴급", "emergency"]):
+            return "SYSTEM_CONTROL"
+
+        # 기본값: MISSION
+        return "MISSION"
+
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
         user_input = str(parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or "").strip()
         intent = str(parameters.get("intent") or "").upper()
+
+        # Intent 분류: LLM 기반 (필수)
         if not intent:
-            lower_input = user_input.lower()
-            if any(word in lower_input for word in ["리포트", "report", "분석", "요약", "analysis", "summary"]):
-                intent = "REPORT"
-            elif any(word in lower_input for word in ["상태", "status", "배터리", "battery"]):
-                intent = "QUERY"
-            else:
-                intent = "MISSION"
+            # LLM으로 intent 분류 (실패시 에러 반환)
+            devices = self.registry_client.list_devices()
+            llm_result, llm_error = await self.decision_engine.analyze_intent(user_input, devices, self.state)
+
+            if llm_error or not llm_result or not llm_result.get("intent_type"):
+                return {
+                    "type": "RESPONSE",
+                    "status": "ERROR",
+                    "message": f"사용자 명령 분석 실패: LLM 호출 불가. {llm_error or 'LLM 응답 형식 오류'}"
+                }
+
+            intent = llm_result.get("intent_type", "MISSION").upper()
         event = self.registry_client.ingest_event(
             {
                 "event_type": "SYS_INTENT_CLASSIFIED",
