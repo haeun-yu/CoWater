@@ -67,10 +67,10 @@ if [ -z "$USER_COMMAND" ]; then
     exit 1
 fi
 
-log_and_print ""
-log_and_print "=== 사용자 명령 ==="
-log_and_print "입력: $USER_COMMAND"
-log_and_print ""
+log_both ""
+log_both "=== 사용자 명령 ==="
+log_both "입력: $USER_COMMAND"
+log_both ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Step 1: 명령을 RequestHandler로 전달
