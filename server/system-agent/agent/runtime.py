@@ -906,20 +906,36 @@ class AgentRuntime:
         user_input = str(parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or "").strip()
         intent = str(parameters.get("intent") or "").upper()
 
-        # Intent 분류: LLM 기반 (필수)
+        # Intent 분류: LLM 기반 (필수, fallback 없음)
         if not intent:
-            # LLM으로 intent 분류 (실패시 에러 반환)
             devices = self.registry_client.list_devices()
             llm_result, llm_error = await self.decision_engine.analyze_intent(user_input, devices, self.state)
 
-            if llm_error or not llm_result or not llm_result.get("intent_type"):
+            # LLM 호출 실패 또는 응답 없음 → ERROR 반환 (규칙 기반 폴백 없음)
+            if llm_error:
+                error_msg = f"{llm_error.get('error_type', 'unknown')}: {llm_error.get('message', 'LLM 호출 실패')}"
                 return {
                     "type": "RESPONSE",
                     "status": "ERROR",
-                    "message": f"사용자 명령 분석 실패: LLM 호출 불가. {llm_error or 'LLM 응답 형식 오류'}"
+                    "message": f"사용자 명령 분석 실패 (LLM 필수). {error_msg}"
                 }
 
-            intent = llm_result.get("intent_type", "MISSION").upper()
+            if not llm_result or not llm_result.get("intent_type"):
+                return {
+                    "type": "RESPONSE",
+                    "status": "ERROR",
+                    "message": "사용자 명령 분석 실패: LLM이 의도를 파악하지 못했습니다."
+                }
+
+            intent = llm_result.get("intent_type", "UNKNOWN").upper()
+
+            # 유효하지 않은 intent 거부
+            if intent not in ("QUERY", "REPORT", "MISSION", "SYSTEM_CONTROL"):
+                return {
+                    "type": "RESPONSE",
+                    "status": "ERROR",
+                    "message": f"알 수 없는 intent 타입: {intent}"
+                }
         event = self.registry_client.ingest_event(
             {
                 "event_type": "SYS_INTENT_CLASSIFIED",
@@ -941,8 +957,8 @@ class AgentRuntime:
                 "event": event,
                 "data": {"devices": self.registry_client.list_devices(), "missions": self.registry_client.list_missions()},
             }
+
         if intent == "REPORT":
-            # InsightReporter에 리포트 생성 요청
             devices = self.registry_client.list_devices()
             missions = self.registry_client.list_missions()
             insights = self.registry_client.list_insights()
@@ -958,20 +974,30 @@ class AgentRuntime:
                 "report": report if report else {"report": "리포트 생성 실패"},
                 "report_source": "llm" if report and not error else "error",
             }
-        return {
-            "type": "PROPOSAL",
-            "status": "PENDING_APPROVAL",
-            "event": event,
-            **(await self.generate_mission_proposal(
-                {
-                    "goal": user_input or str(parameters.get("goal") or intent),
-                    "event_id": event.get("event_id"),
-                    "source": "user_intent",
-                    "location": parameters.get("location") or {},
-                },
-                allow_suppression=False,
-            ))
-        }
+
+        # MISSION, SYSTEM_CONTROL 등: Proposal 생성
+        # (intent 분류는 이미 LLM으로 완료됨)
+        try:
+            return {
+                "type": "PROPOSAL",
+                "status": "PENDING_APPROVAL",
+                "event": event,
+                **(await self.generate_mission_proposal(
+                    {
+                        "goal": user_input or str(parameters.get("goal") or intent),
+                        "event_id": event.get("event_id"),
+                        "source": "user_intent",
+                        "location": parameters.get("location") or {},
+                    },
+                    allow_suppression=False,
+                ))
+            }
+        except RuntimeError as e:
+            return {
+                "type": "RESPONSE",
+                "status": "ERROR",
+                "message": f"미션 계획 생성 실패: {str(e)}"
+            }
 
     def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
         policy_id = str(parameters.get("policy_id") or parameters.get("id") or "").strip()
@@ -999,19 +1025,21 @@ class AgentRuntime:
             except Exception:
                 alert = None
 
-        # 미리 분석된 mission_type이 있으면 사용, 없으면 LLM 분석
+        # Mission type 결정: preset이 있으면 사용, 없으면 LLM 필수
         if _preset_mission_type:
             mission_type = _preset_mission_type
             location = _preset_location or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         else:
-            # LLM으로 intent 분석 시도, 실패 시 규칙 기반 fallback
+            # LLM으로 mission_type 분석 (필수, fallback 없음)
             llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
-            if llm_intent and llm_intent.get("mission_type"):
-                mission_type = llm_intent.get("mission_type")
-                location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
-            else:
-                mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
-                location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+
+            if llm_error or not llm_intent or not llm_intent.get("mission_type"):
+                # LLM 호출 실패 → ERROR 반환 (규칙 기반 fallback 없음)
+                error_msg = llm_error.get("message", "LLM 호출 실패") if llm_error else "LLM 응답 형식 오류"
+                raise RuntimeError(f"Mission type 분석 실패: {error_msg}")
+
+            mission_type = llm_intent.get("mission_type")
+            location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         suppression_fingerprint = f"{mission_type}:{goal}:{(alert or {}).get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
