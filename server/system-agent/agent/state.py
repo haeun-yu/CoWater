@@ -39,6 +39,7 @@ class AgentState:
     inbox: list[dict[str, Any]] = field(default_factory=list)
     outbox: list[dict[str, Any]] = field(default_factory=list)
     memory: list[dict[str, Any]] = field(default_factory=list)
+    processed_event_ids: set[str] = field(default_factory=set)
 
     def remember(self, item: dict[str, Any]) -> None:
         self.memory.append(item)

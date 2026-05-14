@@ -296,6 +296,8 @@ class AgentRuntime:
             tasks = [self._registry_keepalive_loop(), self._state_cleanup_loop()]
             if self.state.role == "policy_manager":
                 tasks.append(self._alert_processing_loop())
+            if self.state.role == "insight_reporter":
+                tasks.append(self._event_based_report_loop())
             await asyncio.gather(*tasks)
         else:
             await self._telemetry_processing_loop()
@@ -412,6 +414,89 @@ class AgentRuntime:
 
             except Exception as e:
                 logger.error(f"Alert processing loop error: {e}")
+                await asyncio.sleep(1)
+
+    async def _event_based_report_loop(self) -> None:
+        """InsightReporter: MEB 이벤트 기반 한국어 리포트 생성 (Registry 폴링)"""
+        logger = logging.getLogger(__name__)
+        poll_interval = 2
+        processed_event_ids = getattr(self.state, 'processed_event_ids', set())
+
+        while True:
+            try:
+                await asyncio.sleep(poll_interval)
+                self.state.last_seen_at = utc_now()
+
+                try:
+                    events = self.registry_client.list_events()
+                except Exception as e:
+                    logger.debug(f"Failed to fetch events: {e}")
+                    continue
+
+                # SYS_MISSION_COMPLETED, SYS_ANOMALY_DETECTED 이벤트만 필터링
+                new_events = [
+                    event for event in events
+                    if event.get('type') in ['SYS_MISSION_COMPLETED', 'SYS_ANOMALY_DETECTED']
+                    and str(event.get('event_id') or '') not in processed_event_ids
+                ]
+
+                # 최신 이벤트부터 처리 (역순)
+                for event in reversed(new_events[-10:]):
+                    event_id = str(event.get('event_id') or '')
+                    event_type = str(event.get('type') or '')
+                    if not event_id:
+                        continue
+
+                    try:
+                        logger.info(f"Processing event {event_id}: {event_type}")
+                        devices = self.registry_client.list_devices()
+                        missions = self.registry_client.list_missions()
+                        insights = self.registry_client.list_insights()
+
+                        # 한국어 리포트 생성
+                        report, error = await self.decision_engine.generate_fleet_report(
+                            devices, missions, insights, self.state
+                        )
+
+                        if report:
+                            # 리포트를 새 Insight로 저장
+                            insight_record = self.registry_client.create_insight({
+                                "title": f"{event_type} 분석 리포트",
+                                "summary": report.get("report", ""),
+                                "highlights": report.get("highlights", []),
+                                "recommendations": report.get("recommendations", []),
+                                "source": "event_triggered_report",
+                                "related_event_id": event_id,
+                                "created_at": utc_now(),
+                            })
+                            logger.info(f"✅ Insight created from event {event_id}")
+                            self.state.remember({
+                                "kind": "event_report_generated",
+                                "at": utc_now(),
+                                "event_id": event_id,
+                                "event_type": event_type,
+                                "insight_id": insight_record.get("id"),
+                            })
+                        elif error:
+                            logger.warning(f"Report generation failed for event {event_id}: {error}")
+                            self.state.remember({
+                                "kind": "event_report_failed",
+                                "at": utc_now(),
+                                "event_id": event_id,
+                                "error": str(error),
+                            })
+
+                        # 처리 완료 표시
+                        processed_event_ids.add(event_id)
+                        if len(processed_event_ids) > 1000:
+                            processed_event_ids = set(list(processed_event_ids)[-500:])
+                        self.state.processed_event_ids = processed_event_ids
+
+                    except Exception as e:
+                        logger.error(f"Failed to process event {event_id}: {e}")
+
+            except Exception as e:
+                logger.error(f"Event-based report loop error: {e}")
                 await asyncio.sleep(1)
 
     async def _evaluate_and_apply_policies(self, devices: list[dict[str, Any]], logger: Any) -> None:
