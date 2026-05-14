@@ -695,3 +695,296 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
             return json.loads(match.group())
         except json.JSONDecodeError:
             return None
+
+    # ──────────────────────────────────────────────
+    # Phase 3: SystemSentinel - 복합 패턴 분석
+    # ──────────────────────────────────────────────
+
+    async def analyze_fleet_patterns(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+        alerts: list[dict[str, Any]],
+        state: AgentState,
+    ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        """LLM으로 fleet 전체 복합 패턴 이상 탐지
+
+        Returns: (analysis_result, error_context)
+        """
+        if not self.llm_enabled or not self.llm_client:
+            return self._rule_based_fleet_check(devices, missions, alerts), {"error_type": "llm_disabled"}
+
+        try:
+            prompt = self._fleet_pattern_prompt(devices, missions, alerts)
+            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+
+            if error_ctx is not None:
+                error_dict = self._normalize_llm_error(error_ctx)
+                logger.warning(f"LLM fleet pattern 분석 실패, rule-based fallback: {error_dict.get('message', '')}")
+                return self._rule_based_fleet_check(devices, missions, alerts), error_dict
+
+            result = self._parse(response) if response else None
+            if result:
+                logger.info(f"LLM fleet pattern 분석 성공: {result.get('severity', 'normal')}")
+                return result, None
+            else:
+                logger.warning("LLM fleet pattern 응답 파싱 실패, rule-based fallback")
+                return self._rule_based_fleet_check(devices, missions, alerts), {"error_type": "parse_error"}
+
+        except Exception as e:
+            logger.error(f"LLM fleet pattern 분석 중 오류: {type(e).__name__}: {e}")
+            return self._rule_based_fleet_check(devices, missions, alerts), {
+                "error_type": "unknown_error",
+                "message": str(e),
+            }
+
+    def _rule_based_fleet_check(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+        alerts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """규칙 기반 fleet 이상 감지"""
+        anomalies = []
+        severity = "normal"
+
+        low_battery_devices = [d for d in devices if d.get("last_battery_percent", 100) < 20]
+        if low_battery_devices:
+            anomalies.append({
+                "type": "LOW_BATTERY",
+                "devices": [d.get("name") for d in low_battery_devices],
+                "message": f"{len(low_battery_devices)}개 디바이스 배터리 부족 (20% 이하)"
+            })
+            severity = "warning"
+
+        offline_devices = [d for d in devices if not d.get("connected")]
+        if offline_devices:
+            anomalies.append({
+                "type": "OFFLINE",
+                "devices": [d.get("name") for d in offline_devices],
+                "message": f"{len(offline_devices)}개 디바이스 오프라인"
+            })
+            severity = "warning"
+
+        active_missions = [m for m in missions if m.get("status") in ["ACTIVE", "IN_PROGRESS"]]
+        if len(active_missions) > len(devices):
+            anomalies.append({
+                "type": "RESOURCE_SHORTAGE",
+                "missions": len(active_missions),
+                "devices": len(devices),
+                "message": f"활성 임무({len(active_missions)}) > 가용 디바이스({len(devices)})"
+            })
+            severity = "critical"
+
+        return {
+            "anomalies": anomalies,
+            "severity": severity,
+            "summary": f"규칙 기반 이상 탐지: {severity}",
+            "recommended_actions": ["인적 검토 필요"] if severity != "normal" else []
+        }
+
+    def _fleet_pattern_prompt(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+        alerts: list[dict[str, Any]],
+    ) -> str:
+        """Fleet 복합 패턴 분석 프롬프트"""
+        missions_summary = "\n".join(
+            f"  - {m.get('title', 'Unknown')} (상태: {m.get('status', 'UNKNOWN')}, id: {m.get('mission_id')})"
+            for m in missions[:10]
+        ) or "  (진행 중인 임무 없음)"
+
+        alerts_summary = "\n".join(
+            f"  - {a.get('alert_type', 'Unknown')}: {a.get('message', 'No message')} (심각도: {a.get('severity', 'INFO')})"
+            for a in alerts[-10:]
+        ) or "  (최근 alerts 없음)"
+
+        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 시스템 감시 AI입니다.
+Fleet 전체의 복합 패턴 이상을 분석합니다.
+
+## 현재 Fleet 상태
+{self._fleet_summary(devices)}
+
+## 진행 중인 임무
+{missions_summary}
+
+## 최근 Alerts (최신 10개)
+{alerts_summary}
+
+## 분석 요청
+다음 항목들의 **복합 패턴**을 분석하세요:
+1. 배터리 급감 + 신호 약화 → 고장 의심
+2. 다수 디바이스 동시 배터리 저하 → 기지 전원 문제
+3. 활성 임무 수 > 가용 디바이스 → 자원 부족 경보
+4. 진행 중인 임무 대비 실제 가용 자원 부족 → 임무 실패 가능성
+
+## 응답 형식 (JSON만)
+{{
+  "anomalies": [
+    {{"type": "PATTERN_TYPE", "message": "설명", "severity": "low|medium|high"}}
+  ],
+  "severity": "normal|warning|critical",
+  "summary": "종합 분석 요약",
+  "recommended_actions": ["조치1", "조치2"]
+}}"""
+
+    # ──────────────────────────────────────────────
+    # Phase 4: InsightReporter - 한국어 요약
+    # ──────────────────────────────────────────────
+
+    async def generate_insight_summary(
+        self,
+        goal: str,
+        mission_type: str,
+        devices: list[dict[str, Any]],
+        context: dict[str, Any],
+        state: AgentState,
+    ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        """LLM으로 insight summary + reason_summary 한국어 생성"""
+        if not self.llm_enabled or not self.llm_client:
+            return self._rule_based_insight_summary(mission_type), {"error_type": "llm_disabled"}
+
+        try:
+            prompt = self._insight_summary_prompt(goal, mission_type, devices, context)
+            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+
+            if error_ctx is not None:
+                return self._rule_based_insight_summary(mission_type), self._normalize_llm_error(error_ctx)
+
+            result = self._parse(response) if response else None
+            if result and result.get("summary"):
+                logger.info("LLM insight 요약 생성 성공")
+                return result, None
+            else:
+                return self._rule_based_insight_summary(mission_type), {"error_type": "parse_error"}
+
+        except Exception as e:
+            logger.error(f"LLM insight 요약 생성 중 오류: {type(e).__name__}: {e}")
+            return self._rule_based_insight_summary(mission_type), {"error_type": "unknown_error"}
+
+    async def generate_fleet_report(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+        insights: list[dict[str, Any]],
+        state: AgentState,
+    ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        """LLM으로 fleet 전체 현황 한국어 리포트 생성"""
+        if not self.llm_enabled or not self.llm_client:
+            return self._rule_based_fleet_report(devices, missions), {"error_type": "llm_disabled"}
+
+        try:
+            prompt = self._fleet_report_prompt(devices, missions, insights)
+            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+
+            if error_ctx is not None:
+                return self._rule_based_fleet_report(devices, missions), self._normalize_llm_error(error_ctx)
+
+            result = self._parse(response) if response else None
+            if result and result.get("report"):
+                logger.info("LLM fleet 리포트 생성 성공")
+                return result, None
+            else:
+                return self._rule_based_fleet_report(devices, missions), {"error_type": "parse_error"}
+
+        except Exception as e:
+            logger.error(f"LLM fleet 리포트 생성 중 오류: {type(e).__name__}: {e}")
+            return self._rule_based_fleet_report(devices, missions), {"error_type": "unknown_error"}
+
+    def _rule_based_insight_summary(self, mission_type: str) -> dict[str, Any]:
+        """규칙 기반 insight 요약"""
+        base = mission_type.replace("_", " ").title()
+        return {
+            "summary": f"'{base}' 미션 제안이 준비되었습니다.",
+            "reason_summary": "현재 디바이스 가용성 및 라우팅 상태를 고려하여 실행 가능합니다."
+        }
+
+    def _rule_based_fleet_report(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """규칙 기반 fleet 리포트"""
+        online_count = sum(1 for d in devices if d.get("connected"))
+        active_missions = [m for m in missions if m.get("status") in ["ACTIVE", "IN_PROGRESS"]]
+
+        return {
+            "report": f"Fleet 현황: 온라인 {online_count}/{len(devices)} 디바이스, 활성 임무 {len(active_missions)}개",
+            "highlights": [
+                f"운영 중인 디바이스: {online_count}개",
+                f"진행 중인 임무: {len(active_missions)}개"
+            ],
+            "recommendations": []
+        }
+
+    def _insight_summary_prompt(
+        self,
+        goal: str,
+        mission_type: str,
+        devices: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> str:
+        """Insight 요약 한국어 프롬프트"""
+        location_str = json.dumps(context.get("location", {}), ensure_ascii=False) if context.get("location") else "미지정"
+
+        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 자연어 리포팅 AI입니다.
+미션 제안에 대한 한국어 요약을 생성합니다.
+
+## 미션 정보
+- 목표: {goal}
+- 미션 타입: {mission_type}
+- 작전 지역: {location_str}
+
+## 현재 Fleet 상태
+{self._fleet_summary(devices)}
+
+## 요청
+다음 두 항목을 한국어로 생성하세요:
+
+1. **summary**: 미션 제안의 한 문장 요약 (30-50자)
+2. **reason_summary**: 왜 이 미션이 실행 가능한지 설명 (50-100자)
+
+응답은 JSON만:
+{{
+  "summary": "한국어 제목",
+  "reason_summary": "한국어 근거"
+}}"""
+
+    def _fleet_report_prompt(
+        self,
+        devices: list[dict[str, Any]],
+        missions: list[dict[str, Any]],
+        insights: list[dict[str, Any]],
+    ) -> str:
+        """Fleet 리포트 한국어 프롬프트"""
+        online = sum(1 for d in devices if d.get("connected"))
+        active_missions = [m for m in missions if m.get("status") in ["ACTIVE", "IN_PROGRESS"]]
+
+        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 자연어 리포팅 AI입니다.
+Fleet 전체 현황에 대한 한국어 리포트를 생성합니다.
+
+## Fleet 상태
+- 온라인 디바이스: {online}/{len(devices)}개
+- 진행 중인 임무: {len(active_missions)}개
+- 최근 인사이트: {len(insights)}개
+
+## 디바이스 상세
+{self._fleet_summary(devices)}
+
+## 요청
+다음 항목들을 한국어로 생성하세요:
+
+1. **report**: Fleet 전체 현황 리포트 (100-150자)
+2. **highlights**: 주요 사항 3-5개 (리스트)
+3. **recommendations**: 권고 조치 (필요 시)
+
+응답은 JSON만:
+{{
+  "report": "한국어 리포트",
+  "highlights": ["항목1", "항목2"],
+  "recommendations": []
+}}"""

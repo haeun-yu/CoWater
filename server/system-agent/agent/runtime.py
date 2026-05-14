@@ -788,17 +788,9 @@ class AgentRuntime:
             result = await self.handle_command_with_llm(command)
             return {"type": "COMMAND", "status": "SUCCESS", "result": result}
         if role == "system_sentinel":
-            return {"type": "STATE", "status": "SUCCESS", "devices": self.registry_client.list_devices()}
+            return await self._execute_system_sentinel(parameters)
         if role == "insight_reporter":
-            return {
-                "type": "RESPONSE",
-                "status": "SUCCESS",
-                "data": {
-                    "devices": self.registry_client.list_devices(),
-                    "missions": self.registry_client.list_missions(),
-                    "insights": self.registry_client.list_insights(),
-                },
-            }
+            return await self._execute_insight_reporter(parameters)
         return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
 
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -886,10 +878,16 @@ class AgentRuntime:
         if not steps:
             fallback_step = self._build_generic_steps_for_goal(goal or mission_type, devices, location)
             steps = fallback_step
+
+        # Phase 4: LLM으로 한국어 insight 요약 생성
+        insight_texts, insight_err = await self.decision_engine.generate_insight_summary(
+            goal, mission_type, devices, {"location": location}, self.state
+        )
+
         insight = self.registry_client.create_insight(
             {
-                "summary": payload.get("insight_summary") or f"Mission proposal prepared for {mission_type}",
-                "reason_summary": payload.get("reason_summary") or "Current device availability, roles, and routing support execution.",
+                "summary": payload.get("insight_summary") or insight_texts.get("summary") or f"'{mission_type.replace('_', ' ').title()}' 미션이 준비되었습니다.",
+                "reason_summary": payload.get("reason_summary") or insight_texts.get("reason_summary") or "현재 디바이스 가용성 및 라우팅을 고려하여 실행 가능합니다.",
                 "severity": str(payload.get("severity") or ((alert or {}).get("severity") or "INFORMATION")).upper(),
                 "recommended_action": "review_and_approve_mission",
                 "confidence_level": "medium",
@@ -3535,4 +3533,48 @@ class AgentRuntime:
                 "task_id": task_id,
                 "reporter": reporter,
             },
+        }
+
+    # ──────────────────────────────────────────────
+    # Phase 3: SystemSentinel
+    # ──────────────────────────────────────────────
+
+    async def _execute_system_sentinel(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Fleet 전체 복합 패턴 이상 분석"""
+        devices = self.registry_client.list_devices()
+        missions = self.registry_client.list_missions()
+        alerts = self.registry_client.list_alerts()
+
+        analysis, error = await self.decision_engine.analyze_fleet_patterns(
+            devices, missions, alerts, self.state
+        )
+
+        return {
+            "type": "ANALYSIS",
+            "status": "SUCCESS",
+            "devices": devices,
+            "analysis": analysis,
+            "analysis_source": "llm" if not error else "rule_based",
+        }
+
+    # ──────────────────────────────────────────────
+    # Phase 4: InsightReporter
+    # ──────────────────────────────────────────────
+
+    async def _execute_insight_reporter(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Fleet 전체 현황 한국어 리포트 생성"""
+        devices = self.registry_client.list_devices()
+        missions = self.registry_client.list_missions()
+        insights = self.registry_client.list_insights()
+
+        report, error = await self.decision_engine.generate_fleet_report(
+            devices, missions, insights, self.state
+        )
+
+        return {
+            "type": "RESPONSE",
+            "status": "SUCCESS",
+            "data": {"devices": devices, "missions": missions, "insights": insights},
+            "report": report,
+            "report_source": "llm" if not error else "rule_based",
         }
