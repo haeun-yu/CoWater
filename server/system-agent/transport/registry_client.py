@@ -198,28 +198,6 @@ class RegistryClient:
     def delete_agent_connection(self, connection_id: str) -> dict[str, Any]:
         return delete_json(f"{self.url}/agent-connections/{connection_id}")
 
-    def ingest_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        return post_json(f"{self.url}/events/ingest", event)
-
-    def ingest_alert(self, alert: dict[str, Any]) -> dict[str, Any]:
-        return post_json(f"{self.url}/alerts/ingest", alert)
-
-    def list_alerts(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
-        return get_json(f"{self.url}/alerts", params={"limit": limit, "offset": offset})
-
-    def get_alert(self, alert_id: str) -> dict[str, Any]:
-        return get_json(f"{self.url}/alerts/{alert_id}")
-
-    def acknowledge_alert(self, alert_id: str, approved: bool = True, notes: str | None = None) -> dict[str, Any]:
-        body = {"approved": approved}
-        if notes is not None:
-            body["notes"] = notes
-        return post_json(f"{self.url}/alerts/{alert_id}/ack", body)
-
-    def complete_alert(self, alert_id: str, notes: str | None = None) -> dict[str, Any]:
-        body = {"notes": notes or "Mission completed"}
-        return post_json(f"{self.url}/alerts/{alert_id}/complete", body)
-
     def create_insight(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/insights", payload)
 

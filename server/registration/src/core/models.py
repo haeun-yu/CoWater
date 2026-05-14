@@ -28,8 +28,7 @@ TRACK_TYPES = Literal[
 
 DEVICE_TYPES = Literal["USV", "AUV", "ROV", "OTHER"]
 LAYERS = Literal["lower", "middle", "system"]
-ALERT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFO"]
-EVENT_SEVERITIES = ALERT_SEVERITIES
+EVENT_SEVERITIES = Literal["CRITICAL", "WARNING", "INFO"]
 
 TASK_STATES = Literal["PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "ABORTED"]
 FAILURE_CATEGORIES = Literal["device", "communication", "sensor", "mission", "policy", "user", "unknown"]
@@ -399,35 +398,6 @@ class DeviceAgentRegistrationRequest(BaseModel):
 
 
 @dataclass
-class AlertRecord:
-    alert_id: str
-    source_system: str
-    event_id: str
-    source_agent_id: Optional[str]
-    source_role: Optional[str]
-    alert_type: str
-    severity: ALERT_SEVERITIES
-    message: str
-    status: str = "registered"
-    recommended_action: Optional[str] = None
-    target_agent_id: Optional[str] = None
-    requires_user_approval: bool = False
-    auto_remediated: bool = False
-    route_mode: str = "direct_to_system"
-    created_at: str = field(default_factory=utc_now_iso)
-    updated_at: str = field(default_factory=utc_now_iso)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def touch(self, status: Optional[str] = None) -> None:
-        self.updated_at = utc_now_iso()
-        if status:
-            self.status = status
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
 class SensorStatus:
     """센서 상태 정보 (아키텍처 Ch.15)"""
     sensor_id: str
@@ -572,34 +542,6 @@ class EventIngestRequest(BaseModel):
     @classmethod
     def normalize_severity(cls, value: Any) -> str:
         return normalize_severity_value(value)
-
-
-class AlertIngestRequest(BaseModel):
-    alert_id: Optional[str] = None
-    source_system: str = "control_center"
-    event_id: str
-    source_agent_id: Optional[str] = None
-    source_role: Optional[str] = None
-    alert_type: str
-    severity: ALERT_SEVERITIES = "INFO"
-    message: str
-    status: str = "waiting"
-    recommended_action: Optional[str] = None
-    target_agent_id: Optional[str] = None
-    requires_user_approval: bool = False
-    auto_remediated: bool = False
-    route_mode: str = "direct_to_system"
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("severity", mode="before")
-    @classmethod
-    def normalize_severity(cls, value: Any) -> str:
-        return normalize_severity_value(value)
-
-
-class AlertAckRequest(BaseModel):
-    approved: bool = True
-    notes: Optional[str] = None
 
 
 @dataclass

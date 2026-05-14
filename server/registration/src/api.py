@@ -14,9 +14,6 @@ import uvicorn
 
 from src.core.config import APP_SETTINGS
 from src.core.models import (
-    AlertAckRequest,
-    AlertIngestRequest,
-    ALERT_SEVERITIES,
     AUVSubmersionRequest,
     CORE_ACTIONS,
     DEVICE_TYPES,
@@ -65,7 +62,6 @@ def require_internal_caller(x_cowater_internal: str | None) -> None:
 
 components = build_registry_components()
 registry = components.registry
-alert_registry = components.alert_registry
 event_registry = components.event_registry
 a2a_log_registry = components.a2a_log_registry
 policy_registry = components.policy_registry
@@ -122,12 +118,6 @@ def meta() -> dict[str, Any]:
         "track_types": list(TRACK_TYPES.__args__),
         "device_types": list(DEVICE_TYPES.__args__),
         "core_actions": list(CORE_ACTIONS.__args__),
-        "alert_severities": list(ALERT_SEVERITIES.__args__),
-        "alerts": {
-            "ingest": "/alerts/ingest",
-            "list": "/alerts",
-            "ack": "/alerts/{alert_id}/ack",
-        },
         "device_register": "/devices/register",
         "agent_register": "/agents/register",
         "insights": "/insights",
@@ -266,14 +256,6 @@ def update_device_connectivity(
         raise HTTPException(status_code=404, detail="device not found") from exc
 
 
-@app.post("/alerts/ingest", status_code=status.HTTP_201_CREATED)
-def ingest_alert(request: AlertIngestRequest) -> dict[str, Any]:
-    alert = alert_registry.ingest_alert(request)
-    result = alert.to_dict()
-    _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
-    return result
-
-
 @app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_event(body: dict[str, Any]) -> dict[str, Any]:
     """Event 생성"""
@@ -322,43 +304,6 @@ def get_event(event_id: str) -> dict[str, Any]:
         return event_registry.get_event(event_id).to_dict()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="event not found") from exc
-
-
-@app.get("/alerts")
-def list_alerts(
-    limit: int | None = Query(default=None, ge=1),
-    offset: int = Query(default=0, ge=0),
-) -> list[dict[str, Any]]:
-    return [alert.to_dict() for alert in alert_registry.list_alerts(limit=limit, offset=offset)]
-
-
-@app.get("/alerts/{alert_id}")
-def get_alert(alert_id: str) -> dict[str, Any]:
-    try:
-        return alert_registry.get_alert(alert_id).to_dict()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="alert not found") from exc
-
-
-@app.post("/alerts/{alert_id}/ack")
-def acknowledge_alert(alert_id: str, request: AlertAckRequest) -> dict[str, Any]:
-    try:
-        result = alert_registry.acknowledge_alert(alert_id, approved=request.approved, notes=request.notes).to_dict()
-        _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
-        return result
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="alert not found") from exc
-
-
-@app.post("/alerts/{alert_id}/complete")
-def complete_alert(alert_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
-    try:
-        notes = str((body or {}).get("notes") or "Mission completed")
-        result = alert_registry.complete_alert(alert_id, notes=notes).to_dict()
-        _publish_registry_snapshot("alerts", [a.to_dict() for a in alert_registry.list_alerts()])
-        return result
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="alert not found") from exc
 
 
 @app.post("/a2a-logs/ingest", status_code=status.HTTP_201_CREATED)
@@ -1239,7 +1184,6 @@ def reset_all_data() -> Response:
     """
     logger.warning("Registry 데이터 초기화 시작")
     device_count = len(registry.list_devices())
-    alert_count = len(alert_registry.list_alerts())
     event_count = len(event_registry.list_events())
     mission_count = len(mission_registry.list_missions())
     user_count = len(user_registry.list_users(limit=10000))
@@ -1250,7 +1194,6 @@ def reset_all_data() -> Response:
     sensor_count = len(sensor_registry.list_sensors(limit=10000))
 
     registry.reset()
-    alert_registry.reset()
     event_registry.reset()
     mission_registry.reset()
     insight_registry.reset()
@@ -1270,7 +1213,7 @@ def reset_all_data() -> Response:
 
     logger.info(
         f"Registry 초기화 완료: "
-        f"devices={device_count}, alerts={alert_count}, "
+        f"devices={device_count}, "
         f"events={event_count}, missions={mission_count}, "
         f"users={user_count}, agents={agent_count}, "
         f"tasks={task_count}, reports={report_count}, "
@@ -1322,7 +1265,6 @@ async def websocket_dashboard(websocket: WebSocket) -> None:
         initial_data = {
             "type": "initial",
             "events": [e.to_dict() for e in event_registry.list_events()],
-            "alerts": [a.to_dict() for a in alert_registry.list_alerts()],
             "insights": [i.to_dict() for i in insight_registry.list_insights()],
             "approvals": [a.to_dict() for a in approval_registry.list_approvals()],
             "mission_proposals": [p.to_dict() for p in mission_proposal_registry.list_mission_proposals()],

@@ -544,9 +544,9 @@ class AgentRuntime:
                 self.state.last_decision = decision
                 self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
-                # 3-b️⃣ Critical rule 발동 시 서버 alert registry에 전송
+                # 3-b️⃣ Critical rule 발동 시 SYS_ANOMALY_DETECTED 이벤트 전송
                 if decision.get("mode") == "critical_rule":
-                    self._post_critical_alert(decision, telemetry)
+                    self._post_critical_event(decision, telemetry)
 
                 # 4️⃣ [ENHANCED] Decision 권장사항을 Tools에 적용
                 # 의사결정 결과가 실제로 motor_control 등에 반영됨
@@ -659,26 +659,29 @@ class AgentRuntime:
                 # 기지 복귀: 최대 전진 thrust
                 self.tools["motor_control"].set_thrust(1.0, 0.0)
 
-    def _post_critical_alert(self, decision: dict[str, Any], telemetry: dict[str, Any]) -> None:
-        """Critical rule 발동 시 서버 alert registry에 비동기 전송 (non-blocking)"""
+    def _post_critical_event(self, decision: dict[str, Any], telemetry: dict[str, Any]) -> None:
+        """Critical rule 발동 시 SYS_ANOMALY_DETECTED 이벤트를 Registry에 전송 (non-blocking)"""
         try:
             rec = (decision.get("recommendations") or [{}])[0]
             reason = rec.get("params", {}).get("reason", "critical_rule")
-            self.registry_client.ingest_alert({
+            self.registry_client.ingest_event({
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "source_system": "device_agent",
-                "event_id": f"critical-{uuid4().hex[:8]}",
                 "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "alert_type": reason,
                 "severity": "CRITICAL",
+                "title": f"[{self.state.device_type}] {self.state.name}: {reason}",
                 "message": (
                     f"[{self.state.device_type}] {self.state.name}: "
                     f"{reason} — action={rec.get('action')}, "
                     f"battery={telemetry.get('battery_percent', '?')}%"
                 ),
-                "recommended_action": rec.get("action"),
-                "auto_remediated": True,
-                "metadata": {
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "data": {
+                    "anomaly_type": reason,
+                    "recommended_action": rec.get("action"),
+                    "auto_remediated": True,
                     "device_id": self.state.registry_id,
                     "device_type": self.state.device_type,
                     "layer": self.state.layer,
@@ -687,7 +690,7 @@ class AgentRuntime:
                 },
             })
         except Exception as e:
-            logger.debug(f"Critical alert 전송 실패: {e}")
+            logger.debug(f"Critical event 전송 실패: {e}")
 
     def _build_decision_context(self, telemetry: dict[str, Any]) -> dict[str, Any]:
         """

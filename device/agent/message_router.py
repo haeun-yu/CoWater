@@ -38,7 +38,6 @@ async def _execute_and_report_task(
             execution_status=normalized_status,
             system_agent_url=report_endpoint,
             mission_id=mission_id or None,
-            alert_id=str(message_data.get("alert_id") or ""),
             step_id=str(message_data.get("step_id") or ""),
             response_id=str(message_data.get("response_id") or mission_id or ""),
         )
@@ -150,7 +149,6 @@ async def _report_task_result_to_system_agent(
     execution_status: str,
     system_agent_url: str = "http://127.0.0.1:9116/message:send",
     mission_id: str | None = None,
-    alert_id: str | None = None,
     step_id: str | None = None,
     response_id: str | None = None,
 ) -> None:
@@ -166,7 +164,6 @@ async def _report_task_result_to_system_agent(
                         "task_id": task_id,
                         "mission_id": mission_id,
                         "response_id": response_id or mission_id or task_id,
-                        "alert_id": alert_id,
                         "step_id": step_id,
                         "status": normalized_status,
                         "device_id": runtime.state.registry_id,

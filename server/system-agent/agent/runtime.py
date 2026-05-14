@@ -296,8 +296,6 @@ class AgentRuntime:
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
             tasks = [self._registry_keepalive_loop(), self._state_cleanup_loop()]
-            if self.state.role == "policy_manager":
-                tasks.append(self._alert_processing_loop())
             if self.state.role == "insight_reporter":
                 tasks.append(self._event_based_report_loop())
             await asyncio.gather(*tasks)
@@ -353,70 +351,6 @@ class AgentRuntime:
             self.state.last_telemetry = telemetry
             decision = self.decision_engine.decide(self.state, telemetry)
             self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
-
-    async def _alert_processing_loop(self) -> None:
-        """System-layer agent alert processing loop"""
-        logger = logging.getLogger(__name__)
-        poll_interval = 2
-        all_devices: list[dict[str, Any]] = []
-
-        while True:
-            try:
-                await asyncio.sleep(poll_interval)
-                self.state.last_seen_at = utc_now()
-
-                try:
-                    all_devices = self.registry_client.list_devices()
-                    # P3 (보고 기반): Agent가 보고한 위치/배터리 정보를 device dict에 반영
-                    all_devices = [self._normalize_device_from_registry(d) for d in all_devices]
-                except Exception as e:
-                    logger.debug(f"Failed to fetch device list: {e}")
-
-                # Fetch all alerts from registry
-                try:
-                    alerts = self.registry_client.list_alerts()
-                except Exception as e:
-                    logger.debug(f"Failed to fetch alerts: {e}")
-                    continue
-
-                # handle_event_report에서 처리 못 한 registered 상태 alert만 폴백 처리
-                now_ts = time.time()
-                stale_cutoff = now_ts - 30 * 60
-                waiting_alerts = [
-                    alert for alert in alerts
-                    if alert.get("status") == "registered"
-                    and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
-                ]
-                waiting_alerts.sort(
-                    key=lambda alert: (
-                        self._severity_rank(str(alert.get("severity") or "INFORMATION")),
-                        -self._parse_iso_ts(str(alert.get("created_at") or "")),
-                    ),
-                    reverse=False,
-                )
-                # 루프당 최대 3개 처리 (백로그가 많아도 신규 alert가 빠르게 처리되도록)
-                for alert in waiting_alerts[:3]:
-                    alert_id = alert.get("alert_id")
-
-                    logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
-                    try:
-                        self.registry_client.acknowledge_alert(
-                            str(alert_id),
-                            approved=True,
-                            notes="system-agent claimed alert for processing",
-                        )
-                    except Exception as exc:
-                        logger.debug(f"Failed to claim alert {alert_id}: {exc}")
-                    await self._process_alert(alert, all_devices, logger)
-
-                await self._process_waiting_queue(all_devices, logger)
-
-                # ✅ Policy 평가 및 자동 대응 (Ch.17.1)
-                await self._evaluate_and_apply_policies(all_devices, logger)
-
-            except Exception as e:
-                logger.error(f"Alert processing loop error: {e}")
-                await asyncio.sleep(1)
 
     async def _event_based_report_loop(self) -> None:
         """InsightReporter: MEB 이벤트 기반 한국어 리포트 생성 (Registry 폴링)"""
@@ -549,90 +483,6 @@ class AgentRuntime:
 
     async def _process_waiting_queue(self, devices: list[dict[str, Any]], logger: Any) -> None:
         return
-
-    async def _process_alert(self, alert: dict[str, Any], devices: list[dict[str, Any]], logger: Any) -> dict[str, Any]:
-        """단일 alert를 insight/proposal/approval 흐름으로 처리한다."""
-        # Critical 긴급 상황 — LLM 없이 즉각 에스컬레이션
-        if self.decision_engine.is_critical_urgent(alert):
-            critical = self.decision_engine.critical_response(alert)
-            self.state.remember({"kind": "alert_critical_urgent", "at": utc_now(), "alert": alert.get("alert_type"), "decision": critical})
-            logger.warning(f"CRITICAL URGENT alert: {alert.get('alert_type')} — 즉각 에스컬레이션")
-            try:
-                self.registry_client.acknowledge_alert(str(alert.get("alert_id")), approved=True, notes="Critical urgent — auto escalated")
-            except Exception:
-                pass
-            proposal_bundle = await self.generate_mission_proposal(
-                {
-                    "title": f"{str(alert.get('alert_type') or 'Critical').replace('_', ' ').title()} Critical Response",
-                    "goal": str(alert.get("message") or alert.get("alert_type") or "Critical mission"),
-                    "alert_id": str(alert.get("alert_id") or ""),
-                    "event_id": str(alert.get("event_id") or ""),
-                    "severity": str(alert.get("severity") or "CRITICAL"),
-                    "source": "critical_policy",
-                    "summary": "Policy-based critical response was generated automatically.",
-                    "reason_summary": critical.get("reasoning") or "Critical policy auto response.",
-                    "insight_summary": f"Critical policy response for {alert.get('alert_type') or 'alert'}",
-                }
-            )
-            auto_decision = None
-            approval_id = (proposal_bundle.get("approval") or {}).get("approval_id")
-            if approval_id:
-                auto_decision = await self.decide_approval_flow(
-                    str(approval_id),
-                    True,
-                    decided_by="system_policy",
-                    notes="Critical policy auto approval",
-                )
-            return {
-                **critical,
-                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
-                "approval_id": approval_id,
-                "mission_id": ((auto_decision or {}).get("mission") or {}).get("mission_id"),
-            }
-
-        # LLM 분석을 Lock 외부에서 먼저 수행 (최대 120초 블로킹이 Lock 밖에서 일어남)
-        decision = self.decision_engine.decide(self.state, alert)
-        llm_result, llm_error = await self.decision_engine.analyze_alert(alert, devices, self.state)
-        
-        # LLM 결과 처리
-        if llm_result:
-            decision["llm_analysis"] = llm_result
-        if llm_error:
-            # LLM 오류 발생 - Event 기록
-            self.event_publisher.publish(
-                create_device_status_change_event(
-                    source_agent_id=self.state.agent_id,
-                    device_id=0,  # System-level event
-                    device_name="system",
-                    old_status="OPERATIONAL",
-                    new_status="DEGRADED",
-                    reason=f"LLM error: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
-                )
-            )
-            decision["llm_error"] = llm_error
-            logger.warning(f"Alert {alert.get('alert_id')} processing with LLM error: {llm_error}")
-
-        async with self._mission_lock:
-            alert_id = alert.get("alert_id")
-
-            self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
-            logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={'success' if llm_result else ('error' if llm_error else 'disabled')}")
-            proposal_bundle = await self.generate_mission_proposal(
-                {
-                    "title": f"{str(alert.get('alert_type') or 'Alert').replace('_', ' ').title()} Proposal",
-                    "goal": str(alert.get("message") or alert.get("alert_type") or "Mission proposal"),
-                    "alert_id": str(alert_id or ""),
-                    "event_id": alert.get("event_id") or (alert.get("metadata") or {}).get("event_id"),
-                    "severity": alert.get("severity") or "INFORMATION",
-                    "source": "alert_processing_loop",
-                    "summary": f"Proposal generated from alert {alert_id}.",
-                }
-            )
-            return {
-                "alert_id": alert_id,
-                "decision": decision,
-                **proposal_bundle,
-            }
 
     def _build_mission_steps(
         self,
@@ -879,7 +729,6 @@ class AgentRuntime:
                 "type": "STATE",
                 "status": "SUCCESS",
                 "devices": self.registry_client.list_devices(),
-                "alerts": self.registry_client.list_alerts(),
             }
         if role == "insight_reporter":
             return await self._execute_insight_reporter(parameters)
@@ -917,17 +766,6 @@ class AgentRuntime:
                 }
                 for m in raw
             ]
-        if tool_name == "get_alerts" and isinstance(raw, list):
-            if not raw:
-                return {"message": "현재 활성 경보 없음", "count": 0}
-            return [
-                {
-                    "경보유형": a.get("alert_type") or a.get("type"),
-                    "심각도": a.get("severity"),
-                    "상태": a.get("status"),
-                }
-                for a in raw[:10]  # 최대 10개로 제한
-            ]
         if tool_name == "get_insights" and isinstance(raw, list):
             if not raw:
                 return {"message": "현재 인사이트 없음", "count": 0}
@@ -957,8 +795,6 @@ class AgentRuntime:
             return self._summarize_tool_result("get_devices", self.registry_client.list_devices())
         if tool_name == "get_missions":
             return self._summarize_tool_result("get_missions", self.registry_client.list_missions())
-        if tool_name == "get_alerts":
-            return self._summarize_tool_result("get_alerts", self.registry_client.list_alerts())
         if tool_name == "get_insights":
             return self._summarize_tool_result("get_insights", self.registry_client.list_insights())
         if tool_name == "plan_mission":
@@ -1108,18 +944,11 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
-        alert = None
-        alert_id = payload.get("alert_id")
-        if alert_id:
-            try:
-                alert = self.registry_client.get_alert(str(alert_id))
-            except Exception:
-                alert = None
 
         # Mission type 결정: preset이 있으면 사용, 없으면 LLM 필수
         if _preset_mission_type:
             mission_type = _preset_mission_type
-            location = _preset_location or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+            location = _preset_location or payload.get("location") or {}
         else:
             # LLM으로 mission_type 분석 (필수, fallback 없음)
             llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
@@ -1130,8 +959,8 @@ class AgentRuntime:
                 raise RuntimeError(f"Mission type 분석 실패: {error_msg}")
 
             mission_type = llm_intent.get("mission_type")
-            location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
-        suppression_fingerprint = f"{mission_type}:{goal}:{(alert or {}).get('alert_id') or ''}"
+            location = llm_intent.get("location") or payload.get("location") or {}
+        suppression_fingerprint = f"{mission_type}:{goal}:{payload.get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
             return {
@@ -1158,11 +987,11 @@ class AgentRuntime:
             {
                 "summary": payload.get("insight_summary") or insight_texts.get("summary") or f"'{mission_type.replace('_', ' ').title()}' 미션이 준비되었습니다.",
                 "reason_summary": payload.get("reason_summary") or insight_texts.get("reason_summary") or "현재 디바이스 가용성 및 라우팅을 고려하여 실행 가능합니다.",
-                "severity": str(payload.get("severity") or ((alert or {}).get("severity") or "INFORMATION")).upper(),
+                "severity": str(payload.get("severity") or "INFORMATION").upper(),
                 "recommended_action": "review_and_approve_mission",
                 "confidence_level": "medium",
-                "related_event_id": payload.get("event_id") or (alert or {}).get("event_id"),
-                "related_alert_id": (alert or {}).get("alert_id"),
+                "related_event_id": payload.get("event_id"),
+                "related_alert_id": payload.get("alert_id"),
                 "metadata": {"goal": goal, "location": location},
             }
         )
@@ -1173,8 +1002,8 @@ class AgentRuntime:
                 "goal": goal or mission_type,
                 "summary": payload.get("summary") or f"Proposal with {len(steps)} step(s) for operator review.",
                 "source": payload.get("source") or "system_agent",
-                "alert_id": (alert or {}).get("alert_id"),
-                "event_id": payload.get("event_id") or (alert or {}).get("event_id"),
+                "alert_id": payload.get("alert_id"),
+                "event_id": payload.get("event_id"),
                 "insight_id": insight.get("insight_id"),
                 "steps": steps,
                 "metadata": {"location": location, "fingerprint": suppression_fingerprint},
@@ -1368,19 +1197,13 @@ class AgentRuntime:
         except Exception:
             devices = []
         try:
-            alerts = self.registry_client.list_alerts()
-        except Exception:
-            alerts = []
-        try:
             missions = self.registry_client.list_missions()
         except Exception:
             missions = []
         return {
             "devices": devices,
-            "alerts": alerts,
             "missions": missions,
             "devices.connected_count": len([device for device in devices if bool(device.get("connected"))]),
-            "alerts.waiting_count": len([alert for alert in alerts if str(alert.get("status") or "") in {"waiting", "registered", "processing"}]),
             "missions.in_progress_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "IN_PROGRESS"]),
             "missions.failed_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "FAILED"]),
         }
@@ -3002,32 +2825,14 @@ class AgentRuntime:
         }
         stored_event = self.registry_client.ingest_event(event_record)
 
-        alert_record = {
-            "event_id": event_id,
-            "source_system": "system_agent",
-            "source_agent_id": source_agent_id,
-            "source_role": source_role,
-            "alert_type": event_type,
-            "severity": severity,
-            "message": message,
-            "recommended_action": self.recommended_action_for_event(event_type, severity),
-            "metadata": metadata,
-        }
-        stored_alert = self.registry_client.ingest_alert(alert_record)
-        alert_id = stored_alert.get("alert_id")
-        try:
-            self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent processing")
-        except Exception:
-            pass
         proposal_bundle = await self.generate_mission_proposal(
             {
                 "title": f"{event_type.replace('_', ' ').title()} Mission Proposal",
                 "goal": message,
-                "alert_id": stored_alert.get("alert_id"),
                 "event_id": stored_event.get("event_id"),
                 "severity": severity,
                 "source": "event_report",
-                "summary": f"Proposal generated from alert {stored_alert.get('alert_id')}.",
+                "summary": f"Proposal generated from event {stored_event.get('event_id')}.",
             }
         )
         self.state.remember(
@@ -3035,7 +2840,6 @@ class AgentRuntime:
                 "kind": "event_report_processed",
                 "at": utc_now(),
                 "event_id": event_id,
-                "alert_id": stored_alert.get("alert_id"),
                 "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
                 "event_type": event_type,
                 "severity": severity,
@@ -3045,7 +2849,6 @@ class AgentRuntime:
             "received": True,
             "message_type": "event.report",
             "event_id": stored_event.get("event_id"),
-            "alert_id": stored_alert.get("alert_id"),
             "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
             "approval_id": (proposal_bundle.get("approval") or {}).get("approval_id"),
             "severity": severity,
@@ -3683,12 +3486,6 @@ class AgentRuntime:
                             "data": {"mission_id": mission_id},
                         }
                     )
-                    alert_id = str(mission.get("alert_id") or "")
-                    if alert_id:
-                        try:
-                            self.registry_client.complete_alert(alert_id, notes="Mission completed")
-                        except Exception as exc:
-                            logger.debug(f"Failed to complete alert {alert_id}: {exc}")
                     try:
                         self.registry_client.ingest_event(
                             {
@@ -3728,12 +3525,6 @@ class AgentRuntime:
                             },
                         }
                     )
-                    alert_id = str(mission.get("alert_id") or "")
-                    if alert_id:
-                        try:
-                            self.registry_client.acknowledge_alert(alert_id, approved=False, notes="Mission failed")
-                        except Exception as exc:
-                            logger.debug(f"Failed to mark alert {alert_id} as failed: {exc}")
                     try:
                         self.registry_client.ingest_event(
                             {

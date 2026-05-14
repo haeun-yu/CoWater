@@ -8,7 +8,6 @@ from src.db.connection import DatabaseConnection
 from src.registry.a2a_log_registry import A2ALogRegistry
 from src.registry.agent_connection_registry import AgentConnectionRegistry
 from src.registry.agent_registry import AgentRegistry
-from src.registry.alert_registry import AlertRegistry
 from src.registry.approval_registry import ApprovalRegistry
 from src.registry.config_registry import ConfigRegistry
 from src.registry.device_registry import DeviceRegistry
@@ -29,7 +28,6 @@ from src.transport.moth_subscriber import MothHealthcheckSubscriber
 @dataclass
 class RegistryComponents:
     registry: DeviceRegistry
-    alert_registry: AlertRegistry
     event_registry: EventRegistry
     a2a_log_registry: A2ALogRegistry
     policy_registry: PolicyRegistry
@@ -53,7 +51,6 @@ class RegistryComponents:
 
 def build_registry_components() -> RegistryComponents:
     storage_type = os.getenv("COWATER_STORAGE", "sqlite").lower()
-    alert_db_path = ":memory:" if storage_type == "memory" else ".data/alerts.db"
     event_db_path = ":memory:" if storage_type == "memory" else ".data/events.db"
     a2a_log_db_path = ":memory:" if storage_type == "memory" else ".data/a2a_logs.db"
 
@@ -75,7 +72,6 @@ def build_registry_components() -> RegistryComponents:
         telemetry_topic_template=APP_SETTINGS["moth"]["telemetry_topic_template"],
     )
 
-    alert_registry = AlertRegistry(db_path=alert_db_path)
     event_registry = EventRegistry(db_path=event_db_path)
     a2a_log_registry = A2ALogRegistry(db_path=a2a_log_db_path)
     policy_registry = PolicyRegistry()
@@ -115,7 +111,6 @@ def build_registry_components() -> RegistryComponents:
 
     return RegistryComponents(
         registry=registry,
-        alert_registry=alert_registry,
         event_registry=event_registry,
         a2a_log_registry=a2a_log_registry,
         policy_registry=policy_registry,

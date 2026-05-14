@@ -1,8 +1,8 @@
 """
 System Agent 의사결정 엔진 (LLM-primary)
 
-- Critical 긴급(distress, collision_risk CRITICAL): 즉각 rule 대응, LLM 없음
-- 그 외 모든 alert / 사용자 명령: LLM이 fleet 전체 컨텍스트를 보고 판단
+- 모든 사용자 명령: LLM이 fleet 전체 컨텍스트를 보고 판단
+- 이상 탐지: SYS_ANOMALY_DETECTED 이벤트로 처리
 """
 
 from __future__ import annotations
@@ -25,9 +25,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# 생명 안전 — LLM 없이 즉각 에스컬레이션
-CRITICAL_URGENT = {"distress", "collision_risk"}
-
 # RequestHandler가 LLM에게 노출하는 도구 목록
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -38,11 +35,6 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "get_missions",
         "description": "등록된 미션 목록 조회 (제목, 상태, 우선순위, 생성 시각)",
-        "parameters": {},
-    },
-    {
-        "name": "get_alerts",
-        "description": "발생한 경보 목록 조회 (심각도, 유형, 상태, 발생 시각)",
         "parameters": {},
     },
     {
@@ -100,27 +92,6 @@ class DecisionEngine:
             self.llm_client = None
             self.llm_enabled = False
 
-    # ──────────────────────────────────────────────
-    # Critical rule (즉각 대응)
-    # ──────────────────────────────────────────────
-
-    def is_critical_urgent(self, alert: dict[str, Any]) -> bool:
-        alert_type = str(alert.get("alert_type") or "").lower()
-        severity = str(alert.get("severity") or "").upper()
-        return severity == "CRITICAL" and alert_type in CRITICAL_URGENT
-
-    def critical_response(self, alert: dict[str, Any]) -> dict[str, Any]:
-        alert_type = str(alert.get("alert_type") or "unknown")
-        decision = {
-            "at": utc_now(),
-            "mode": "critical_rule",
-            "action": "escalate_alert",
-            "priority": "critical",
-            "reasoning": f"{alert_type} CRITICAL — 즉각 에스컬레이션",
-            "llm_analysis": None,
-        }
-        return decision
-
     def _normalize_llm_error(self, error_ctx: Any) -> dict[str, Any]:
         if error_ctx is None:
             return {}
@@ -135,100 +106,6 @@ class DecisionEngine:
             "error_type": "unknown_error",
             "message": str(error_ctx),
         }
-
-    # ──────────────────────────────────────────────
-    # 동기 decide (alert 기록용, 하위 호환)
-    # ──────────────────────────────────────────────
-
-    def decide(self, state: AgentState, alert: dict[str, Any]) -> dict[str, Any]:
-        actions = set(self.skills.list_actions())
-        alert_type = str(alert.get("alert_type") or "unknown")
-        severity = str(alert.get("severity") or "INFORMATION").upper()
-        metadata = alert.get("metadata") or {}
-        recommendations: list[dict[str, Any]] = []
-
-        if alert_type == "mine_detection" and "mission.assign" in actions:
-            recommendations.append({
-                "action": "mission.assign",
-                "priority": "critical" if severity == "CRITICAL" else "high",
-                "mission_type": "mine_survey_and_removal",
-                "params": {"location": metadata.get("location", {})},
-            })
-        elif alert.get("recommended_action") and "task.assign" in actions:
-            recommended = str(alert["recommended_action"]).lower()
-            task_type = (
-                "survey_depth" if "survey" in recommended
-                else "remove_mine" if "remove" in recommended
-                else "generic"
-            )
-            recommendations.append({
-                "action": "task.assign",
-                "priority": severity,
-                "task_type": task_type,
-                "params": {"location": metadata.get("location", {})},
-            })
-
-        decision = {
-            "at": utc_now(),
-            "mode": "rule",
-            "recommendations": recommendations,
-            "alert_type": alert_type,
-            "severity": severity,
-        }
-        state.last_decision = decision
-        return decision
-
-    # ──────────────────────────────────────────────
-    # LLM 분석
-    # ──────────────────────────────────────────────
-
-    async def analyze_alert(
-        self,
-        alert: dict[str, Any],
-        devices: list[dict[str, Any]],
-        state: AgentState,
-    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-        """
-        Fleet 전체 컨텍스트로 alert 분석 → 디바이스 선정 / 임무 계획
-        
-        Returns: (llm_result, error_context)
-        - If successful: (result_dict, None)
-        - If failed: (None, error_dict)
-        """
-        try:
-            prompt = self._alert_prompt(alert, devices, state)
-            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
-            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
-            
-            # LLM 오류 처리
-            if error_ctx is not None:
-                error_dict = self._normalize_llm_error(error_ctx)
-                error_type = str(error_dict.get("error_type") or "unknown_error")
-                log_fn = logger.warning if error_type == "circuit_open" else logger.error
-                log_fn(
-                    f"LLM alert 분석 실패 [{error_type}] "
-                    f"(시도 {error_dict.get('attempt_number', 1)}/{error_dict.get('max_attempts', 3)}, "
-                    f"{error_dict.get('elapsed_ms', 0)}ms): {error_dict.get('message', '')}"
-                )
-                return None, error_dict
-            
-            # 응답 파싱
-            result = self._parse(response) if response else None
-            if result:
-                logger.info(f"LLM alert 분석 성공: {result.get('reasoning', '')[:80]}")
-            else:
-                logger.warning(f"LLM alert 분석 응답 파싱 실패 (응답: {response[:100] if response else 'empty'})")
-            
-            return result, None
-            
-        except Exception as e:
-            logger.error(f"LLM alert 분석 중 예기치 않은 오류: {type(e).__name__}: {e}")
-            error_dict = {
-                "error_type": "unknown_error",
-                "message": str(e),
-                "recovery_strategy": "fallback",
-            }
-            return None, error_dict
 
     async def analyze_command(
         self,
@@ -456,17 +333,6 @@ class DecisionEngine:
   ]
 }}"""
 
-    # ── alert type semantics ──────────────────────
-    _ALERT_CONTEXT = {
-        "mine_detection":     "수중 기뢰 또는 위험 물체 탐지. AUV로 정밀 탐색 후 ROV로 제거.",
-        "battery_emergency":  "디바이스 배터리 위급. 해당 디바이스가 귀환 중이며 fleet 재조율 필요.",
-        "collision_risk":     "충돌 위험 감지. 해당 디바이스 경보 확인 후 인근 지원 고려.",
-        "distress":           "조난 신호. 즉각 에스컬레이션 및 인근 가용 자산 집결.",
-        "battery_low":        "배터리 경고. 해당 디바이스 귀환 유도 또는 임무 재배분.",
-        "communication_loss": "통신 두절. 인근 중계 디바이스 배치 또는 시스템 경보.",
-        "tether_warning":     "ROV 테더 장력 이상. 즉시 확인 및 안전 조치.",
-    }
-
     # ── action semantics ──────────────────────────
     _ACTION_DESC = {
         "mission.plan":    "임무 계획 수립 (params: mission_type, location)",
@@ -475,7 +341,6 @@ class DecisionEngine:
         "approve_response":"시스템 대응 승인 및 실행 지시",
         "route_direct":    "디바이스에 직접 명령 전달 (중간 계층 없이)",
         "route_via_middle":"중간 계층 에이전트를 통해 명령 전달",
-        "escalate_alert":  "운용자에게 경보 에스컬레이션 (자동 대응 불가 시)",
     }
 
     # ── device selection criteria ─────────────────
@@ -493,58 +358,6 @@ class DecisionEngine:
     # ──────────────────────────────────────────────
     # Prompt builders
     # ──────────────────────────────────────────────
-
-    def _alert_prompt(
-        self,
-        alert: dict[str, Any],
-        devices: list[dict[str, Any]],
-        state: AgentState,
-    ) -> str:
-        actions = list(self.skills.list_actions())
-        metadata = alert.get("metadata") or {}
-        alert_type = str(alert.get("alert_type") or "unknown")
-        alert_ctx = self._ALERT_CONTEXT.get(alert_type, "알 수 없는 이벤트. 상황을 판단하여 대응하세요.")
-
-        action_lines = "\n".join(
-            f"  - {a}: {self._ACTION_DESC.get(a, '(설명 없음)')}"
-            for a in actions
-        )
-
-        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다.
-함대 전체를 관제하며, 수신된 alert에 대해 최적의 대응 action을 결정합니다.
-
-## 수신된 Alert
-- 유형: {alert_type}
-- 의미: {alert_ctx}
-- 심각도: {alert.get("severity", "INFORMATION")}
-- 메시지: {alert.get("message", "")}
-- 발생 위치: {json.dumps(metadata.get("location", {}), ensure_ascii=False)}
-
-## 현재 Fleet 상태
-{self._fleet_summary(devices)}
-
-## 현재 진행 중인 임무 수: {len(state.tasks)}개
-
-## 수행 가능한 action
-{action_lines}
-
-## 디바이스 선정 기준
-{self._SELECTION_GUIDE}
-
-## Action 선택 규칙
-- mine_detection → 반드시 "mission.assign" (탐색 + 제거 복합 임무)
-- 단일 작업 배정 → "task.assign"
-- 자동 대응 불가 → "escalate_alert"
-
-위 기준으로 최적의 action과 투입 디바이스를 결정하세요.
-JSON 형식으로만 응답하세요. 설명 없이 JSON만:
-{{
-  "action": "<위 목록 중 하나>",
-  "preferred_survey_device_id": "<탐색 담당 device id 또는 null>",
-  "preferred_remove_device_id": "<제거 담당 device id 또는 null>",
-  "priority": "critical" | "high" | "normal",
-  "reasoning": "<선정 근거 — 배터리·거리·능력 중 어떤 기준이 결정적이었나>"
-}}"""
 
     def _command_prompt(
         self,
@@ -568,7 +381,7 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
 - action 필드가 명확하면 그대로 사용
 - 자연어 reason/params에 대상 디바이스 이름이 있으면 fleet에서 찾아 id 매핑
 - 대상이 불명확하면 임무 수행 가능한 디바이스 중 배터리가 가장 높은 것 선택
-- 명령이 현재 fleet 상태상 불가능하면 action을 "escalate_alert"로 설정하고 reasoning에 이유 기술
+- 명령이 현재 fleet 상태상 불가능하면 action을 "escalate"로 설정하고 reasoning에 이유 기술
 
 ## 현재 Fleet 상태
 {self._fleet_summary(devices)}
@@ -828,18 +641,6 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
                         f'{d.get("name","??")}({d.get("status","??")})'
                         for d in result[:5]
                     )
-                elif action == "get_alerts" and isinstance(result, list):
-                    # 유형+심각도 기준으로 중복 제거해 카운트
-                    from collections import Counter
-                    counts = Counter(
-                        f'{a.get("경보유형","??")}({a.get("심각도","??")})'
-                        for a in result
-                    )
-                    summary = f'경보 {len(result)}건: ' + ", ".join(
-                        f'{k} {v}건' for k, v in counts.most_common(5)
-                    )
-                elif action == "get_alerts" and isinstance(result, dict):
-                    summary = result.get("message", str(result))
                 elif action == "get_missions" and isinstance(result, list):
                     summary = f'미션 {len(result)}건: ' + ", ".join(
                         f'{m.get("title","??")}/{m.get("status","??")}'
@@ -859,7 +660,7 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         if force_final:
             return (
                 f'CoWater 해양 운용 플랫폼 AI.\n'
-                f'[수집 데이터 설명] get_devices=장치상태, get_alerts=경보목록, get_missions=미션목록, get_insights=인사이트\n'
+                f'[수집 데이터 설명] get_devices=장치상태, get_missions=미션목록, get_insights=인사이트\n'
                 f'운용자 질문: "{user_input}"\n'
                 f'{history_text}\n'
                 f'위 데이터를 CoWater 해양 운용 맥락으로 해석해 한국어로 답변. JSON만 출력:\n'
@@ -909,7 +710,6 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         self,
         devices: list[dict[str, Any]],
         missions: list[dict[str, Any]],
-        alerts: list[dict[str, Any]],
         state: AgentState,
     ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
         """LLM으로 fleet 전체 복합 패턴 이상 탐지
@@ -917,17 +717,17 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         Returns: (analysis_result, error_context)
         """
         if not self.llm_enabled or not self.llm_client:
-            return self._rule_based_fleet_check(devices, missions, alerts), {"error_type": "llm_disabled"}
+            return self._rule_based_fleet_check(devices, missions), {"error_type": "llm_disabled"}
 
         try:
-            prompt = self._fleet_pattern_prompt(devices, missions, alerts)
+            prompt = self._fleet_pattern_prompt(devices, missions)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
             response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
 
             if error_ctx is not None:
                 error_dict = self._normalize_llm_error(error_ctx)
                 logger.warning(f"LLM fleet pattern 분석 실패, rule-based fallback: {error_dict.get('message', '')}")
-                return self._rule_based_fleet_check(devices, missions, alerts), error_dict
+                return self._rule_based_fleet_check(devices, missions), error_dict
 
             result = self._parse(response) if response else None
             if result:
@@ -935,11 +735,11 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
                 return result, None
             else:
                 logger.warning("LLM fleet pattern 응답 파싱 실패, rule-based fallback")
-                return self._rule_based_fleet_check(devices, missions, alerts), {"error_type": "parse_error"}
+                return self._rule_based_fleet_check(devices, missions), {"error_type": "parse_error"}
 
         except Exception as e:
             logger.error(f"LLM fleet pattern 분석 중 오류: {type(e).__name__}: {e}")
-            return self._rule_based_fleet_check(devices, missions, alerts), {
+            return self._rule_based_fleet_check(devices, missions), {
                 "error_type": "unknown_error",
                 "message": str(e),
             }
@@ -948,7 +748,6 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         self,
         devices: list[dict[str, Any]],
         missions: list[dict[str, Any]],
-        alerts: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """규칙 기반 fleet 이상 감지"""
         anomalies = []
@@ -993,18 +792,12 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         self,
         devices: list[dict[str, Any]],
         missions: list[dict[str, Any]],
-        alerts: list[dict[str, Any]],
     ) -> str:
         """Fleet 복합 패턴 분석 프롬프트"""
         missions_summary = "\n".join(
             f"  - {m.get('title', 'Unknown')} (상태: {m.get('status', 'UNKNOWN')}, id: {m.get('mission_id')})"
             for m in missions[:10]
         ) or "  (진행 중인 임무 없음)"
-
-        alerts_summary = "\n".join(
-            f"  - {a.get('alert_type', 'Unknown')}: {a.get('message', 'No message')} (심각도: {a.get('severity', 'INFO')})"
-            for a in alerts[-10:]
-        ) or "  (최근 alerts 없음)"
 
         return f"""당신은 CoWater 해양 통합 운용 플랫폼의 시스템 감시 AI입니다.
 Fleet 전체의 복합 패턴 이상을 분석합니다.
@@ -1014,9 +807,6 @@ Fleet 전체의 복합 패턴 이상을 분석합니다.
 
 ## 진행 중인 임무
 {missions_summary}
-
-## 최근 Alerts (최신 10개)
-{alerts_summary}
 
 ## 분석 요청
 다음 항목들의 **복합 패턴**을 분석하세요:
