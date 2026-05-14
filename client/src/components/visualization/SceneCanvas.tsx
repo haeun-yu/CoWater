@@ -318,7 +318,15 @@ export function SceneCanvas() {
       className="border border-white/10 bg-[#07131d]">
 
       {/* ── 3D Canvas ── */}
-      <Canvas camera={{ position: [0, 8, 20], fov: 55 }}>
+      <Canvas
+        camera={{ position: [0, 8, 20], fov: 55 }}
+        onCreated={(state) => {
+          state.gl.canvas.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            console.warn('WebGL context lost, attempting recovery...');
+          });
+        }}
+      >
         <ambientLight intensity={0.5} />
         <directionalLight position={[10, 20, 10]} intensity={0.8} color="#fff8e7" />
         <pointLight position={[0, -5, 0]} intensity={0.3} color="#3b82f6" />

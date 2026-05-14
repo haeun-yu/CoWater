@@ -38,11 +38,14 @@ export function MissionPage() {
     if (!selectedMission?.mission_id) return;
     setCancelling(true);
     try {
-      await fetch(`${REGISTRY_URL}/missions/${selectedMission.mission_id}`, {
+      const response = await fetch(`${REGISTRY_URL}/missions/${selectedMission.mission_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...selectedMission, status: 'CANCELLED' }),
       });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       setSelectedId(null);
     } catch (err) {
       console.error('Cancel failed:', err);

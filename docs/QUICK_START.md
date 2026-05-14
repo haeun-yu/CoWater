@@ -1,53 +1,105 @@
 # CoWater 실행 가이드
 
-## ⚡ 초급 사용자: 한 줄로 실행 & 테스트
+## 🚀 빠른 시작
 
-```bash
-cd /Users/teamgrit/Documents/CoWater
-./run_full_test.sh
-```
-
-**자동으로 수행되는 작업:**
-1. ✅ 모든 서비스 자동 시작 (이미 실행 중이면 스킵)
-2. ✅ 서비스 상태 확인 (Registry, System Agent, Device Agents)
-3. ✅ API 연결성 테스트
-4. ✅ 통합 테스트 실행 (mine_removal_scenario)
-5. ✅ 테스트 결과 분석 & 리포트 출력
-6. ✅ Client UI 접속 링크 제공
-
----
-
-## 🎯 표준 실행
-
-서비스 시작:
+### 1. 모든 서비스 시작
 
 ```bash
 cd /Users/teamgrit/Documents/CoWater
 ./cowaterctl.sh start
 ```
 
-중지 / 재시작 / 상태:
+**자동으로 실행:**
+- Registry Server (포트 8280)
+- System Agent Layer (포트 9110-9116, 6개 role)
+- Device Agents (Ship-Middle, USV/AUV/ROV-Lower)
+
+### 2. 상태 확인
 
 ```bash
-./cowaterctl.sh stop
-./cowaterctl.sh restart
 ./cowaterctl.sh status
 ```
 
-로그 실시간 보기:
+모든 포트가 활성화될 때까지 잠시 대기합니다. (10-15초)
+
+### 3. 로그 보기 (선택)
 
 ```bash
-./cowaterctl.sh logs Registry
-./cowaterctl.sh logs System-Agent
-./cowaterctl.sh logs AUV-Lower
-# 가능한 이름: Registry | System-Agent | Ship-Middle | USV-Lower | AUV-Lower | ROV-Lower
+# 각각 실시간 로그 보기
+./cowaterctl.sh logs registry
+./cowaterctl.sh logs system-agent
+./cowaterctl.sh logs device-ship
+./cowaterctl.sh logs device-usv
+./cowaterctl.sh logs device-auv
+./cowaterctl.sh logs device-rov
 ```
 
-브라우저에서 열기:
+### 4. Client UI 접속
+
+브라우저에서:
 
 - **Client SPA**: `http://127.0.0.1:5173/`
 - **운영 관제**: `http://127.0.0.1:5173/ops`
 - **미션 상세**: `http://127.0.0.1:5173/mission/<mission_id>`
+
+### 5. 중지
+
+```bash
+./cowaterctl.sh stop
+```
+
+---
+
+## 스크립트 명령어
+
+```bash
+./cowaterctl.sh start              # 모든 서비스 시작
+./cowaterctl.sh stop               # 모든 서비스 중지
+./cowaterctl.sh restart            # 재시작
+./cowaterctl.sh status             # 상태 확인 (11개 포트 체크)
+./cowaterctl.sh logs <service>     # 실시간 로그
+```
+
+---
+
+## 고급: 수동 실행
+
+cowaterctl.sh 없이 직접 실행하려면:
+
+### 0단계: venv 활성화
+
+```bash
+cd /Users/teamgrit/Documents/CoWater
+source .venv/bin/activate
+```
+
+### 1단계: Registry Server
+
+```bash
+cd server/registration
+python device_registration_server.py
+```
+
+### 2단계: System Agent Layer
+
+새 터미널:
+
+```bash
+cd server/system-agent
+python run_system_agents.py
+```
+
+### 3단계: Device Agents
+
+각각 새 터미널에서:
+
+```bash
+cd device
+python device_agent.py --type ship --layer middle
+python device_agent.py --type usv --layer lower
+python device_agent.py --type auv --layer lower
+python device_agent.py --type rov --layer lower
+```
 
 ---
 
@@ -101,88 +153,32 @@ CoWater System
 
 ---
 
-## 수동 실행 순서
+## Device Agent 옵션
 
-venv 활성화:
-
-```bash
-cd /Users/teamgrit/Documents/CoWater
-source .venv/bin/activate
-```
-
-### 1. Registry Server
-
-```bash
-cd server/registration
-python device_registration_server.py
-```
-
-```bash
-curl http://127.0.0.1:8280/health
-```
-
-### 2. System Agent Layer
-
-```bash
-cd server/system-agent
-python run_system_agents.py
-```
-
-```bash
-curl http://127.0.0.1:9116/health
-curl http://127.0.0.1:9110/health
-```
-
-### 3. Middle Agent
-
-```bash
-cd device
-python device_agent.py --type ship --layer middle
-```
-
-Device Agent 시작 시 자동으로 다음이 수행됩니다:
-
-```
-1️⃣ 설정 파일 로드      → device/configs/{type}-{layer}.json 읽음
-                         (Device ID, capabilities, System Agent endpoint)
-                         ↓
-2️⃣ IdentityStore 확인  → .data/identity/{device_id}.json 존재?
-                         ↓
-         ┌─ 있음 → 캐시된 agent_id/endpoint 사용
-         │
-         └─ 없음 → System Agent Registry에 등록
-                   (device_id, agent_id, stream URLs 획득)
-                   → 로컬에 저장
-                   ↓
-3️⃣ Heartbeat 시작      → 1초 주기로 System Agent로 상태 보고
-```
-
-**주요 파일:**
-- 설정: `device/configs/{type}-{layer}.json`
-- 로컬 캐시: `.data/identity/{device_id}.json`
-- 로그: `.logs/{Type}-{Layer}.log`
-
-### 4. Lower Agents
-
-```bash
-cd device
-python device_agent.py --type usv --layer lower
-python device_agent.py --type auv --layer lower
-python device_agent.py --type rov --layer lower
-```
-
-같은 타입을 여러 개 띄울 때는 `--port`로 구분:
+같은 타입을 여러 개 띄우려면 `--port` 사용:
 
 ```bash
 python device_agent.py --type usv --layer lower --port 9121
 python device_agent.py --type usv --layer lower --port 9122
 ```
 
-각 Device Agent는 자신의 설정파일에서 Device ID를 읽어 독립적으로 등록됩니다.
+### 옵션 목록
 
-### Device Agent 설정 파일 예시
+| 옵션       | 필수 | 설명                                  |
+|------------|------|---------------------------------------|
+| `--type`   | ✅   | `usv` / `auv` / `rov` / `ship`         |
+| `--layer`  | ✅   | `lower` / `middle`                    |
+| `--port`   |      | 포트 오버라이드 (기본값: config.json) |
+| `--host`   |      | 호스트 오버라이드                     |
+| `--config` |      | 커스텀 config.json 경로               |
 
-`device/configs/auv-lower.json`:
+---
+
+## 설정 파일 구조
+
+각 Device Agent는 `device/configs/{type}-{layer}.json`에서 설정을 읽습니다.
+
+예시 (`device/configs/auv-lower.json`):
 ```json
 {
   "device": {
@@ -220,16 +216,6 @@ python device_agent.py --type usv --layer lower --port 9122
 - `device.actions`: 이 Device가 수행 가능한 작업
 - `capabilities`: 통신 매체 (ACOUSTIC, RF, INTERNET 등)
 - `system_agent.endpoint`: DeviceBridge 주소/포트
-
-### device_agent.py 옵션
-
-| 옵션       | 필수 | 설명                                           |
-| ---------- | ---- | ---------------------------------------------- |
-| `--type`   | ✅   | 디바이스 타입: `usv` / `auv` / `rov` / `ship`  |
-| `--layer`  | ✅   | 에이전트 계층: `lower` / `middle`              |
-| `--port`   |      | 포트 오버라이드 (기본값: config.json)          |
-| `--host`   |      | 호스트 오버라이드                              |
-| `--config` |      | 커스텀 config.json 경로                        |
 
 ---
 
