@@ -82,3 +82,19 @@
 
 **Remember**: 이 규칙들이 있어야 Claude가 **안전하고 정확**합니다.  
 **모든 규칙보다 우선**: 의심되면 물어보기! 🛡️
+
+---
+
+## Agent Skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Issues use standard triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain language and architecture context is centralized in `CONTEXT.md` (single-context layout). See `docs/agents/domain.md`.
