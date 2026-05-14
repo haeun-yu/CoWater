@@ -156,9 +156,17 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
         return await runtime.execute_role_request(body or {})
 
     @app.post("/mission-proposals/generate")
-    def generate_mission_proposal(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+    async def generate_mission_proposal(body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        import traceback
         body = body or {}
-        return runtime.generate_mission_proposal(body)
+        try:
+            return await runtime.generate_multiple_mission_proposals(body)
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error in generate_multiple_mission_proposals: {type(e).__name__}: {str(e)}"
+            )
 
     @app.post("/approvals/{approval_id}/decision")
     async def approval_decision(approval_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:

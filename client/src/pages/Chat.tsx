@@ -28,11 +28,12 @@ export function ChatPage() {
 
       if (response.ok) {
         const data = await response.json();
-        const proposal = data.proposal;
-        const approval = data.approval;
+        const proposals = data.proposals || [data.proposal];
+        const source = data.strategy_source === 'llm' ? 'LLM' : '규칙 기반';
+        const proposalList = proposals.map((p: any, i: number) => `${i+1}. ${p.title}`).join('\n');
         const assistantMsg = {
           role: 'assistant',
-          content: `✅ 작업 제안이 생성되었습니다!\n제목: ${proposal.title}\n목표: ${proposal.goal || '(no goal)'}\n상태: ${proposal.status}\nProposal ID: ${proposal.id || proposal.proposal_id}\nApproval ID: ${approval?.approval_id || '(pending)'}`
+          content: `✅ 3가지 작전 제안이 생성되었습니다! (${source})\n\n${proposalList}\n\n📋 Proposal 페이지에서 선택 및 승인하세요.`
         };
         setMessages(prev => [...prev, assistantMsg]);
       } else {

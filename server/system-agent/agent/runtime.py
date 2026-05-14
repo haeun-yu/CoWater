@@ -474,7 +474,7 @@ class AgentRuntime:
                 self.registry_client.acknowledge_alert(str(alert.get("alert_id")), approved=True, notes="Critical urgent — auto escalated")
             except Exception:
                 pass
-            proposal_bundle = self.generate_mission_proposal(
+            proposal_bundle = await self.generate_mission_proposal(
                 {
                     "title": f"{str(alert.get('alert_type') or 'Critical').replace('_', ' ').title()} Critical Response",
                     "goal": str(alert.get("message") or alert.get("alert_type") or "Critical mission"),
@@ -530,7 +530,7 @@ class AgentRuntime:
 
             self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
             logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={'success' if llm_result else ('error' if llm_error else 'disabled')}")
-            proposal_bundle = self.generate_mission_proposal(
+            proposal_bundle = await self.generate_mission_proposal(
                 {
                     "title": f"{str(alert.get('alert_type') or 'Alert').replace('_', ' ').title()} Proposal",
                     "goal": str(alert.get("message") or alert.get("alert_type") or "Mission proposal"),
@@ -776,7 +776,7 @@ class AgentRuntime:
         if role == "request_handler":
             return await self._execute_request_handler(parameters)
         if role == "mission_planner":
-            return self.generate_mission_proposal(parameters, allow_suppression=False)
+            return await self.generate_mission_proposal(parameters, allow_suppression=False)
         if role == "policy_manager":
             return self._execute_policy_manager(parameters)
         if role == "device_bridge":
@@ -831,7 +831,7 @@ class AgentRuntime:
             "type": "PROPOSAL",
             "status": "PENDING_APPROVAL",
             "event": event,
-            **self.generate_mission_proposal(
+            **(await self.generate_mission_proposal(
                 {
                     "goal": user_input or str(parameters.get("goal") or intent),
                     "event_id": event.get("event_id"),
@@ -839,7 +839,7 @@ class AgentRuntime:
                     "location": parameters.get("location") or {},
                 },
                 allow_suppression=False,
-            ),
+            ))
         }
 
     def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -850,7 +850,7 @@ class AgentRuntime:
             policy = self.registry_client.create_policy(parameters)
         return {"type": "RESPONSE", "status": "SUCCESS", "policy": policy}
 
-    def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
+    async def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
         alert = None
@@ -860,8 +860,15 @@ class AgentRuntime:
                 alert = self.registry_client.get_alert(str(alert_id))
             except Exception:
                 alert = None
-        mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
-        location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+
+        # LLM으로 intent 분석 시도, 실패 시 규칙 기반 fallback
+        llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
+        if llm_intent and llm_intent.get("mission_type"):
+            mission_type = llm_intent.get("mission_type")
+            location = llm_intent.get("location") or payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
+        else:
+            mission_type = self._infer_mission_type(goal, (alert or {}).get("alert_type"))
+            location = payload.get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
         suppression_fingerprint = f"{mission_type}:{goal}:{(alert or {}).get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
@@ -925,6 +932,57 @@ class AgentRuntime:
             "insight": insight,
             "proposal": proposal,
             "approval": approval,
+        }
+
+    async def generate_multiple_mission_proposals(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        사용자 대화 전용: 3개의 mission proposal을 생성하여 반환
+        각 proposal은 서로 다른 전략(표준/신속/정밀)을 기반으로 함
+
+        Returns: {
+            "proposals": [proposal1, proposal2, proposal3],
+            "approvals": [approval1, approval2, approval3],
+            "insights": [insight1, insight2, insight3],
+            "strategy_source": "llm" | "rule_based"
+        }
+        """
+        devices = self.registry_client.list_devices()
+        goal = str(payload.get("goal") or "").strip()
+
+        # Step 1: LLM으로 mission_type 분류 (Phase 1 기능 재사용)
+        llm_intent, _ = await self.decision_engine.analyze_intent(goal, devices, self.state)
+        if llm_intent and llm_intent.get("mission_type"):
+            mission_type = llm_intent["mission_type"]
+            location = llm_intent.get("location") or payload.get("location") or {}
+        else:
+            mission_type = self._infer_mission_type(goal, None)
+            location = payload.get("location") or {}
+
+        # Step 2: LLM으로 3가지 전략 생성
+        strategies, strategy_error = await self.decision_engine.generate_proposal_strategies(
+            goal, mission_type, location, devices, self.state
+        )
+
+        # Step 3: 각 전략으로 proposal/approval/insight 생성
+        results = []
+        for strategy in strategies:
+            bundle = await self.generate_mission_proposal(
+                {
+                    **payload,
+                    "title": strategy.get("title") or f"{mission_type} Proposal",
+                    "summary": strategy.get("summary") or f"{strategy.get('approach', 'strategy')} approach",
+                    "_approach": strategy.get("approach"),  # 메타데이터용
+                },
+                allow_suppression=False,
+            )
+            if not bundle.get("suppressed"):
+                results.append(bundle)
+
+        return {
+            "proposals": [r["proposal"] for r in results],
+            "approvals": [r["approval"] for r in results],
+            "insights": [r["insight"] for r in results],
+            "strategy_source": "llm" if not strategy_error else "rule_based",
         }
 
     def _command_proposal_title(self, goal: str, mission_type: str) -> str:
@@ -2573,7 +2631,7 @@ class AgentRuntime:
             mission_type = self._infer_mission_type(goal, None)
             if mission_type == "generic_mission" and params_mission_type:
                 mission_type = self._infer_mission_type(params_mission_type, None)
-            proposal_bundle = self.generate_mission_proposal(
+            proposal_bundle = await self.generate_mission_proposal(
                 {
                     "title": command.get("title") or self._command_proposal_title(goal, mission_type),
                     "goal": goal,
@@ -2648,7 +2706,7 @@ class AgentRuntime:
             return "escalate_alert"
         return None
 
-    def handle_event_report(self, event: dict[str, Any]) -> dict[str, Any]:
+    async def handle_event_report(self, event: dict[str, Any]) -> dict[str, Any]:
         severity = self.classify_event_severity(event)
         event_type = str(event.get("event_type") or event.get("type") or "unknown")
         event_id = str(event.get("event_id") or f"event-{uuid4()}")
@@ -2689,7 +2747,7 @@ class AgentRuntime:
             self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent processing")
         except Exception:
             pass
-        proposal_bundle = self.generate_mission_proposal(
+        proposal_bundle = await self.generate_mission_proposal(
             {
                 "title": f"{event_type.replace('_', ' ').title()} Mission Proposal",
                 "goal": message,

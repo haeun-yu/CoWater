@@ -33,13 +33,33 @@ class DecisionEngine:
     def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
         self.agent_config = agent_config
         self.skills = skills
+
+        llm_config = agent_config.get("llm", {})
+        llm_enabled_in_config = llm_config.get("enabled", True)
+
+        # LLM disabled in config
+        if not llm_enabled_in_config:
+            logger.info("LLM disabled in config, using rule-based decision making")
+            self.llm_client = None
+            self.llm_enabled = False
+            return
+
+        # LLM import unavailable
         if not make_llm_client:
-            raise RuntimeError("LLM client factory is unavailable")
+            logger.warning("LLM client factory unavailable, falling back to rule-based mode")
+            self.llm_client = None
+            self.llm_enabled = False
+            return
+
+        # Try to initialize LLM
         try:
-            self.llm_client = make_llm_client(agent_config.get("llm", {}))
+            self.llm_client = make_llm_client(llm_config)
+            logger.info("LLM client initialized successfully")
+            self.llm_enabled = True
         except Exception as e:
-            raise RuntimeError(f"System Agent LLM 초기화 실패: {e}") from e
-        self.llm_enabled = True
+            logger.warning(f"LLM initialization failed: {e}, falling back to rule-based mode")
+            self.llm_client = None
+            self.llm_enabled = False
 
     # ──────────────────────────────────────────────
     # Critical rule (즉각 대응)
@@ -219,6 +239,184 @@ class DecisionEngine:
             }
             return None, error_dict
 
+    async def analyze_intent(
+        self,
+        goal: str,
+        devices: list[dict[str, Any]],
+        state: AgentState,
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """
+        사용자 자연어 목표 → mission_type, location, priority 분류
+
+        Returns: (llm_result, error_context)
+        - If successful: (intent_dict with mission_type/location/priority, None)
+        - If failed: (None, error_dict)
+        """
+        if not self.llm_enabled or not self.llm_client:
+            logger.debug("LLM disabled, cannot analyze intent")
+            return None, {"error_type": "llm_disabled", "message": "LLM disabled in config"}
+
+        try:
+            prompt = self._intent_prompt(goal, devices, state)
+            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+
+            if error_ctx is not None:
+                error_dict = self._normalize_llm_error(error_ctx)
+                error_type = str(error_dict.get("error_type") or "unknown_error")
+                log_fn = logger.warning if error_type == "circuit_open" else logger.error
+                log_fn(
+                    f"LLM intent 분석 실패 [{error_type}] "
+                    f"(시도 {error_dict.get('attempt_number', 1)}/{error_dict.get('max_attempts', 3)}, "
+                    f"{error_dict.get('elapsed_ms', 0)}ms): {error_dict.get('message', '')}"
+                )
+                return None, error_dict
+
+            result = self._parse(response) if response else None
+            if result:
+                logger.info(f"LLM intent 분석 성공: {result.get('mission_type', 'unknown')} - {result.get('reasoning', '')[:80]}")
+            else:
+                logger.warning(f"LLM intent 분석 응답 파싱 실패 (응답: {response[:100] if response else 'empty'})")
+
+            return result, None
+
+        except Exception as e:
+            logger.error(f"LLM intent 분석 중 예기치 않은 오류: {type(e).__name__}: {e}")
+            error_dict = {
+                "error_type": "unknown_error",
+                "message": str(e),
+                "recovery_strategy": "fallback",
+            }
+            return None, error_dict
+
+    async def generate_proposal_strategies(
+        self,
+        goal: str,
+        mission_type: str,
+        location: dict[str, Any],
+        devices: list[dict[str, Any]],
+        state: AgentState,
+    ) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+        """
+        LLM에게 3가지 mission strategy 변형 생성 요청
+
+        Returns: (strategies_list, error_context)
+        Each strategy: {"title": str, "approach": str, "summary": str, "priority": str}
+        """
+        if not self.llm_enabled or not self.llm_client:
+            logger.debug("LLM disabled, returning rule-based strategies")
+            return self._rule_based_strategies(mission_type), {"error_type": "llm_disabled"}
+
+        try:
+            prompt = self._strategies_prompt(goal, mission_type, location, devices)
+            timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
+            response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
+
+            if error_ctx is not None:
+                error_dict = self._normalize_llm_error(error_ctx)
+                logger.warning(f"LLM proposal strategies 생성 실패, rule-based fallback 사용: {error_dict.get('message', '')}")
+                return self._rule_based_strategies(mission_type), error_dict
+
+            result = self._parse(response) if response else None
+            if result:
+                strategies = result.get("strategies") or []
+                if len(strategies) >= 3:
+                    logger.info(f"LLM proposal strategies 생성 성공: {len(strategies)} strategies")
+                    return strategies[:3], None
+                else:
+                    logger.warning(f"LLM returned {len(strategies)} strategies (need 3), using rule-based fallback")
+                    return self._rule_based_strategies(mission_type), {"error_type": "incomplete_response"}
+            else:
+                logger.warning("LLM proposal strategies 응답 파싱 실패, rule-based fallback 사용")
+                return self._rule_based_strategies(mission_type), {"error_type": "parse_error"}
+
+        except Exception as e:
+            logger.error(f"LLM proposal strategies 생성 중 오류: {type(e).__name__}: {e}")
+            return self._rule_based_strategies(mission_type), {
+                "error_type": "unknown_error",
+                "message": str(e),
+            }
+
+    def _rule_based_strategies(self, mission_type: str) -> list[dict[str, Any]]:
+        """LLM 실패 시 mission_type에 맞는 3가지 기본 전략 반환"""
+        base = mission_type.replace("_", " ").title()
+        return [
+            {
+                "title": f"{base} 표준 작전",
+                "approach": "standard",
+                "summary": "균형 잡힌 표준 접근 방식으로 안정적인 작전 실행",
+                "priority": "normal",
+            },
+            {
+                "title": f"{base} 신속 작전",
+                "approach": "fast",
+                "summary": "최소 자원으로 신속 대응하는 효율적 접근",
+                "priority": "high",
+            },
+            {
+                "title": f"{base} 정밀 작전",
+                "approach": "precise",
+                "summary": "철저한 다단계 탐사로 정밀하게 실행하는 방식",
+                "priority": "normal",
+            },
+        ]
+
+    def _strategies_prompt(
+        self,
+        goal: str,
+        mission_type: str,
+        location: dict[str, Any],
+        devices: list[dict[str, Any]],
+    ) -> str:
+        """3가지 전략 생성 LLM 프롬프트"""
+        location_str = json.dumps(location or {}, ensure_ascii=False)
+        devices_summary = self._fleet_summary(devices)
+
+        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 작전 계획 AI입니다.
+주어진 미션에 대해 3가지 서로 다른 전략적 접근법을 제안합니다.
+
+## 미션 정보
+- 목표: {goal}
+- 미션 타입: {mission_type}
+- 작전 지역: {location_str}
+
+## 현재 Fleet 상태
+{devices_summary}
+
+## 전략 개발 지침
+3가지 전략은 각각 다른 우선순위를 반영해야 합니다:
+
+1. **표준 작전** (approach: "standard")
+   - 균형 잡힌 접근
+   - 중간 정도의 투입 자원으로 안정적 실행
+   - 작전 완료 시간: 중간
+
+2. **신속 작전** (approach: "fast")
+   - 빠른 대응 우선
+   - 최소한의 필수 자원만 투입
+   - 작전 완료 시간: 단축
+   - 우선순위(priority): "high"
+
+3. **정밀 작전** (approach: "precise")
+   - 철저한 탐사 우선
+   - 다단계 검증 포함
+   - 확보 정확성: 최대
+   - 작전 완료 시간: 장기
+
+## 응답 형식
+다음 JSON으로만 응답하세요. 설명 없이 JSON만:
+{{
+  "strategies": [
+    {{
+      "title": "<작전명 (한국어)>",
+      "approach": "standard" | "fast" | "precise",
+      "summary": "<전략 설명 (1-2문장, 한국어)>",
+      "priority": "normal" | "high" | "low"
+    }},
+    ...
+  ]
+}}"""
+
     # ── alert type semantics ──────────────────────
     _ALERT_CONTEXT = {
         "mine_detection":     "수중 기뢰 또는 위험 물체 탐지. AUV로 정밀 탐색 후 ROV로 제거.",
@@ -345,6 +543,42 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
   "target_device_id": "<대상 device id 또는 null>",
   "params": {{}},
   "reasoning": "<명령 해석 근거 및 디바이스 선정 이유>"
+}}"""
+
+    def _intent_prompt(
+        self,
+        goal: str,
+        devices: list[dict[str, Any]],
+        state: AgentState,
+    ) -> str:
+        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다.
+운용자의 자연어 목표를 분석하여, 적절한 미션 타입과 위치 정보를 추출합니다.
+
+## 운용자 목표
+"{goal}"
+
+## 가능한 미션 타입
+- mine_clearance: 기뢰 탐지 및 제거 (기뢰, 탐지, 제거, 소나 등)
+- survey: 지형/해역 조사 (조사, 탐사, 스캔, 측량 등)
+- inspection: 수중 구조물 점검 (검사, 점검, 확인 등)
+- monitoring: 실시간 모니터링 (모니터링, 감시, 관찰 등)
+- generic_mission: 기타 미션
+
+## 현재 Fleet 상태
+{self._fleet_summary(devices)}
+
+## 응답 지침
+- mission_type: 위 목록에서 가장 적합한 타입
+- location: 목표에서 언급된 위치 (지역명, 좌표 등) 또는 null
+- priority: CRITICAL, HIGH, NORMAL 중 하나 (기뢰=HIGH, 긴급=CRITICAL)
+- reason: 분류 근거 (목표에서 어떤 키워드/맥락으로 판단했는가)
+
+JSON 형식으로만 응답하세요. 설명 없이 JSON만:
+{{
+  "mission_type": "mine_clearance" | "survey" | "inspection" | "monitoring" | "generic_mission",
+  "location": {{"area": "<지역명>" or null}},
+  "priority": "CRITICAL" | "HIGH" | "NORMAL",
+  "reasoning": "<분류 근거>"
 }}"""
 
     @staticmethod
