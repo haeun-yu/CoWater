@@ -13,10 +13,7 @@ import logging
 from typing import Any, Optional, TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
-try:
-    import websockets
-except ImportError:
-    websockets = None
+import websockets
 
 if TYPE_CHECKING:
     from src.registry.device_registry import DeviceRegistry
@@ -92,10 +89,6 @@ class MothHealthcheckSubscriber:
 
     async def connect(self) -> None:
         """Moth WebSocket 서버에 연결"""
-        if websockets is None:
-            logger.info("websockets 미설치 - Moth 구독 비활성화")
-            return
-
         if self.ws is not None and not self._ws_is_closed():
             return
 
@@ -279,10 +272,6 @@ class MothHealthcheckSubscriber:
 
     async def start(self) -> None:
         """Moth 구독 시작"""
-        if websockets is None:
-            logger.info("websockets 미설치 - Moth 구독 스킵")
-            return
-
         self.is_running = True
         logger.info(f"MothHealthcheckSubscriber 시작: {self.moth_server_url}")
 

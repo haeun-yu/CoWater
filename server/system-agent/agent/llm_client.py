@@ -141,7 +141,7 @@ class OllamaClient(LLMClient):
         self._circuit_open_until = 0.0
         self._last_skip_log_at = 0.0
         if httpx:
-            self.client = httpx.AsyncClient(timeout=60.0)
+            self.client = httpx.AsyncClient(timeout=None)  # per-request timeout 사용
         else:
             self.client = None
         logger.info(f"OllamaClient initialized: {endpoint}, model={model}, max_retries={max_retries}")

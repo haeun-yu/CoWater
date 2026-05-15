@@ -145,10 +145,8 @@ def create_app(runtime: AgentRuntime) -> FastAPI:
             import logging
             logging.getLogger(__name__).debug(f"Failed to update device {device_id}: {e}")
 
-        # Moth로 relay
-        publisher = getattr(runtime, "moth_publisher", None)
-        if publisher is not None:
-            await publisher.publish_healthcheck_payload(dict(payload, relayed_by=runtime.state.registry_id))
+        # 헬스체크는 Registry 이벤트로 저장하지 않음 (초당 수 회 발생 → Moth 과부하)
+        # 장치 상태는 Registry device 테이블에서 직접 조회 가능
 
         return {"relayed": True, "child": child_id}
 

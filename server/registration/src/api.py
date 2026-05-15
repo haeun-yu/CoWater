@@ -258,7 +258,7 @@ def update_device_connectivity(
 
 @app.post("/events/ingest", status_code=status.HTTP_201_CREATED)
 def ingest_event(body: dict[str, Any]) -> dict[str, Any]:
-    """Event 생성"""
+    """Event 생성 (Registry 저장 전용 — 에이전트 간 통신은 Moth MEB 직접 사용)"""
     event_type = body.get("type", body.get("event_type", "UNKNOWN"))
     payload = body.get("data", {})
     actor_type = body.get("actor_type")
@@ -285,9 +285,7 @@ def ingest_event(body: dict[str, Any]) -> dict[str, Any]:
         data=payload,
         status=body.get("status", "OPEN"),
     )
-    result = event.to_dict()
-    _publish_registry_snapshot("events", [e.to_dict() for e in event_registry.list_events()])
-    return result
+    return event.to_dict()
 
 
 @app.get("/events")
@@ -368,7 +366,7 @@ def get_a2a_logs(
 
 
 @app.post("/policies", status_code=status.HTTP_201_CREATED)
-def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
+async def create_policy(body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
     """정책 생성 (Ch.17.1)"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.create_policy(body)
@@ -395,7 +393,7 @@ def get_policy(policy_id: str) -> dict[str, Any]:
 
 
 @app.put("/policies/{policy_id}")
-def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
+async def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str | None = Header(default=None)) -> dict[str, Any]:
     """정책 업데이트"""
     require_internal_caller(x_cowater_internal)
     result = policy_registry.update_policy(policy_id, body)
@@ -404,7 +402,7 @@ def update_policy(policy_id: str, body: dict[str, Any], x_cowater_internal: str 
 
 
 @app.delete("/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(default=None)) -> Response:
+async def delete_policy(policy_id: str, x_cowater_internal: str | None = Header(default=None)) -> Response:
     """정책 삭제"""
     require_internal_caller(x_cowater_internal)
     policy_registry.delete_policy(policy_id)
@@ -434,7 +432,7 @@ def get_insight(insight_id: str) -> dict[str, Any]:
 
 
 @app.post("/approvals", status_code=status.HTTP_201_CREATED)
-def create_approval(body: dict[str, Any]) -> dict[str, Any]:
+async def create_approval(body: dict[str, Any]) -> dict[str, Any]:
     result = approval_registry.create_approval(body).to_dict()
     _publish_registry_snapshot("approvals", [item.to_dict() for item in approval_registry.list_approvals()])
     return result
@@ -457,7 +455,7 @@ def get_approval(approval_id: str) -> dict[str, Any]:
 
 
 @app.post("/approvals/{approval_id}/decision")
-def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
     approved = bool(body.get("approved"))
     decided_by = str(body.get("decided_by") or "user")
     notes = body.get("notes")
@@ -476,7 +474,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/mission-proposals", status_code=status.HTTP_201_CREATED)
-def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
+async def create_mission_proposal(body: dict[str, Any]) -> dict[str, Any]:
     result = mission_proposal_registry.create_mission_proposal(body).to_dict()
     _publish_registry_snapshot("mission_proposals", [item.to_dict() for item in mission_proposal_registry.list_mission_proposals()])
     return result
@@ -499,7 +497,7 @@ def get_mission_proposal(proposal_id: str) -> dict[str, Any]:
 
 
 @app.post("/agent-connections", status_code=status.HTTP_201_CREATED)
-def create_agent_connection(body: dict[str, Any]) -> dict[str, Any]:
+async def create_agent_connection(body: dict[str, Any]) -> dict[str, Any]:
     record = agent_connection_registry.create_agent_connection(body)
     event_registry.create_event(
         actor_type="SYSTEM",
@@ -552,7 +550,7 @@ def update_agent_connection(connection_id: str, body: dict[str, Any]) -> dict[st
 
 
 @app.delete("/agent-connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_agent_connection(connection_id: str) -> Response:
+async def delete_agent_connection(connection_id: str) -> Response:
     try:
         record = agent_connection_registry.get_agent_connection(connection_id)
         agent_connection_registry.delete_agent_connection(connection_id)

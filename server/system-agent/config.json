@@ -69,7 +69,6 @@
     }
   },
   "moth": {
-    "enabled": false,
     "server_url": "wss://cobot.center:8287"
   },
   "event_rules": {

@@ -44,8 +44,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "plan_mission",
-        "description": "새 미션 계획 생성. 사용자가 작전/임무 수행을 요청할 때 사용",
+        "description": "새 미션 계획 생성. 사용자가 작전/임무 수행을 요청할 때 사용. 실행까지 원하면 이후 approve_mission을 호출하세요",
         "parameters": {"goal": {"type": "string", "description": "미션 목표 설명"}},
+    },
+    {
+        "name": "approve_mission",
+        "description": "plan_mission으로 생성된 미션을 승인하고 즉시 실행. plan_mission 결과의 approval_id가 필요",
+        "parameters": {"approval_id": {"type": "string", "description": "plan_mission 결과에서 받은 approval_id"}},
     },
     {
         "name": "generate_report",
@@ -615,66 +620,88 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
     # ReAct 에이전트 루프 (N-step tool calling)
     # ──────────────────────────────────────────────
 
+    @staticmethod
+    def _summarize_history(history: list) -> str:
+        lines = []
+        for step in history:
+            action = step["action"]
+            result = step["result"]
+            if action == "get_devices" and isinstance(result, list):
+                summary = f'장치 {len(result)}개: ' + ", ".join(
+                    f'{d.get("name","??")}({d.get("status","??")}, 배터리:{d.get("battery","?")}%)'
+                    for d in result
+                )
+            elif action == "get_missions" and isinstance(result, list):
+                summary = f'미션 {len(result)}건: ' + ", ".join(
+                    f'{m.get("title","??")}/{m.get("status","??")}' for m in result[:5]
+                )
+            elif action == "get_insights" and isinstance(result, list):
+                summary = f'인사이트 {len(result)}건'
+            elif isinstance(result, dict) and "message" in result:
+                summary = result["message"]
+            else:
+                summary = json.dumps(result, ensure_ascii=False, default=str)[:300]
+            lines.append(f'[{action}] {summary}')
+        return "\n".join(lines)
+
     def _react_prompt(self, user_input: str, tools: list, history: list, *, force_final: bool = False) -> str:
-        # 도구 목록: 이름(파라미터) - 한줄 설명
+        history_text = self._summarize_history(history) if history else ""
+
+        # force_final: 수집된 데이터로 무조건 답변
+        if force_final:
+            return (
+                f'CoWater 해양 운용 AI. JSON만 출력.\n'
+                f'운용자 질문: "{user_input}"\n'
+                f'수집 결과:\n{history_text}\n\n'
+                f'위 데이터로 한국어 답변. JSON만:\n'
+                f'{{"thought":"근거","action":"final_answer","action_input":{{"response":"한국어답변"}}}}'
+            )
+
+        last_action = history[-1]["action"] if history else None
+
+        # 히스토리가 있으면 → 다음 행동 결정
+        if history:
+            # plan_mission 이후: 사용자가 실행 원하면 approve_mission, 아니면 final_answer
+            if last_action == "plan_mission":
+                last_result = history[-1].get("result", {})
+                approval_id = last_result.get("approval_id", "")
+                if approval_id:
+                    next_hint = (
+                        f'사용자가 실행을 원하면 approve_mission을 호출하세요.\n'
+                        f'계획만 원하면 final_answer를 호출하세요.\n'
+                        f'approve_mission 예시: {{"thought":"실행","action":"approve_mission","action_input":{{"approval_id":"{approval_id}"}}}}'
+                    )
+                else:
+                    next_hint = f'final_answer로 계획 내용을 한국어로 전달하세요.'
+            else:
+                next_hint = f'final_answer로 한국어 답변을 전달하세요.'
+
+            return (
+                f'CoWater 해양 운용 AI. JSON만 출력.\n'
+                f'운용자 질문: "{user_input}"\n'
+                f'수집 결과:\n{history_text}\n\n'
+                f'→ {next_hint}\n'
+                f'출력: {{"thought":"이유","action":"선택한도구","action_input":{{}}}}'
+            )
+
+        # 첫 단계: 필요한 도구 선택
+        valid_names = [t["name"] for t in tools]
         tool_lines = []
         for t in tools:
             name = t["name"]
-            desc = t["description"].split(".")[0]  # 첫 문장만
+            desc = t["description"].split(".")[0]
             params = t.get("parameters") or {}
-            if params:
-                sig = ", ".join(f'{k}="..."' for k in params)
-                tool_lines.append(f'{name}({sig}): {desc}')
-            else:
-                tool_lines.append(f'{name}: {desc}')
-        tools_text = "\n".join(tool_lines)
-
-        # 히스토리: 도구별 자연어 요약
-        history_text = ""
-        if history:
-            lines = []
-            for step in history:
-                result = step["result"]
-                action = step["action"]
-                if action == "get_devices" and isinstance(result, list):
-                    summary = f'장치 {len(result)}개: ' + ", ".join(
-                        f'{d.get("name","??")}({d.get("status","??")})'
-                        for d in result[:5]
-                    )
-                elif action == "get_missions" and isinstance(result, list):
-                    summary = f'미션 {len(result)}건: ' + ", ".join(
-                        f'{m.get("title","??")}/{m.get("status","??")}'
-                        for m in result[:5]
-                    )
-                elif action == "get_missions" and isinstance(result, dict):
-                    summary = result.get("message", str(result))
-                elif action == "get_insights" and isinstance(result, list):
-                    summary = f'인사이트 {len(result)}건'
-                elif isinstance(result, dict) and "message" in result:
-                    summary = result["message"]
-                else:
-                    summary = json.dumps(result, ensure_ascii=False, default=str)[:200]
-                lines.append(f'[{action}] {summary}')
-            history_text = "\n수집 결과:\n" + "\n".join(lines)
-
-        if force_final:
-            return (
-                f'CoWater 해양 운용 플랫폼 AI.\n'
-                f'[수집 데이터 설명] get_devices=장치상태, get_missions=미션목록, get_insights=인사이트\n'
-                f'운용자 질문: "{user_input}"\n'
-                f'{history_text}\n'
-                f'위 데이터를 CoWater 해양 운용 맥락으로 해석해 한국어로 답변. JSON만 출력:\n'
-                f'{{"thought":"요약근거","action":"final_answer","action_input":{{"response":"한국어답변"}}}}'
-            )
+            sig = ", ".join(f'{k}="..."' for k in params) if params else ""
+            tool_lines.append(f'  "{name}"({sig}): {desc}' if sig else f'  "{name}": {desc}')
 
         return (
-            f'CoWater 해양 운용 플랫폼 AI. JSON만 출력.\n'
+            f'CoWater 해양 운용 AI. JSON만 출력.\n'
             f'명령: "{user_input}"\n\n'
-            f'도구:\n{tools_text}\n'
-            f'{history_text}\n\n'
-            f'규칙: 필요한 도구 호출 후 반드시 final_answer로 답변. 결과 없어도 final_answer 호출.\n'
-            f'예시: {{"thought":"장치 상태 확인 필요","action":"get_devices","action_input":{{}}}}\n'
-            f'출력: {{"thought":"...","action":"도구명","action_input":{{}}}}'
+            f'허용 도구 (action은 반드시 아래 중 하나):\n'
+            + "\n".join(tool_lines) + "\n\n"
+            f'허용 action 목록: {json.dumps(valid_names, ensure_ascii=False)}\n\n'
+            f'출력 (action에 위 목록 중 하나만 사용):\n'
+            f'{{"thought":"선택 이유","action":"허용된도구명","action_input":{{}}}}'
         )
 
     async def react_step(

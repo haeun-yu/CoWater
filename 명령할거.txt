@@ -1,0 +1,34 @@
+그리고 지금 이거 수정하면서 docs 스키마랑 달라졌지?
+```
+    steps: list = field(default_factory=list)
+    summary: str | None = None
+    source: str | None = None
+    alert_id: str | None = None
+    event_id: str | None = None
+    insight_id: str | None = None
+    metadata: dict = field(default_factory=dict)
+    ```
+
+demo.sh는 UI역할만 하고 있는거 맞지?
+
+_AREA_BOUNDS: dict[str, dict[str, float]] = {
+    "동해 북방": {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
+    "동해":      {"lat_min": 35.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
+    "서해":      {"lat_min": 33.5, "lat_max": 38.5, "lon_min": 124.0, "lon_max": 127.5},
+    "남해":      {"lat_min": 33.0, "lat_max": 35.5, "lon_min": 126.0, "lon_max": 130.5},
+    "독도":      {"lat_min": 37.2, "lat_max": 37.3, "lon_min": 131.8, "lon_max": 131.9},
+    "제주":      {"lat_min": 33.1, "lat_max": 33.6, "lon_min": 126.1, "lon_max": 126.9},
+    "북방":      {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 124.0, "lon_max": 135.0},
+}
+
+여기에 없는 데이터면 어떻게 답변하려고?
+
+_moth_event_loop: name=agents 채널 구독 (현재 name=events)
+Registry ingest_event async 변환은 그대로 유지 (프론트엔드 push 용도)
+이거 되어있어?
+
+moth_publish랑 sub말고도 meb파일을 따로 만들어서 처리하는건 어떠니 그럼 혼란이 좀 덜할거같은데
+meb은 그 하나의 스트림으로 pub도되고 sub도돼
+
+runtime.py가 좀 수상하다 agent 코드에 있는거..
+llm으로 다 처리하고 있는거 맞지?

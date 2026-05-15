@@ -43,6 +43,13 @@ class MissionProposalRecord:
     approved_at: str | None = None
     status_updated_at: str = field(default_factory=utc_now_iso)
     status_reason: str | None = None
+    steps: list = field(default_factory=list)
+    summary: str | None = None
+    source: str | None = None
+    alert_id: str | None = None
+    event_id: str | None = None
+    insight_id: str | None = None
+    metadata: dict = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -68,6 +75,13 @@ class MissionProposalRecord:
             "approved_at": self.approved_at,
             "status_updated_at": self.status_updated_at,
             "status_reason": self.status_reason,
+            "steps": self.steps,
+            "summary": self.summary,
+            "source": self.source,
+            "alert_id": self.alert_id,
+            "event_id": self.event_id,
+            "insight_id": self.insight_id,
+            "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -135,6 +149,13 @@ class MissionProposalRegistry:
             approved_by_user_id=payload.get("approved_by_user_id"),
             approved_at=payload.get("approved_at"),
             status_reason=payload.get("status_reason"),
+            steps=list(payload.get("steps") or []),
+            summary=payload.get("summary"),
+            source=payload.get("source"),
+            alert_id=payload.get("alert_id"),
+            event_id=payload.get("event_id"),
+            insight_id=payload.get("insight_id"),
+            metadata=dict(payload.get("metadata") or {}),
         )
         self._persist_mission_proposal(mission_proposal)
         return mission_proposal

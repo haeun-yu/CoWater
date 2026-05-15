@@ -14,7 +14,18 @@ from uuid import uuid4
 
 from agent.decision import DecisionEngine, TOOL_DEFINITIONS
 
-REACT_MAX_STEPS = 6
+REACT_MAX_STEPS = 4  # 불필요한 루프 방지
+
+# 한국 주요 해역 좌표 범위 (위도/경도, WGS84 기준)
+_AREA_BOUNDS: dict[str, dict[str, float]] = {
+    "동해 북방": {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
+    "동해":      {"lat_min": 35.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
+    "서해":      {"lat_min": 33.5, "lat_max": 38.5, "lon_min": 124.0, "lon_max": 127.5},
+    "남해":      {"lat_min": 33.0, "lat_max": 35.5, "lon_min": 126.0, "lon_max": 130.5},
+    "독도":      {"lat_min": 37.2, "lat_max": 37.3, "lon_min": 131.8, "lon_max": 131.9},
+    "제주":      {"lat_min": 33.1, "lat_max": 33.6, "lon_min": 126.1, "lon_max": 126.9},
+    "북방":      {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 124.0, "lon_max": 135.0},
+}
 from agent.event_system import (
     EventPublisher,
     create_step_evaluation_event,
@@ -296,8 +307,9 @@ class AgentRuntime:
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
             tasks = [self._registry_keepalive_loop(), self._state_cleanup_loop()]
-            if self.state.role == "insight_reporter":
-                tasks.append(self._event_based_report_loop())
+            # request_handler는 이벤트 발행자 역할만 하므로 구독 루프 불필요
+            if self.state.role != "request_handler":
+                tasks.append(self._moth_event_loop())
             await asyncio.gather(*tasks)
         else:
             await self._telemetry_processing_loop()
@@ -352,88 +364,160 @@ class AgentRuntime:
             decision = self.decision_engine.decide(self.state, telemetry)
             self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
-    async def _event_based_report_loop(self) -> None:
-        """InsightReporter: MEB 이벤트 기반 한국어 리포트 생성 (Registry 폴링)"""
-        logger = logging.getLogger(__name__)
-        poll_interval = 2
-        processed_event_ids = getattr(self.state, 'processed_event_ids', set())
+    async def _moth_event_loop(self) -> None:
+        """Moth 'agents' MEB 채널 구독 → role별 이벤트 핸들러로 디스패치"""
+        import websockets as _ws
+        from urllib.parse import urlsplit, urlunsplit
+
+        moth_cfg = self.config.get("moth", {})
+        raw_url = str(moth_cfg.get("server_url") or "wss://cobot.center:8287")
+        parsed = urlsplit(raw_url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+        role = self.state.role
+        # 모든 에이전트 이벤트는 "agents" MEB 채널 단일 채널 사용 (docs/core/event-types.md)
+        ws_url = f"{base}/pang/ws/meb?channel=instant&name=agents&source={role}&track={role}"
+        agent_name = str(self.state.name or role)
 
         while True:
             try:
-                await asyncio.sleep(poll_interval)
-                self.state.last_seen_at = utc_now()
-
-                try:
-                    events = self.registry_client.list_events()
-                except Exception as e:
-                    logger.debug(f"Failed to fetch events: {e}")
-                    continue
-
-                # SYS_MISSION_COMPLETED, SYS_ANOMALY_DETECTED 이벤트만 필터링
-                new_events = [
-                    event for event in events
-                    if event.get('type') in ['SYS_MISSION_COMPLETED', 'SYS_ANOMALY_DETECTED']
-                    and str(event.get('event_id') or '') not in processed_event_ids
-                ]
-
-                # 최신 이벤트부터 처리 (역순)
-                for event in reversed(new_events[-10:]):
-                    event_id = str(event.get('event_id') or '')
-                    event_type = str(event.get('type') or '')
-                    if not event_id:
-                        continue
-
+                async with _ws.connect(ws_url, ping_interval=None) as ws:
+                    await ws.send(json.dumps({
+                        "type": "subscribe",
+                        "channel": "agents",
+                        "channel_type": "meb",
+                    }))
+                    logger.info(f"[{role}] Moth 'agents' MEB 채널 구독 시작")
+                    ping_task = asyncio.create_task(self._moth_ping_loop(ws))
                     try:
-                        logger.info(f"Processing event {event_id}: {event_type}")
-                        devices = self.registry_client.list_devices()
-                        missions = self.registry_client.list_missions()
-                        insights = self.registry_client.list_insights()
-
-                        # 한국어 리포트 생성
-                        report, error = await self.decision_engine.generate_fleet_report(
-                            devices, missions, insights, self.state
-                        )
-
-                        if report:
-                            # 리포트를 새 Insight로 저장
-                            insight_record = self.registry_client.create_insight({
-                                "title": f"{event_type} 분석 리포트",
-                                "summary": report.get("report", ""),
-                                "highlights": report.get("highlights", []),
-                                "recommendations": report.get("recommendations", []),
-                                "source": "event_triggered_report",
-                                "related_event_id": event_id,
-                                "created_at": utc_now(),
-                            })
-                            logger.info(f"✅ Insight created from event {event_id}")
-                            self.state.remember({
-                                "kind": "event_report_generated",
-                                "at": utc_now(),
-                                "event_id": event_id,
-                                "event_type": event_type,
-                                "insight_id": insight_record.get("id"),
-                            })
-                        elif error:
-                            logger.warning(f"Report generation failed for event {event_id}: {error}")
-                            self.state.remember({
-                                "kind": "event_report_failed",
-                                "at": utc_now(),
-                                "event_id": event_id,
-                                "error": str(error),
-                            })
-
-                        # 처리 완료 표시
-                        processed_event_ids.add(event_id)
-                        if len(processed_event_ids) > 1000:
-                            processed_event_ids = set(list(processed_event_ids)[-500:])
-                        self.state.processed_event_ids = processed_event_ids
-
-                    except Exception as e:
-                        logger.error(f"Failed to process event {event_id}: {e}")
-
+                        while True:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=90)
+                            if isinstance(msg, (bytes, bytearray)):
+                                continue
+                            data = json.loads(msg)
+                            # Moth가 전달하는 payload 추출
+                            event = data.get("payload") or data.get("data") or {}
+                            if not isinstance(event, dict):
+                                continue
+                            # target_agents 필터 — 자신이 수신자가 아니면 무시
+                            target_agents = event.get("target_agents") or []
+                            if target_agents and agent_name not in target_agents:
+                                continue
+                            asyncio.create_task(self._handle_moth_event(event))
+                    except Exception:
+                        ping_task.cancel()
+                        raise
             except Exception as e:
-                logger.error(f"Event-based report loop error: {e}")
-                await asyncio.sleep(1)
+                logger.warning(f"[{role}] Moth event loop 재연결 중 ({type(e).__name__}): {e}")
+                await asyncio.sleep(5)
+
+    async def _moth_ping_loop(self, ws: Any) -> None:
+        """Moth WebSocket 연결 유지용 바이너리 ping"""
+        while True:
+            try:
+                await ws.send(b"ping")
+                await asyncio.sleep(10)
+            except Exception:
+                break
+
+    async def _publish_to_meb(self, event_type: str, payload: dict[str, Any], target_agents: list[str]) -> None:
+        """Moth 'agents' MEB 채널에 이벤트 직접 publish"""
+        import websockets as _ws
+        from urllib.parse import urlsplit, urlunsplit
+
+        moth_cfg = self.config.get("moth", {})
+        raw_url = str(moth_cfg.get("server_url") or "wss://cobot.center:8287")
+        parsed = urlsplit(raw_url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+        role = self.state.role
+        ws_url = f"{base}/pang/ws/meb?channel=instant&name=agents&source={role}&track={role}"
+        message = {
+            "event_type": event_type,
+            "source_role": role,
+            "source_agent_id": self.state.agent_id,
+            "target_agents": target_agents,
+            "payload": payload,
+        }
+        try:
+            async with _ws.connect(ws_url, ping_interval=None) as ws:
+                await ws.send(json.dumps({"type": "publish", "channel": "agents", "data": message}))
+                logger.info(f"[MEB] Published {event_type} → {target_agents}")
+        except Exception as e:
+            logger.warning(f"[MEB] Publish 실패 ({event_type}): {e}")
+
+    async def _handle_moth_event(self, event: dict[str, Any]) -> None:
+        """수신한 Moth MEB 이벤트를 역할별 핸들러로 라우팅
+        MEB 메시지 구조: {event_type, source_role, target_agents, payload}
+        """
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        role = self.state.role
+        payload = event.get("payload") or event.get("data") or {}
+        try:
+            if role == "mission_planner":
+                if event_type == "SYS_INTENT_CLASSIFIED":
+                    await self._handle_mission_intent_event(payload)
+            elif role == "policy_manager":
+                if event_type == "SYS_ANOMALY_DETECTED":
+                    await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
+            elif role == "system_sentinel":
+                if event_type == "DEVICE_HEALTHCHECK":
+                    await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
+            elif role == "insight_reporter":
+                if event_type in ("SYS_MISSION_COMPLETED", "SYS_ANOMALY_DETECTED"):
+                    await self._generate_insight_from_event(event)
+        except Exception as e:
+            logger.error(f"[{role}] Moth 이벤트 처리 오류 ({event_type}): {e}")
+
+    async def _handle_mission_intent_event(self, payload: dict[str, Any]) -> None:
+        """MissionPlanner: SYS_INTENT_CLASSIFIED (MISSION) 수신 → proposal 생성"""
+        goal = str(payload.get("user_input") or payload.get("goal") or "")
+        if not goal:
+            logger.warning("[MissionPlanner] SYS_INTENT_CLASSIFIED: goal 없음, 스킵")
+            return
+        logger.info(f"[MissionPlanner] 미션 intent 수신: {goal[:60]}")
+        try:
+            async with self._mission_lock:
+                await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+            logger.info(f"[MissionPlanner] Proposal 생성 완료: {goal[:40]}")
+        except Exception as e:
+            logger.error(f"[MissionPlanner] Proposal 생성 실패: {e}")
+            self.registry_client.ingest_event({
+                "event_type": "SYS_MISSION_UPDATED",
+                "source_system": "mission_planner",
+                "source_agent_id": self.state.agent_id,
+                "source_role": "mission_planner",
+                "severity": "WARNING",
+                "title": "미션 계획 실패",
+                "message": f"Proposal 생성 실패: {e}",
+                "data": {"goal": goal, "error": str(e)},
+            })
+
+    async def _generate_insight_from_event(self, event: dict[str, Any]) -> None:
+        """InsightReporter: 이벤트 수신 시 fleet 리포트 생성 및 Insight 저장"""
+        event_id = str(event.get("event_id") or "")
+        event_type = str(event.get("type") or event.get("event_type") or "")
+        logger.info(f"[InsightReporter] 이벤트 처리: {event_id} ({event_type})")
+        try:
+            devices = self.registry_client.list_devices()
+            missions = self.registry_client.list_missions()
+            insights = self.registry_client.list_insights()
+            report, error = await self.decision_engine.generate_fleet_report(
+                devices, missions, insights, self.state
+            )
+            if report:
+                self.registry_client.create_insight({
+                    "title": f"{event_type} 분석 리포트",
+                    "summary": report.get("report", ""),
+                    "highlights": report.get("highlights", []),
+                    "recommendations": report.get("recommendations", []),
+                    "source": "event_triggered_report",
+                    "related_event_id": event_id,
+                    "created_at": utc_now(),
+                })
+                logger.info(f"[InsightReporter] Insight 생성 완료 (event: {event_id})")
+            elif error:
+                logger.warning(f"[InsightReporter] 리포트 생성 실패: {error}")
+        except Exception as e:
+            logger.error(f"[InsightReporter] Insight 생성 오류: {e}")
 
     async def _evaluate_and_apply_policies(self, devices: list[dict[str, Any]], logger: Any) -> None:
         """Policy를 평가하고 Critical 상황 시 자동 대응 (Ch.17.1)"""
@@ -717,6 +801,28 @@ class AgentRuntime:
         if role == "policy_manager":
             return self._execute_policy_manager(parameters)
         if role == "device_bridge":
+            # MissionPlanner에서 전달된 미션 스텝을 Device Agent로 A2A 디스패치
+            steps = list(parameters.get("steps") or [])
+            mission_id = str(parameters.get("mission_id") or "")
+            if steps and mission_id:
+                devices = self.registry_client.list_devices()
+                response_like = {
+                    "response_id": mission_id,
+                    "mission_id": mission_id,
+                    "alert_id": parameters.get("alert_id"),
+                    "reason": parameters.get("reason") or "DeviceBridge task dispatch",
+                    "dispatch_result": {"steps": []},
+                }
+                dispatch = await self._dispatch_next_step(
+                    response_like, steps, devices, logging.getLogger(__name__)
+                )
+                return {
+                    "type": "COMMAND",
+                    "status": "SUCCESS",
+                    "delivered": dispatch.get("delivered"),
+                    "dispatch": dispatch,
+                }
+            # 단순 명령 처리 (레거시)
             command = {
                 "action": parameters.get("action") or parameters.get("command") or "hold_position",
                 "params": parameters.get("params") or {},
@@ -781,12 +887,19 @@ class AgentRuntime:
             ]
         if tool_name == "plan_mission" and isinstance(raw, dict):
             proposal = raw.get("proposal") or {}
+            approval = raw.get("approval") or {}
+            # approval_id: raw > approval > proposal 순으로 찾기
+            approval_id = (
+                raw.get("approval_id")
+                or approval.get("approval_id")
+                or proposal.get("approval_id")
+            )
             return {
                 "proposal_id": proposal.get("proposal_id"),
                 "title": proposal.get("title"),
                 "mission_type": proposal.get("mission_type"),
                 "steps_count": len(proposal.get("steps") or []),
-                "approval_id": proposal.get("approval_id"),
+                "approval_id": approval_id,
             }
         return raw
 
@@ -797,13 +910,118 @@ class AgentRuntime:
             return self._summarize_tool_result("get_missions", self.registry_client.list_missions())
         if tool_name == "get_insights":
             return self._summarize_tool_result("get_insights", self.registry_client.list_insights())
+        if tool_name == "approve_mission":
+            approval_id = str(tool_input.get("approval_id") or "")
+            if not approval_id:
+                return {"error": "approval_id가 필요합니다. plan_mission을 먼저 실행하세요."}
+            try:
+                result = await asyncio.wait_for(
+                    self.decide_approval_flow(approval_id, approved=True, decided_by="user"),
+                    timeout=60.0,
+                )
+                mission = result.get("mission") or {}
+                return {
+                    "approved": True,
+                    "mission_id": mission.get("mission_id"),
+                    "title": mission.get("title"),
+                    "status": mission.get("status"),
+                    "message": "미션이 승인되어 실행을 시작했습니다.",
+                }
+            except asyncio.TimeoutError:
+                return {"error": "미션 실행 시작 시간이 초과됐습니다. 잠시 후 상태를 확인하세요."}
+            except Exception as e:
+                return {"error": f"미션 승인 실패: {str(e)}"}
+
         if tool_name == "plan_mission":
             goal = str(tool_input.get("goal") or "")
-            raw = await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+            devices = self._summarize_tool_result(
+                "get_devices", self.registry_client.list_devices()
+            )
+            feasibility = self._check_area_feasibility(goal, devices)
+            if not feasibility["feasible"]:
+                return {"feasible": False, "reason": feasibility["reason"]}
+            try:
+                raw = await asyncio.wait_for(
+                    self.generate_mission_proposal({"goal": goal}, allow_suppression=False),
+                    timeout=80.0,
+                )
+            except asyncio.TimeoutError:
+                return {
+                    "feasible": False,
+                    "reason": "미션 계획 생성에 실패했습니다. LLM 응답 시간이 초과됐습니다. 잠시 후 다시 시도해 주세요.",
+                }
             return self._summarize_tool_result("plan_mission", raw)
         return {"error": f"알 수 없는 도구: {tool_name}"}
 
+    def _check_area_feasibility(self, goal: str, devices: list) -> dict:
+        """미션 목표에 언급된 해역에 장치가 실제로 배치돼 있는지 검증"""
+        # 가장 구체적인(긴) 해역명부터 매칭
+        matched_area = None
+        matched_bounds = None
+        for area_name in sorted(_AREA_BOUNDS, key=len, reverse=True):
+            if area_name in goal:
+                matched_area = area_name
+                matched_bounds = _AREA_BOUNDS[area_name]
+                break
+
+        if not matched_bounds:
+            # CoWater 운용 범위 밖 지역 키워드
+            _OUT_OF_RANGE = {"화성", "달", "우주", "남극", "북극", "대서양", "태평양", "인도양", "지중해", "북해"}
+            out_kw = next((kw for kw in _OUT_OF_RANGE if kw in goal), None)
+            if out_kw:
+                return {
+                    "feasible": False,
+                    "reason": (
+                        f"CoWater는 한국 해역 해양 운용 플랫폼입니다. "
+                        f"'{out_kw}'은(는) 운용 범위 밖입니다.\n"
+                        f"지원 해역: 동해, 동해 북방, 서해, 남해, 독도, 제주"
+                    ),
+                }
+            return {"feasible": True}  # 해역 지정 없음 → 현재 장치 위치 기준으로 수행
+
+        field_devices = [
+            d for d in devices
+            if d.get("lat") is not None and d.get("lon") is not None
+        ]
+        if not field_devices:
+            return {
+                "feasible": False,
+                "reason": "현재 위치 정보가 있는 장치가 없습니다.",
+            }
+
+        in_area = [
+            d for d in field_devices
+            if (matched_bounds["lat_min"] <= float(d["lat"]) <= matched_bounds["lat_max"]
+                and matched_bounds["lon_min"] <= float(d["lon"]) <= matched_bounds["lon_max"])
+        ]
+
+        if not in_area:
+            positions = ", ".join(
+                f'{d["name"]}(위도 {float(d["lat"]):.2f}°N, 경도 {float(d["lon"]):.2f}°E)'
+                for d in field_devices[:3]
+            )
+            return {
+                "feasible": False,
+                "reason": (
+                    f"'{matched_area}' 해역(위도 {matched_bounds['lat_min']}~"
+                    f"{matched_bounds['lat_max']}°N, 경도 {matched_bounds['lon_min']}~"
+                    f"{matched_bounds['lon_max']}°E)에 배치된 장치가 없습니다.\n"
+                    f"현재 장치 위치: {positions}"
+                ),
+            }
+
+        return {
+            "feasible": True,
+            "devices_in_area": [d["name"] for d in in_area],
+        }
+
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """
+        RequestHandler 역할:
+        - analyze_intent로 MISSION/QUERY/REPORT 분류 (단순하고 안정적)
+        - MISSION → SYS_INTENT_CLASSIFIED 이벤트 발행 후 PENDING 반환 (MissionPlanner가 처리)
+        - QUERY/REPORT → InsightReporter(9114) A2A 호출 후 즉시 응답
+        """
         user_input = str(
             parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or ""
         ).strip()
@@ -811,120 +1029,89 @@ class AgentRuntime:
         if not user_input:
             return {"type": "RESPONSE", "status": "ERROR", "message": "사용자 명령이 비어 있습니다."}
 
-        tools = list(TOOL_DEFINITIONS)
-        history: list[dict[str, Any]] = []
-        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds")
+        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds") or 60
+        devices_raw = self.registry_client.list_devices()
+        devices = self._summarize_tool_result("get_devices", devices_raw)
 
-        for step_num in range(1, REACT_MAX_STEPS + 1):
-            step_result, error = await self.decision_engine.react_step(
-                user_input, tools, history, timeout
-            )
-
-            if error:
-                error_msg = f"{error.get('error_type', 'unknown')}: {error.get('message', 'LLM 호출 실패')}"
-                return {"type": "RESPONSE", "status": "ERROR", "message": f"처리 실패 (단계 {step_num}): {error_msg}"}
-
-            if not step_result or not step_result.get("action"):
-                # LLM이 {"tool_calls": []} 등 종료 신호를 보낸 경우 → 강제 final_answer 시도
-                logger.warning(f"[ReAct {step_num}] action 없는 응답, 강제 final_answer 시도")
-                break
-
-            action = str(step_result["action"])
-            action_input = step_result.get("action_input") or {}
-            thought = step_result.get("thought", "")
-            logger.info(f"[ReAct {step_num}/{REACT_MAX_STEPS}] {action} | {thought[:80]}")
-
-            if action == "generate_report":
-                devices = self.registry_client.list_devices()
-                missions = self.registry_client.list_missions()
-                insights = self.registry_client.list_insights()
-                report, _ = await self.decision_engine.generate_fleet_report(
-                    devices, missions, insights, self.state
-                )
-                report_text = (report or {}).get("report") or "리포트 생성에 실패했습니다."
-                self.registry_client.ingest_event({
-                    "event_type": "SYS_REQUEST_PROCESSED",
-                    "source_system": "system_agent",
-                    "source_agent_id": self.state.agent_id,
-                    "source_role": self.state.role,
-                    "severity": "INFORMATION",
-                    "message": user_input,
-                    "target_type": "SYSTEM",
-                    "title": "Report generated",
-                    "description": f"RequestHandler generated fleet report in {step_num} step(s).",
-                    "data": {"steps": step_num, "tools_used": [h["action"] for h in history] + ["generate_report"]},
-                })
-                return {
-                    "type": "RESPONSE",
-                    "status": "SUCCESS",
-                    "message": report_text,
-                    "steps": step_num,
-                }
-
-            if action == "final_answer":
-                response_text = (
-                    action_input.get("response", "")
-                    if isinstance(action_input, dict)
-                    else str(action_input)
-                )
-                self.registry_client.ingest_event({
-                    "event_type": "SYS_REQUEST_PROCESSED",
-                    "source_system": "system_agent",
-                    "source_agent_id": self.state.agent_id,
-                    "source_role": self.state.role,
-                    "severity": "INFORMATION",
-                    "message": user_input,
-                    "target_type": "SYSTEM",
-                    "title": "Request processed",
-                    "description": f"RequestHandler completed in {step_num} step(s).",
-                    "data": {"steps": step_num, "tools_used": [h["action"] for h in history]},
-                })
-                return {
-                    "type": "RESPONSE",
-                    "status": "SUCCESS",
-                    "message": response_text,
-                    "steps": step_num,
-                }
-
-            tool_result = await self._execute_tool(
-                action, action_input if isinstance(action_input, dict) else {}
-            )
-            history.append({"action": action, "input": action_input, "result": tool_result})
-
-        # 최대 단계 소진 또는 action 없는 응답 → 수집된 정보로 강제 final_answer 요청
-        logger.warning(f"[ReAct] 강제 final_answer 시도 (수집 단계: {len(history)})")
-        forced, force_error = await self.decision_engine.react_step(
-            user_input, tools, history, timeout, force_final=True
+        # Step 1: analyze_intent로 intent_type 분류 (MISSION/QUERY/REPORT/SYSTEM_CONTROL)
+        intent_result, error = await self.decision_engine.analyze_intent(
+            user_input, devices_raw, self.state
         )
-        if not force_error and forced:
-            # {"action": "final_answer", "action_input": {"response": ...}} 형식
-            if forced.get("action") == "final_answer":
-                forced_input = forced.get("action_input") or {}
-                response_text = (
-                    forced_input.get("response", "")
-                    if isinstance(forced_input, dict)
-                    else str(forced_input)
-                )
-            # 모델이 {"answer": ...} 또는 {"response": ...} 형식으로 반환하는 경우
-            elif forced.get("answer"):
-                response_text = str(forced["answer"])
-            elif forced.get("response"):
-                response_text = str(forced["response"])
-            else:
-                response_text = None
 
-            if response_text:
+        if error:
+            error_msg = f"{error.get('error_type', 'unknown')}: {error.get('message', 'LLM 호출 실패')}"
+            return {"type": "RESPONSE", "status": "ERROR", "message": f"처리 실패: {error_msg}"}
+
+        intent_type = str((intent_result or {}).get("intent_type") or "QUERY").upper()
+        logger.info(f"[RequestHandler] intent_type={intent_type} | {(intent_result or {}).get('reasoning', '')[:80]}")
+
+        # ── MISSION 의도: SYS_INTENT_CLASSIFIED 이벤트 발행 → MissionPlanner가 처리 ──
+        if intent_type == "MISSION":
+            goal = user_input
+            devices = self._summarize_tool_result("get_devices", self.registry_client.list_devices())
+            feasibility = self._check_area_feasibility(goal, devices)
+            if not feasibility["feasible"]:
                 return {
                     "type": "RESPONSE",
-                    "status": "SUCCESS",
-                    "message": response_text,
-                    "steps": len(history) + 1,
+                    "status": "INFEASIBLE",
+                    "message": f"미션 수행 불가: {feasibility['reason']}",
                 }
-        return {
-            "type": "RESPONSE",
-            "status": "ERROR",
-            "message": f"최대 처리 단계({REACT_MAX_STEPS})를 초과했습니다.",
-        }
+            # Moth 'agents' MEB 채널에 직접 publish (Registry는 저장용으로만 별도 기록)
+            intent_id = f"intent-{uuid4()}"
+            meb_payload = {
+                "intent_type": "MISSION",
+                "user_input": user_input,
+                "goal": goal,
+                "intent_id": intent_id,
+                "devices_summary": devices,
+            }
+            asyncio.create_task(self._publish_to_meb(
+                "SYS_INTENT_CLASSIFIED", meb_payload, ["MissionPlanner"]
+            ))
+            # Registry에 감사 로그 저장 (비동기, 실패해도 무관)
+            try:
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_INTENT_CLASSIFIED",
+                    "source_system": "request_handler",
+                    "source_agent_id": self.state.agent_id,
+                    "source_role": "request_handler",
+                    "severity": "INFORMATION",
+                    "title": "사용자 미션 요청",
+                    "message": user_input,
+                    "data": meb_payload,
+                })
+            except Exception:
+                pass
+            logger.info(f"[RequestHandler] SYS_INTENT_CLASSIFIED MEB 발행 (intent_id={intent_id})")
+            return {
+                "type": "RESPONSE",
+                "status": "PENDING",
+                "message": (
+                    "미션 계획 요청이 MissionPlanner로 전달됐습니다.\n"
+                    "장치 역량 분석 후 실행 가능한 Proposal이 생성됩니다.\n"
+                    "UI의 Proposals 목록에서 원하는 계획을 승인해 주세요."
+                ),
+                "intent_id": intent_id,
+            }
+
+        # ── QUERY/REPORT 의도: InsightReporter(9114) A2A 동기 호출 ──
+        try:
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._call_system_agent_sync(
+                        9114, {"user_input": user_input, "intent_type": intent_type}
+                    ),
+                ),
+                timeout=float(timeout),
+            )
+            report_obj = result.get("report") or {}
+            message = report_obj.get("report") or result.get("message") or "리포트를 생성할 수 없습니다."
+            return {"type": "RESPONSE", "status": "SUCCESS", "message": message}
+        except asyncio.TimeoutError:
+            return {"type": "RESPONSE", "status": "ERROR", "message": "InsightReporter 응답 시간 초과."}
+        except Exception as e:
+            return {"type": "RESPONSE", "status": "ERROR", "message": f"리포트 생성 실패: {e}"}
 
     def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
         policy_id = str(parameters.get("policy_id") or parameters.get("id") or "").strip()
@@ -1170,7 +1357,12 @@ class AgentRuntime:
                 self._recommendation_suppressions[fingerprint] = datetime.fromtimestamp(time.time() + 3600, tz=timezone.utc).isoformat()
             return {"approval": approval, "proposal": proposal, "mission": None}
         mission = self._mission_from_proposal(proposal, approval_id=str(approval.get("approval_id") or approval_id))
-        mission = self.registry_client.create_mission(mission)
+        created = self.registry_client.create_mission(mission)
+        # registry 응답은 최소 필드만 포함 → mission_id만 업데이트하고 나머지는 보존
+        if created.get("mission_id"):
+            mission["mission_id"] = created["mission_id"]
+        mission["created_at"] = created.get("created_at") or mission.get("created_at")
+        mission["updated_at"] = created.get("updated_at") or mission.get("updated_at")
         # ✅ Record mission approval timeline event (Ch.18-20)
         try:
             self.registry_client.append_mission_timeline_event(
@@ -1467,6 +1659,12 @@ class AgentRuntime:
         }
 
     async def _start_mission_execution(self, mission: dict[str, Any]) -> dict[str, Any]:
+        mission_id = mission.get("mission_id")
+        if not mission_id:
+            logger.error("_start_mission_execution: mission_id 없음, 실행 불가")
+            mission["status"] = "FAILED"
+            mission["final_result"] = {"status": "FAILED", "reason": "mission_id_missing"}
+            return mission
         devices = self.registry_client.list_devices()
         steps = mission.get("steps") or []
         if not steps:
@@ -1479,7 +1677,7 @@ class AgentRuntime:
                 "message": "Mission has no steps — no capable device found.",
                 "data": {"mission_id": mission.get("mission_id")},
             })
-            self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+            self._try_update_mission_status(mission.get("mission_id"), "FAILED", "no_steps_generated")
             return mission
         mission["status"] = "IN_PROGRESS"
         mission["started_at"] = utc_now()
@@ -1500,23 +1698,79 @@ class AgentRuntime:
             "dispatch_result": dispatch_state,
             "params": {"steps": steps},
         }
-        dispatch = await self._dispatch_next_step(response_like, steps, devices, logging.getLogger(__name__))
+        # MissionPlanner 역할일 때는 DeviceBridge(9110) 경유, 아니면 직접 dispatch
+        if self.state.role == "mission_planner":
+            dispatch = await self._dispatch_via_device_bridge(mission, steps)
+        else:
+            dispatch = await self._dispatch_next_step(response_like, steps, devices, logging.getLogger(__name__))
         mission = self._sync_mission_from_dispatch_state(mission, dispatch)
         self._append_dispatch_timeline_entries(mission, dispatch, steps)
+        delivered = bool(dispatch.get("delivered"))
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "TASK_DISPATCHED" if dispatch.get("delivered") else "DISPATCH_FAILED",
-                "message": "Initial mission step dispatched." if dispatch.get("delivered") else "Initial mission dispatch failed.",
-                "data": dispatch,
+                "type": "TASK_DISPATCHED" if delivered else "DISPATCH_FAILED",
+                "message": "Initial mission step dispatched." if delivered else "Initial mission dispatch failed.",
+                "data": {"delivered": delivered, "error": dispatch.get("error")},
             }
         )
-        if not dispatch.get("delivered"):
+        if not delivered:
             mission["status"] = "FAILED"
-            mission["completed_at"] = utc_now()
             mission["final_result"] = {"status": "FAILED", "reason": dispatch.get("error") or "dispatch_failed"}
-        self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+            self._try_update_mission_status(mission.get("mission_id"), "FAILED", dispatch.get("error") or "dispatch_failed")
+        else:
+            self._try_update_mission_status(mission.get("mission_id"), "IN_PROGRESS")
         return mission
+
+    def _try_update_mission_status(self, mission_id: str | None, status: str, reason: str | None = None) -> None:
+        """registry에 미션 상태만 업데이트 (실패해도 무시)"""
+        if not mission_id:
+            return
+        try:
+            payload: dict[str, Any] = {"status": status}
+            if reason:
+                payload["status_reason"] = reason
+            self.registry_client.replace_mission(str(mission_id), payload)
+        except Exception as e:
+            logger.warning(f"미션 상태 registry 업데이트 실패 (mission_id={mission_id}): {e}")
+
+    async def _dispatch_via_device_bridge(self, mission: dict[str, Any], steps: list) -> dict[str, Any]:
+        """MissionPlanner → DeviceBridge(9110) A2A → Device Agent"""
+        payload = {
+            "mission_id": mission.get("mission_id"),
+            "alert_id": mission.get("alert_id"),
+            "reason": mission.get("title") or "MissionPlanner dispatch",
+            "steps": steps,
+        }
+        try:
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._call_system_agent_sync(9110, payload)
+                ),
+                timeout=30.0,
+            )
+            delivered = bool((result or {}).get("delivered"))
+            logger.info(f"[MissionPlanner→DeviceBridge] delivered={delivered}")
+            return {"delivered": delivered, "result": result}
+        except Exception as e:
+            logger.error(f"[MissionPlanner→DeviceBridge] 오류: {e}")
+            return {"delivered": False, "error": str(e)}
+
+    def _call_system_agent_sync(self, port: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """다른 System Agent의 /execute 엔드포인트에 동기 HTTP POST"""
+        url = f"http://127.0.0.1:{port}/execute"
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                return json.loads(resp.read())
+        except Exception as e:
+            logger.warning(f"[A2A] {url} 호출 실패: {e}")
+            return {"error": str(e)}
 
     def _build_task(
         self,
