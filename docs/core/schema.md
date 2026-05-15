@@ -945,6 +945,143 @@ trigger 일치하는 모든 Rule 찾기
 
 ---
 
+## 14. Agent Card (.well-known/agent-card.json)
+
+**정의**: 에이전트의 메타데이터 및 통신 정보를 담은 JSON 파일
+
+**경로**: `/.well-known/agent-card.json`
+
+**목적**:
+- 에이전트 자동 발견 (Agent Discovery)
+- 통신 가능 메서드 명시 (JSON-RPC)
+- 에이전트의 역할, 능력, 엔드포인트 정보 제공
+- 외부 클라이언트와의 A2A 호환성
+
+**포맷**:
+
+```json
+{
+  "version": "v0.3.0",
+  
+  "name": "string",
+  "type": "DEVICE_AGENT | SYSTEM_AGENT",
+  
+  "role": "DEVICE_CONTROL | REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER",
+  
+  "endpoint": {
+    "host": "string",
+    "port": "number",
+    "protocol": "HTTP",
+    "path": "string"
+  },
+  
+  "capabilities": ["string"],  // 지원 능력 (예: ["scan_area", "remove_mine"])
+  
+  "supported_methods": [
+    "message/send",
+    "tasks/get",
+    "tasks/cancel"
+  ],
+  
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result",
+    "child.register",
+    "layer.assignment"
+  ],
+  
+  "authentication": {
+    "type": "none | token | oauth2",
+    "details": "object | null"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**필드 설명**:
+
+| 필드 | 설명 |
+|------|------|
+| **version** | A2A 프로토콜 버전 (Google A2A v0.3.0 기준) |
+| **name** | 에이전트 이름 |
+| **type** | 에이전트 타입 (Device vs System) |
+| **role** | 에이전트의 구체적 역할 |
+| **endpoint** | HTTP 통신 주소 (host, port, path) |
+| **capabilities** | 지원 능력 목록 (Device Agent의 경우 actions[]) |
+| **supported_methods** | JSON-RPC 메서드 목록 |
+| **supported_message_types** | A2A 메시지 타입 목록 |
+| **authentication** | 인증 방식 (향후 확장) |
+
+**예시 (Device Agent)**:
+
+```json
+{
+  "version": "v0.3.0",
+  "name": "AUV-01 Agent",
+  "type": "DEVICE_AGENT",
+  "role": "DEVICE_CONTROL",
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 9201,
+    "protocol": "HTTP",
+    "path": "/message:send"
+  },
+  "capabilities": ["scan_area", "remove_mine", "return_to_base"],
+  "supported_methods": ["message/send"],
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result"
+  ],
+  "authentication": {
+    "type": "token",
+    "details": null
+  },
+  "created_at": "2026-05-15T10:00:00Z",
+  "updated_at": "2026-05-15T10:00:00Z"
+}
+```
+
+**예시 (System Agent - DeviceBridge)**:
+
+```json
+{
+  "version": "v0.3.0",
+  "name": "DeviceBridge Agent",
+  "type": "SYSTEM_AGENT",
+  "role": "DEVICE_BRIDGE",
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 9110,
+    "protocol": "HTTP",
+    "path": "/message:send"
+  },
+  "capabilities": ["task.assign", "task.result.aggregate", "event.logging"],
+  "supported_methods": ["message/send"],
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result",
+    "child.register",
+    "layer.assignment"
+  ],
+  "authentication": {
+    "type": "none",
+    "details": null
+  },
+  "created_at": "2026-05-15T10:00:00Z",
+  "updated_at": "2026-05-15T10:00:00Z"
+}
+```
+
+---
+
 ## 참고
 
 - **[ADR-002](../adr/ADR-002-proposal-as-solution-set.md)**: Proposal 구조

@@ -84,6 +84,8 @@ class A2ASendRequest(BaseModel):
 |--------------|------|------|------|
 | **task.assign** | System → Device | Task 할당 | `{"task_id": "task-001", "action": "scan_area", "params": {...}}` |
 | **task.result** | Device → System | Task 실행 결과 | `{"task_id": "task-001", "status": "COMPLETED", "result": {...}}` |
+| **event.report** | Device → System | Device에서 감지한 이벤트 보고 | `{"event_type": "SENSOR_FAILURE", "severity": "CRITICAL", "device_id": "AUV-01"}` |
+| **mission.result** | System → Device | Mission 완료/취소 결과 보고 | `{"mission_id": "mission-001", "status": "COMPLETED"}` |
 | **child.register** | Device → Parent | 자신을 부모로 등록 요청 | `{"device_id": "ROV-01", "parent_id": "USV-01"}` |
 | **layer.assignment** | System → Device | 계층 정보 할당 | `{"parent_gateway": {"id": "USV-01", "port": 9201}, "layer": 2}` |
 
@@ -186,6 +188,67 @@ curl -X POST http://127.0.0.1:9110/message:send \
   }'
 ```
 
+### 4.3 Event 보고 예시
+
+```bash
+curl -X POST http://127.0.0.1:9110/message:send \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message": {
+      "role": "assistant",
+      "parts": [
+        {
+          "type": "data",
+          "data": {
+            "message_type": "event.report",
+            "event_type": "SENSOR_FAILURE",
+            "severity": "CRITICAL",
+            "device_id": "AUV-01",
+            "description": "Sonar sensor not responding",
+            "timestamp": 1715592400000
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "sender_id": "auv-01-agent",
+      "sender_device_id": "AUV-01",
+      "contextId": "ctx-20260513-002",
+      "timestamp": 1715592400000
+    }
+  }'
+```
+
+### 4.4 Mission 결과 예시
+
+```bash
+curl -X POST http://127.0.0.1:9201/message:send \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message": {
+      "role": "user",
+      "parts": [
+        {
+          "type": "data",
+          "data": {
+            "message_type": "mission.result",
+            "mission_id": "mission-001",
+            "status": "COMPLETED",
+            "summary": "Mission completed successfully",
+            "completion_time_s": 3600
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "sender_id": "device-bridge-agent",
+      "sender_device_id": "system",
+      "contextId": "ctx-20260513-003",
+      "timestamp": 1715592500000
+    }
+  }'
+```
+
 ---
 
 ## 5. 검증 & 에러 처리
@@ -205,6 +268,15 @@ curl -X POST http://127.0.0.1:9110/message:send \
 ```python
 # Device Agent 수신 시 검증
 
+SUPPORTED_MESSAGE_TYPES = {
+    "task.assign",      # System → Device: Task 할당
+    "task.result",      # Device → System: Task 결과
+    "event.report",     # Device → System: 이벤트 보고
+    "mission.result",   # System → Device: Mission 결과
+    "child.register",   # Device → Parent: 자식 등록
+    "layer.assignment"  # System → Device: 계층 정보
+}
+
 async def handle_message_send(request: A2ASendRequest):
     # 1. Pydantic 검증 (자동)
     # 2. 송신자 검증
@@ -220,10 +292,21 @@ async def handle_message_send(request: A2ASendRequest):
     if msg_type not in SUPPORTED_MESSAGE_TYPES:
         return 422, f"Unsupported message_type: {msg_type}"
     
-    # 5. action 지원 확인 (Device가 지원하지 않는 action)
-    action = request.message.parts[0].data.get("action")
-    if action not in self.device.capabilities:
-        return 422, f"Device does not support: {action}"
+    # 5. message_type별 추가 검증
+    if msg_type == "task.assign":
+        action = request.message.parts[0].data.get("action")
+        if action not in self.device.capabilities:
+            return 422, f"Device does not support: {action}"
+    
+    elif msg_type == "event.report":
+        event_type = request.message.parts[0].data.get("event_type")
+        if not event_type:
+            return 422, "event_type required for event.report"
+    
+    elif msg_type == "child.register":
+        child_device_id = request.message.parts[0].data.get("device_id")
+        if not child_device_id:
+            return 422, "device_id required for child.register"
     
     # 6. 즉시 200 OK 응답, 비동기 처리 시작
     asyncio.create_task(process_message_async(request))
@@ -232,28 +315,37 @@ async def handle_message_send(request: A2ASendRequest):
 
 ---
 
-## 6. Device 간 직접 A2A 통신 (Relay)
+## 6. Device 간 Peer-to-Peer A2A 통신
 
-Device-to-Device 직접 통신도 A2A 프로토콜을 사용:
+Device-to-Device 직접 통신도 A2A 프로토콜을 사용합니다.
 
-### 6.1 직접 통신
+**핵심**: Device 간 통신은 **계층 구조가 아니라 협력 관계**입니다. 
+- Device A와 Device B는 대등한 관계
+- 물리적 제약(USV가 ROV를 수중으로 운반)은 있지만, A2A 통신상 부모-자식 관계가 아님
+- 데이터 공유, 상태 조회, 협력 요청 등으로 상호작용
+
+### 6.1 Peer-to-Peer 직접 통신
 
 ```
-Device A (9201)
+Device A (9201) [예: USV]
     │
     └─ HTTP POST Device B:9202/message:send
-        └─ message_type: task.result (relay)
+        └─ message_type: task.result | event.report | data.share 등
+           (어떤 메시지 타입이든 사용 가능)
 
-Device B (9202)
+Device B (9202) [예: ROV]
     │
     ├─ 메시지 수신
+    ├─ 처리 또는 필요시 다른 Device로 전달
     │
-    └─ 목적지가 자신이 아니면 다음 Device로 relay
+    └─ (비동기) 결과 또는 상태 보고
+        └─ HTTP POST Device A:9201/message:send
 ```
 
-### 6.2 경로 결정 (BFS 알고리즘)
-
-multi-hop relay 경로는 SystemSentinel이 AgentConnection을 기반으로 BFS로 계산하고 MEB로 경로 정보 배포.
+**경로 결정**: 
+- SystemSentinel이 AgentConnection 정보를 기반으로 통신 가능한 Device들을 파악
+- BFS 알고리즘으로 최적 경로 계산
+- 각 Device는 자신이 처리할 수 없는 메시지를 다음 Device로 전달 가능 (multi-hop)
 
 ---
 
@@ -282,19 +374,29 @@ async def handle_task_assign(task: Task):
 
 ---
 
-## 8. Relay와 Direct 통신 구분
+## 8. 통신 경로: System-Bridge vs Device-to-Device
 
-### 8.1 Relay (DeviceBridge를 거침)
+### 8.1 System ↔ Device 통신 (DeviceBridge 경유)
 
-- **경우**: System Agent ↔ Device
-- **경로**: System Agent → DeviceBridge (9110) → Device (9201)
-- **목적**: 중앙 감시 & 이벤트 기록
+- **참여자**: System Agent ↔ DeviceBridge ↔ Device Agent
+- **경로**: System Agent (포트 9110) ↔ DeviceBridge (9110) ↔ Device (9201~9215)
+- **메시지 타입**: task.assign, task.result, event.report, mission.result 등
+- **목적**: 
+  - 중앙 감시 (System이 모든 Task/Event를 추적)
+  - 이벤트 기록 (모든 통신을 Registry에 로깅)
+  - 안전성 (System의 명령이 Device에 정확히 전달되는지 보증)
 
-### 8.2 Direct A2A (Device 간 직접)
+### 8.2 Device ↔ Device 통신 (Peer-to-Peer, Direct)
 
-- **경우**: Device A ↔ Device B (multi-hop)
-- **경로**: Device A (9201) → Device B (9202) → ... → Target Device
-- **목적**: 신속한 Device 협력, Network latency 최소화
+- **참여자**: Device Agent ↔ Device Agent (대등 관계)
+- **경로**: Device A (9201) → Device B (9202) → ... → Target Device (multi-hop 가능)
+- **메시지 타입**: 모든 메시지 타입 가능 (task.assign, event.report, data.share 등)
+- **목적**:
+  - Device 간 협력 (데이터 공유, 상태 조회)
+  - 낮은 latency (System을 거치지 않아 빠름)
+  - 자율적 협업 (System의 승인 없이 Device끼리 소통 가능)
+- **제약**:
+  - 물리적 연결이 있어야 함 (AgentConnection이 정의된 Device들끼리만 통신 가능)
 
 ---
 

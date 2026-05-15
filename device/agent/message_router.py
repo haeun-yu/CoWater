@@ -196,7 +196,14 @@ async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
     runtime.record_inbox(request.taskId, data)
     msg_type = str(data.get("message_type") or data.get("type") or "task.assign")
 
-    VALID_MESSAGE_TYPES = {"child.register", "layer.assignment", "task.assign"}
+    VALID_MESSAGE_TYPES = {
+        "task.assign",
+        "task.result",
+        "event.report",
+        "mission.result",
+        "child.register",
+        "layer.assignment",
+    }
 
     if msg_type == "child.register":
         child = data.get("child") or data
@@ -260,6 +267,31 @@ async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
                     request=request,
                 )
             )
+    elif msg_type == "event.report":
+        event_type = str(data.get("event_type") or "UNKNOWN")
+        severity = str(data.get("severity") or "INFO")
+        description = str(data.get("description") or "")
+        logger.warning(f"Event reported: type={event_type}, severity={severity}, description={description}")
+        result = {
+            "received": True,
+            "event_type": event_type,
+            "logged": True,
+        }
+    elif msg_type == "mission.result":
+        mission_id = str(data.get("mission_id") or "")
+        mission_status = str(data.get("status") or "UNKNOWN")
+        logger.info(f"Mission result received: mission_id={mission_id}, status={mission_status}")
+        runtime.state.remember({
+            "kind": "mission_result",
+            "mission_id": mission_id,
+            "status": mission_status,
+            "at": utc_now(),
+        })
+        result = {
+            "received": True,
+            "mission_id": mission_id,
+            "status": mission_status,
+        }
     else:
         if msg_type not in VALID_MESSAGE_TYPES:
             logger.warning(f"Unknown A2A message_type: {msg_type}, task_id: {request.taskId}, data: {data}")
