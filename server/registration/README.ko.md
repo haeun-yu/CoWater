@@ -1,8 +1,8 @@
-# POC 00 - Registry Server
+# POC 00 - Registry 서버
 
 ## 개요
 
-Registry Server는 CoWater의 공용 서버 컴포넌트다. 디바이스 등록, healthcheck 반영, assignment 계산, Event / Alert / Insight / Approval / Mission 원장을 담당한다.
+Registry 서버는 CoWater의 공용 서버 컴포넌트다. 디바이스 등록, healthcheck 반영, assignment 계산, Event / Alert / Insight / Approval / Mission 원장을 담당한다.
 
 ## 기본 정보
 

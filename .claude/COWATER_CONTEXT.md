@@ -1,4 +1,4 @@
-# CoWater Project Context
+# CoWater 프로젝트 컨텍스트
 
 > 이 프로젝트의 아키텍처, 컴포넌트, 용어 빠른 참고서
 
@@ -8,7 +8,7 @@
 
 **정의**: 해양 무인체 통합 운영 AI 플랫폼
 
-**핵심**: 여러 해양 무인체(USV, AUV, ROV 등)를 AI Agent로 실시간 통합 관리
+**핵심**: 여러 해양 무인체(USV, AUV, ROV 등)를 AI 에이전트로 실시간 통합 관리
 
 ---
 
@@ -157,7 +157,7 @@ client/
 
 ## 🔌 주요 통신 프로토콜
 
-### A2A (Agent-to-Agent)
+### A2A (에이전트 간 통신)
 - System Agent ↔ Device Agent 간 Task/Result 전달
 - 예: POST /task, POST /result
 

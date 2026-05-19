@@ -1,4 +1,4 @@
-# 예외 및 자동 대응 (Exceptions & Auto-Recovery)
+# 예외와 자동 대응
 
 오류 상황과 시스템의 자동 대응 메커니즘  
 **기반**: [ADR-003](../adr/ADR-003-capability-driven-task-assignment.md), [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md), [ADR-006](../adr/ADR-006-adaptive-autonomy-migration-path.md)
@@ -541,7 +541,7 @@ Event {
 
 ---
 
-## 🔍 Alert Fingerprint & Event Deduplication (중복 방지)
+## 🔍 Alert Fingerprint와 Event 중복 방지
 
 **문제**: 동일한 문제가 반복되면 Event와 Alert가 폭주합니다.
 

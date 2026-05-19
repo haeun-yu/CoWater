@@ -1,4 +1,4 @@
-# CoWater Server API Reference
+# CoWater 서버 API 참조
 
 이 문서는 `registration` 서버와 `system-agent` 서버의 HTTP API를 한 곳에 정리한 참조 문서입니다.
 
@@ -9,7 +9,7 @@
 - `registration`은 저장 원장(source of truth) 역할을 합니다.
 - `system-agent`는 AI Agent의 판단과 오케스트레이션 역할을 맡습니다.
 
-## Registration Server
+## Registration 서버
 
 Base URL: `http://127.0.0.1:8280`
 
@@ -35,7 +35,7 @@ Base URL: `http://127.0.0.1:8280`
 - `PATCH /devices/{device_id}/connectivity-state`
 - `PUT /devices/{device_id}/role`
 
-### Alerts / Events / A2A Logs
+### Alert / Event / A2A 로그
 
 - `POST /alerts/ingest`
 - `GET /alerts`
@@ -47,7 +47,7 @@ Base URL: `http://127.0.0.1:8280`
 - `POST /a2a-logs/ingest`
 - `GET /a2a-logs`
 
-### Policies
+### 정책
 
 - `POST /policies`
 - `GET /policies`
@@ -87,7 +87,7 @@ Base URL: `http://127.0.0.1:8280`
 - `/policies`, `/a2a-logs/ingest`는 내부 전용입니다.
 - `device_id`는 내부 숫자 ID와 public ID가 함께 쓰일 수 있으니 호출 전에 응답 포맷을 확인하는 것이 좋습니다.
 
-## System-Agent Server
+## System-Agent 서버
 
 Base URL: `http://127.0.0.1:9116`
 

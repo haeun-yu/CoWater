@@ -1,4 +1,4 @@
-# ADR-006: Adaptive Autonomy Migration Path
+# ADR-006: 적응형 자율성 전환 경로
 
 **상태**: Accepted  
 **작성일**: 2026-05-12  
@@ -6,7 +6,7 @@
 
 ---
 
-## 상황 (Context)
+## 상황
 
 CoWater의 핵심 철학 중 하나는 **계획과 실행의 분리**입니다.
 
@@ -22,7 +22,7 @@ CoWater의 핵심 철학 중 하나는 **계획과 실행의 분리**입니다.
 
 ---
 
-## 결정 (Decision)
+## 결정
 
 **Policy/Rule 설정만으로 단계적 자동화를 구현합니다.**
 
@@ -266,7 +266,7 @@ VALUES ('AUTO_RESPONSE', 'AUTO_CREATE_MISSION', {...}, true)
 
 ---
 
-## 결과 (Consequences)
+## 결과
 
 ### ✅ 이점
 - **점진적 전환**: 한 번에 완전 자동화로 가지 않고 단계적 진화

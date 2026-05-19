@@ -1,8 +1,8 @@
-# POC 06 - System Agent Layer
+# POC 06 - System Agent 계층
 
 ## 개요
 
-System Agent Layer는 system-layer 다중 에이전트 시스템이다. 역할별 프로세스가 RequestHandler, DeviceBridge, MissionPlanner, PolicyManager, SystemSentinel, InsightReporter로 분리되어 `SYS_INTENT_CLASSIFIED → Proposal → Mission → Task` 흐름을 처리한다.
+System Agent 계층은 system-layer 다중 에이전트 시스템이다. 역할별 프로세스가 RequestHandler, DeviceBridge, MissionPlanner, PolicyManager, SystemSentinel, InsightReporter로 분리되어 `SYS_INTENT_CLASSIFIED → Proposal → Mission → Task` 흐름을 처리한다.
 
 ## 기본 정보
 

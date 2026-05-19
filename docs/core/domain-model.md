@@ -1,11 +1,11 @@
-# 핵심 도메인 모델 (Domain Model)
+# 핵심 도메인 모델
 
 **Ubiquitous Language** - 모든 팀이 공유하는 도메인 개념 정의  
 **기반**: [ADR-001: Core Design Philosophy](../adr/ADR-001-core-design-philosophy.md)
 
 ---
 
-## 역할 정의 (Role Definition)
+## 역할 정의
 
 ### 🤖 **Device (장비) - 물리 자원**
 
@@ -201,7 +201,7 @@ Device Agent 시작
 
 ---
 
-## 흐름 정의 (Flow Definition)
+## 흐름 정의
 
 ### **User (사용자) → Proposal → Mission → Task**
 
@@ -263,7 +263,7 @@ REPORT (결과 요약)
 
 ---
 
-## 설정 정의 (Configuration Definition)
+## 설정 정의
 
 ### **Policy / Rule / Config - 운영 로직**
 

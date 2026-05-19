@@ -1,11 +1,11 @@
-# Rule Engine 구현 가이드 (Rule-Driven Automation)
+# Rule Engine 구현 가이드
 
 **문서 버전**: v0.1  
 **최종 업데이트**: 2026-05-13  
 **대상**: Rule Engine, PolicyManager 개발자  
 **목적**: Event 기반 자동화 규칙의 설계, 평가, 실행 로직
 
-> 💡 **이 문서는 Rule Engine 구현을 위한 기술 가이드입니다.** 정책 관리는 [agent-implementation.md](./agent-implementation.md#5-policymanager)를 참고하세요.
+> 💡 **이 문서는 Rule Engine 구현을 위한 기술 가이드입니다.** 정책 관리는 [system-agent.md](./system-agent.md#5-policymanager)를 참고하세요.
 
 ---
 
@@ -635,6 +635,6 @@ class TestRuleConditionEvaluator:
 
 ## 9. 참고자료
 
-- [agent-implementation.md](./agent-implementation.md) - PolicyManager 구현
-- [event-types.md](./event-types.md) - Event 정의
-- [principles.md](./principles.md) - 설계 원칙
+- [system-agent.md](./system-agent.md) - PolicyManager 구현
+- [event-types.md](../core/event-types.md) - Event 정의
+- [principles.md](../core/principles.md) - 설계 원칙

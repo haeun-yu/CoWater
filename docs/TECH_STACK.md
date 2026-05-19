@@ -1,4 +1,4 @@
-# CoWater 기술 스택 (Technology Stack & Communication)
+# CoWater 기술 스택과 통신 구조
 
 **문서 버전**: v1.0 (설계 기반 - 경량)  
 **최종 업데이트**: 2026-05-12  
@@ -18,7 +18,7 @@
 
 ---
 
-# 섹션 1: 통신 방식 (Communication Protocol)
+# 섹션 1: 통신 방식
 
 ## 📋 통신 방식 요약
 
@@ -31,7 +31,7 @@
 
 ---
 
-## 1️⃣ A2A Protocol (Agent-to-Agent) - HTTP 기반
+## 1️⃣ A2A 프로토콜 - HTTP 기반
 
 **목적**: Device Agent ↔ System Agent 간 Task 할당 및 결과 보고
 
@@ -56,7 +56,7 @@ POST   /result            # Task 결과 보고
 - Timeout 설정 필요 (오프라인 감지)
 - 정책 검증은 System Agent에서 수행
 
-### 향후 확장 (Phase 2+)
+### 향후 확장
 - API Gateway 추가 가능 (정책 중앙화)
 - 필요시 추가 (현재는 불필요)
 
@@ -113,7 +113,7 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 
 ---
 
-## 4️⃣ Web Client 통신 (향후 Phase 2)
+## 4️⃣ 웹 클라이언트 통신 (향후 Phase 2)
 
 **현재**: 미정  
 **계획**: Frontend 구현시 결정
@@ -168,7 +168,7 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 
 ---
 
-## 6️⃣ Device ↔ Physical Device (내부)
+## 6️⃣ Device ↔ 실제 장비 (내부)
 
 **책임**: Device Agent가 각자 구현  
 **방식**: Serial, Modbus, MQTT 등 (Device 타입별)  
@@ -200,9 +200,9 @@ a2a.{source_agent}.{target_agent}   # Agent 간 메시지 (선택)
 
 ---
 
-# 섹션 2: 기술 스택 (Technology Stack)
+# 섹션 2: 기술 스택
 
-## 0️⃣ 물리 통신 매체 관리 (Physical Media Management)
+## 0️⃣ 물리 통신 매체 관리
 
 ### 매체별 우선순위 및 특성
 
@@ -222,7 +222,7 @@ System Agent가 AgentConnection 생성 시:
 
 ---
 
-## 1️⃣ Backend Framework
+## 1️⃣ 백엔드 프레임워크
 
 ### 선택: **FastAPI**
 
@@ -238,7 +238,7 @@ System Agent가 AgentConnection 생성 시:
 
 ---
 
-## 2️⃣ Database
+## 2️⃣ 데이터베이스
 
 ### 선택: **SQLite (Phase 1) → PostgreSQL (필요시)**
 
@@ -258,7 +258,7 @@ System Agent가 AgentConnection 생성 시:
 
 ---
 
-## 3️⃣ Real-time Messaging
+## 3️⃣ 실시간 메시징
 
 ### 확정: **Moth WebSocket Pub-Sub**
 
@@ -274,7 +274,7 @@ System Agent가 AgentConnection 생성 시:
 
 ---
 
-## 4️⃣ Frontend (Phase 2)
+## 4️⃣ 프론트엔드 (Phase 2)
 
 **선택**: **Next.js**
 
@@ -304,7 +304,7 @@ System Agent가 AgentConnection 생성 시:
 
 ---
 
-## 5️⃣ Frontend API (Phase 2)
+## 5️⃣ 프론트엔드 API (Phase 2)
 
 **선택**: **REST API** (Phase 2) → GraphQL (Phase 3, 선택)
 

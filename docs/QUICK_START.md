@@ -34,7 +34,7 @@ cd /Users/teamgrit/Documents/CoWater
 ./cowaterctl.sh logs device-rov
 ```
 
-### 4. Client UI 접속
+### 4. 클라이언트 UI 접속
 
 브라우저에서:
 
@@ -73,14 +73,14 @@ cd /Users/teamgrit/Documents/CoWater
 source .venv/bin/activate
 ```
 
-### 1단계: Registry Server
+### 1단계: Registry 서버
 
 ```bash
 cd server/registration
 python device_registration_server.py
 ```
 
-### 2단계: System Agent Layer
+### 2단계: System Agent 계층
 
 새 터미널:
 
@@ -89,7 +89,7 @@ cd server/system-agent
 python run_system_agents.py
 ```
 
-### 3단계: Device Agents
+### 3단계: Device Agent
 
 각각 새 터미널에서:
 

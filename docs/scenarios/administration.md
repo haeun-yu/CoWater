@@ -1,4 +1,4 @@
-# 관리/설정 프로세스 (Administration & Configuration)
+# 관리와 설정 프로세스
 
 Policy, Rule, Config를 통한 시스템 운영 로직 관리  
 **기반**: [ADR-006](../adr/ADR-006-adaptive-autonomy-migration-path.md) (코드 수정 없이 운영 조정)

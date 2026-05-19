@@ -1,4 +1,4 @@
-# 미션 생명주기 (Mission Lifecycle)
+# 미션 생명주기
 
 Proposal 승인부터 완료/취소까지의 전체 상태 전이  
 **기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
@@ -28,7 +28,7 @@ graph TD
 
 ---
 
-## Device Agent 등록 (Prerequisites)
+## Device Agent 등록 전제조건
 
 Mission이 생성되기 전, **Device Agent가 먼저 System과 통신하기 위해 초기화 및 등록**되어야 합니다.
 
@@ -219,7 +219,7 @@ Device를 시스템에서 완전히 제거하는 프로세스입니다.
 
 **준수 원칙**: [P1](../core/principles.md#p1-🔴-agent-직접-제어-원칙-agent-direct-control) (각 Agent의 협력 관계 재정의)
 
-### **Prerequisites: Device 제거 조건**
+### **전제조건: Device 제거 조건**
 
 ```
 Device 제거 전 확인:

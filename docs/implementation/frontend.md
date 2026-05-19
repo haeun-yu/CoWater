@@ -1,4 +1,4 @@
-# 프론트엔드 구현 가이드 (Frontend Implementation Guide)
+# 프론트엔드 구현 가이드
 
 **문서 버전**: v0.1  
 **최종 업데이트**: 2026-05-13  
@@ -140,7 +140,7 @@ src/
 
 ## 3. 핵심 페이지 구현
 
-### 3.1 Dashboard (메인 페이지) - 3D 시각화
+### 3.1 대시보드(메인 페이지) - 3D 시각화
 
 ```tsx
 // src/pages/Dashboard.tsx
@@ -203,7 +203,7 @@ export default function Dashboard() {
 }
 ```
 
-### 3.2 Chat Console - 자연어 명령
+### 3.2 채팅 콘솔 - 자연어 명령
 
 ```tsx
 // src/pages/Chat.tsx
@@ -299,7 +299,7 @@ export default function Proposal() {
   });
 ```
 
-### 3.4 Policy & Rule 관리 페이지
+### 3.4 Policy와 Rule 관리 페이지
 
 ```tsx
 // src/pages/Policy.tsx
@@ -759,7 +759,7 @@ export function useMebSubscribe({
 
 ## 5. 상태 관리 (Zustand)
 
-### 5.1 Device Store
+### 5.1 Device 스토어
 
 ```ts
 // src/stores/deviceStore.ts
@@ -802,7 +802,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 }));
 ```
 
-### 5.2 Auth Store
+### 5.2 인증 스토어
 
 ```ts
 // src/stores/authStore.ts
@@ -893,7 +893,7 @@ api.interceptors.response.use(
 export default api;
 ```
 
-### 6.2 Mission Service
+### 6.2 Mission 서비스
 
 ```ts
 // src/services/missionService.ts
@@ -1083,7 +1083,7 @@ export default function ProtectedRoute({
 
 ## 9. 3D 시각화 (Three.js + react-three-fiber)
 
-### 9.1 Scene Canvas
+### 9.1 장면 캔버스
 
 ```tsx
 // src/components/3d/SceneCanvas.tsx

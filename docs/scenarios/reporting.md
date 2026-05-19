@@ -1,4 +1,4 @@
-# 기록/분석/개선 프로세스 (Reporting & Analysis)
+# 기록, 분석, 개선 프로세스
 
 운영 이력 기록, 분석, 개선 사항 도출의 전체 흐름  
 **기반**: [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md) (Event-Based Traceability)

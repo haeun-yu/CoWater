@@ -1,4 +1,4 @@
-# CoWater: Domain Language & Architecture Context
+# CoWater 도메인 언어와 아키텍처 컨텍스트
 
 > 이 문서는 CoWater 시스템의 핵심 개념, 아키텍처 설계 원칙, 그리고 용어 정의를 담고 있습니다. 
 > 코드, 문서, 의사결정 시 이 언어를 일관되게 사용합니다.
@@ -17,7 +17,7 @@
 
 CoWater는 **책임 기반 다중 에이전트 아키텍처**로 설계됩니다. 각 에이전트는 명확한 책임 영역과 DB 소유권을 가집니다.
 
-### System Agent Layer (6개 전문가)
+### System Agent 계층 (6개 전문 에이전트)
 
 | 에이전트 | 책임 | 포트 | 주요 역할 |
 |---------|------|------|---------|
@@ -28,7 +28,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 설계됩니다
 | **SystemSentinel** | 이상 감시 & 건전성 체크 | 9113 | Heartbeat 모니터링, 이상 징후 탐지, Alert 생성 |
 | **InsightReporter** | 데이터 조회 & 리포팅 | 9114 | 데이터 분석, Report 생성, 이력 기록 |
 
-### Device Agent Layer
+### Device Agent 계층
 
 - **Device Agent**: 각 무인체마다 하나씩 실행
   - 개별 디바이스 제어 및 로컬 안전 행동 판단
@@ -36,7 +36,7 @@ CoWater는 **책임 기반 다중 에이전트 아키텍처**로 설계됩니다
   
 - **Communication**: A2A (Agent-to-Agent HTTP) + Moth (실시간 WebSocket)
 
-### Infrastructure
+### 기반 구성요소
 
 - **Registry** (포트 8280) — Device/Agent 등록, 상태 추적
 - **SQLite** (Phase 1) — 로컬 데이터베이스
@@ -114,7 +114,7 @@ User Request → Proposal (여러 개) → User Selects
 
 ## 🎯 설계 원칙 (10가지)
 
-### P1. Agent 직접 제어 원칙
+### P1. 에이전트 직접 제어 원칙
 - **Device Agent만** 자신의 Device를 직접 제어
 - 다른 Agent들(RequestHandler, MissionPlanner 등)은 **Task 할당/위임만** 수행
 - Device Agent: Task 수신 후 **최종 go/no-go 판단**

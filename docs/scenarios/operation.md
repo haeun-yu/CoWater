@@ -1,4 +1,4 @@
-# 작업 프로세스 (Operation Process)
+# 작업 프로세스
 
 작업 제안 → 사용자 선택 → 실행의 전체 흐름  
 **기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-003](../adr/ADR-003-capability-driven-task-assignment.md), [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
@@ -17,7 +17,7 @@
 
 ---
 
-## 프로세스 플로우 (High Level)
+## 프로세스 개요
 
 ```mermaid
 graph TD
@@ -147,7 +147,7 @@ Proposal-2 (대안)
 - ProposalTask가 이미 순서와 Device 할당이 결정됨 (MissionPlanner의 책임)
 - 사용자는 Task 수정 불가, **Proposal 전체를 선택만 가능**
 
-### **4️⃣ 사용자: Proposal 선택 및 승인**
+### **4️⃣ 사용자: Proposal 선택과 승인**
 
 ```
 UI에 Proposal 목록 표시:
@@ -391,7 +391,7 @@ Mission-1 (A 구역 촬영) FAILED
   Task-3 (복귀): CANCELLED (Task-2 실패로 인해)
 ```
 
-### **옵션 1: 동일 조건 재시도 (Retry Same Device)**
+### **옵션 1: 동일 조건 재시도**
 
 **상황**: 일시적 오류이거나 Device 문제 해결됨
 
@@ -451,7 +451,7 @@ WHERE mission_id = 'mission-1'
 AND sequence >= 2;  -- Task-2 이후만 복사
 ```
 
-### **옵션 2: 다른 Device로 재실행 (Retry Alternate Device)**
+### **옵션 2: 다른 Device로 재실행**
 
 **상황**: 해당 Device는 고장, 다른 Device로 같은 작업 수행 가능
 
@@ -491,7 +491,7 @@ AND sequence >= 2;  -- Task-2 이후만 복사
 - "배터리 용량 부족" 같은 새로운 제한사항 발생 가능
 - User는 다시 한번 검토해야 함
 
-### **옵션 3: 재계획 (Replan)**
+### **옵션 3: 재계획**
 
 **상황**: 상황이 크게 달라졌음 (시간 경과, 환경 변화 등)
 
@@ -521,7 +521,7 @@ AND sequence >= 2;  -- Task-2 이후만 복사
    Proposal-3: [ROV 수리 대기]
 ```
 
-### **옵션 4: 종료 (Abort)**
+### **옵션 4: 종료**
 
 **상황**: 이 미션은 더 이상 필요 없음
 

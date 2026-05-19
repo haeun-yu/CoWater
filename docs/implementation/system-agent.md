@@ -1,15 +1,15 @@
-# System Agent 구현 가이드 (Implementation Guide)
+# System Agent 구현 가이드
 
 **문서 버전**: v0.1 (구현 기반)  
 **최종 업데이트**: 2026-05-13  
 **대상**: System Agent(RequestHandler, DeviceBridge, MissionPlanner 등) 개발자  
 **목적**: 6개 System Agent의 구체적인 구현 방법, 알고리즘, 패턴 상세화
 
-> 💡 **이 문서는 구현 가이드입니다.** 전체 아키텍처는 [SYSTEM_AGENT_DESIGN.md](../SYSTEM_AGENT_DESIGN.md), 설계 원칙은 [principles.md](./principles.md)를 참고하세요.
+> 💡 **이 문서는 구현 가이드입니다.** 전체 아키텍처는 [SYSTEM_AGENT_DESIGN.md](../SYSTEM_AGENT_DESIGN.md), 설계 원칙은 [principles.md](../core/principles.md)를 참고하세요.
 
 ---
 
-## 1. 공통 패턴 (All Agents)
+## 1. 공통 패턴
 
 ### 1.1 BaseAgent 구현
 
@@ -1214,7 +1214,7 @@ class InsightReporter(BaseAgent):
 
 ## 8. 참고자료
 
-- [A2A Protocol](./a2a-protocol.md) - Agent 간 통신
-- [Event Types](./event-types.md) - 13개 MEB 이벤트
+- [A2A Protocol](../core/a2a-protocol.md) - Agent 간 통신
+- [Event Types](../core/event-types.md) - 13개 MEB 이벤트
 - [SYSTEM_AGENT_DESIGN.md](../SYSTEM_AGENT_DESIGN.md) - 아키텍처 개요
-- [principles.md](./principles.md) - 설계 원칙
+- [principles.md](../core/principles.md) - 설계 원칙

@@ -1,4 +1,4 @@
-# Event Type Catalog (MEB 이벤트 타입)
+# 이벤트 타입 카탈로그
 
 **문서 버전**: 1.0  
 **목적**: Moth MEB에서 발행되는 모든 이벤트 타입과 구독자를 정의
@@ -40,7 +40,7 @@ MEB 채널: "agents"
 
 ---
 
-## 2. System Layer 이벤트 (System Agent ↔ System Agent)
+## 2. System 계층 이벤트
 
 System Agent 간의 의사결정 프로세스를 이벤트로 추적.
 
@@ -105,7 +105,7 @@ Device 간 통신 가능성을 관리하는 이벤트 (SystemSentinel 발행).
 
 ---
 
-## 4. Device Layer 이벤트 (Device → System)
+## 4. Device 계층 이벤트
 
 Device가 발행하는 상태 신호 (MEB를 통해 System에 전파).
 

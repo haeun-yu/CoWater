@@ -1,49 +1,49 @@
 # AGENTS.md
 
-This file is the Codex harness for CoWater. Its priority is working behavior, review discipline, and documentation rules, not implementation roadmap details.
+이 문서는 CoWater에서 Codex가 따라야 할 작업 규칙입니다. 구현 로드맵보다 작업 방식, 리뷰 규율, 문서 관리 규칙을 우선합니다.
 
-## Primary Sources
+## 우선 참고 문서
 
-Read these first and follow them in this order:
+다음 순서로 먼저 읽고 따릅니다.
 
 1. `CLAUDE.md`
 2. `.claude/PROCESS.md`
 3. `.claude/GUIDELINES.md`
 4. `.claude/DOCUMENTATION_GUIDELINES.md`
 
-Use other `.claude/*.md` files only when the task needs domain or architecture context.
+다른 `.claude/*.md` 파일은 작업에 도메인이나 아키텍처 맥락이 필요할 때만 참고합니다.
 
-## Non-Negotiable Rules
+## 필수 규칙
 
-- If anything is ambiguous, ask instead of guessing.
-- For feature work: design first, side effects second, user approval third, implementation last.
-- Do not silently expand scope.
-- Keep changes surgical and directly related to the request.
-- Do not commit or push unless the user explicitly asks.
-- Do not run destructive commands such as `rm -rf`, `git reset --hard`, or `git clean -f`.
+- 애매한 점이 있으면 추측하지 말고 질문합니다.
+- 기능 작업은 반드시 설계, 사이드 이펙트, 사용자 승인, 구현 순서로 진행합니다.
+- 범위를 조용히 늘리지 않습니다.
+- 변경은 요청과 직접 관련된 범위로만 최소화합니다.
+- 사용자가 명시적으로 요청하지 않으면 커밋하거나 푸시하지 않습니다.
+- `rm -rf`, `git reset --hard`, `git clean -f` 같은 파괴적 명령은 실행하지 않습니다.
 
-## Standard Working Process
+## 표준 작업 절차
 
-For implementation tasks, follow this sequence:
+구현 작업은 다음 순서를 따릅니다.
 
 1. Understand the request and inspect the relevant code.
 2. State assumptions explicitly.
 3. Present the intended design before editing.
-4. List side effects:
-   - directly affected files
-   - indirectly affected files
-   - API/schema/config/test/doc impact
+4. 사이드 이펙트를 정리합니다.
+   - 직접 영향 파일
+   - 간접 영향 파일
+   - API, 스키마, 설정, 테스트, 문서 영향
 5. Wait for user approval before implementing.
 6. If the task is multi-step, keep an explicit plan and track progress.
 7. Implement only the approved scope.
 8. Verify with `git diff` and targeted tests.
 9. Summarize changes, verification, and remaining risks.
 
-If implementation reveals broader impact than expected, stop and report that before continuing.
+구현 중 영향 범위가 예상보다 커지면 계속 진행하지 말고 먼저 보고합니다.
 
-## Coding Guidelines
+## 코딩 가이드라인
 
-Apply these rules from `.claude/GUIDELINES.md`:
+`.claude/GUIDELINES.md`의 다음 규칙을 적용합니다.
 
 - Think before coding.
 - Prefer the simplest solution that satisfies the request.
@@ -53,27 +53,27 @@ Apply these rules from `.claude/GUIDELINES.md`:
 - Define success criteria before changing behavior.
 - For bug fixes, prefer a reproduction path plus a validating test when feasible.
 
-### Change Discipline
+### 변경 범위 관리
 
 - Modify only files that are necessary for the request.
 - Do not reformat or rename unrelated code.
 - After editing, check that every changed line is still in scope.
 
-## Documentation Rules
+## 문서 관리 규칙
 
-When the task touches docs or architecture, follow `.claude/DOCUMENTATION_GUIDELINES.md`:
+문서나 아키텍처를 다룰 때는 `.claude/DOCUMENTATION_GUIDELINES.md`를 따릅니다.
 
-- Use `docs/core/schema.md` as the single source of truth for schema and detailed structures.
-- In `docs/scenarios/`, describe concepts and flow, and link to schema instead of duplicating it.
-- Write diagrams in Mermaid, not as image assets.
-- For architecture or behavior changes, update the relevant ADR first.
-- If a new ADR is added, immediately update `docs/adr/ADR-000-index.md`.
-- Keep ADR numbering sequential.
-- If the user says something will be handled later, record it in the appropriate section of `docs/roadmap.md`.
+- 스키마와 상세 구조는 `docs/core/schema.md`를 단일 정본으로 사용합니다.
+- `docs/scenarios/`에는 구조를 복제하지 말고 개념과 흐름만 적고 스키마를 링크합니다.
+- 다이어그램은 이미지 대신 Mermaid로 작성합니다.
+- 아키텍처나 동작을 바꾸면 관련 ADR을 먼저 갱신합니다.
+- 새 ADR을 추가하면 즉시 `docs/adr/ADR-000-index.md`도 갱신합니다.
+- ADR 번호는 순차적으로 유지합니다.
+- 사용자가 나중에 처리하겠다고 한 내용은 `docs/roadmap.md`의 적절한 섹션에 남깁니다.
 
-## Safety and Review Triggers
+## 주의가 필요한 변경
 
-Use extra caution and surface impact clearly when work touches:
+다음 범위를 건드릴 때는 영향 범위를 더 명확히 드러내고 신중하게 진행합니다.
 
 - `server/system-agent/`
 - registry schema or persistence shape
@@ -81,33 +81,75 @@ Use extra caution and surface impact clearly when work touches:
 - CI/CD or automation
 - database schema changes
 
-Ask before:
+다음 변경은 먼저 확인을 받습니다.
 
-- adding dependencies
-- making breaking API/protocol/schema changes
-- changing behavior outside the approved design
+- 의존성 추가
+- 호환성을 깨는 API, 프로토콜, 스키마 변경
+- 승인된 설계 범위를 벗어나는 동작 변경
 
-## Verification Expectations
+## 검증 기준
 
-Before finishing:
+마무리 전에 다음을 확인합니다.
 
-- review the diff for scope control
-- run the smallest relevant verification
-- say explicitly what you did not verify
-- call out assumptions, unresolved risks, or follow-up work
+- `git diff`로 범위가 통제됐는지 확인합니다.
+- 가장 작은 관련 검증을 실행합니다.
+- 무엇을 검증하지 못했는지 명시합니다.
+- 가정, 미해결 위험, 후속 작업을 분명히 적습니다.
 
-## Repo Notes
+## 저장소 메모
 
-Useful references when needed:
+필요할 때 참고할 만한 경로입니다.
 
-- `.claude/COWATER_CONTEXT.md`: system context
-- `docs/SYSTEM_ARCHITECTURE.md`: architecture overview
-- `docs/QUICK_START.md`: manual run guidance
-- `.claude/projects/-Users-teamgrit-Documents-CoWater/memory/`: project memory
+- `.claude/COWATER_CONTEXT.md`: 시스템 빠른 참고 문서
+- `docs/SYSTEM_ARCHITECTURE.md`: 아키텍처 개요
+- `docs/QUICK_START.md`: 수동 실행 가이드
+- `.claude/projects/-Users-teamgrit-Documents-CoWater/memory/`: 프로젝트 메모리
 
-Only pull in roadmap or design documents such as `.claude/SYSTEM_AGENT_DESIGN.md` or `.claude/IMPLEMENTATION_STATUS_ROADMAP.md` when the task specifically requires target-state architecture context.
+`.claude/SYSTEM_AGENT_DESIGN.md`, `.claude/IMPLEMENTATION_STATUS_ROADMAP.md` 같은 로드맵이나 설계 문서는 목표 아키텍처 맥락이 꼭 필요할 때만 참고합니다.
 
-## Temporary User Rules Update
+## 도메인 문서 참조 규칙
+
+CoWater는 도메인 언어와 아키텍처 결정을 한 곳에서 추적하는 단일 컨텍스트 구성을 사용합니다.
+
+- `CONTEXT.md`: 도메인 언어, 핵심 개념, 아키텍처 용어
+- `docs/adr/`: 주요 설계 결정을 담은 ADR 모음
+- `.claude/COWATER_CONTEXT.md`: 빠르게 훑는 시스템 참고 문서
+
+다음 상황이 생기면 문서를 이렇게 갱신합니다.
+
+- 새 개념이나 용어를 추가할 때 → `CONTEXT.md` 갱신
+- 아키텍처 결정을 내릴 때 → `docs/adr/`에 ADR 추가 후 `docs/adr/ADR-000-index.md` 갱신
+- 용어 충돌을 발견했을 때 → `CONTEXT.md`와 관련 ADR을 함께 갱신
+
+`improve-codebase-architecture`, `diagnose`, `tdd` 같은 스킬은 이 문서들을 기준으로 도메인 제약과 용어를 해석합니다.
+
+## 이슈 추적과 트리아지 규칙
+
+CoWater의 이슈는 GitHub Issues에서 관리합니다.
+
+이슈 작업은 `gh` CLI를 사용합니다.
+
+```bash
+gh issue create --title "..." --body "..."
+gh issue view <number>
+gh issue list --label needs-triage
+gh issue edit <number> --add-label needs-triage
+gh issue edit <number> --remove-label needs-info
+```
+
+표준 트리아지 라벨은 아래 다섯 개입니다.
+
+| 라벨 | 의미 | 다음 단계 |
+|-------|---------|----------|
+| `needs-triage` | 관리자의 1차 검토가 필요함 | → `needs-info` 또는 `ready-for-agent` |
+| `needs-info` | 제보자의 추가 설명을 기다림 | → `needs-triage` 또는 `ready-for-agent` |
+| `ready-for-agent` | 사양이 충분해 에이전트가 작업 가능함 | → 필요 시 `ready-for-human` |
+| `ready-for-human` | 사람이 직접 구현해야 함 | 종료 상태 |
+| `wontfix` | 처리하지 않기로 결정함 | 종료 상태 |
+
+`triage`는 이 라벨을 기준으로 이슈를 이동하고, `to-issues`는 계획을 이슈 단위로 나누며, `to-prd`는 PRD를 이슈로 게시합니다.
+
+## 임시 사용자 규칙 업데이트
 
 - docs 기준으로 구현한다.
 - 사용자가 `docs` 전체를 기준으로 구현하라고 하면, 구현 전에 `docs/` 디렉토리의 모든 문서를 확인한 뒤 구현 순서를 정한다.

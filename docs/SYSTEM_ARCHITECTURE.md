@@ -99,7 +99,7 @@ Stream Layer (Moth - 실시간 데이터)
 
 ## 4. 핵심 컴포넌트와 역할
 
-### 4.1 다중 에이전트 아키텍처 (Multi-Agent Architecture)
+### 4.1 다중 에이전트 아키텍처
 
 CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에이전트는 명확한 책임 영역과 데이터베이스 소유권을 가집니다.
 
@@ -123,7 +123,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 | **Device Agent** | 개별 무인체 Agent (USV-01, AUV-01, ROV-01 등) | Task 수행 판단 및 실행, 로컬 안전 행동, 상태 보고 | 자신의 Device만 직접 제어 |
 
 👉 자세한 책임 및 규칙: [**도메인 모델**](core/domain-model.md), [**설계 원칙**](core/principles.md)  
-👉 **Device Agent 구현**: [**Device Agent 구현 가이드**](core/device-agent-implementation.md) ← Task 수행 판단, 통신 드라이버, Heartbeat 등 상세 구현
+👉 **Device Agent 구현**: [**Device Agent 구현 가이드**](implementation/device-agent.md) ← Task 수행 판단, 통신 드라이버, Heartbeat 등 상세 구현
 
 #### 생명주기 흐름 (입력 → 판단 → 계획 → 실행 → 감시 → 기록)
 
@@ -188,7 +188,7 @@ CoWater는 **책임 기반 다중 에이전트** 구조로 운영되며, 각 에
 
 CoWater의 핵심: **Device Agent는 물리 환경을 인식하고 자동으로 최적 통신을 선택합니다.**
 
-#### 📊 매체별 우선순위 (The Cost of Medium)
+#### 📊 매체별 우선순위
 
 | 매체                | 용도                    | 우선순위 | 특성                                 |
 | ------------------- | ----------------------- | -------- | ------------------------------------ |
@@ -216,7 +216,7 @@ Step 3. 환경별 가용성 필터 (Environmental Filter)
   └─ 예: AUV 수중 진입 → active_mediums = [ACOUSTIC]로 자동 변경
 ```
 
-#### 🔄 실시간 통신 모드 전환 (Dynamic Hand-over)
+#### 🔄 실시간 통신 모드 전환
 
 ```
 상황: AUV가 수심 진입
@@ -237,7 +237,7 @@ Device Agent:
 
 👉 상세: [**ADR-009: 물리 통신 라우팅**](adr/ADR-009-physical-communication-routing.md)
 
-### 4.4 Device Agent 초기화 & 등록 (Initialization & Registration)
+### 4.4 Device Agent 초기화와 등록
 
 Device Agent는 시스템 부팅 후 다음 단계로 초기화됩니다:
 
@@ -299,7 +299,7 @@ Device Agent는 시스템 부팅 후 다음 단계로 초기화됩니다:
 }
 ```
 
-👉 상세: [**Device Agent 구현 가이드**](core/device-agent-implementation.md#2-device-agent-초기화--등록-initialization--registration)
+👉 상세: [**Device Agent 구현 가이드**](implementation/device-agent.md#2-device-agent-초기화와-등록)
 
 ---
 
@@ -307,7 +307,7 @@ Device Agent는 시스템 부팅 후 다음 단계로 초기화됩니다:
 
 CoWater의 5가지 시나리오별 프로세스:
 
-### 5.1 Device Lifecycle (장비 생명주기)
+### 5.1 Device 생명주기
 
 **등록 → 준비 → 운영 → 제거**
 
@@ -318,7 +318,7 @@ CoWater의 5가지 시나리오별 프로세스:
 
 👉 [**Device Lifecycle**](scenarios/lifecycle.md)
 
-### 5.2 Operation (운영 흐름)
+### 5.2 Operation 운영 흐름
 
 **명령 해석 → 계획(Proposal) → 승인 → 실행(Mission) → 결과 처리**
 
@@ -335,7 +335,7 @@ CoWater의 5가지 시나리오별 프로세스:
 
 👉 [**Operation 프로세스**](scenarios/operation.md)
 
-### 5.3 Exception Handling (예외 상황)
+### 5.3 예외 처리
 
 **위험 감지 → 격리 및 격상 → 자동 대응 또는 사용자 승인**
 
@@ -347,7 +347,7 @@ CoWater의 5가지 시나리오별 프로세스:
 
 👉 [**Exception Handling**](scenarios/exceptions.md)
 
-### 5.4 Reporting (기록 및 분석)
+### 5.4 기록과 분석
 
 **Event 기록 → Report 생성 → 분석 및 피드백**
 
@@ -361,7 +361,7 @@ CoWater의 5가지 시나리오별 프로세스:
 
 👉 [**Reporting & Analytics**](scenarios/reporting.md)
 
-### 5.5 Administration (시스템 관리)
+### 5.5 시스템 관리
 
 **설정 관리 → 정책 관리 → 모니터링**
 
@@ -413,7 +413,7 @@ CoWater의 5가지 시나리오별 프로세스:
 
 ---
 
-## 8. 자동화 수준 (Phase Model)
+## 8. 자동화 수준
 
 CoWater는 Proposal-Mission 분리를 통해 단계적 자동화를 지원합니다.
 
@@ -439,12 +439,12 @@ Phase 3: Full Autonomous
 
 ## 9. 통신 모델
 
-### 9.1 A2A (Agent-to-Agent)
+### 9.1 A2A (에이전트 간 통신)
 
 - Agent 간 의도적 상호작용: Mission, Task, Event 전달
 - 모든 A2A 메시지 로깅
 
-### 9.2 Moth (Stream Layer)
+### 9.2 Moth (스트림 계층)
 
 - 실시간 데이터 전달: A2A, Telemetry, Healthcheck
 - 구현: WebSocket 기반 pub-sub (wss://cobot.center:8287)
@@ -456,7 +456,7 @@ Phase 3: Full Autonomous
 
 ---
 
-## 10. 상태 소유권 (Canonical Owner)
+## 10. 상태 소유권
 
 | 정보                       | 소유자                  |
 | -------------------------- | ----------------------- |
@@ -487,7 +487,7 @@ Phase 3: Full Autonomous
 
 ---
 
-## 12. 향후 확장 (Out of Scope)
+## 12. 향후 확장
 
 현재 설계에 포함되지 않는 항목 (향후 확장):
 

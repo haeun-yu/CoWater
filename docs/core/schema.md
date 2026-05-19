@@ -1,4 +1,4 @@
-# 공통 데이터 스키마 (Common Schema)
+# 공통 데이터 스키마
 
 주요 데이터 모델의 JSON/SQL 상세 정의  
 **기반**: [ADR-001~006](../adr/)
@@ -780,7 +780,7 @@ Policy: "Low Battery Auto-Return"
 }
 ```
 
-**특성** (agent-implementation.md 참고):
+**특성** (`docs/implementation/system-agent.md` 참고):
 
 - **scope**: Policy 적용 범위
   - `SYSTEM`: 모든 Device에 적용
@@ -849,7 +849,7 @@ Policy: "Low Battery Auto-Return"
 }
 ```
 
-**특성** (rule-engine-implementation.md 참고):
+**특성** (`docs/implementation/rule-engine.md` 참고):
 
 - **trigger**: Rule을 발동하는 Event 타입
   - 예: `DEVICE_HEALTHCHECK` (Device Heartbeat), `SYS_TASK_DISPATCHED` (Task 할당)
@@ -876,7 +876,7 @@ Policy: "Low Battery Auto-Return"
 {{ system.time }}            # 현재 시간
 ```
 
-**Rule 평가 흐름** (rule-engine-implementation.md 참고):
+**Rule 평가 흐름** (`docs/implementation/rule-engine.md` 참고):
 
 ```
 Event 발생

@@ -1,372 +1,321 @@
-# CoWater 로드맵 (Roadmap)
+# CoWater 로드맵
 
 **최종 업데이트**: 2026-05-12  
-**상태**: Phase 1 설계 완료 → Phase 2 구현 준비
+**목적**: 완료된 설계 범위와 앞으로의 구현 우선순위를 한눈에 정리한다.
 
 ---
 
-## 📊 진행 상황 요약
+## 현재 상태
 
-```
-Phase 1: Design & Architecture     ✅ 2026-05-12 완료
-├─ ✅ ADR-001~006 정의
-├─ ✅ 5대 설계 철학 확정
-├─ ✅ 14개 데이터 모델 정의
-├─ ✅ 5개 시나리오 프로세스 문서화
-└─ ✅ 설계 원칙 체계화
+- 설계와 아키텍처 문서화는 완료됨
+- 핵심 구현은 아직 본격 착수 전 준비 단계
+- 로드맵은 `완료`, `단기 구현`, `중기 확장`, `기술 부채`로만 관리함
 
-Phase 2: Core Implementation      🚀 2026-05-12 ~ 2026-08-31
-Phase 3: Advanced Features        📅 2026-09-01 이후
-```
+### 진행 요약
 
----
-
-## ✅ 완료 (2026-05-12)
-
-### 핵심 설계 아키텍처
-
-- **[ADR-001: Core Design Philosophy](adr/ADR-001-core-design-philosophy.md)**
-  - 5대 핵심 철학 확정
-  - Action Abstraction, Decoupling, Inter-Agent Collaboration, Event-Based Traceability, Bridge the Gap
-  
-- **[ADR-002~006: 아키텍처 결정](adr/ADR-000-index.md)**
-  - Proposal as Solution Set
-  - Capability-Driven Task Assignment
-  - Agent Endpoint Management
-  - Event-Triggered Rule Execution
-  - Adaptive Autonomy Migration Path
-
-### 데이터 모델 & 도메인
-
-- **[principles.md](core/principles.md)**
-  - 5대 철학 상세 설명
-  - 10가지 설계 원칙
-  - 역할 정의 (User, System Agent, Device Agent, Middle-layer Agent)
-
-- **[schema.md](core/schema.md)**
-  - 14개 데이터 모델 정의
-  - Device, Proposal, Mission, Task, Event, Alert, Insight, AgentConnection 등
-
-- **[domain-model.md](core/domain-model.md)**
-  - 엔티티 간 관계
-  - 상태 다이어그램 (UML)
-  - AgentConnection 동적 관리 전략
-
-### 시나리오 & 프로세스
-
-- **[lifecycle.md](scenarios/lifecycle.md)**: Device 생명주기 (등록→준비→운영→제거)
-- **[operation.md](scenarios/operation.md)**: 사용자 명령 → Proposal → Mission → Task 실행 흐름
-- **[exceptions.md](scenarios/exceptions.md)**: 예외 상황 처리 (`SYS_ANOMALY_DETECTED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED`, `SYS_INTENT_REJECTED`)
-- **[reporting.md](scenarios/reporting.md)**: Event 기록, Report 생성, 실패 분석, 피드백 수집
-- **[administration.md](scenarios/administration.md)**: 시스템 설정, 정책 관리, 승인 규칙
+| 구분              | 상태    | 비고                                          |
+| ----------------- | ------- | --------------------------------------------- |
+| Phase 1 설계      | ✅ 완료 | ADR, 도메인 모델, 시나리오 문서 정리 완료     |
+| Phase 2 핵심 구현 | 🚀 예정 | Registry, System Agent, Device Agent, 기본 UI |
+| Phase 3 고급 확장 | 📅 예정 | 조건부 미션, 고가용성, 정책 학습              |
 
 ---
 
-## 🚀 Phase 2: Core Implementation (2026-05-13 ~ 2026-08-31)
+## 완료
 
-### Phase 2-A: 공통 인프라 구축 (1주, 2026-05-13 ~ 2026-05-19)
+### 설계와 아키텍처
 
-기본 통신 및 Agent 프레임워크 구현
+- [ADR-001: CoWater의 핵심 설계 철학](adr/ADR-001-core-design-philosophy.md)
+- [ADR-002~006 색인](adr/ADR-000-index.md)
+- [설계 원칙](core/principles.md)
+- [데이터 스키마](core/schema.md)
+- [도메인 모델](core/domain-model.md)
 
-#### 공통 모듈 (shared/)
-- [ ] **moth_client.py** - MEB pub/sub/meb 클라이언트
-  - single "agents" meb 채널 구독/발행
-  - event_type + target_agents 라우팅
+### 운영 시나리오와 프로세스
+
+- [Device 생명주기](scenarios/lifecycle.md)
+- [운영 흐름](scenarios/operation.md)
+- [예외와 자동 대응](scenarios/exceptions.md)
+- [기록과 분석](scenarios/reporting.md)
+- [관리와 설정](scenarios/administration.md)
+
+---
+
+## 단기 구현 우선순위
+
+### 1. 공통 인프라
+
+- [ ] `moth_client.py`
+  - MEB pub/sub 클라이언트
+  - 단일 `agents` 채널 구독/발행
   - 재연결 로직 포함
 
-- [ ] **llm_client.py** - Ollama 클라이언트
-  - Circuit Breaker + 재시도
-  - JSON 파싱 + 유효성 검사
-  - timeout 관리
+- [ ] `llm_client.py`
+  - Ollama 클라이언트
+  - Circuit Breaker, 재시도, timeout
+  - JSON 파싱과 유효성 검사
 
-- [ ] **registry_client.py** - Registry REST API 클라이언트
+- [ ] `registry_client.py`
+  - Registry REST API 클라이언트
   - Device, Mission, Task, Event 조회/생성/업데이트
   - AgentConnection CRUD
 
-- [ ] **base_agent.py** - BaseAgent 공통 클래스
-  - init, start, call_llm, publish_event
+- [ ] `base_agent.py`
+  - BaseAgent 공통 클래스
+  - `init`, `start`, `call_llm`, `publish_event`
   - MEB 구독 패턴
-  - 상태 관리 (메모리 캐시)
+  - 메모리 캐시 기반 상태 관리
 
-#### 설정
-- [ ] config.yaml - 포트, Registry, LLM, Moth 설정
+- [ ] `config.yaml`
+  - 포트, Registry, LLM, Moth 설정
 
----
+### 2. System Agent 6개 구현
 
-### Phase 2-B: 6개 System Agent 구현 (2주, 2026-05-20 ~ 2026-06-02)
+#### RequestHandler
 
-순차 구현 (의존성 순서):
-
-#### 1️⃣ RequestHandler (포트 9116, 3일)
 - [ ] Intent 분류 LLM 프롬프트
-- [ ] /agents/{token}/command 엔드포인트
-- [ ] MEB: SYS_INTENT_CLASSIFIED 발행
+- [ ] `/agents/{token}/command` 엔드포인트
+- [ ] `SYS_INTENT_CLASSIFIED` 발행
 - [ ] Fleet 상태 요약 API
 
-#### 2️⃣ MissionPlanner (포트 9111, 4일)
-- [ ] 3단계 Proposal 생성 (규칙 기반 + LLM + 검증)
-- [ ] 여러 대안 생성 (최적/빠른/안전)
-- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
-- [ ] MEB: SYS_MISSION_UPDATED 발행
+#### MissionPlanner
+
+- [ ] 3단계 Proposal 생성: 규칙 기반 + LLM + 검증
+- [ ] 여러 대안 생성: 최적 / 빠른 / 안전
+- [ ] `SYS_INTENT_CLASSIFIED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED`, `SYS_ANOMALY_DETECTED`, `SYS_POLICY_DECISION` 구독
+- [ ] `SYS_MISSION_UPDATED` 발행
 - [ ] Mission 생명주기 관리
 
-#### 3️⃣ DeviceBridge (포트 9110, 3일)
-- [ ] A2A 엔드포인트: POST /message:send
-- [ ] task.assign, task.result, child.register, layer.assignment 처리
-- [ ] Device Endpoint 관리
-- [ ] MEB: SYS_TASK_DISPATCHED, SYS_TASK_COMPLETED, SYS_TASK_FAILED 발행
+#### DeviceBridge
 
-#### 4️⃣ PolicyManager (포트 9112, 2일)
-- [ ] Policy 등록/관리
+- [ ] `POST /message:send` A2A 엔드포인트
+- [ ] `task.assign`, `task.result`, `child.register`, `layer.assignment` 처리
+- [ ] Device endpoint 관리
+- [ ] `SYS_TASK_DISPATCHED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED` 발행
+
+#### PolicyManager
+
+- [ ] Policy 등록과 관리
 - [ ] LLM 기반 Policy 매칭
-- [ ] auto_execute 정책 실행
-- [ ] 구독: SYS_INTENT_CLASSIFIED, SYS_ANOMALY_DETECTED
-- [ ] MEB: SYS_POLICY_DECISION 발행
+- [ ] `auto_execute` 정책 실행
+- [ ] `SYS_INTENT_CLASSIFIED`, `SYS_ANOMALY_DETECTED` 구독
+- [ ] `SYS_POLICY_DECISION` 발행
 
-#### 5️⃣ SystemSentinel (포트 9113, 3일)
-- [ ] Device 건전성 감시 루프 (1초 interval)
-- [ ] 규칙 기반: 배터리, Heartbeat, 센서 이상 탐지
-- [ ] AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
-- [ ] LLM 기반: 복합 패턴 분석
-- [ ] 구독: DEVICE_HEALTHCHECK, ENV_STATE_CHANGED, SYS_TASK_DISPATCHED, SYS_TASK_COMPLETED, SYS_TASK_FAILED
-- [ ] MEB: SYS_ANOMALY_DETECTED, SYS_AGENT_CONNECTION_* 발행
+#### SystemSentinel
 
-#### 6️⃣ InsightReporter (포트 9114, 2일)
-- [ ] 데이터 조회 (Mission, Device, Event)
+- [ ] Device 건전성 감시 루프
+- [ ] 규칙 기반 이상 탐지: 배터리, Heartbeat, 센서
+- [ ] AgentConnection 3단계 필터링: Gateway, 매체, 환경
+- [ ] LLM 기반 복합 패턴 분석
+- [ ] `DEVICE_HEALTHCHECK`, `ENV_STATE_CHANGED`, `SYS_TASK_DISPATCHED`, `SYS_TASK_COMPLETED`, `SYS_TASK_FAILED` 구독
+- [ ] `SYS_ANOMALY_DETECTED`, `SYS_AGENT_CONNECTION_*` 발행
+
+#### InsightReporter
+
+- [ ] Mission, Device, Event 조회
 - [ ] LLM 기반 한국어 리포트 생성
-- [ ] stateless (Registry에서 실시간 조회)
-- [ ] 구독: 모든 주요 이벤트
+- [ ] Registry 실시간 조회 기반 stateless 동작
+- [ ] 주요 이벤트 구독
 
----
+### 3. 통합과 E2E 검증
 
-### Phase 2-C: 통합 & E2E 테스트 (1주, 2026-06-03 ~ 2026-06-09)
-
-#### 각 Agent 단독 테스트
-- [ ] 포트별 응답성 확인 (9110~9114, 9116)
-- [ ] LLM 호출 타임아웃 처리
-- [ ] MEB 이벤트 발행/수신
-
-#### MEB 이벤트 흐름 테스트
+- [ ] 포트별 응답성 확인: `9110~9114`, `9116`
+- [ ] LLM 호출 timeout 처리 확인
+- [ ] MEB 이벤트 발행/수신 검증
 - [ ] Intent classified → MissionPlanner → Proposal 생성
 - [ ] Policy decision → Policy 자동 실행
 - [ ] Anomaly detected → Alert + 자동 대응
-
-#### E2E 시나리오
 - [ ] 사용자 명령 → Proposal → Mission → Task → Device 실행 → 결과 보고
-- [ ] 에러 처리: Device offline, Task timeout, Policy escalation
-- [ ] Multi-hop relay (Device A → Device B → DeviceBridge)
+- [ ] Device offline, Task timeout, Policy escalation 오류 흐름 검증
+- [ ] Multi-hop relay: `Device A → Device B → DeviceBridge`
 
----
+### 4. 프론트엔드와 시뮬레이션
 
-### Q2 2026 (2026-05-13 ~ 2026-07-31) - 기존 계획
-
-#### 2-1. Backend Core (FastAPI) - 기존
-[기존 내용 유지...]
-
-#### 2-2. Frontend Core (Next.js)
-- [ ] **Proposal 승인 화면**
+- [ ] Proposal 승인 화면
   - 여러 솔루션 세트 비교
   - 선택, 수정, 거절 UI
-  - 예상: 2주
 
-- [ ] **Mission 추적 대시보드**
+- [ ] Mission 추적 대시보드
   - Mission 상태, Step, Task 트리
   - Timeline 표시
   - Device 위치 지도
-  - 예상: 3주
 
-- [ ] **Alert & Exception 관리**
-  - Alert 목록 및 세부 정보
+- [ ] Alert와 Exception 관리 화면
+  - Alert 목록과 세부 정보
   - 자동 대응 로그
   - Override UI
-  - 예상: 2주
 
-#### 2-3. 통합 테스트
-- [ ] **시뮬레이션 Device Agent** (테스트용)
+- [ ] 시뮬레이션 Device Agent
   - USV, AUV, ROV 시뮬레이터
-  - 예상: 2주
 
-- [ ] **엔드투엔드 시나리오 테스트**
+- [ ] 엔드투엔드 시나리오 테스트
   - Device 등록 → Proposal → Mission → Task 실행
-  - 예상: 2주
 
-### Q3 2026 (2026-08-01 ~ 2026-08-31)
+---
 
-#### 3-1. Phase 1 → Phase 2 전환
-- [ ] **자동화 정책 구현**
-  - `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → RETURN_TO_BASE 자동 Mission
-  - `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` → EMERGENCY_STOP 자동 Mission
-  - 예상: 2주
+## 중기 확장
 
-- [ ] **User Feedback Loop**
+### 자동화와 운영 고도화
+
+- [ ] 자동화 정책 구현
+  - `SYS_ANOMALY_DETECTED(anomaly_type=LOW_BATTERY)` → `RETURN_TO_BASE`
+  - `SYS_ANOMALY_DETECTED(anomaly_type=CRITICAL_HAZARD)` → `EMERGENCY_STOP`
+
+- [ ] 사용자 피드백 루프
   - Feedback 수집 UI
   - Improvement 후보 추적
-  - 예상: 1주
 
-- [ ] **모니터링 & 분석**
+- [ ] 모니터링과 분석
   - Mission 성공률 추적
   - Task 실패 원인 분석
   - Device 성능 지표
-  - 예상: 2주
 
-#### 3-2. 성능 최적화
-- [ ] **LLM 호출 최적화**
-  - LLM 응답 캐싱 (같은 fleet 상태 재사용)
-  - generate_multiple_mission_proposals() 중복 호출 감소
+### 성능 최적화
+
+- [ ] LLM 호출 최적화
+  - 응답 캐싱
+  - 중복 Proposal 생성 호출 감소
   - 프롬프트 템플릿 최적화
-  - 예상: 1주
 
-- [ ] **Registry Query 최적화**
+- [ ] Registry 조회 최적화
   - 인덱싱 전략
-  - 캐싱 (Redis)
-  - 예상: 1주
+  - Redis 캐싱
 
-- [ ] **Mission/Task 계획 최적화**
+- [ ] Mission과 Task 계획 최적화
   - Device 선택 알고리즘 고도화
-  - 예상: 1주
 
-#### 3-3. 모니터링 & 관찰성
-- [ ] **LLM 성능 메트릭**
-  - LLM 호출 성공률 / 실패율
-  - 평균 응답 시간 (p50, p95, p99)
-  - Circuit Breaker 상태 추적
-  - 에러 유형별 분류 (timeout, invalid JSON, API error)
-  - 예상: 1주
+### 관찰성과 메트릭
 
-- [ ] **System Agent 메트릭**
+- [ ] LLM 성능 메트릭
+  - 성공률과 실패율
+  - 평균 응답 시간
+  - Circuit Breaker 상태
+  - 에러 유형별 분류
+
+- [ ] System Agent 메트릭
   - Mission 생성 지연시간
   - Proposal 생성 지연시간
   - Policy 평가 시간
-  - 이벤트 처리 처리량
-  - 예상: 1주
+  - 이벤트 처리량
 
-- [ ] **대시보드 & 알림**
+- [ ] 대시보드와 알림
   - Prometheus 메트릭 내보내기
-  - Grafana 대시보드 (LLM 성공률, 지연시간)
-  - 알림 규칙 (LLM 성공률 < 80%, p95 > 5초)
-  - 예상: 1주
+  - Grafana 대시보드
+  - 알림 규칙
 
----
+### 고급 기능
 
-## 📅 Phase 3: Advanced Features (2026-09-01 이후)
-
-### Q4 2026
-
-- [ ] **Conditional Mission (조건부 미션)**
-  - 사용자 자연어 기반 조건부 명령
-  - 예: "USV로 기뢰 탐지 하는데 기뢰가 있을경우 ROV로 제거해주세요"
+- [ ] Conditional Mission
+  - 자연어 기반 조건부 명령
   - Task 결과 기반 다음 Task 자동 실행
-  - PolicyManager Rule + Task 체이닝으로 구현
-  - 예상: 2주
+  - PolicyManager Rule + Task chaining
 
-- [ ] **Middle-layer Agent 강화**
+- [ ] Middle-layer Agent 강화
   - Relay 기반 미션 관리
-  - 예상: 3주
 
-- [ ] **Advanced AgentConnection Types**
-  - LEADER_FOLLOWER 협력
-  - SHARE_DATA 센서 통합
-  - 예상: 2주
+- [ ] Advanced AgentConnection Types
+  - `LEADER_FOLLOWER`
+  - `SHARE_DATA`
 
-- [ ] **Multi-Domain Coordination**
-  - USV-AUV-ROV 복합 미션
-  - 예상: 3주
+- [ ] Multi-Domain Coordination
+  - USV, AUV, ROV 복합 미션
 
-### 2027 Q1
-
-- [ ] **AI 기반 정책 학습**
-  - Soul.md 기반 Policy 개선
+- [ ] AI 기반 정책 학습
   - 사용자 피드백 기반 추천 고도화
-  - 예상: 4주
 
-- [ ] **High Availability & Resilience**
+- [ ] High Availability와 Resilience
   - Registry 복제
   - Failover 전략
-  - 예상: 2주
 
-- [ ] **권한 관리 (ADMIN/OPERATOR/VIEWER)**
+- [ ] 권한 관리
+  - `ADMIN`, `OPERATOR`, `VIEWER`
   - 역할 기반 접근 제어
   - 감사 로그
-  - 예상: 2주
 
 ---
 
-## 🎯 마일스톤
-
-| 날짜 | 마일스톤 | 상태 |
-|------|---------|------|
-| 2026-05-12 | **Design Complete** (ADR 6개, 시나리오 5개) | ✅ |
-| 2026-06-30 | **Core Backend MVP** (Registry, System Agent, Device Agent) | 🚀 |
-| 2026-07-31 | **Core Frontend MVP** (Proposal, Mission, Alert UI) | 🚀 |
-| 2026-08-31 | **Phase 2 완료** (자동화 정책, 모니터링) | 🚀 |
-| 2026-09-30 | **Phase 3 시작** (Advanced Features) | 📅 |
-| 2027-01-31 | **AI 기반 정책 학습** | 📅 |
-
----
-
-## 🔧 기술 부채 & 개선
+## 기술 부채와 운영 개선
 
 ### 높은 우선순위
-- [ ] **테스트 커버리지** (목표: 80%)
+
+- [ ] 테스트 커버리지 확대
   - Unit 테스트
   - Integration 테스트
   - E2E 시나리오 테스트
 
-- [ ] **API 문서화** (OpenAPI/Swagger)
+- [ ] API 문서화
   - Registry Server API
   - System Agent API
   - Device Agent API
 
-- [ ] **에러 처리 표준화**
+- [ ] 에러 처리 표준화
   - 일관된 에러 코드
   - 에러 메시지 가이드라인
 
-- [ ] **로깅 & Observability**
+- [ ] 로깅과 Observability
   - 구조화된 로깅
-  - 분산 추적 (Tracing)
-  - 메트릭 수집 (Prometheus)
+  - 분산 추적
+  - Prometheus 메트릭 수집
 
 ### 중간 우선순위
-- [ ] **성능 벤치마킹**
+
+- [ ] 성능 벤치마킹
   - Mission 생성 지연시간
   - Task 할당 지연시간
   - Registry 조회 성능
 
-- [ ] **배포 자동화**
+- [ ] 배포 자동화
   - CI/CD 파이프라인
-  - 컨테이너화 (Docker)
-  - 쿠버네티스 배포
+  - Docker 컨테이너화
+  - Kubernetes 배포
 
-- [ ] **통신 신뢰성**
-  - Message Queue (RabbitMQ, Kafka)
+- [ ] 통신 신뢰성
+  - Message Queue
   - Retry 정책
   - Dead Letter Queue
 
 ### 낮은 우선순위
-- [ ] **UI/UX 개선**
+
+- [ ] UI/UX 개선
   - Dark Mode
   - Mobile Responsive
   - Accessibility
 
-- [ ] **성능 최적화**
+- [ ] 추가 성능 최적화
   - Frontend 번들 최적화
   - DB 쿼리 최적화
   - Caching 전략
 
 ---
 
-## 📚 핵심 문서
+## 마일스톤
+
+| 날짜       | 마일스톤               | 상태 |
+| ---------- | ---------------------- | ---- |
+| 2026-05-12 | 설계 완료              | ✅   |
+| 2026-06-30 | Core Backend MVP       | 🚀   |
+| 2026-07-31 | Core Frontend MVP      | 🚀   |
+| 2026-08-31 | Phase 2 완료           | 🚀   |
+| 2026-09-30 | Phase 3 시작           | 📅   |
+| 2027-01-31 | AI 기반 정책 학습 시작 | 📅   |
+
+---
+
+## 참고 문서
 
 ### 아키텍처
-- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) - 전체 개요
-- [ADR 색인](adr/ADR-000-index.md) - 아키텍처 결정 기록
-- [설계 원칙](core/principles.md) - 5대 철학 + 10가지 원칙
+
+- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)
+- [ADR 색인](adr/ADR-000-index.md)
+- [설계 원칙](core/principles.md)
 
 ### 구현 기준
-- [도메인 모델](core/domain-model.md) - 엔티티 관계
-- [데이터 스키마](core/schema.md) - 14개 모델 정의
+
+- [도메인 모델](core/domain-model.md)
+- [데이터 스키마](core/schema.md)
 
 ### 운영 프로세스
+
 - [Device Lifecycle](scenarios/lifecycle.md)
 - [Operation Workflow](scenarios/operation.md)
 - [Exception Handling](scenarios/exceptions.md)
@@ -375,23 +324,9 @@ Phase 3: Advanced Features        📅 2026-09-01 이후
 
 ---
 
-## 🎓 참고: 현재 구현 상태
+## 유지 규칙
 
-현재 (2026-05-12):
-- ✅ **설계 아키텍처**: 100% 완료
-- 🚀 **Backend 구현**: 준비 단계
-- 🚀 **Frontend**: 준비 단계
-- 📊 **POC 07**: 실시간 시각화 (Moth 통합) 완료
-
----
-
-## 📝 피드백 및 개선
-
-로드맵에 대한 피드백:
-- 기술 기준 변경 사항은 해당 ADR 또는 설계 원칙 문서 업데이트
-- 구현 일정 변경은 마일스톤 재평가 필요
-- 새로운 요구사항은 ADR-007+ 추가 검토
-
----
-
-**다음 단계**: Phase 2 구현 착수 (2026-05-13)
+- 완료 항목은 `완료` 섹션으로만 이동한다.
+- 아직 시작하지 않은 일은 `단기 구현 우선순위`, `중기 확장`, `기술 부채` 중 하나에만 둔다.
+- 같은 작업을 일정 섹션과 기술 부채 섹션에 중복으로 쓰지 않는다.
+- 구현 기준이 바뀌면 로드맵보다 ADR과 설계 문서를 먼저 갱신한다.

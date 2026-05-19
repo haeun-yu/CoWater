@@ -1,4 +1,4 @@
-# Device Communication Driver Strategy (물리 계층 통신)
+# 디바이스 통신 드라이버 전략
 
 **문서 버전**: 1.0  
 **목적**: Device 간 물리적 데이터 전송을 담당하는 드라이버 선택 및 multi-hop relay 알고리즘 정의
@@ -32,7 +32,7 @@ Physical Layer (실제 송수신)
 
 ---
 
-## 2. Network Type별 드라이버 스펙
+## 2. 네트워크 유형별 드라이버 스펙
 
 ### 2.0 기본 인터페이스
 
@@ -115,7 +115,7 @@ class AcousticDriver(CommunicationDriver):
 
 **사용 사례**: AUV ↔ USV (수중 ↔ 수상)
 
-### 2.4 Satellite (4순위)
+### 2.4 위성 통신 (4순위)
 
 **특성**: 위성 통신 (Long range, 저대역폭)
 
@@ -132,7 +132,7 @@ class SatelliteDriver(CommunicationDriver):
     # 구현은 구현 단계에서
 ```
 
-### 2.5 Inertial (관성 항법, 최저 우선순위)
+### 2.5 관성 항법 (최저 우선순위)
 
 **특성**: GPS 없이 장치 내부 센서(가속도, 자이로)로 위치 추정
 
@@ -150,7 +150,7 @@ class InertialDriver(CommunicationDriver):
 
 ---
 
-## 3. Driver 선택 알고리즘
+## 3. 드라이버 선택 알고리즘
 
 ### 3.1 AgentConnection 기반 선택
 
@@ -185,7 +185,7 @@ class DeviceAgent:
     }
 ```
 
-### 3.2 Fallback 전략
+### 3.2 폴백 전략
 
 primary 드라이버 실패 시 대체 드라이버 시도:
 
@@ -220,7 +220,7 @@ async def send_with_fallback(self, target_device_id: str,
 
 ---
 
-## 4. Multi-hop Relay (Device-Device-System)
+## 4. 다중 홉 릴레이
 
 ### 4.1 계층 구조 예시
 

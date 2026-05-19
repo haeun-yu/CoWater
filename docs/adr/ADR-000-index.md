@@ -1,8 +1,8 @@
-# Architecture Decision Records (ADR)
+# 아키텍처 결정 기록(ADR)
 
 CoWater 시스템의 핵심 아키텍처 결정사항과 설계 철학을 기록합니다.
 
-## Index
+## 목록
 
 | ADR | 제목 | 상태 | 날짜 |
 |-----|------|------|------|

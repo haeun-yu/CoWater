@@ -1,4 +1,4 @@
-# A2A Protocol Specification (Agent-to-Agent Communication)
+# A2A 프로토콜 명세
 
 **문서 버전**: 1.0  
 **목적**: Device Agent와 System Agent 간의 동기식 메시지 통신 정의

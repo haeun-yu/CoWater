@@ -1,11 +1,11 @@
-# 설계 원칙 (Design Principles)
+# 설계 원칙
 
 CoWater 시스템의 핵심 설계 원칙과 책임, 역할을 정의합니다.  
 **기반**: [ADR-001: Core Design Philosophy](../adr/ADR-001-core-design-philosophy.md)
 
 ---
 
-## 🎯 5가지 핵심 철학 (Why We Design This Way)
+## 🎯 5가지 핵심 철학
 
 ### 1️⃣ **추상화된 행동 계층 (Action Abstraction)**
 
@@ -156,7 +156,7 @@ Physical Constraint      Software Solution
 
 ---
 
-## 📋 핵심 설계 원칙 (10가지 - CoWater의 헌법)
+## 📋 핵심 설계 원칙
 
 > **이 원칙들은 모든 아키텍처 결정, 기능 구현, 운영 프로세스의 근거입니다.**  
 > 의심될 때는 이 원칙으로 돌아가세요.
