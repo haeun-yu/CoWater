@@ -865,31 +865,31 @@
         </div>
     </section>
 
-    <!-- S4: DESIGN PRINCIPLES -->
+    <!-- S4: DESIGN DIRECTION -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">설계 원칙</h2>
+            <h2 class="reveal">설계 방향</h2>
             <div class="divider reveal"></div>
             <div class="split-layout reveal">
                 <div class="problem-panel">
-                    <div class="eyebrow">Principles</div>
-                    <h3>CoWater는 네 가지 원칙 위에 설계됩니다.</h3>
+                    <div class="eyebrow">Design Intent</div>
+                    <h3>이 구조는 완전 무인 운영으로 가기 위한 기반입니다.</h3>
                     <div class="problem-list">
                         <div class="problem-item">
-                            <strong>계획과 실행 분리</strong><br>
-                            Proposal은 계획, Mission은 실행입니다.
+                            <strong>운영 단순화</strong><br>
+                            사람은 목표만 주고, 시스템은 계획, 실행, 기록을 나눠 처리합니다.
                         </div>
                         <div class="problem-item">
-                            <strong>이벤트 기반 추적</strong><br>
-                            중요한 변화는 Event로 남깁니다.
+                            <strong>책임 분리</strong><br>
+                            System Agent와 Device Agent를 분리해 제어 경계를 분명하게 둡니다.
                         </div>
                         <div class="problem-item">
-                            <strong>분산형 책임</strong><br>
-                            각 Agent는 자기 역할만 책임집니다.
+                            <strong>추적 가능성</strong><br>
+                            중요한 판단은 Event로 남아 나중에 다시 확인할 수 있습니다.
                         </div>
                         <div class="problem-item">
-                            <strong>물리 제약 대응</strong><br>
-                            통신 환경 변화에 맞게 운영을 바꿉니다.
+                            <strong>단계적 자율화</strong><br>
+                            승인 기반 운영에서 정책 기반 자동 대응으로 자연스럽게 넘어갑니다.
                         </div>
                     </div>
                 </div>
@@ -916,15 +916,15 @@
 
                         <rect x="182" y="36" width="196" height="62" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
                         <text x="280" y="63" text-anchor="middle" class="diagram-label">Planning / Execution</text>
-                        <text x="280" y="82" text-anchor="middle" class="diagram-sub">Proposal과 Mission 분리</text>
+                        <text x="280" y="82" text-anchor="middle" class="diagram-sub">계획과 실행 분리</text>
 
                         <rect x="474" y="228" width="76" height="64" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
                         <text x="512" y="254" text-anchor="middle" class="diagram-label">Event</text>
-                        <text x="512" y="274" text-anchor="middle" class="diagram-sub">Trace</text>
+                        <text x="512" y="274" text-anchor="middle" class="diagram-sub">기록</text>
 
                         <rect x="182" y="438" width="196" height="62" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
                         <text x="280" y="465" text-anchor="middle" class="diagram-label">Distributed Responsibility</text>
-                        <text x="280" y="484" text-anchor="middle" class="diagram-sub">각 Agent의 책임 범위 명확화</text>
+                        <text x="280" y="484" text-anchor="middle" class="diagram-sub">역할 분리와 책임 분산</text>
 
                         <rect x="12" y="228" width="76" height="64" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
                         <text x="50" y="254" text-anchor="middle" class="diagram-label">Physical</text>
@@ -933,7 +933,7 @@
                         <text x="280" y="155" text-anchor="middle" class="diagram-sub">계획과 실행 분리</text>
                         <text x="456" y="250" text-anchor="middle" class="diagram-sub">추적성</text>
                         <text x="280" y="422" text-anchor="middle" class="diagram-sub">책임 분리</text>
-                        <text x="104" y="250" text-anchor="middle" class="diagram-sub">물리 제약 극복</text>
+                        <text x="104" y="250" text-anchor="middle" class="diagram-sub">물리 제약 대응</text>
                     </svg>
                 </div>
             </div>
@@ -1093,28 +1093,28 @@
     <!-- S8: VALUE -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">기대 효과와 가치</h2>
+            <h2 class="reveal">이 설계의 장점</h2>
             <div class="divider reveal"></div>
             <div class="metric-grid reveal" style="grid-template-columns: repeat(2, 1fr);">
                 <div class="metric-tile">
                     <div class="metric-value">↑</div>
-                    <div class="metric-label">효율성 증대</div>
-                    <div class="metric-detail">반복 판단과 상태 확인을 줄입니다.</div>
+                    <div class="metric-label">명확한 역할</div>
+                    <div class="metric-detail">사람, 플랫폼, 장비의 책임이 분리되어 이해하기 쉽습니다.</div>
                 </div>
                 <div class="metric-tile magenta">
                     <div class="metric-value">↓</div>
-                    <div class="metric-label">운영 위험 감소</div>
-                    <div class="metric-detail">위험 징후를 빨리 감지하고 대응합니다.</div>
+                    <div class="metric-label">안전한 확장</div>
+                    <div class="metric-detail">장비가 늘어나도 같은 흐름으로 운영을 이어갈 수 있습니다.</div>
                 </div>
                 <div class="metric-tile">
                     <div class="metric-value">◎</div>
-                    <div class="metric-label">강건성 확보</div>
-                    <div class="metric-detail">통신 장애와 일부 장애에도 버팁니다.</div>
+                    <div class="metric-label">기록 기반 운영</div>
+                    <div class="metric-detail">주요 판단과 결과가 Event로 남아 다시 확인할 수 있습니다.</div>
                 </div>
                 <div class="metric-tile magenta">
                     <div class="metric-value">→</div>
-                    <div class="metric-label">미래 확장</div>
-                    <div class="metric-detail">Agentic AI와 Physical AI로 확장됩니다.</div>
+                    <div class="metric-label">무인화의 발판</div>
+                    <div class="metric-detail">현재는 보조 운영, 이후에는 더 높은 수준의 자율 운영으로 넘어갑니다.</div>
                 </div>
             </div>
         </div>
@@ -1123,24 +1123,24 @@
     <!-- S9: FUTURE EXPANSION -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">향후 확장 가능성</h2>
+            <h2 class="reveal">향후 발전 방향</h2>
             <div class="divider reveal"></div>
             <div class="roadmap-panel reveal">
                 <div class="roadmap-line">
                     <div class="roadmap-node">
-                        <div class="eyebrow">Expansion 01</div>
-                        <h3>CoLand 확장</h3>
-                        <p style="margin-bottom: 0;">해양에서 검증한 구조를 육상 무인체 운영으로 확장합니다.</p>
+                        <div class="eyebrow">Phase 01</div>
+                        <h3>운영 보조</h3>
+                        <p style="margin-bottom: 0;">사람이 목표를 정하고 CoWater가 계획과 기록을 돕는 단계입니다.</p>
                     </div>
                     <div class="roadmap-node">
-                        <div class="eyebrow">Expansion 02</div>
-                        <h3>AI 모델 고도화</h3>
-                        <p style="margin-bottom: 0;">경량 모델, 대형 모델, 도메인 특화 모델을 조합합니다.</p>
+                        <div class="eyebrow">Phase 02</div>
+                        <h3>정책 기반 자동 대응</h3>
+                        <p style="margin-bottom: 0;">위험 감지와 제한적 자동 대응을 정책 중심으로 넓혀갑니다.</p>
                     </div>
                     <div class="roadmap-node">
-                        <div class="eyebrow">Expansion 03</div>
-                        <h3>더 넓은 무인체 환경</h3>
-                        <p style="margin-bottom: 0;">해양을 시작으로 여러 무인체 환경으로 확장할 수 있습니다.</p>
+                        <div class="eyebrow">Phase 03</div>
+                        <h3>완전한 무인 시스템</h3>
+                        <p style="margin-bottom: 0;">사람의 개입을 최소화한 자율 운영 체계로 발전시키는 것이 최종 목표입니다.</p>
                     </div>
                 </div>
             </div>
@@ -1155,34 +1155,34 @@
             <div class="split-layout reveal">
                 <div class="problem-panel">
                     <div class="eyebrow">Progress</div>
-                    <h3>문서와 구현을 함께 맞추는 단계입니다.</h3>
+                    <h3>설계 문서와 발표 흐름을 먼저 정리하는 단계입니다.</h3>
                     <div class="problem-list">
                         <div class="problem-item">
                             <strong>설계</strong><br>
-                            핵심 목표와 구조가 문서화되었습니다.
+                            핵심 목표, 구조, 용어가 문서로 정리되어 있습니다.
                         </div>
                         <div class="problem-item">
                             <strong>구현</strong><br>
-                            핵심 기능은 단계적으로 구현 중입니다.
+                            핵심 기능은 문서에 맞춰 단계적으로 구현 중입니다.
                         </div>
                         <div class="problem-item">
                             <strong>검증</strong><br>
-                            문서와 구현을 맞추며 안정성을 확인합니다.
+                            문서와 구현의 일치를 계속 확인합니다.
                         </div>
                     </div>
                 </div>
                 <div class="solution-panel">
                     <div>
                         <div class="eyebrow">Status</div>
-                        <h3>현재는 기반을 안정적으로 다듬는 단계입니다.</h3>
+                        <h3>현재는 설계에서 운영 흐름으로 옮겨가는 과정입니다.</h3>
                         <p style="line-height: 1.8;">
-                            소개 자료와 구현 기준을 함께 맞추면서,
-                            다음 단계의 확장을 준비하고 있습니다.
+                            소개 자료는 프로젝트의 전체 흐름을 먼저 보여주고,
+                            이후에는 구현 범위를 더 구체화할 예정입니다.
                         </p>
                     </div>
                     <div class="solution-metric">
                         <div class="value">08</div>
-                        <div class="desc">현재 발표 자료는 흐름 중심으로 정리된 상태입니다.</div>
+                        <div class="desc">현재 발표 자료는 프로젝트 개요와 설계 방향을 함께 전달하도록 정리되었습니다.</div>
                     </div>
                 </div>
             </div>
@@ -1194,11 +1194,11 @@
         <div class="slide-content">
             <div class="closing-panel">
                 <div class="eyebrow reveal">CoWater</div>
-                <h1 class="reveal" style="margin-bottom: 0.7rem;">해양 운영의 새로운 기준</h1>
+                <h1 class="reveal" style="margin-bottom: 0.7rem;">해양 운영에서 완전한 무인 시스템으로</h1>
                 <div class="divider reveal"></div>
                 <p class="reveal" style="max-width: 760px; margin: 0 auto; line-height: 1.75; font-size: 0.98rem;">
-                    CoWater는 해양 무인체 운영의 복잡도를 줄이고,
-                    더 안전하고 더 강건한 운영 흐름을 만드는 플랫폼입니다.
+                    CoWater는 해양 무인체 운영을 하나의 흐름으로 묶고,
+                    단계적으로 자율도를 높여 최종적으로는 완전한 무인 시스템을 목표로 하는 플랫폼입니다.
                 </p>
             </div>
         </div>
