@@ -38,6 +38,12 @@ MEB 채널: "agents"
 2. 수신한 이벤트의 `target_agents` 필드 확인
 3. 자신의 이름이 있으면 처리, 없으면 무시
 
+**주의**:
+
+- `target_agents`, `source_role`, `source_agent_id`, `payload`는 **MEB 전송 envelope** 필드입니다.
+- Registry의 `Event` 저장 스키마는 `docs/core/schema.md`의 Event 정의를 따르며, 라우팅용 envelope 필드는 정본 Event 레코드에 저장하지 않습니다.
+- 저장 시 라우팅 부가정보가 필요하면 `data`에 필요한 최소 정보만 흡수합니다.
+
 ---
 
 ## 2. System 계층 이벤트

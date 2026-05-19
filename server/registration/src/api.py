@@ -260,28 +260,34 @@ def update_device_connectivity(
 def ingest_event(body: dict[str, Any]) -> dict[str, Any]:
     """Event 생성 (Registry 저장 전용 — 에이전트 간 통신은 Moth MEB 직접 사용)"""
     event_type = body.get("type", body.get("event_type", "UNKNOWN"))
-    payload = body.get("data", {})
+    payload = dict(body.get("data", {}) or {})
+    metadata = body.get("metadata") or {}
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            payload.setdefault(key, value)
+    if "source_role" in body and "source_role" not in payload:
+        payload["source_role"] = body.get("source_role")
+    if "source_agent_id" in body and "source_agent_id" not in payload:
+        payload["source_agent_id"] = body.get("source_agent_id")
     actor_type = body.get("actor_type")
-    actor_id = body.get("actor_id")
-    source_system = str(body.get("source_system") or "").lower()
     if not actor_type:
+        source_system = str(body.get("source_system") or "").lower()
         if source_system.startswith("device"):
             actor_type = "DEVICE"
         elif source_system.startswith("user"):
             actor_type = "USER"
         else:
             actor_type = "SYSTEM"
-    if actor_id is None:
-        actor_id = body.get("source_agent_id") or body.get("source_device_id") or body.get("source_user_id") or "system"
+    actor_id = body.get("actor_id") or body.get("source_agent_id") or body.get("source_device_id") or body.get("source_user_id") or "system"
     event = event_registry.create_event(
         actor_type=actor_type,
         actor_id=actor_id,
         type=event_type,
         severity=body.get("severity", "INFO"),
         title=body.get("title", ""),
-        description=body.get("description", ""),
-        target_type=body.get("target_type", "UNKNOWN"),
-        target_id=body.get("target_id", ""),
+        description=body.get("description") or body.get("message", ""),
+        target_type=body.get("target_type"),
+        target_id=body.get("target_id"),
         data=payload,
         status=body.get("status", "OPEN"),
     )
@@ -588,7 +594,7 @@ def get_device_connections(device_id: str) -> list[dict[str, Any]]:
 
 
 @app.post("/devices/{device_id}/location")
-def update_device_location(device_id: int, request: LocationUpdate) -> dict[str, Any]:
+def update_device_location(device_id: str, request: LocationUpdate) -> dict[str, Any]:
     """POC 01-05 에이전트의 텔레메트리 기반 위치 업데이트"""
     try:
         device = registry.update_device_location(
@@ -602,7 +608,7 @@ def update_device_location(device_id: int, request: LocationUpdate) -> dict[str,
 
 
 @app.patch("/devices/{device_id}/metadata")
-def update_device_metadata(device_id: int, request: dict[str, Any]) -> Response:
+def update_device_metadata(device_id: str, request: dict[str, Any]) -> Response:
     """디바이스 메타데이터 업데이트 (device_type, layer, connectivity)"""
     try:
         registry.update_device_metadata(
@@ -617,7 +623,7 @@ def update_device_metadata(device_id: int, request: dict[str, Any]) -> Response:
 
 
 @app.patch("/devices/{device_id}/auv-submersion")
-def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict[str, Any]:
+def update_auv_submersion(device_id: str, request: AUVSubmersionRequest) -> dict[str, Any]:
     """AUV 수중/수면 상태 업데이트 (수중음향통신 라우팅 활성화)"""
     try:
         previous = registry.get_device(device_id)
@@ -625,15 +631,16 @@ def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict
         if getattr(previous, "is_submerged", False) != device.is_submerged:
             event_registry.create_event(
                 actor_type="DEVICE",
-                actor_id=str(device.id),
+                actor_id=str(device.public_id),
                 type="ENV_STATE_CHANGED",
                 severity="INFO",
                 title="Environment state changed",
                 description=f"Device {device.name} changed environment state",
                 target_type="DEVICE",
-                target_id=str(device.id),
+                target_id=str(device.public_id),
                 data={
-                    "device_id": device.id,
+                    "device_id": device.public_id,
+                    "registry_id": device.id,
                     "device_name": device.name,
                     "from": "UNDERWATER" if getattr(previous, "is_submerged", False) else "SURFACE",
                     "to": "UNDERWATER" if device.is_submerged else "SURFACE",
@@ -648,7 +655,7 @@ def update_auv_submersion(device_id: int, request: AUVSubmersionRequest) -> dict
 
 
 @app.patch("/devices/{device_id}/connectivity-state")
-def update_device_connectivity_state(device_id: int, request: DeviceConnectivityStateRequest) -> dict[str, Any]:
+def update_device_connectivity_state(device_id: str, request: DeviceConnectivityStateRequest) -> dict[str, Any]:
     """
     디바이스 연결 상태 업데이트
 
@@ -674,16 +681,10 @@ class MissionCreateRequest(BaseModel):
     title: str | None = None
     mission_type: str | None = None
     type: str | None = None
-    goal: str | None = None
-    summary: str | None = None
-    source: str | None = None
-    alert_id: str | None = None
-    event_id: str | None = None
     source_event_id: str | None = None
     proposal_id: str | None = None
     source_proposal_id: str | None = None
     approval_id: str | None = None
-    insight_id: str | None = None
     status: str | None = None
     priority: str | None = None
     target_area: str | None = None
@@ -695,8 +696,6 @@ class MissionCreateRequest(BaseModel):
     status_updated_at: str | None = None
     steps: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
-    logs: list[dict[str, Any]] = Field(default_factory=list)
-    device_execution_results: list[dict[str, Any]] = Field(default_factory=list)
     final_result: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     approved_at: str | None = None
@@ -707,25 +706,22 @@ class MissionCreateRequest(BaseModel):
 @app.post("/missions", status_code=status.HTTP_201_CREATED)
 def create_mission(
     body: MissionCreateRequest | None = Body(None),
-    alert_id: str = Query(None),
-    event_id: str = Query(None),
 ) -> dict[str, Any]:
     """새 Mission 생성"""
     body = body or MissionCreateRequest()
     mission_payload = body.model_dump()
-    mission_payload["alert_id"] = mission_payload.get("alert_id") or alert_id
-    mission_payload["event_id"] = mission_payload.get("event_id") or event_id
     if not mission_payload.get("title"):
         mission_payload["title"] = "Mission"
     if not mission_payload.get("mission_type"):
         mission_payload["mission_type"] = mission_payload.get("type") or "OPERATION"
-    mission_payload["source_event_id"] = mission_payload.get("source_event_id") or mission_payload.get("event_id")
+    mission_payload["source_event_id"] = mission_payload.get("source_event_id")
     mission_payload["source_proposal_id"] = mission_payload.get("source_proposal_id") or mission_payload.get("proposal_id")
     if not mission_payload.get("status"):
         mission_payload["status"] = "READY"
     else:
         mission_payload["status"] = normalize_mission_status(mission_payload.get("status"))
     mission = mission_registry.create_mission(
+        mission_id=mission_payload.get("mission_id"),
         title=mission_payload.get("title"),
         type=mission_payload.get("mission_type"),
         status=mission_payload.get("status"),
@@ -737,8 +733,13 @@ def create_mission(
         created_by=mission_payload.get("created_by"),
         approved_by_user_id=mission_payload.get("approved_by_user_id"),
         approved_at=mission_payload.get("approved_at"),
+        approval_id=mission_payload.get("approval_id"),
         result_summary=mission_payload.get("result_summary"),
         status_reason=mission_payload.get("status_reason"),
+        steps=mission_payload.get("steps"),
+        timeline=mission_payload.get("timeline"),
+        final_result=mission_payload.get("final_result"),
+        metadata=mission_payload.get("metadata"),
     )
     result = mission.to_dict()
     async def publish_mission():
@@ -783,6 +784,7 @@ def replace_mission(mission_id: str, body: dict[str, Any]) -> dict[str, Any]:
         mission = mission_registry.update_mission(mission_id, **body)
     except KeyError:
         mission = mission_registry.create_mission(
+            mission_id=body.get("mission_id") or mission_id,
             title=body.get("title", "Mission"),
             type=body.get("mission_type", body.get("type", "OPERATION")),
             status=body.get("status", "READY"),
@@ -794,7 +796,12 @@ def replace_mission(mission_id: str, body: dict[str, Any]) -> dict[str, Any]:
             created_by=body.get("created_by"),
             approved_by_user_id=body.get("approved_by_user_id"),
             approved_at=body.get("approved_at"),
+            approval_id=body.get("approval_id"),
             result_summary=body.get("result_summary"),
+            steps=body.get("steps"),
+            timeline=body.get("timeline"),
+            final_result=body.get("final_result"),
+            metadata=body.get("metadata"),
         )
     result = mission.to_dict()
     async def publish_mission():
@@ -940,7 +947,7 @@ def update_agent_environment_state(agent_id: str, body: dict[str, Any]) -> dict[
 @app.post("/proposals/{proposal_id}/tasks", status_code=status.HTTP_201_CREATED)
 def create_proposal_task(proposal_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """ProposalTask 생성"""
-    task = proposal_task_registry.create_proposal_task(
+    task = proposal_task_registry.create_task(
         proposal_id=proposal_id,
         title=body.get("title", ""),
         type=body.get("type", "DEVICE_TASK"),
@@ -967,7 +974,7 @@ def list_proposal_tasks(proposal_id: str) -> list[dict[str, Any]]:
 def get_proposal_task(proposal_id: str, task_id: str) -> dict[str, Any]:
     """ProposalTask 조회"""
     try:
-        task = proposal_task_registry.get_proposal_task(task_id)
+        task = proposal_task_registry.get_task(task_id)
         if task.proposal_id != proposal_id:
             raise HTTPException(status_code=404, detail="task not found in this proposal")
         return task.to_dict()

@@ -293,16 +293,16 @@ class UserRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Chat 응답 데이터"""
-    type: str  # "RESPONSE" | "COMMAND" | "PROPOSAL"
-    status: str  # "SUCCESS" | "PENDING_APPROVAL" | "ERROR"
+    type: str  # "RESPONSE" | "COMMAND"
+    status: str  # "SUCCESS" | "PENDING" | "INFEASIBLE" | "ERROR"
     message: str
     data: Optional[Dict[str, Any]] = None
-    
-    # type="PROPOSAL"인 경우
-    proposal_id: Optional[str] = None
-    
-    # type="COMMAND"인 경우
+
     command_id: Optional[str] = None
+    intent_id: Optional[str] = None
+    approval_id: Optional[str] = None
+    reason_code: Optional[str] = None
+    clarification_needed: Optional[bool] = None
 
 @app.post("/request")
 async def handle_user_request(self, request: UserRequest) -> ChatResponse:
@@ -328,23 +328,12 @@ async def handle_user_request(self, request: UserRequest) -> ChatResponse:
         }
     }
     
-    【Response - MISSION 응답 (Proposal 생성)】
+    【Response - MISSION 응답 (Proposal 생성 시작)】
     {
-        "type": "PROPOSAL",
-        "status": "PENDING_APPROVAL",
-        "message": "기뢰탐지 미션 추천안을 생성했습니다. 승인해 주세요.",
-        "proposal_id": "prop-uuid-123",
-        "data": {
-            "proposal": {
-                "proposal_id": "prop-uuid-123",
-                "tasks": [
-                    {"title": "구역 A로 이동", "required_action": "MOVE_TO"},
-                    {"title": "고해상도 스캔", "required_action": "SCAN"},
-                    {"title": "기지로 복귀", "required_action": "RETURN_TO_BASE"}
-                ],
-                "estimated_duration_sec": 3600
-            }
-        }
+        "type": "RESPONSE",
+        "status": "PENDING",
+        "message": "미션 계획 요청이 MissionPlanner로 전달됐습니다.",
+        "intent_id": "intent-uuid-123"
     }
     
     【Response - EMERGENCY 응답】
@@ -358,8 +347,10 @@ async def handle_user_request(self, request: UserRequest) -> ChatResponse:
     【Response - 오류】
     {
         "type": "RESPONSE",
-        "status": "ERROR",
-        "message": "요청을 처리할 수 없습니다."
+        "status": "INFEASIBLE",
+        "message": "미션 수행 불가: 현재 미션을 수행할 수 있는 연결 장치가 없습니다.",
+        "reason_code": "no_available_device",
+        "clarification_needed": false
     }
     """
     
@@ -378,18 +369,17 @@ async def handle_user_request(self, request: UserRequest) -> ChatResponse:
                 data=query_result
             )
         
-        # 3. MISSION: MissionPlanner로 라우팅 → Proposal 생성 → PROPOSAL 응답
+        # 3. MISSION: MissionPlanner로 라우팅 → Proposal 생성 시작 → PENDING 응답
         elif intent == "MISSION":
             proposal_result = await self.route_to_agent(
                 "MISSION",
                 intent_result["parameters"]
             )
             return ChatResponse(
-                type="PROPOSAL",
-                status="PENDING_APPROVAL",
-                message="추천 미션을 생성했습니다. 승인해 주세요.",
-                proposal_id=proposal_result.get("proposal_id"),
-                data={"proposal": proposal_result.get("proposal")}
+                type="RESPONSE",
+                status="PENDING",
+                message="미션 계획 요청을 접수했습니다. Proposal 생성 후 승인 단계로 진행됩니다.",
+                intent_id=proposal_result.get("intent_id")
             )
         
         # 4. EMERGENCY: DeviceBridge로 라우팅 → 긴급 명령 실행 → COMMAND 응답

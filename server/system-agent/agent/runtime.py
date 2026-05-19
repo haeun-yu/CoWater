@@ -16,16 +16,6 @@ from agent.decision import DecisionEngine, TOOL_DEFINITIONS
 
 REACT_MAX_STEPS = 4  # 불필요한 루프 방지
 
-# 한국 주요 해역 좌표 범위 (위도/경도, WGS84 기준)
-_AREA_BOUNDS: dict[str, dict[str, float]] = {
-    "동해 북방": {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
-    "동해":      {"lat_min": 35.0, "lat_max": 42.0, "lon_min": 129.0, "lon_max": 135.0},
-    "서해":      {"lat_min": 33.5, "lat_max": 38.5, "lon_min": 124.0, "lon_max": 127.5},
-    "남해":      {"lat_min": 33.0, "lat_max": 35.5, "lon_min": 126.0, "lon_max": 130.5},
-    "독도":      {"lat_min": 37.2, "lat_max": 37.3, "lon_min": 131.8, "lon_max": 131.9},
-    "제주":      {"lat_min": 33.1, "lat_max": 33.6, "lon_min": 126.1, "lon_max": 126.9},
-    "북방":      {"lat_min": 38.0, "lat_max": 42.0, "lon_min": 124.0, "lon_max": 135.0},
-}
 from agent.event_system import (
     EventPublisher,
     create_step_evaluation_event,
@@ -455,14 +445,39 @@ class AgentRuntime:
             if role == "mission_planner":
                 if event_type == "SYS_INTENT_CLASSIFIED":
                     await self._handle_mission_intent_event(payload)
+                elif event_type in {
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                    "SYS_ANOMALY_DETECTED",
+                    "SYS_POLICY_DECISION",
+                    "SYS_AGENT_CONNECTION_CREATED",
+                    "SYS_AGENT_CONNECTION_DELETED",
+                }:
+                    self.state.remember({"kind": "meb_event_received", "at": utc_now(), "event_type": event_type, "payload": payload})
             elif role == "policy_manager":
-                if event_type == "SYS_ANOMALY_DETECTED":
+                if event_type in {"SYS_INTENT_CLASSIFIED", "SYS_ANOMALY_DETECTED"}:
                     await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
             elif role == "system_sentinel":
-                if event_type == "DEVICE_HEALTHCHECK":
+                if event_type in {
+                    "DEVICE_HEALTHCHECK",
+                    "ENV_STATE_CHANGED",
+                    "SYS_TASK_DISPATCHED",
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                }:
                     await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
             elif role == "insight_reporter":
-                if event_type in ("SYS_MISSION_COMPLETED", "SYS_ANOMALY_DETECTED"):
+                if event_type in {
+                    "SYS_INTENT_CLASSIFIED",
+                    "SYS_TASK_DISPATCHED",
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                    "SYS_ANOMALY_DETECTED",
+                    "SYS_POLICY_DECISION",
+                    "SYS_MISSION_UPDATED",
+                    "SYS_MISSION_COMPLETED",
+                    "DEVICE_HEALTHCHECK",
+                }:
                     await self._generate_insight_from_event(event)
         except Exception as e:
             logger.error(f"[{role}] Moth 이벤트 처리 오류 ({event_type}): {e}")
@@ -895,10 +910,10 @@ class AgentRuntime:
                 or proposal.get("approval_id")
             )
             return {
-                "proposal_id": proposal.get("proposal_id"),
+                "proposal_id": proposal.get("proposal_id") or proposal.get("id"),
                 "title": proposal.get("title"),
-                "mission_type": proposal.get("mission_type"),
-                "steps_count": len(proposal.get("steps") or []),
+                "mission_type": proposal.get("type") or proposal.get("mission_type"),
+                "steps_count": int(proposal.get("proposal_tasks_count") or 0),
                 "approval_id": approval_id,
             }
         return raw
@@ -934,12 +949,16 @@ class AgentRuntime:
 
         if tool_name == "plan_mission":
             goal = str(tool_input.get("goal") or "")
-            devices = self._summarize_tool_result(
-                "get_devices", self.registry_client.list_devices()
-            )
+            devices_raw = self.registry_client.list_devices()
+            devices = self._summarize_tool_result("get_devices", devices_raw)
             feasibility = self._check_area_feasibility(goal, devices)
             if not feasibility["feasible"]:
-                return {"feasible": False, "reason": feasibility["reason"]}
+                return {
+                    "feasible": False,
+                    "reason": feasibility["reason"],
+                    "reason_code": feasibility.get("reason_code"),
+                    "clarification_needed": False,
+                }
             try:
                 raw = await asyncio.wait_for(
                     self.generate_mission_proposal({"goal": goal}, allow_suppression=False),
@@ -954,66 +973,83 @@ class AgentRuntime:
         return {"error": f"알 수 없는 도구: {tool_name}"}
 
     def _check_area_feasibility(self, goal: str, devices: list) -> dict:
-        """미션 목표에 언급된 해역에 장치가 실제로 배치돼 있는지 검증"""
-        # 가장 구체적인(긴) 해역명부터 매칭
-        matched_area = None
-        matched_bounds = None
-        for area_name in sorted(_AREA_BOUNDS, key=len, reverse=True):
-            if area_name in goal:
-                matched_area = area_name
-                matched_bounds = _AREA_BOUNDS[area_name]
-                break
-
-        if not matched_bounds:
-            # CoWater 운용 범위 밖 지역 키워드
-            _OUT_OF_RANGE = {"화성", "달", "우주", "남극", "북극", "대서양", "태평양", "인도양", "지중해", "북해"}
-            out_kw = next((kw for kw in _OUT_OF_RANGE if kw in goal), None)
-            if out_kw:
-                return {
-                    "feasible": False,
-                    "reason": (
-                        f"CoWater는 한국 해역 해양 운용 플랫폼입니다. "
-                        f"'{out_kw}'은(는) 운용 범위 밖입니다.\n"
-                        f"지원 해역: 동해, 동해 북방, 서해, 남해, 독도, 제주"
-                    ),
-                }
-            return {"feasible": True}  # 해역 지정 없음 → 현재 장치 위치 기준으로 수행
-
-        field_devices = [
+        """해역 하드코딩 없이, 현재 연결된 실행 가능 장치 유무만 확인한다."""
+        available_devices = [
             d for d in devices
-            if d.get("lat") is not None and d.get("lon") is not None
+            if str(d.get("layer") or "") in {"lower", "middle"}
         ]
-        if not field_devices:
+        if not available_devices:
             return {
                 "feasible": False,
-                "reason": "현재 위치 정보가 있는 장치가 없습니다.",
+                "reason_code": "no_available_device",
+                "reason": "현재 미션을 수행할 수 있는 연결 장치가 없습니다.",
             }
+        return {"feasible": True}
 
-        in_area = [
-            d for d in field_devices
-            if (matched_bounds["lat_min"] <= float(d["lat"]) <= matched_bounds["lat_max"]
-                and matched_bounds["lon_min"] <= float(d["lon"]) <= matched_bounds["lon_max"])
-        ]
+    def _proposal_task_payloads(self, proposal_id: str, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        sequence = 1
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for task in step.get("tasks") or []:
+                if not isinstance(task, dict):
+                    continue
+                payloads.append(
+                    {
+                        "proposal_id": proposal_id,
+                        "title": str(task.get("title") or task.get("action") or f"Proposal Task {sequence}"),
+                        "type": "DEVICE_TASK",
+                        "required_action": str(task.get("action") or ""),
+                        "sequence": sequence,
+                        "target_area": (task.get("params") or {}).get("area"),
+                        "target_position": (task.get("params") or {}).get("location"),
+                        "recommended_device_id": task.get("target_device_id"),
+                        "recommended_agent_id": task.get("route_agent_id"),
+                        "alternative_device_ids": list(task.get("attempted_device_ids") or []),
+                        "recommendation_reason": str(step.get("step_type") or ""),
+                        "parameters": dict(task.get("params") or {}),
+                    }
+                )
+                sequence += 1
+        return payloads
 
-        if not in_area:
-            positions = ", ".join(
-                f'{d["name"]}(위도 {float(d["lat"]):.2f}°N, 경도 {float(d["lon"]):.2f}°E)'
-                for d in field_devices[:3]
+    def _mission_steps_from_approval(self, approval: dict[str, Any], proposal_id: str) -> list[dict[str, Any]]:
+        metadata = approval.get("metadata") or {}
+        plan = metadata.get("execution_plan") or {}
+        if isinstance(plan, dict):
+            steps = plan.get("steps") or []
+            if isinstance(steps, list):
+                return steps
+        proposal_tasks = self.registry_client.list_proposal_tasks(proposal_id)
+        mission_steps: list[dict[str, Any]] = []
+        for item in proposal_tasks:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id") or item.get("id") or uuid4())
+            mission_steps.append(
+                self._build_step(
+                    f"step-{item.get('sequence') or len(mission_steps) + 1}",
+                    step_type="generic_action",
+                    evaluation_policy="all_tasks_success_v1",
+                    tasks=[
+                        {
+                            "task_id": task_id,
+                            "logical_task_id": task_id,
+                            "attempt": 0,
+                            "attempted_device_ids": [],
+                            "title": item.get("title") or item.get("required_action") or "Task",
+                            "action": item.get("required_action"),
+                            "target_device_id": item.get("recommended_device_id"),
+                            "target_device_name": "",
+                            "route_agent_id": item.get("recommended_agent_id"),
+                            "route_agent_name": "",
+                            "params": dict(item.get("parameters") or {}),
+                        }
+                    ],
+                )
             )
-            return {
-                "feasible": False,
-                "reason": (
-                    f"'{matched_area}' 해역(위도 {matched_bounds['lat_min']}~"
-                    f"{matched_bounds['lat_max']}°N, 경도 {matched_bounds['lon_min']}~"
-                    f"{matched_bounds['lon_max']}°E)에 배치된 장치가 없습니다.\n"
-                    f"현재 장치 위치: {positions}"
-                ),
-            }
-
-        return {
-            "feasible": True,
-            "devices_in_area": [d["name"] for d in in_area],
-        }
+        return mission_steps
 
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
         """
@@ -1055,6 +1091,8 @@ class AgentRuntime:
                     "type": "RESPONSE",
                     "status": "INFEASIBLE",
                     "message": f"미션 수행 불가: {feasibility['reason']}",
+                    "reason_code": feasibility.get("reason_code"),
+                    "clarification_needed": False,
                 }
             # Moth 'agents' MEB 채널에 직접 publish (Registry는 저장용으로만 별도 기록)
             intent_id = f"intent-{uuid4()}"
@@ -1185,33 +1223,39 @@ class AgentRuntime:
         proposal = self.registry_client.create_mission_proposal(
             {
                 "title": payload.get("title") or f"{mission_type.replace('_', ' ').title()} Proposal",
-                "mission_type": mission_type,
-                "goal": goal or mission_type,
-                "summary": payload.get("summary") or f"Proposal with {len(steps)} step(s) for operator review.",
-                "source": payload.get("source") or "system_agent",
-                "alert_id": payload.get("alert_id"),
-                "event_id": payload.get("event_id"),
-                "insight_id": insight.get("insight_id"),
-                "steps": steps,
-                "metadata": {"location": location, "fingerprint": suppression_fingerprint},
+                "type": mission_type.upper(),
+                "priority": str(payload.get("priority") or "NORMAL").upper(),
+                "source_event_id": payload.get("event_id"),
+                "target_area": (location or {}).get("area"),
+                "target_position": location if isinstance(location, dict) and any(k in location for k in ("latitude", "longitude")) else None,
+                "created_by": {"type": "SYSTEM", "id": self.state.agent_id},
+                "limitations": payload.get("limitations"),
             }
         )
+        proposal_id = str(proposal.get("proposal_id") or proposal.get("id") or "")
+        proposal_tasks = [
+            self.registry_client.create_proposal_task(proposal_id, task_payload)
+            for task_payload in self._proposal_task_payloads(proposal_id, steps)
+        ]
         approval = self.registry_client.create_approval(
             {
                 "target_type": "mission_proposal",
-                "target_id": proposal.get("proposal_id"),
+                "target_id": proposal_id,
                 "summary": f"Approve mission proposal '{proposal.get('title')}'",
                 "requested_action": "approve_mission_proposal",
                 "related_insight_id": insight.get("insight_id"),
                 "metadata": {
                     "mission_type": mission_type,
-                    "goal": proposal.get("goal"),
+                    "goal": goal or mission_type,
                     "location": location,
+                    "source_event_id": payload.get("event_id"),
+                    "suppression_fingerprint": suppression_fingerprint,
+                    "execution_plan": {"steps": steps},
                 },
             }
         )
         proposal["approval_id"] = approval.get("approval_id")
-        proposal = self.registry_client.create_mission_proposal(proposal)
+        proposal["proposal_tasks_count"] = len(proposal_tasks)
         return {
             "insight": insight,
             "proposal": proposal,
@@ -1348,15 +1392,20 @@ class AgentRuntime:
             return {"approval": approval, "mission": mission}
         if str(approval.get("target_type") or "") != "mission_proposal":
             return {"approval": approval, "mission": None}
-        proposal = self.registry_client.get_mission_proposal(str(approval.get("target_id")))
+        proposal_id = str(approval.get("target_id"))
+        proposal = self.registry_client.get_mission_proposal(proposal_id)
         proposal["status"] = "APPROVED" if approved else "CANCELLED"
         proposal = self.registry_client.create_mission_proposal(proposal)
         if not approved:
-            fingerprint = str((proposal.get("metadata") or {}).get("fingerprint") or "")
+            fingerprint = str((approval.get("metadata") or {}).get("suppression_fingerprint") or "")
             if fingerprint:
                 self._recommendation_suppressions[fingerprint] = datetime.fromtimestamp(time.time() + 3600, tz=timezone.utc).isoformat()
             return {"approval": approval, "proposal": proposal, "mission": None}
-        mission = self._mission_from_proposal(proposal, approval_id=str(approval.get("approval_id") or approval_id))
+        mission = self._mission_from_proposal(
+            proposal,
+            approval,
+            approval_id=str(approval.get("approval_id") or approval_id),
+        )
         created = self.registry_client.create_mission(mission)
         # registry 응답은 최소 필드만 포함 → mission_id만 업데이트하고 나머지는 보존
         if created.get("mission_id"):
@@ -1503,14 +1552,17 @@ class AgentRuntime:
             )
         ]
 
-    def _mission_from_proposal(self, proposal: dict[str, Any], *, approval_id: str) -> dict[str, Any]:
-        mission_id = f"mission-{uuid4()}"
+    def _mission_from_proposal(self, proposal: dict[str, Any], approval: dict[str, Any], *, approval_id: str) -> dict[str, Any]:
+        mission_id = str(uuid4())
+        proposal_id = str(proposal.get("proposal_id") or proposal.get("id") or "")
+        steps = self._mission_steps_from_approval(approval, proposal_id)
+        approval_metadata = approval.get("metadata") or {}
         timeline = [
             {
                 "timestamp": utc_now(),
                 "type": "MISSION_CREATED",
                 "message": "Mission created from approved proposal.",
-                "data": {"proposal_id": proposal.get("proposal_id"), "approval_id": approval_id},
+                "data": {"proposal_id": proposal_id, "approval_id": approval_id},
             },
             {
                 "timestamp": utc_now(),
@@ -1522,24 +1574,21 @@ class AgentRuntime:
         return {
             "mission_id": mission_id,
             "title": proposal.get("title") or "Mission",
-            "mission_type": proposal.get("mission_type") or "generic_mission",
-            "goal": proposal.get("goal") or "",
+            "mission_type": proposal.get("type") or proposal.get("mission_type") or "OPERATION",
             "status": "READY",
-            "summary": proposal.get("summary") or "",
-            "source": proposal.get("source") or "system_agent",
-            "alert_id": proposal.get("alert_id"),
-            "event_id": proposal.get("event_id"),
-            "proposal_id": proposal.get("proposal_id"),
+            "priority": proposal.get("priority") or "NORMAL",
+            "source_event_id": proposal.get("source_event_id") or approval_metadata.get("source_event_id"),
+            "source_proposal_id": proposal_id,
+            "target_area": proposal.get("target_area"),
+            "target_position": proposal.get("target_position"),
+            "created_by": proposal.get("created_by") or {"type": "SYSTEM", "id": self.state.agent_id},
+            "approved_by_user_id": approval.get("decided_by"),
             "approval_id": approval_id,
-            "insight_id": proposal.get("insight_id"),
-            "steps": proposal.get("steps") or [],
+            "steps": steps,
             "timeline": timeline,
-            "logs": list(timeline),
-            "device_execution_results": [],
             "final_result": {},
             "metadata": {
-                **dict(proposal.get("metadata") or {}),
-                "dispatch_state": self._build_dispatch_result_from_steps(proposal.get("steps") or []),
+                "dispatch_state": self._build_dispatch_result_from_steps(steps),
             },
             "approved_at": utc_now(),
         }
@@ -1564,7 +1613,6 @@ class AgentRuntime:
                 mission_task["attempted_device_ids"] = state.get("attempted_device_ids") or mission_task.get("attempted_device_ids") or []
                 mission_task["completed_at"] = state.get("completed_at")
         mission.setdefault("metadata", {})["dispatch_state"] = dispatch_state
-        mission["device_execution_results"] = list(dispatch_state.get("execution_results") or [])
         return mission
 
     def _append_dispatch_timeline_entries(self, mission: dict[str, Any], dispatch: dict[str, Any], mission_steps: list[dict[str, Any]]) -> None:
@@ -3058,35 +3106,35 @@ class AgentRuntime:
     async def handle_event_report(self, event: dict[str, Any]) -> dict[str, Any]:
         severity = self.classify_event_severity(event)
         event_type = str(event.get("event_type") or event.get("type") or "unknown")
-        event_id = str(event.get("event_id") or f"event-{uuid4()}")
-        source_agent_id = event.get("source_agent_id") or event.get("detected_by") or event.get("agent_id")
-        source_role = event.get("source_role") or event.get("role")
-        message = str(event.get("message") or f"{event_type} reported")
-        metadata = dict(event.get("metadata") or {})
-        if "location" in event and "location" not in metadata:
-            metadata["location"] = event["location"]
-        metadata.setdefault("raw_event", dict(event))
+        event_id = str(event.get("event_id") or uuid4())
+        actor_id = event.get("source_agent_id") or event.get("detected_by") or event.get("agent_id") or "system"
+        description = str(event.get("description") or event.get("message") or f"{event_type} reported")
+        event_data = dict(event.get("data") or {})
+        if "location" in event and "location" not in event_data:
+            event_data["location"] = event["location"]
+        event_data.setdefault("raw_event", dict(event))
 
         event_record = {
             "event_id": event_id,
-            "source_system": "a2a",
-            "source_agent_id": source_agent_id,
-            "source_role": source_role,
+            "actor_type": "SYSTEM",
+            "actor_id": actor_id,
             "event_type": event_type,
             "severity": severity,
-            "message": message,
-            "metadata": metadata,
+            "title": str(event.get("title") or event_type.replace("_", " ").title()),
+            "description": description,
+            "target_type": event.get("target_type"),
+            "target_id": event.get("target_id"),
+            "data": event_data,
         }
         stored_event = self.registry_client.ingest_event(event_record)
+        stored_event_id = stored_event.get("event_id") or stored_event.get("id") or event_id
 
         proposal_bundle = await self.generate_mission_proposal(
             {
                 "title": f"{event_type.replace('_', ' ').title()} Mission Proposal",
-                "goal": message,
-                "event_id": stored_event.get("event_id"),
+                "goal": description,
+                "event_id": stored_event_id,
                 "severity": severity,
-                "source": "event_report",
-                "summary": f"Proposal generated from event {stored_event.get('event_id')}.",
             }
         )
         self.state.remember(
@@ -3094,7 +3142,7 @@ class AgentRuntime:
                 "kind": "event_report_processed",
                 "at": utc_now(),
                 "event_id": event_id,
-                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id") or (proposal_bundle.get("proposal") or {}).get("id"),
                 "event_type": event_type,
                 "severity": severity,
             }
@@ -3102,8 +3150,8 @@ class AgentRuntime:
         return {
             "received": True,
             "message_type": "event.report",
-            "event_id": stored_event.get("event_id"),
-            "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+            "event_id": stored_event_id,
+            "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id") or (proposal_bundle.get("proposal") or {}).get("id"),
             "approval_id": (proposal_bundle.get("approval") or {}).get("approval_id"),
             "severity": severity,
         }

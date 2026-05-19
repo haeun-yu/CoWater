@@ -210,6 +210,11 @@
   - Task 결과 기반 다음 Task 자동 실행
   - PolicyManager Rule + Task chaining
 
+- [ ] 해역 표준/별칭 관리 기능
+  - 표준 해역 집합과 좌표 범위 등록/수정
+  - `울릉도 근해` 같은 별칭을 표준 해역으로 매핑
+  - Agent Skill 또는 전용 운영 도구로 해역 정보 변경 이력 관리
+
 - [ ] Middle-layer Agent 강화
   - Relay 기반 미션 관리
 

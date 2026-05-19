@@ -3,6 +3,12 @@
 주요 데이터 모델의 JSON/SQL 상세 정의  
 **기반**: [ADR-001~006](../adr/)
 
+**표기 규칙**:
+
+- 본 문서는 각 엔티티의 **정본 canonical 필드**를 `id` 기준으로 설명합니다.
+- 현재 Registry/API 구현은 점진적 전환을 위해 `event_id`, `proposal_id`, `mission_id`, `task_id` 같은 **별칭 필드**를 함께 반환할 수 있습니다.
+- Device 응답은 외부 식별자인 `id`(UUID)와 별도로 내부 라우팅용 `registry_id`(numeric)를 포함할 수 있습니다. 외부 참조는 `id`를 기준으로 사용합니다.
+
 ---
 
 ## 1. User (사용자)
@@ -67,6 +73,13 @@
   "updated_at": "timestamp"
 }
 ```
+
+**운영 확장 필드**:
+
+- 현재 Device Registry 응답은 운영/라우팅 동기화를 위해 `connected`, `connectivity_status`, `main_video_track_name`, `server`, `agent`, `tracks`, `action_catalog`를 함께 포함합니다.
+- 현재 Device Registry 응답은 위치/라우팅 추적을 위해 `device_type`, `layer`, `connectivity`, `latitude`, `longitude`, `last_battery_percent`, `last_battery_update`, `parent_id`, `last_location_update`를 함께 포함합니다.
+- 현재 Device Registry 응답은 Moth/A2A 연계를 위해 `healthcheck_topic`, `healthcheck_endpoint`, `telemetry_topics`를 함께 포함합니다.
+- 현재 Device Registry 응답은 수중 운용 상태를 위해 `is_submerged`, `submerged_at`, `surfaced_at`, `force_parent_routing`를 함께 포함합니다.
 
 **중요**:
 
@@ -389,7 +402,7 @@
 
   "type": "OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY",
 
-  "status": "READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED",
+  "status": "READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED | EXPIRED",
 
   "priority": "LOW | NORMAL | HIGH | EMERGENCY",
 
@@ -406,11 +419,44 @@
 
   "approved_by_user_id": "string (uuid) | null",
   "approved_at": "timestamp | null",
+  "approval_id": "string (uuid) | null",
 
   "status_updated_at": "timestamp",
   "status_reason": "string | null",
 
   "result_summary": "string | null",
+
+  "steps": [
+    {
+      "step_id": "string",
+      "step_type": "string",
+      "evaluation_policy": "string",
+      "depends_on": ["string"],
+      "tasks": ["Task 실행 정의"]
+    }
+  ],
+
+  "timeline": [
+    {
+      "timestamp": "timestamp",
+      "type": "string",
+      "message": "string",
+      "data": {}
+    }
+  ],
+
+  "final_result": {
+    "status": "string",
+    "reason": "string | null",
+    "summary": "string | null"
+  },
+
+  "metadata": {
+    "dispatch_state": {
+      "steps": ["Dispatch 상태"],
+      "execution_results": ["실행 결과 집계"]
+    }
+  },
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -428,6 +474,12 @@
   - → CANCELLED: 사용자가 취소 (진행 중/대기 중 Task도 함께 취소)
 - **COMPLETED** (완료): 모든 Task COMPLETED
 - **FAILED** (실패): 하나 이상의 Task FAILED, 이후 Task들 CANCELLED (status_reason에 실패 사유 기록)
+- **EXPIRED** (만료): 승인 이후 유효 시간이 지나 자동 종료된 상태
+
+**구현 메모**:
+
+- Mission은 문서상의 핵심 상태 엔티티이면서, 현재 구현에서는 실행 orchestration을 위한 `steps`, `timeline`, `final_result`, `metadata.dispatch_state`를 함께 보관합니다.
+- `logs`, `device_execution_results` 같은 중복 실행 기록 필드는 정본 Mission 스키마에서 제외합니다.
 - **CANCELLED** (취소): 사용자 명령 (status_reason에 취소 사유 기록)
 
 **개념 정의** (ADR-002):

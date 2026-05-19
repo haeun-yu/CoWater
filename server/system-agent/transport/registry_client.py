@@ -117,7 +117,7 @@ class RegistryClient:
         connectivity: str | None = None,
         location: dict[str, float] | None = None,
         requires_parent: bool = False,
-        parent_id: int | None = None,
+        parent_id: str | int | None = None,
     ) -> dict[str, Any]:
         body = {
             "secretKey": self.secret_key,
@@ -174,10 +174,10 @@ class RegistryClient:
             payload,
         )
 
-    def get_assignment(self, registry_id: int) -> dict[str, Any]:
+    def get_assignment(self, registry_id: str | int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}/assignment")
 
-    def get_device(self, registry_id: int) -> dict[str, Any]:
+    def get_device(self, registry_id: str | int) -> dict[str, Any]:
         return get_json(f"{self.url}/devices/{registry_id}")
 
     def list_devices(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
@@ -239,6 +239,12 @@ class RegistryClient:
 
     def get_mission_proposal(self, proposal_id: str) -> dict[str, Any]:
         return get_json(f"{self.url}/mission-proposals/{proposal_id}")
+
+    def create_proposal_task(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/proposals/{proposal_id}/tasks", payload)
+
+    def list_proposal_tasks(self, proposal_id: str) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/proposals/{proposal_id}/tasks")
 
     def create_mission(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/missions", payload)

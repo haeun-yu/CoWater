@@ -467,9 +467,14 @@ class MissionRecord:
     created_by: Dict[str, Any] = field(default_factory=lambda: {"type": "SYSTEM", "id": "system"})
     approved_by_user_id: Optional[str] = None
     approved_at: Optional[str] = None
+    approval_id: Optional[str] = None
     status_updated_at: str = field(default_factory=utc_now_iso)
     status_reason: Optional[str] = None
     result_summary: Optional[str] = None
+    steps: List[Dict[str, Any]] = field(default_factory=list)
+    timeline: List[Dict[str, Any]] = field(default_factory=list)
+    final_result: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -483,7 +488,9 @@ class MissionRecord:
             self.status_reason = reason
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["id"] = self.mission_id
+        return payload
 
 
 @dataclass
@@ -508,7 +515,9 @@ class EventRecord:
             self.status = str(status).upper()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["id"] = self.event_id
+        return payload
 
 
 def normalize_severity_value(value: Any) -> str:
@@ -530,24 +539,16 @@ def normalize_severity_value(value: Any) -> str:
 
 class EventIngestRequest(BaseModel):
     event_id: Optional[str] = None
-    source_system: str = "control_center"
-    source_agent_id: Optional[str] = None
-    source_role: Optional[str] = None
     actor_type: Optional[str] = None
     actor_id: Optional[str] = None
     event_type: str
     severity: EVENT_SEVERITIES = "INFO"
     status: str = "OPEN"
-    message: Optional[str] = None
     title: str = ""
     description: Optional[str] = None
     target_type: Optional[str] = None
     target_id: Optional[str] = None
     data: Dict[str, Any] = Field(default_factory=dict)
-    target_agents: List[str] = Field(default_factory=list)
-    status_reason: Optional[str] = None
-    status_updated_at: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -689,7 +690,7 @@ class DeviceRegistrationRequest(BaseModel):
     connectivity: Optional[str] = None
     location: Optional[dict] = None
     requires_parent: bool = False
-    parent_id: Optional[int] = None
+    parent_id: Optional[str] = None
     physical_interfaces: List[Dict[str, Any]] = Field(default_factory=list)
     battery_percent: Optional[float] = None
     gateway_agent_id: Optional[str] = None
@@ -717,7 +718,7 @@ class DeviceRegistrationResponse(BaseModel):
     token: str
     agent_id: str
     name: str
-    parent_id: Optional[int] = None
+    parent_id: Optional[str] = None
     parent_endpoint: Optional[str] = None
     parent_command_endpoint: Optional[str] = None
     healthcheck_topic: str
@@ -747,7 +748,7 @@ class AUVSubmersionRequest(BaseModel):
 
 class DeviceConnectivityStateRequest(BaseModel):
     """Device connectivity state update (for ROV wired/wireless, AUV surface/submerged routing)"""
-    parent_id: Optional[int] = None  # ROV wired connection through middle layer
+    parent_id: Optional[str] = None  # ROV wired connection through middle layer
     force_parent_routing: bool = False  # ROV: always route through parent
 
 
@@ -824,7 +825,7 @@ def device_record_from_dict(data: dict) -> "DeviceRecord":
         if isinstance(raw_id, str) and raw_id and not raw_id.isdigit():
             public_id_value = raw_id
         else:
-            public_id_value = f"id-{uuid4().hex[:12]}"
+            public_id_value = str(uuid4())
     public_id_value = str(public_id_value)
 
     record = DeviceRecord(
@@ -923,7 +924,9 @@ class ProposalTaskRecord:
     updated_at: str = field(default_factory=utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["id"] = self.task_id
+        return payload
 
 
 @dataclass
@@ -948,7 +951,9 @@ class TaskRecord:
     updated_at: str = field(default_factory=utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["id"] = self.task_id
+        return payload
 
     def touch(self, status: Optional[str] = None, reason: Optional[str] = None) -> None:
         self.updated_at = utc_now_iso()

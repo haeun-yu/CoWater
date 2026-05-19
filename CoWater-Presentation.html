@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoWater - 해양 무인체 AI 통합 운영 플랫폼</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* === NEON CYBER THEME === */
+        :root {
+            --bg-primary: #0a0f1c;
+            --bg-secondary: #0f1424;
+            --text-primary: #ffffff;
+            --text-secondary: #a0aec0;
+            --accent-cyan: #00ffcc;
+            --accent-magenta: #ff00aa;
+            --accent-glow: rgba(0, 255, 204, 0.3);
+
+            --title-size: clamp(2rem, 6vw, 5rem);
+            --h2-size: clamp(1.5rem, 4vw, 3rem);
+            --h3-size: clamp(1.1rem, 2.5vw, 1.8rem);
+            --body-size: clamp(0.85rem, 1.2vw, 1.1rem);
+
+            --slide-padding: clamp(1.5rem, 4vw, 4rem);
+            --content-gap: clamp(1rem, 2vw, 2rem);
+
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* === BASE === */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+        }
+
+        html {
+            scroll-snap-type: y mandatory;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            position: relative;
+        }
+
+        /* Grid background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(rgba(0, 255, 204, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 204, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* === SLIDES === */
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            scroll-snap-align: start;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            background: var(--bg-primary);
+        }
+
+        .slide::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at 20% 80%, rgba(0, 255, 204, 0.1) 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 20%, rgba(255, 0, 170, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .slide-content {
+            width: 100%;
+            max-width: 1000px;
+            max-height: 100%;
+            overflow: hidden;
+            padding: var(--slide-padding);
+            position: relative;
+            z-index: 2;
+        }
+
+        /* === TYPOGRAPHY === */
+        h1 {
+            font-family: 'Space Mono', monospace;
+            font-size: var(--title-size);
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: var(--content-gap);
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+
+        h2 {
+            font-family: 'Space Mono', monospace;
+            font-size: var(--h2-size);
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: var(--content-gap);
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+        }
+
+        h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: var(--h3-size);
+            font-weight: 600;
+            margin-bottom: calc(var(--content-gap) * 0.75);
+            color: var(--accent-cyan);
+        }
+
+        p, li {
+            font-size: var(--body-size);
+            line-height: 1.7;
+            margin-bottom: calc(var(--content-gap) * 0.6);
+            color: var(--text-secondary);
+        }
+
+        strong {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        /* === ANIMATIONS === */
+        @keyframes glow-pulse {
+            0%, 100% { text-shadow: 0 0 10px rgba(0, 255, 204, 0.5); }
+            50% { text-shadow: 0 0 20px rgba(0, 255, 204, 0.8); }
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s var(--ease-out-expo),
+                        transform 0.6s var(--ease-out-expo);
+        }
+
+        .slide.visible .reveal {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .slide.visible h1.reveal {
+            animation: glow-pulse 3s ease-in-out infinite;
+        }
+
+        .reveal:nth-child(1) { transition-delay: 0.05s; }
+        .reveal:nth-child(2) { transition-delay: 0.1s; }
+        .reveal:nth-child(3) { transition-delay: 0.15s; }
+        .reveal:nth-child(4) { transition-delay: 0.2s; }
+        .reveal:nth-child(5) { transition-delay: 0.25s; }
+
+        /* === NEON BOXES === */
+        .neon-box {
+            border: 2px solid var(--accent-cyan);
+            background: rgba(0, 255, 204, 0.02);
+            padding: var(--content-gap);
+            border-radius: 0;
+            margin: var(--content-gap) auto;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2), inset 0 0 20px rgba(0, 255, 204, 0.05);
+            max-width: 700px;
+        }
+
+        .neon-box.magenta {
+            border-color: var(--accent-magenta);
+            background: rgba(255, 0, 170, 0.02);
+            box-shadow: 0 0 20px rgba(255, 0, 170, 0.2), inset 0 0 20px rgba(255, 0, 170, 0.05);
+        }
+
+        .feature-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: calc(var(--content-gap) * 0.75);
+            margin: var(--content-gap) auto;
+            max-width: 750px;
+            text-align: left;
+        }
+
+        .feature-list li {
+            padding-left: 2.5rem;
+            position: relative;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .feature-list li::before {
+            content: "→";
+            color: var(--accent-cyan);
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+            font-size: 1.1em;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--content-gap);
+            margin: var(--content-gap) auto;
+            max-width: 950px;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .grid-item {
+            background: rgba(0, 255, 204, 0.02);
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            padding: var(--content-gap);
+            border-radius: 2px;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.1);
+        }
+
+        .grid-item h3 {
+            margin-bottom: 0.75rem;
+        }
+
+        .grid-item p {
+            margin-bottom: 0;
+            font-size: calc(var(--body-size) * 0.95);
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--content-gap);
+            margin: var(--content-gap) auto;
+            max-width: 950px;
+        }
+
+        @media (max-width: 1024px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* === ACCENT TEXT === */
+        .accent-cyan {
+            color: var(--accent-cyan);
+        }
+
+        .accent-magenta {
+            color: var(--accent-magenta);
+        }
+
+        .divider {
+            width: 100px;
+            height: 1px;
+            background: linear-gradient(90deg, var(--accent-cyan), transparent);
+            margin: var(--content-gap) auto;
+        }
+
+        /* === NAVIGATION === */
+        .nav-dots {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 0.75rem;
+            z-index: 100;
+        }
+
+        .nav-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 0;
+            background: rgba(0, 255, 204, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(0, 255, 204, 0.4);
+        }
+
+        .nav-dot:hover {
+            background: rgba(0, 255, 204, 0.4);
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+        }
+
+        .nav-dot.active {
+            background: var(--accent-cyan);
+            box-shadow: 0 0 15px var(--accent-cyan);
+            border-color: var(--accent-cyan);
+        }
+
+        .progress-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-magenta));
+            width: 0%;
+            z-index: 101;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+        }
+
+        /* === RESPONSIVE === */
+        @media (max-height: 700px) {
+            :root {
+                --slide-padding: clamp(1rem, 3vw, 2rem);
+                --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
+                --h2-size: clamp(1rem, 3vw, 1.75rem);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; }
+            html { scroll-behavior: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-bar"></div>
+    <nav class="nav-dots"></nav>
+
+    <!-- SLIDE 1: TITLE -->
+    <section class="slide">
+        <div class="slide-content">
+            <h1 class="reveal">CoWater</h1>
+            <div class="divider reveal"></div>
+            <p class="reveal" style="font-size: var(--h3-size); color: var(--accent-cyan); margin-bottom: 1rem; font-family: 'Space Mono', monospace;">
+                AI-DRIVEN AUTONOMOUS MARINE VESSEL MANAGEMENT
+            </p>
+            <p class="reveal" style="max-width: 700px; margin: 0 auto;">
+                다중 에이전트 아키텍처 기반의<br>
+                해양 무인체 통합 운영 플랫폼
+            </p>
+        </div>
+    </section>
+
+    <!-- SLIDE 2: WHAT IS COWATER -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">CoWater란?</h2>
+            <div class="divider reveal"></div>
+            <ul class="feature-list reveal">
+                <li><strong>사용자 요청</strong>을 해석하여 여러 실행안(Proposal) 생성</li>
+                <li><strong>승인된 안</strong>만 실제 임무(Mission)로 전환</li>
+                <li>임무는 <strong>여러 작업</strong>으로 분해되어 Device에 할당</li>
+                <li>모든 <strong>실행과 판단의 근거</strong>를 Event로 기록</li>
+                <li><strong>점진적 자동화</strong> - 정책에 따라 자동 대응 수준 조절</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- SLIDE 3: CHALLENGES -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">현재의 과제</h2>
+            <div class="divider reveal"></div>
+            <div class="grid-2 reveal">
+                <div class="grid-item">
+                    <h3>파편화</h3>
+                    <p>각 무인체마다 별도 제어 체계</p>
+                </div>
+                <div class="grid-item">
+                    <h3>추적 불가</h3>
+                    <p>의사결정 근거 기록 부재</p>
+                </div>
+                <div class="grid-item">
+                    <h3>경직된 자동화</h3>
+                    <p>수동 vs 자동, 중간 선택지 없음</p>
+                </div>
+                <div class="grid-item">
+                    <h3>취약한 대응</h3>
+                    <p>통신 단절 시 체계적 대응 부재</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 4: SOLUTION -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">CoWater의 솔루션</h2>
+            <div class="divider reveal"></div>
+            <p class="reveal" style="margin-bottom: var(--content-gap);">
+                <span class="accent-cyan">5가지 핵심 철학</span>으로 설계된 시스템
+            </p>
+            <ul class="feature-list reveal">
+                <li><strong>Action Abstraction</strong> - 하드웨어 독립적 제어</li>
+                <li><strong>Planning/Execution 분리</strong> - 계획과 실행의 명확한 구분</li>
+                <li><strong>Agent 협업</strong> - 분산형 의사결정으로 자동 조율</li>
+                <li><strong>Event 추적</strong> - 모든 결정의 근거 기록</li>
+                <li><strong>물리적 제약 극복</strong> - 통신 환경 자동 대응</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- SLIDE 5: PROPOSAL-MISSION -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">핵심 개념 1</h2>
+            <h3 class="reveal" style="text-transform: uppercase; margin-bottom: 1rem;">Proposal-Mission 분리</h3>
+            <div class="two-column reveal">
+                <div class="neon-box">
+                    <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-cyan);">$ PROPOSAL</p>
+                    <p style="margin-top: 0.75rem; margin-bottom: 0;">시스템이 제시하는 여러 실행안. 사용자 선택 또는 정책 자동화</p>
+                </div>
+                <div class="neon-box magenta">
+                    <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-magenta);">$ MISSION</p>
+                    <p style="margin-top: 0.75rem; margin-bottom: 0;">승인된 안을 기반으로 실제 실행. Task로 분해되어 Device 할당</p>
+                </div>
+            </div>
+            <p class="reveal" style="margin-top: 2rem; font-size: 0.95rem; text-align: center; color: var(--text-secondary);">
+                → 자동화 수준을 정책으로 동적 조절 가능
+            </p>
+        </div>
+    </section>
+
+    <!-- SLIDE 6: EVENT TRACEABILITY -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">핵심 개념 2</h2>
+            <h3 class="reveal" style="text-transform: uppercase; margin-bottom: 1rem;">Event 기반 추적성</h3>
+            <p class="reveal" style="margin-bottom: var(--content-gap); text-align: center;">
+                모든 의사결정이 Event로 기록되고 추적됩니다
+            </p>
+            <ul class="feature-list reveal">
+                <li>Device Healthcheck - 배터리, 위치, 센서 상태</li>
+                <li>Task Dispatch - 어느 Device에 할당했는가</li>
+                <li>Policy Decision - 어떤 자동 결정을 내렸는가</li>
+                <li>Anomaly Detection - 비정상 상황 감지 및 대응</li>
+                <li>Mission Progress - 모든 단계의 실행 흐름</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- SLIDE 7: AI AGENT AUTOMATION -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">핵심 개념 3</h2>
+            <h3 class="reveal" style="text-transform: uppercase; margin-bottom: 1rem;">AI Agent 기반 자동화</h3>
+            <div class="neon-box reveal">
+                <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-cyan); margin-bottom: 1rem;">
+                    &gt; 6 SYSTEM AGENTS + DEVICE AGENTS
+                </p>
+                <ul style="list-style: none; margin: 0; padding: 0;">
+                    <li style="margin-bottom: 0.5rem;"><strong>RequestHandler</strong> - 요청 해석 및 경로 결정</li>
+                    <li style="margin-bottom: 0.5rem;"><strong>MissionPlanner</strong> - Task 설계 및 Mission 생성</li>
+                    <li style="margin-bottom: 0.5rem;"><strong>PolicyManager</strong> - 정책 기반 자동 대응</li>
+                    <li style="margin-bottom: 0.5rem;"><strong>SystemSentinel</strong> - 실시간 이상 감시</li>
+                    <li style="margin-bottom: 0.5rem;"><strong>DeviceBridge</strong> - 물리 장비 통신 관리</li>
+                    <li style="margin-bottom: 0;"><strong>Device Agents</strong> - 개별 무인체 제어 및 판단</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 8: ARCHITECTURE -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">시스템 아키텍처</h2>
+            <div class="divider reveal"></div>
+            <div class="neon-box reveal" style="font-family: 'Space Mono', monospace; font-size: 0.9rem;">
+                <p style="margin: 0; color: var(--accent-cyan);">
+                    사용자 요청<br>
+                    │<br>
+                    ├─ RequestHandler<br>
+                    │  └─ Proposal 생성<br>
+                    │<br>
+                    ├─ 사용자 승인 또는 정책 자동화<br>
+                    │<br>
+                    ├─ Mission → Task 분해<br>
+                    │<br>
+                    ├─ Device 할당 & 실행<br>
+                    │<br>
+                    └─ Event 기록 & 모니터링
+                </p>
+            </div>
+            <p class="reveal" style="margin-top: 1rem; font-size: 0.9rem; text-align: center;">
+                <strong class="accent-cyan">Registry Server:</strong> 중앙 저장소 | <strong class="accent-cyan">Moth:</strong> 실시간 스트림
+            </p>
+        </div>
+    </section>
+
+    <!-- SLIDE 9: SYSTEM AGENTS -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">System Agent 상세</h2>
+            <div class="divider reveal"></div>
+            <div class="grid-2 reveal">
+                <div class="grid-item">
+                    <h3>RequestHandler</h3>
+                    <p>자연어 요청 해석, 경로 결정</p>
+                </div>
+                <div class="grid-item">
+                    <h3>MissionPlanner</h3>
+                    <p>Task 설계, Mission 생성</p>
+                </div>
+                <div class="grid-item">
+                    <h3>DeviceBridge</h3>
+                    <p>물리 장비 통신, 상태 동기화</p>
+                </div>
+                <div class="grid-item">
+                    <h3>PolicyManager</h3>
+                    <p>정책/규칙 관리, 자동 대응</p>
+                </div>
+                <div class="grid-item">
+                    <h3>SystemSentinel</h3>
+                    <p>이상 감시, Alert 생성</p>
+                </div>
+                <div class="grid-item">
+                    <h3>InsightReporter</h3>
+                    <p>분석, 통계, 리포트</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 10: DEVICE AGENTS -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">Device Agent와 협력</h2>
+            <div class="divider reveal"></div>
+            <ul class="feature-list reveal">
+                <li>각 무인체마다 <strong>1개 Device Agent</strong> 배치</li>
+                <li><strong>자신의 Device만 직접 제어</strong> - 분산형 제어</li>
+                <li>Task 수행 가능 여부 <strong>최종 판단</strong></li>
+                <li><strong>AgentConnection</strong> - Device 간 협력 관계 정의</li>
+                <li><strong>물리 통신 선택</strong> - 유선 → RF → 음향</li>
+                <li><strong>환경 적응</strong> - 수중 진입 시 음향 자동 전환</li>
+            </ul>
+            <div class="neon-box reveal" style="margin-top: 1.5rem;">
+                <p><strong>로컬 안전 행동:</strong> 통신 단절 시에도 로컬 정책에 따라 자율 동작</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 11: TECH STACK -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">기술 스택</h2>
+            <div class="divider reveal"></div>
+            <div class="grid-2 reveal">
+                <div class="grid-item">
+                    <h3>Backend</h3>
+                    <p>FastAPI · SQLite3 · Moth Server</p>
+                </div>
+                <div class="grid-item">
+                    <h3>Frontend</h3>
+                    <p>React 18 · 3D 시각화 · 대시보드</p>
+                </div>
+                <div class="grid-item">
+                    <h3>Communication</h3>
+                    <p>A2A Protocol · RSSP · WebSocket</p>
+                </div>
+                <div class="grid-item">
+                    <h3>Future Phase</h3>
+                    <p>GraphQL · Redis · Next.js</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 12: KEY FEATURES -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">핵심 기능</h2>
+            <div class="divider reveal"></div>
+            <ul class="feature-list reveal">
+                <li>🎯 <strong>자연어 명령</strong> 해석 & Proposal 생성</li>
+                <li>✅ <strong>사용자 승인</strong> 기반 Mission 실행</li>
+                <li>🤖 <strong>정책 기반</strong> 자동 대응</li>
+                <li>📊 <strong>실시간</strong> 모니터링 대시보드</li>
+                <li>🌍 <strong>통신 매체</strong> 자동 선택</li>
+                <li>📈 <strong>Event</strong> 기반 상세 분석</li>
+                <li>🔄 <strong>임무</strong> 재시작 및 롤백</li>
+                <li>🛡️ <strong>장비</strong> 보호 정책</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- SLIDE 13: ROADMAP -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">로드맵</h2>
+            <div class="divider reveal"></div>
+            <div style="margin: var(--content-gap) auto; max-width: 750px;">
+                <div class="neon-box reveal" style="margin-bottom: 1rem;">
+                    <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-cyan);">$ phase1</p>
+                    <p style="margin-top: 0.5rem; margin-bottom: 0;">Proposal-Mission 분리, Event 추적, System Agent, Device 협력</p>
+                </div>
+                <div class="neon-box reveal" style="margin-bottom: 1rem;">
+                    <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-magenta);">$ phase2</p>
+                    <p style="margin-top: 0.5rem; margin-bottom: 0;">GraphQL, Redis, Next.js 마이그레이션, 고급 정책 엔진</p>
+                </div>
+                <div class="neon-box reveal">
+                    <p style="margin: 0; font-family: 'Space Mono', monospace; color: var(--accent-cyan);">$ phase3</p>
+                    <p style="margin-top: 0.5rem; margin-bottom: 0;">AI 기반 학습, 완전 자율 운영, 글로벌 스케줄 최적화</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 14: VALUE -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">제공하는 가치</h2>
+            <div class="divider reveal"></div>
+            <ul class="feature-list reveal">
+                <li><strong>운영 효율성</strong> - 복잡한 협력 임무 자동화</li>
+                <li><strong>의사결정 근거</strong> - 모든 결정 Event로 추적</li>
+                <li><strong>점진적 자동화</strong> - 조직 준비 수준에 맞춰 확대</li>
+                <li><strong>신뢰성</strong> - 분산형으로 통신 장애 자동 대응</li>
+                <li><strong>확장성</strong> - 다양한 무인체 통합 관리</li>
+            </ul>
+            <div class="neon-box magenta reveal" style="margin-top: 1.5rem;">
+                <p style="margin: 0;"><strong>더 안전하고 효율적인 해양 무인체 운영의 새로운 표준</strong></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 15: CLOSING -->
+    <section class="slide">
+        <div class="slide-content">
+            <h1 class="reveal" style="margin-bottom: 1rem;">CoWater</h1>
+            <div class="divider reveal" style="margin-bottom: 2rem;"></div>
+            <p class="reveal" style="font-family: 'Space Mono', monospace; font-size: var(--h3-size); color: var(--accent-cyan);">
+                &gt; 함께 미래를 만듭니다
+            </p>
+            <p class="reveal" style="margin-top: 2rem; font-size: 0.95rem;">
+                CoWater와 함께 시작하세요
+            </p>
+        </div>
+    </section>
+
+    <script>
+        class SlidePresentation {
+            constructor() {
+                this.slides = document.querySelectorAll('.slide');
+                this.navDots = [];
+                this.currentIndex = 0;
+                this.setupNavDots();
+                this.setupIntersectionObserver();
+                this.setupKeyboardNav();
+                this.setupTouchNav();
+                this.updateProgress();
+            }
+
+            setupNavDots() {
+                const container = document.querySelector('.nav-dots');
+                this.slides.forEach((_, index) => {
+                    const dot = document.createElement('button');
+                    dot.className = `nav-dot ${index === 0 ? 'active' : ''}`;
+                    dot.addEventListener('click', () => this.goToSlide(index));
+                    container.appendChild(dot);
+                    this.navDots.push(dot);
+                });
+            }
+
+            setupIntersectionObserver() {
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('visible');
+                            const index = Array.from(this.slides).indexOf(entry.target);
+                            this.updateActiveDot(index);
+                            this.currentIndex = index;
+                        }
+                    });
+                }, { threshold: 0.5 });
+
+                this.slides.forEach(slide => observer.observe(slide));
+            }
+
+            setupKeyboardNav() {
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'ArrowDown' || e.key === ' ') {
+                        e.preventDefault();
+                        this.nextSlide();
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        this.prevSlide();
+                    }
+                });
+            }
+
+            setupTouchNav() {
+                let startY = 0;
+                document.addEventListener('touchstart', (e) => {
+                    startY = e.touches[0].clientY;
+                });
+                document.addEventListener('touchend', (e) => {
+                    const endY = e.changedTouches[0].clientY;
+                    if (startY - endY > 50) this.nextSlide();
+                    else if (endY - startY > 50) this.prevSlide();
+                });
+            }
+
+            updateProgress() {
+                window.addEventListener('scroll', () => {
+                    const scrolled = window.scrollY / (document.documentElement.scrollHeight - window.innerHeight);
+                    document.querySelector('.progress-bar').style.width = (scrolled * 100) + '%';
+                });
+            }
+
+            updateActiveDot(index) {
+                this.navDots.forEach((dot, i) => {
+                    dot.classList.toggle('active', i === index);
+                });
+            }
+
+            nextSlide() {
+                if (this.currentIndex < this.slides.length - 1) {
+                    this.goToSlide(this.currentIndex + 1);
+                }
+            }
+
+            prevSlide() {
+                if (this.currentIndex > 0) {
+                    this.goToSlide(this.currentIndex - 1);
+                }
+            }
+
+            goToSlide(index) {
+                this.slides[index].scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        new SlidePresentation();
+    </script>
+</body>
+</html>
