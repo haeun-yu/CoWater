@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CoVerse Dashboard - Mock</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #333;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-left: 5px solid #2a5298;
+        }
+
+        .header h1 {
+            color: #1e3c72;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .layer {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-top: 4px solid #2a5298;
+        }
+
+        .layer h2 {
+            color: #1e3c72;
+            margin-bottom: 20px;
+            font-size: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+
+        .card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .card h3 {
+            color: #1e3c72;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .card-info {
+            font-size: 12px;
+            color: #555;
+            line-height: 1.6;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        .status-active {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-critical {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-warning {
+            background: #FFC107;
+            color: black;
+        }
+
+        .priority-1 {
+            color: #f44336;
+            font-weight: bold;
+        }
+
+        .priority-2 {
+            color: #FFC107;
+            font-weight: bold;
+        }
+
+        .priority-3 {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .decision-item {
+            background: #f9f9f9;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 3px solid #667eea;
+        }
+
+        .decision-role {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }
+
+        .decision-conclusion {
+            color: #333;
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+
+        .decision-confidence {
+            color: #999;
+            font-size: 10px;
+        }
+
+        .event-item {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border-left: 3px solid #4CAF50;
+            font-size: 11px;
+        }
+
+        .event-time {
+            color: #999;
+            font-size: 10px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+        }
+
+        .metric-row:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #666;
+        }
+
+        .metric-value {
+            color: #1e3c72;
+            font-weight: bold;
+        }
+
+        .fullwidth {
+            grid-column: 1 / -1;
+        }
+
+        .timestamp {
+            text-align: right;
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 CoVerse Dashboard</h1>
+            <p>상황인식 논리적 데이터 공간 - Mock Visualization</p>
+            <p style="margin-top: 10px; font-size: 13px; color: #999;">
+                5개 레이어의 실시간 데이터를 한 곳에서 보고, 시스템의 판단 근거를 명확히 이해합니다.
+            </p>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-value">5</div>
+                    <div class="stat-label">Active Entities</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">2</div>
+                    <div class="stat-label">Missions</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">3</div>
+                    <div class="stat-label">Tasks</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">3</div>
+                    <div class="stat-label">Decisions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1. Entity Layer -->
+        <div class="layer">
+            <h2>1️⃣ Entity Layer (실체 상태)</h2>
+            <div class="grid">
+
+                <div class="card">
+                    <h3>
+                        AUV Alpha
+                        <span class="status-badge status-active">active</span>
+                    </h3>
+                    <div class="card-info">
+                        <div>🌍 위치: 37.50°, 126.80°</div>
+                        <div>🔋 배터리: <strong>85%</strong></div>
+                        <div>🌡️ 온도: 12.3°C</div>
+                        <div>📡 신호: 95%</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        AUV Beta
+                        <span class="status-badge status-critical">active</span>
+                    </h3>
+                    <div class="card-info">
+                        <div>🌍 위치: 37.52°, 126.85°</div>
+                        <div>🔋 배터리: <strong>18%</strong></div>
+                        <div>🌡️ 온도: 11.8°C</div>
+                        <div>📡 신호: 75%</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        AUV Gamma
+                        <span class="status-badge status-active">active</span>
+                    </h3>
+                    <div class="card-info">
+                        <div>🌍 위치: 37.48°, 126.75°</div>
+                        <div>🔋 배터리: <strong>62%</strong></div>
+                        <div>🌡️ 온도: 12.1°C</div>
+                        <div>📡 신호: 70%</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        Gateway Station
+                        <span class="status-badge status-active">active</span>
+                    </h3>
+                    <div class="card-info">
+                        <div>🌍 위치: 37.55°, 126.90°</div>
+                        <div>🔋 배터리: <strong>100%</strong></div>
+                        <div>🌡️ 온도: 15.2°C</div>
+                        <div>📡 신호: 81%</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        Environmental Sensor
+                        <span class="status-badge status-active">active</span>
+                    </h3>
+                    <div class="card-info">
+                        <div>🌍 위치: 37.50°, 126.82°</div>
+                        <div>🔋 배터리: <strong>45%</strong></div>
+                        <div>🌡️ 온도: 8.5°C</div>
+                        <div>📡 신호: 40%</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 2. Operation Layer: Missions -->
+        <div class="layer">
+            <h2>2️⃣ Operation Layer - Missions (상위 목표)</h2>
+            <div class="grid">
+
+                <div class="card">
+                    <h3>특정 해역의 수질 모니터링</h3>
+                    <div class="card-info">
+                        <div>ID: MISSION-001</div>
+                        <div>상태: <strong>in_progress</strong></div>
+                        <div>우선도: <span class="priority-2">2</span></div>
+                        <div>Task 수: 2</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>해저 지형 지질 데이터 수집</h3>
+                    <div class="card-info">
+                        <div>ID: MISSION-002</div>
+                        <div>상태: <strong>in_progress</strong></div>
+                        <div>우선도: <span class="priority-2">2</span></div>
+                        <div>Task 수: 1</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 3. Operation Layer: Tasks + Decision Trail -->
+        <div class="layer">
+            <h2>3️⃣ Operation Layer - Tasks + Decision Trail (판단 근거)</h2>
+            <div class="grid fullwidth">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3 style="color: #1e3c72; margin-bottom: 15px;">📋 Tasks</h3>
+
+                        <div class="decision-item">
+                            <div class="decision-role">RETURN_TO_BASE</div>
+                            <div class="card-info">
+                                <div>할당: <strong>UUV-002</strong></div>
+                                <div>상태: assigned</div>
+                                <div>우선도: <span class="priority-1">1</span></div>
+                                <div>진행: 0%</div>
+                            </div>
+                        </div>
+
+                        <div class="decision-item">
+                            <div class="decision-role">MONITOR</div>
+                            <div class="card-info">
+                                <div>할당: <strong>UUV-001</strong></div>
+                                <div>상태: in_progress</div>
+                                <div>우선도: <span class="priority-2">2</span></div>
+                                <div>진행: 45%</div>
+                            </div>
+                        </div>
+
+                        <div class="decision-item">
+                            <div class="decision-role">PATROL</div>
+                            <div class="card-info">
+                                <div>할당: <strong>UUV-003</strong></div>
+                                <div>상태: in_progress</div>
+                                <div>우선도: <span class="priority-3">3</span></div>
+                                <div>진행: 62%</div>
+                            </div>
+                        </div>
+
+                    </div>
+                    <div>
+                        <h3 style="color: #1e3c72; margin-bottom: 15px;">🔍 Decision Trail (왜 이렇게 됐는가)</h3>
+
+                        <div class="decision-item">
+                            <div class="decision-role">👤 MONITORING</div>
+                            <div class="decision-conclusion">
+                                📌 배터리 임계값 이하 - 즉시 조치 필요
+                            </div>
+                            <div class="decision-confidence">
+                                신뢰도: 99.00% | 타입: anomaly_detected
+                            </div>
+                        </div>
+
+                        <div class="decision-item">
+                            <div class="decision-role">👤 ANALYSIS</div>
+                            <div class="decision-conclusion">
+                                📌 높은 우선도 - 배터리 위험 + 원격거리
+                            </div>
+                            <div class="decision-confidence">
+                                신뢰도: 95.00% | 타입: priority_adjustment
+                            </div>
+                        </div>
+
+                        <div class="decision-item">
+                            <div class="decision-role">👤 CONTROL</div>
+                            <div class="decision-conclusion">
+                                📌 무인체 반환 명령 발행
+                            </div>
+                            <div class="decision-confidence">
+                                신뢰도: 98.00% | 타입: task_allocation
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. System Layer -->
+        <div class="layer">
+            <h2>4️⃣ System Layer (시스템 건강도)</h2>
+            <div class="grid fullwidth">
+
+                <div class="card" style="grid-column: 1/-1;">
+                    <h3>전체 시스템</h3>
+                    <div class="metric-row">
+                        <span class="metric-label">운영 부하</span>
+                        <span class="metric-value">72.0%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">활성 Task</span>
+                        <span class="metric-value">3</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">실패율</span>
+                        <span class="metric-value">0.10%</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        detection_agent
+                        <span class="status-badge status-active">healthy</span>
+                    </h3>
+                    <div class="card-info">
+<div>cpu_usage: 32</div><div>memory_usage: 48</div><div>latency: 23</div><div>messages_processed: 1247</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        analysis_agent
+                        <span class="status-badge status-active">healthy</span>
+                    </h3>
+                    <div class="card-info">
+<div>cpu_usage: 45</div><div>memory_usage: 62</div><div>latency: 56</div><div>model_accuracy: 0.9</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        control_agent
+                        <span class="status-badge status-warning">degraded</span>
+                    </h3>
+                    <div class="card-info">
+<div>cpu_usage: 85</div><div>memory_usage: 78</div><div>latency: 320</div>
+                        <div style="margin-top: 8px; color: #f44336; font-size: 11px;">
+                            ⚠️ High CPU usage - consider load balancing
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        database
+                        <span class="status-badge status-active">healthy</span>
+                    </h3>
+                    <div class="card-info">
+<div>query_latency: 12</div><div>connections: 15</div><div>storage_usage_gb: 45.2</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        redis
+                        <span class="status-badge status-active">healthy</span>
+                    </h3>
+                    <div class="card-info">
+<div>memory_usage_mb: 256</div><div>connected_clients: 8</div><div>throughput_ops_sec: 1450</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 5. Spatial Layer -->
+        <div class="layer">
+            <h2>5️⃣ Spatial Layer (공간 관계)</h2>
+            <div class="card fullwidth">
+<h3>엔티티 간 거리</h3><div class="card-info"><div>🔗 UUV-001-UUV-002: 4.94km</div><div>🔗 UUV-001-UUV-003: 4.94km</div><div>🔗 UUV-001-GATEWAY-001: 10.43km</div><div>🔗 UUV-001-SENSOR-001: 1.76km</div><div>🔗 UUV-002-UUV-003: 9.88km</div></div>
+            </div>
+        </div>
+
+        <!-- 6. Temporal Layer -->
+        <div class="layer">
+            <h2>6️⃣ Temporal Layer (시간 흐름 & 이벤트)</h2>
+            <div class="card fullwidth">
+                <h3>최근 이벤트 타임라인</h3>
+
+                <div class="event-item">
+                    <div class="event-time">51+00:00</div>
+                    <div>Task patrol created for UUV-003</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">41+00:00</div>
+                    <div>Task monitor created for UUV-001</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">30+00:00</div>
+                    <div>Decision task_allocation made by control</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">19+00:00</div>
+                    <div>Task return_to_base created for UUV-002</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">47+00:00</div>
+                    <div>Decision priority_adjustment made by analysis</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">36+00:00</div>
+                    <div>Decision anomaly_detected made by monitoring</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">19+00:00</div>
+                    <div>Mission data_collection created</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">12+00:00</div>
+                    <div>Mission surveillance created</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">01+00:00</div>
+                    <div>Entity Environmental Sensor updated</div>
+                </div>
+
+                <div class="event-item">
+                    <div class="event-time">86+00:00</div>
+                    <div>Entity Gateway Station updated</div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="timestamp">
+            📊 생성 시간: 2026-05-19 15:06:38
+        </div>
+    </div>
+</body>
+</html>

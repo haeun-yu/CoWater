@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Entity Layer - CoVerse</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border-left: 5px solid #667eea;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .back-btn {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+
+        .back-btn:hover {
+            background: #764ba2;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .panel h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 18px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .map-container {
+            background: linear-gradient(135deg, #e0e0e0 0%, #f5f5f5 100%);
+            border-radius: 8px;
+            height: 400px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .entity {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .entity:hover {
+            transform: scale(1.2);
+            z-index: 10;
+        }
+
+        .entity-label {
+            position: absolute;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .entity:hover .entity-label {
+            opacity: 1;
+        }
+
+        .entity-1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .entity-2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .entity-3 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .entity-4 { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .entity-5 { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+        .entity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .entity-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s;
+        }
+
+        .entity-card:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .entity-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .entity-stat {
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+        }
+
+        .entity-stat-value {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .battery-bar {
+            width: 100%;
+            height: 6px;
+            background: #ddd;
+            border-radius: 3px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+
+        .battery-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+            border-radius: 3px;
+        }
+
+        .battery-low {
+            background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 25px;
+        }
+
+        .metric-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .metric-box h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+        }
+
+        .metric-label {
+            color: #666;
+        }
+
+        .metric-value {
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        @media (max-width: 1024px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        .status-active {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-warning {
+            background: #FFC107;
+            color: white;
+        }
+
+        .status-error {
+            background: #f44336;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Entity Layer - 실체 상태 (Live Status)</h1>
+            <p>무인체, 센서, 게이트웨이의 실시간 상태를 지도와 메트릭으로 시각화합니다.</p>
+            <a href="../index.html" class="back-btn">← 목록으로</a>
+        </div>
+
+        <div class="content">
+            <!-- 좌측: 지도 시각화 -->
+            <div class="panel">
+                <h2>📍 위치 맵 (Real-time Position)</h2>
+                <div class="map-container" id="map">
+                    <!-- 동적으로 엔티티 추가됨 -->
+                </div>
+            </div>
+
+            <!-- 우측: 엔티티 리스트 -->
+            <div class="panel">
+                <h2>📋 엔티티 상태 (Entity Status)</h2>
+                <div class="entity-list" id="entityList">
+                    <!-- 동적으로 생성됨 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 센서 데이터 차트 -->
+        <div class="grid">
+            <div class="metric-box">
+                <h3>🔋 배터리 분포 (Battery Distribution)</h3>
+                <div class="chart-container">
+                    <canvas id="batteryChart"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-box">
+                <h3>🌡️ 온도 데이터 (Temperature)</h3>
+                <div class="chart-container">
+                    <canvas id="temperatureChart"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-box">
+                <h3>📡 신호 강도 (Signal Strength)</h3>
+                <div class="chart-container">
+                    <canvas id="signalChart"></canvas>
+                </div>
+            </div>
+
+            <div class="metric-box">
+                <h3>📊 연결 상태 (Connectivity)</h3>
+                <div id="connectivityStats"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock Data
+        const entities = [
+            {
+                id: "UUV-001",
+                name: "AUV Alpha",
+                lat: 37.50,
+                lon: 126.80,
+                x: "30%",
+                y: "35%",
+                battery: 85,
+                temperature: 12.3,
+                signal: 92,
+                status: "active",
+                icon: "🚀",
+                class: "entity-1"
+            },
+            {
+                id: "UUV-002",
+                name: "AUV Beta",
+                lat: 37.52,
+                lon: 126.85,
+                x: "55%",
+                y: "45%",
+                battery: 18,
+                temperature: 11.8,
+                signal: 45,
+                status: "warning",
+                icon: "⚠️",
+                class: "entity-2"
+            },
+            {
+                id: "UUV-003",
+                name: "AUV Gamma",
+                lat: 37.48,
+                lon: 126.75,
+                x: "20%",
+                y: "60%",
+                battery: 62,
+                temperature: 12.1,
+                signal: 78,
+                status: "active",
+                icon: "🚀",
+                class: "entity-3"
+            },
+            {
+                id: "GATEWAY-001",
+                name: "Gateway Station",
+                lat: 37.55,
+                lon: 126.90,
+                x: "75%",
+                y: "25%",
+                battery: 100,
+                temperature: 15.2,
+                signal: 100,
+                status: "active",
+                icon: "🏠",
+                class: "entity-4"
+            },
+            {
+                id: "SENSOR-001",
+                name: "Env. Sensor",
+                lat: 37.50,
+                lon: 126.82,
+                x: "40%",
+                y: "75%",
+                battery: 45,
+                temperature: 8.5,
+                signal: 60,
+                status: "active",
+                icon: "📡",
+                class: "entity-5"
+            }
+        ];
+
+        // 맵에 엔티티 표시
+        const mapContainer = document.getElementById("map");
+        entities.forEach(entity => {
+            const div = document.createElement("div");
+            div.className = `entity ${entity.class}`;
+            div.style.left = entity.x;
+            div.style.top = entity.y;
+            div.innerHTML = `
+                ${entity.icon}
+                <div class="entity-label">
+                    ${entity.name}<br>
+                    ${entity.lat.toFixed(2)}°, ${entity.lon.toFixed(2)}°
+                </div>
+            `;
+            mapContainer.appendChild(div);
+        });
+
+        // 엔티티 리스트
+        const entityListContainer = document.getElementById("entityList");
+        entities.forEach(entity => {
+            const statusClass = entity.battery < 20 ? "status-warning" : "status-active";
+            const batteryClass = entity.battery < 20 ? "battery-low" : "";
+
+            const card = document.createElement("div");
+            card.className = "entity-card";
+            card.innerHTML = `
+                <div class="entity-name">
+                    ${entity.icon} ${entity.name}
+                    <span class="status-badge ${statusClass}">${entity.status}</span>
+                </div>
+                <div class="entity-stat">
+                    <span class="metric-label">위치</span>
+                    <span class="metric-value">${entity.lat.toFixed(2)}°, ${entity.lon.toFixed(2)}°</span>
+                </div>
+                <div class="entity-stat">
+                    <span class="metric-label">배터리</span>
+                    <span class="metric-value">${entity.battery}%</span>
+                </div>
+                <div class="battery-bar">
+                    <div class="battery-fill ${batteryClass}" style="width: ${entity.battery}%"></div>
+                </div>
+                <div class="entity-stat" style="margin-top: 8px;">
+                    <span class="metric-label">온도</span>
+                    <span class="metric-value">${entity.temperature}°C</span>
+                </div>
+                <div class="entity-stat">
+                    <span class="metric-label">신호</span>
+                    <span class="metric-value">${entity.signal}%</span>
+                </div>
+            `;
+            entityListContainer.appendChild(card);
+        });
+
+        // 배터리 차트
+        const batteryCtx = document.getElementById("batteryChart").getContext("2d");
+        new Chart(batteryCtx, {
+            type: "bar",
+            data: {
+                labels: entities.map(e => e.name),
+                datasets: [{
+                    label: "배터리 레벨 (%)",
+                    data: entities.map(e => e.battery),
+                    backgroundColor: [
+                        "rgba(102, 126, 234, 0.8)",
+                        "rgba(245, 87, 108, 0.8)",
+                        "rgba(79, 172, 254, 0.8)",
+                        "rgba(67, 233, 123, 0.8)",
+                        "rgba(250, 112, 154, 0.8)"
+                    ],
+                    borderRadius: 8,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, max: 100 }
+                }
+            }
+        });
+
+        // 온도 차트
+        const tempCtx = document.getElementById("temperatureChart").getContext("2d");
+        new Chart(tempCtx, {
+            type: "line",
+            data: {
+                labels: entities.map(e => e.name),
+                datasets: [{
+                    label: "온도 (°C)",
+                    data: entities.map(e => e.temperature),
+                    borderColor: "#667eea",
+                    backgroundColor: "rgba(102, 126, 234, 0.1)",
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 6,
+                    pointBackgroundColor: "#667eea"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // 신호 차트
+        const signalCtx = document.getElementById("signalChart").getContext("2d");
+        new Chart(signalCtx, {
+            type: "radar",
+            data: {
+                labels: entities.map(e => e.name),
+                datasets: [{
+                    label: "신호 강도 (%)",
+                    data: entities.map(e => e.signal),
+                    borderColor: "#667eea",
+                    backgroundColor: "rgba(102, 126, 234, 0.2)",
+                    pointBackgroundColor: "#667eea"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    r: { beginAtZero: true, max: 100 }
+                }
+            }
+        });
+
+        // 연결 상태
+        const connected = entities.filter(e => e.status === "active").length;
+        const disconnected = entities.length - connected;
+        const warning = entities.filter(e => e.status === "warning").length;
+
+        document.getElementById("connectivityStats").innerHTML = `
+            <div class="metric-row">
+                <span class="metric-label">✅ 연결됨</span>
+                <span class="metric-value">${connected}개</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">⚠️ 경고</span>
+                <span class="metric-value">${warning}개</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">❌ 연결 해제</span>
+                <span class="metric-value">${disconnected}개</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">📊 평균 배터리</span>
+                <span class="metric-value">${(entities.reduce((a, e) => a + e.battery, 0) / entities.length).toFixed(1)}%</span>
+            </div>
+        `;
+    </script>
+</body>
+</html>

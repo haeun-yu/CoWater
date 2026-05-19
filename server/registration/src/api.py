@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, List
 from uuid import uuid4
 
@@ -11,6 +13,11 @@ from fastapi import Body, FastAPI, Header, HTTPException, Query, Response, statu
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
+
+# 서버 루트 디렉토리를 Python path에 추가하여 shared 모듈 import 가능
+_server_root = Path(__file__).resolve().parent.parent.parent
+if str(_server_root) not in sys.path:
+    sys.path.insert(0, str(_server_root))
 
 from src.core.config import APP_SETTINGS
 from src.core.models import (
@@ -30,6 +37,7 @@ from src.core.pubsub import get_pubsub_manager
 from src.application.bootstrap import build_registry_components
 from src.db.connection import close_db
 from src.transport.moth_publisher import get_publisher as get_moth_publisher
+from shared.storage.coverse_store import get_coverse_store
 
 
 logger = logging.getLogger(__name__)
@@ -1332,6 +1340,79 @@ async def publish_mission_update(mission_id: str, update_type: str) -> None:
         logger.warning(f"⚠️ Failed to publish mission update: {e}")
 
 
+# ============================================================================
+# CoVerse 엔드포인트
+# ============================================================================
+
+@app.get("/coverse/snapshot")
+def get_coverse_snapshot() -> dict[str, Any]:
+    """CoVerse의 전체 5-레이어 스냅샷 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        return coverse_store.get_coverse_snapshot()
+    except Exception as e:
+        logger.error(f"CoVerse snapshot 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/coverse/entity-layer")
+def get_entity_layer() -> dict[str, Any]:
+    """Entity Layer 데이터 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        snapshot = coverse_store.get_coverse_snapshot()
+        return snapshot.get("entityLayer", {})
+    except Exception as e:
+        logger.error(f"Entity Layer 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/coverse/operation-layer")
+def get_operation_layer() -> dict[str, Any]:
+    """Operation Layer 데이터 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        snapshot = coverse_store.get_coverse_snapshot()
+        return snapshot.get("operationLayer", {})
+    except Exception as e:
+        logger.error(f"Operation Layer 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/coverse/system-layer")
+def get_system_layer() -> dict[str, Any]:
+    """System Layer 데이터 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        snapshot = coverse_store.get_coverse_snapshot()
+        return snapshot.get("systemLayer", {})
+    except Exception as e:
+        logger.error(f"System Layer 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/coverse/temporal-layer")
+def get_temporal_layer() -> dict[str, Any]:
+    """Temporal Layer 데이터 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        snapshot = coverse_store.get_coverse_snapshot()
+        return snapshot.get("temporalLayer", {})
+    except Exception as e:
+        logger.error(f"Temporal Layer 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/coverse/spatial-layer")
+def get_spatial_layer() -> dict[str, Any]:
+    """Spatial Layer 데이터 반환"""
+    try:
+        coverse_store = get_coverse_store()
+        snapshot = coverse_store.get_coverse_snapshot()
+        return snapshot.get("spatialLayer", {})
+    except Exception as e:
+        logger.error(f"Spatial Layer 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 

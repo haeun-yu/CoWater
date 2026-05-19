@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CoVerse - Multi-Layer Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 18px;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        .layers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-top: 40px;
+        }
+
+        .layer-card {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .layer-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        }
+
+        .layer-header {
+            padding: 30px 25px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .layer-icon {
+            font-size: 28px;
+        }
+
+        .layer-1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .layer-2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .layer-3 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .layer-4 { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .layer-5 { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+        .layer-body {
+            padding: 25px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .layer-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .layer-desc {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            flex-grow: 1;
+        }
+
+        .layer-features {
+            font-size: 12px;
+            color: #999;
+            margin-top: auto;
+        }
+
+        .layer-features li {
+            list-style: none;
+            padding: 4px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .layer-features li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+        }
+
+        .btn-view {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+
+        .layer-card:hover .btn-view {
+            background: #764ba2;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+
+        .stat {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 32px;
+            }
+
+            .layers-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 CoVerse</h1>
+            <p>상황인식 논리적 데이터 공간</p>
+            <p class="subtitle">5개 레이어별 멀티 시각화</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">5</div>
+                <div class="stat-label">시각화 레이어</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">5</div>
+                <div class="stat-label">활성 무인체</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">3</div>
+                <div class="stat-label">활성 Task</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">8</div>
+                <div class="stat-label">의사결정 기록</div>
+            </div>
+        </div>
+
+        <div class="layers-grid">
+            <!-- Layer 1: Entity -->
+            <a href="layers/01_entity_layer.html" class="layer-card">
+                <div class="layer-header layer-1">
+                    <span class="layer-icon">🚀</span>
+                    <span>Entity Layer</span>
+                </div>
+                <div class="layer-body">
+                    <div class="layer-title">실체 상태 (Live Status)</div>
+                    <div class="layer-desc">
+                        무인체, 센서, 게이트웨이 등의 실시간 상태를 지도와 게이지로 시각화합니다.
+                    </div>
+                    <ul class="layer-features">
+                        <li>지도 기반 위치 표시</li>
+                        <li>실시간 센서 데이터</li>
+                        <li>연결 상태 모니터링</li>
+                    </ul>
+                    <div class="btn-view">보기 →</div>
+                </div>
+            </a>
+
+            <!-- Layer 2: Operation -->
+            <a href="layers/02_operation_layer.html" class="layer-card">
+                <div class="layer-header layer-2">
+                    <span class="layer-icon">⚙️</span>
+                    <span>Operation Layer</span>
+                </div>
+                <div class="layer-body">
+                    <div class="layer-title">의도 & 실행 (Decision Trail)</div>
+                    <div class="layer-desc">
+                        Mission, Task, Decision Trail을 통해 시스템의 의도적 결정과 근거를 표시합니다.
+                    </div>
+                    <ul class="layer-features">
+                        <li>Mission 목표 관리</li>
+                        <li>Task 흐름도</li>
+                        <li>판단 근거 추적</li>
+                    </ul>
+                    <div class="btn-view">보기 →</div>
+                </div>
+            </a>
+
+            <!-- Layer 3: System -->
+            <a href="layers/03_system_layer.html" class="layer-card">
+                <div class="layer-header layer-3">
+                    <span class="layer-icon">⚡</span>
+                    <span>System Layer</span>
+                </div>
+                <div class="layer-body">
+                    <div class="layer-title">시스템 건강도 (Health)</div>
+                    <div class="layer-desc">
+                        Agent, Database, 네트워크 등 시스템 컴포넌트의 성능을 그래프로 모니터링합니다.
+                    </div>
+                    <ul class="layer-features">
+                        <li>CPU/메모리 사용률</li>
+                        <li>레이턴시 추적</li>
+                        <li>시스템 알람</li>
+                    </ul>
+                    <div class="btn-view">보기 →</div>
+                </div>
+            </a>
+
+            <!-- Layer 4: Temporal -->
+            <a href="layers/04_temporal_layer.html" class="layer-card">
+                <div class="layer-header layer-4">
+                    <span class="layer-icon">📊</span>
+                    <span>Temporal Layer</span>
+                </div>
+                <div class="layer-body">
+                    <div class="layer-title">시간 흐름 (Timeline)</div>
+                    <div class="layer-desc">
+                        시스템의 모든 이벤트를 시간 순서대로 표시하여 상황 변화를 추적합니다.
+                    </div>
+                    <ul class="layer-features">
+                        <li>이벤트 타임라인</li>
+                        <li>상태 변화 기록</li>
+                        <li>히스토리 분석</li>
+                    </ul>
+                    <div class="btn-view">보기 →</div>
+                </div>
+            </a>
+
+            <!-- Layer 5: Spatial -->
+            <a href="layers/05_spatial_layer.html" class="layer-card">
+                <div class="layer-header layer-5">
+                    <span class="layer-icon">🔗</span>
+                    <span>Spatial Layer</span>
+                </div>
+                <div class="layer-body">
+                    <div class="layer-title">공간 관계 (Network)</div>
+                    <div class="layer-desc">
+                        엔티티 간의 거리, 근접성, 네트워크 관계를 가시화합니다.
+                    </div>
+                    <ul class="layer-features">
+                        <li>엔티티 간 거리</li>
+                        <li>네트워크 구조</li>
+                        <li>클러스터 분석</li>
+                    </ul>
+                    <div class="btn-view">보기 →</div>
+                </div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>

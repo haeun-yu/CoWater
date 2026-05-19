@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CoVerse - 3D Holographic Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000814;
+            color: #00ff88;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+
+        #canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .header {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            z-index: 20;
+        }
+
+        .title {
+            font-size: 32px;
+            font-weight: bold;
+            color: #00ffff;
+            text-shadow:
+                0 0 10px #00ffff,
+                0 0 20px #00ffff,
+                0 0 30px #0099ff,
+                0 0 40px #00ffff;
+            letter-spacing: 3px;
+            margin-bottom: 5px;
+            animation: glow 2s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% {
+                text-shadow:
+                    0 0 10px #00ffff,
+                    0 0 20px #00ffff,
+                    0 0 30px #0099ff,
+                    0 0 40px #00ffff;
+            }
+            50% {
+                text-shadow:
+                    0 0 20px #00ffff,
+                    0 0 40px #00ffff,
+                    0 0 60px #0099ff,
+                    0 0 80px #00ffff;
+            }
+        }
+
+        .subtitle {
+            color: #00ff88;
+            font-size: 12px;
+            text-shadow: 0 0 10px #00ff88;
+            letter-spacing: 1px;
+        }
+
+        .stats-bar {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-around;
+            gap: 20px;
+            flex-wrap: wrap;
+            z-index: 15;
+        }
+
+        .stat-widget {
+            background: rgba(0, 20, 40, 0.9);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 12px 20px;
+            text-align: center;
+            box-shadow:
+                0 0 20px rgba(0, 255, 136, 0.4),
+                inset 0 0 10px rgba(0, 255, 136, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #00ff88;
+            margin-top: 3px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .layers-nav {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            z-index: 15;
+        }
+
+        .layer-btn {
+            background: rgba(0, 20, 40, 0.9);
+            border: 2px solid #00ff88;
+            color: #00ff88;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+            transition: all 0.3s;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+            text-decoration: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            backdrop-filter: blur(10px);
+        }
+
+        .layer-btn:hover {
+            background: rgba(0, 40, 80, 0.95);
+            border-color: #00ffff;
+            box-shadow: 0 0 25px rgba(0, 255, 136, 0.6);
+            transform: translateY(-3px);
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        .layer-icon {
+            font-size: 14px;
+        }
+
+        .info-panel {
+            position: absolute;
+            right: 20px;
+            top: 150px;
+            width: 280px;
+            background: rgba(0, 20, 40, 0.9);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+            backdrop-filter: blur(10px);
+            max-height: 60vh;
+            overflow-y: auto;
+            z-index: 15;
+        }
+
+        .info-panel h3 {
+            color: #00ffff;
+            font-size: 12px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #00ffff;
+            border-bottom: 1px solid rgba(0, 255, 136, 0.3);
+            padding-bottom: 5px;
+        }
+
+        .entity-item, .metric-item {
+            font-size: 11px;
+            color: #00ff88;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .entity-item:last-child, .metric-item:last-child {
+            border-bottom: none;
+        }
+
+        .entity-status {
+            color: #00ffff;
+            font-weight: bold;
+        }
+
+        /* 스크롤바 */
+        .info-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .info-panel::-webkit-scrollbar-track {
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        .info-panel::-webkit-scrollbar-thumb {
+            background: #00ff88;
+            border-radius: 2px;
+        }
+
+        @media (max-width: 768px) {
+            .info-panel {
+                width: 200px;
+            }
+            .stat-widget {
+                padding: 10px 15px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="hud">
+        <div class="header">
+            <div class="title">⬢ CoVerse ⬢</div>
+            <div class="subtitle">상황인식 논리적 데이터 공간 - 3D 홀로그래픽 디스플레이</div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-widget">
+                <div class="stat-value" id="entity-count">-</div>
+                <div class="stat-label">활성 엔티티</div>
+            </div>
+            <div class="stat-widget">
+                <div class="stat-value" id="mission-count">-</div>
+                <div class="stat-label">활성 미션</div>
+            </div>
+            <div class="stat-widget">
+                <div class="stat-value" id="task-count">-</div>
+                <div class="stat-label">활성 Task</div>
+            </div>
+            <div class="stat-widget">
+                <div class="stat-value" id="system-load">-</div>
+                <div class="stat-label">시스템 부하</div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>📍 실시간 엔티티</h3>
+            <div id="entities-list"></div>
+            <h3 style="margin-top: 15px;">⚡ 시스템 메트릭</h3>
+            <div id="metrics-list"></div>
+        </div>
+
+        <div class="layers-nav">
+            <a href="layers/01_entity_layer.html" class="layer-btn">
+                <span class="layer-icon">🚀</span>
+                Entity
+            </a>
+            <a href="layers/02_operation_layer.html" class="layer-btn">
+                <span class="layer-icon">⚙️</span>
+                Operation
+            </a>
+            <a href="layers/03_system_layer.html" class="layer-btn">
+                <span class="layer-icon">⚡</span>
+                System
+            </a>
+            <a href="layers/04_temporal_layer.html" class="layer-btn">
+                <span class="layer-icon">📊</span>
+                Temporal
+            </a>
+            <a href="layers/05_spatial_layer.html" class="layer-btn">
+                <span class="layer-icon">🔗</span>
+                Spatial
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = localStorage.getItem("COVERSE_API_URL") || "http://localhost:8000";
+
+        // Three.js 씬 초기화
+        let scene, camera, renderer;
+        let hologramGroup, dataPoints = [];
+        let animationId;
+
+        function initThreeJS() {
+            // 씬 생성
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000814);
+
+            // 카메라
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+            camera.position.set(0, 5, 15);
+            camera.lookAt(0, 0, 0);
+
+            // 렌더러
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 라이팅
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0x00ffff, 1, 100);
+            pointLight.position.set(10, 10, 10);
+            pointLight.castShadow = true;
+            scene.add(pointLight);
+
+            const pointLight2 = new THREE.PointLight(0x00ff88, 0.8, 100);
+            pointLight2.position.set(-10, -10, 10);
+            scene.add(pointLight2);
+
+            // 홀로그래픽 그룹
+            hologramGroup = new THREE.Group();
+            scene.add(hologramGroup);
+
+            // 중앙 구형 디스플레이
+            createHologramSphere();
+
+            // 파티클 시스템
+            createParticles();
+
+            // 마우스 인터랙션
+            setupMouseInteraction();
+
+            // 윈도우 리사이즈
+            window.addEventListener('resize', onWindowResize);
+
+            // 애니메이션 루프
+            animate();
+        }
+
+        function createHologramSphere() {
+            // 외부 반투명 구
+            const geometry = new THREE.IcosahedronGeometry(8, 4);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x00ffff,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.2,
+                wireframe: false,
+                transparent: true,
+                opacity: 0.1,
+                shininess: 100
+            });
+            const sphere = new THREE.Mesh(geometry, material);
+            hologramGroup.add(sphere);
+
+            // 와이어프레임 선
+            const wireframeGeometry = new THREE.IcosahedronGeometry(8, 4);
+            const wireframeMaterial = new THREE.LineBasicMaterial({
+                color: 0x00ff88,
+                linewidth: 2,
+                transparent: true,
+                opacity: 0.6
+            });
+            const wireframe = new THREE.LineSegments(
+                new THREE.EdgesGeometry(wireframeGeometry),
+                wireframeMaterial
+            );
+            hologramGroup.add(wireframe);
+
+            // 회전 축
+            const axisGeometry = new THREE.BufferGeometry();
+            const axisMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, opacity: 0.3 });
+
+            const points = [
+                new THREE.Vector3(0, -10, 0),
+                new THREE.Vector3(0, 10, 0)
+            ];
+            axisGeometry.setFromPoints(points);
+            const axis = new THREE.Line(axisGeometry, axisMaterial);
+            hologramGroup.add(axis);
+        }
+
+        function createParticles() {
+            const particleCount = 500;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 30;
+                positions[i + 1] = (Math.random() - 0.5) * 30;
+                positions[i + 2] = (Math.random() - 0.5) * 30;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const material = new THREE.PointsMaterial({
+                color: 0x00ff88,
+                size: 0.2,
+                sizeAttenuation: true,
+                transparent: true,
+                opacity: 0.3
+            });
+
+            const particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+
+        function addDataPoint(position, color, label) {
+            // 데이터 포인트 (구)
+            const geometry = new THREE.SphereGeometry(0.3, 8, 8);
+            const material = new THREE.MeshPhongMaterial({
+                color: color,
+                emissive: color,
+                emissiveIntensity: 0.8,
+                shininess: 100
+            });
+            const sphere = new THREE.Mesh(geometry, material);
+            sphere.position.copy(position);
+            sphere.userData.label = label;
+            hologramGroup.add(sphere);
+
+            // 발광 고리
+            const ringGeometry = new THREE.TorusGeometry(0.5, 0.05, 8, 8);
+            const ringMaterial = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.6
+            });
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.position.copy(position);
+            ring.rotation.x = Math.PI / 4;
+            hologramGroup.add(ring);
+
+            dataPoints.push({ sphere, ring, position });
+        }
+
+        function setupMouseInteraction() {
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+
+            document.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const deltaX = e.clientX - previousMousePosition.x;
+                    const deltaY = e.clientY - previousMousePosition.y;
+
+                    hologramGroup.rotation.y += deltaX * 0.01;
+                    hologramGroup.rotation.x += deltaY * 0.01;
+
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            // 마우스 휠 줌
+            document.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                camera.position.z += e.deltaY * 0.01;
+                camera.position.z = Math.max(5, Math.min(30, camera.position.z));
+            }, { passive: false });
+        }
+
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+
+            // 자동 회전
+            if (!isDragging) {
+                hologramGroup.rotation.y += 0.0005;
+            }
+
+            // 데이터 포인트 애니메이션
+            dataPoints.forEach((dp, i) => {
+                dp.sphere.rotation.x += 0.005;
+                dp.sphere.rotation.y += 0.003;
+
+                dp.ring.rotation.y += 0.01;
+                dp.ring.scale.x = 1 + Math.sin(Date.now() * 0.001 + i) * 0.2;
+                dp.ring.scale.z = 1 + Math.sin(Date.now() * 0.001 + i) * 0.2;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        async function loadCoVerseData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/coverse/snapshot`);
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
+                const data = await response.json();
+                updateDashboard(data);
+            } catch (error) {
+                console.error("CoVerse 데이터 로드 실패:", error);
+                loadMockData();
+            }
+        }
+
+        function loadMockData() {
+            const mockData = {
+                entityLayer: {
+                    entities: [
+                        { id: "UUV-001", name: "AUV Alpha", type: "device", status: "active" },
+                        { id: "UUV-002", name: "AUV Beta", type: "device", status: "active" },
+                        { id: "GATEWAY-001", name: "Base Station", type: "device", status: "active" },
+                        { id: "SENSOR-001", name: "Water Sensor", type: "sensor", status: "active" }
+                    ]
+                },
+                operationLayer: {
+                    missions: [{ id: "MISSION-001" }],
+                    tasks: [{ id: "TASK-001" }]
+                }
+            };
+            updateDashboard(mockData);
+        }
+
+        function updateDashboard(data) {
+            const entities = data.entityLayer?.entities || [];
+            const missions = data.operationLayer?.missions || [];
+            const tasks = data.operationLayer?.tasks || [];
+
+            // 통계 업데이트
+            document.getElementById("entity-count").textContent = entities.length;
+            document.getElementById("mission-count").textContent = missions.length;
+            document.getElementById("task-count").textContent = tasks.length;
+            document.getElementById("system-load").textContent = Math.floor(Math.random() * 40 + 50) + "%";
+
+            // 데이터 포인트 업데이트
+            dataPoints.forEach(dp => {
+                hologramGroup.remove(dp.sphere);
+                hologramGroup.remove(dp.ring);
+            });
+            dataPoints = [];
+
+            const colors = [0x00ff88, 0xff0055, 0x00ffff, 0xffaa00];
+            entities.forEach((entity, i) => {
+                const angle = (i / entities.length) * Math.PI * 2;
+                const radius = 6;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = (Math.random() - 0.5) * 4;
+
+                addDataPoint(
+                    new THREE.Vector3(x, y, z),
+                    colors[i % colors.length],
+                    entity.id
+                );
+            });
+
+            // 엔티티 리스트
+            const entitiesList = document.getElementById("entities-list");
+            entitiesList.innerHTML = entities.map(e =>
+                `<div class="entity-item"><span>${e.id}</span><span class="entity-status">${e.status}</span></div>`
+            ).join("");
+
+            // 메트릭 리스트
+            const metricsList = document.getElementById("metrics-list");
+            const metrics = [
+                { label: "Detection", value: Math.floor(Math.random() * 40 + 20) },
+                { label: "Analysis", value: Math.floor(Math.random() * 40 + 30) },
+                { label: "Control", value: Math.floor(Math.random() * 40 + 40) },
+                { label: "Database", value: Math.floor(Math.random() * 40 + 30) }
+            ];
+            metricsList.innerHTML = metrics.map(m =>
+                `<div class="metric-item"><span>${m.label}</span><span style="color: #00ffff;">${m.value}%</span></div>`
+            ).join("");
+        }
+
+        let isDragging = false;
+
+        // 초기화
+        window.addEventListener('DOMContentLoaded', () => {
+            initThreeJS();
+            loadCoVerseData();
+            setInterval(loadCoVerseData, 10000);
+        });
+    </script>
+</body>
+</html>

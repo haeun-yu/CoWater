@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Temporal Layer - CoVerse</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border-left: 5px solid #38f9d7;
+        }
+        .header h1 { color: #333; margin-bottom: 8px; }
+        .header p { color: #666; font-size: 14px; }
+        .back-btn {
+            display: inline-block;
+            background: #38f9d7;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            margin-top: 15px;
+        }
+        .back-btn:hover { background: #1ecfb7; }
+        .panel {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 25px;
+        }
+        .panel h2 { color: #333; margin-bottom: 20px; font-size: 18px; padding-bottom: 10px; border-bottom: 2px solid #f0f0f0; }
+
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 40px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, #38f9d7 0%, #43e97b 100%);
+        }
+
+        .timeline-item {
+            margin-bottom: 30px;
+            padding-left: 120px;
+            position: relative;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            left: 22px;
+            top: 8px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: white;
+            border: 3px solid #38f9d7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            z-index: 2;
+        }
+
+        .timeline-content {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #38f9d7;
+        }
+
+        .timeline-time {
+            color: #38f9d7;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 5px;
+        }
+
+        .timeline-event {
+            color: #333;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+
+        .timeline-detail {
+            color: #666;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .event-type {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #e0f7f4;
+            color: #00897b;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-top: 6px;
+        }
+
+        .timeline-item.critical .timeline-marker {
+            border-color: #f44336;
+            background: #fff3cd;
+        }
+
+        .timeline-item.critical .timeline-content {
+            border-left-color: #f44336;
+        }
+
+        .timeline-item.critical .timeline-time {
+            color: #f44336;
+        }
+
+        .timeline-item.success .timeline-marker {
+            border-color: #4CAF50;
+        }
+
+        .timeline-item.success .timeline-content {
+            border-left-color: #4CAF50;
+        }
+
+        .timeline-item.success .timeline-time {
+            color: #4CAF50;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #38f9d7;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #38f9d7;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Temporal Layer - 시간 흐름 (Timeline)</h1>
+            <p>시스템의 모든 이벤트를 시간 순서대로 표시하여 상황 변화를 추적합니다.</p>
+            <a href="../index.html" class="back-btn">← 목록으로</a>
+        </div>
+
+        <!-- 통계 -->
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value">15</div>
+                <div class="stat-label">총 이벤트</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">2</div>
+                <div class="stat-label">중요 이벤트</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">5</div>
+                <div class="stat-label">상태 변화</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">8</div>
+                <div class="stat-label">의사결정</div>
+            </div>
+        </div>
+
+        <!-- 타임라인 -->
+        <div class="panel">
+            <h2>📈 이벤트 타임라인 (Event Timeline)</h2>
+            <div class="timeline">
+                <!-- 최신 이벤트부터 -->
+                <div class="timeline-item success">
+                    <div class="timeline-marker">✅</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:35:20</div>
+                        <div class="timeline-event">Task 진행중으로 상태 변경</div>
+                        <div class="timeline-detail">
+                            UUV-002의 복귀 Task가 진행중으로 변경됨<br>
+                            (in_progress 상태)
+                        </div>
+                        <div class="event-type">Task Status Change</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">✅</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:35:00</div>
+                        <div class="timeline-event">복귀 명령 실행</div>
+                        <div class="timeline-detail">
+                            Gateway가 UUV-002에 복귀 명령 전송<br>
+                            무인체 응답: ACK (승인)
+                        </div>
+                        <div class="event-type">Command Executed</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">⚡</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:30:20</div>
+                        <div class="timeline-event">Task 할당됨</div>
+                        <div class="timeline-detail">
+                            return_to_base Task (ID: task-999)이 UUV-002에 할당됨<br>
+                            우선도: P1 (최고)
+                        </div>
+                        <div class="event-type">Task Allocated</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">📊</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:30:05</div>
+                        <div class="timeline-event">의사결정: 우선도 조정</div>
+                        <div class="timeline-detail">
+                            Analysis Agent: 우선도를 2에서 1(P1)로 조정<br>
+                            근거: 배터리 18% + 거리 4.94km + 시스템 부하 72%<br>
+                            신뢰도: 95%
+                        </div>
+                        <div class="event-type">Decision Made</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item critical">
+                    <div class="timeline-marker">🔴</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:30:01</div>
+                        <div class="timeline-event">배터리 부족 감지!</div>
+                        <div class="timeline-detail">
+                            Detection Agent가 이상을 감지함<br>
+                            UUV-002 배터리: 18% (임계값: 20%)<br>
+                            심각도: CRITICAL<br>
+                            신뢰도: 99%
+                        </div>
+                        <div class="event-type">Anomaly Detected</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">📡</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:25:30</div>
+                        <div class="timeline-event">UUV-003 Task 진행중</div>
+                        <div class="timeline-detail">
+                            정찰 Task 진행률: 62% (4/5 waypoint)<br>
+                            예상 완료: 14:45
+                        </div>
+                        <div class="event-type">Task Progress</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">📡</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:20:00</div>
+                        <div class="timeline-event">UUV-001 모니터링 시작</div>
+                        <div class="timeline-detail">
+                            모니터링 Task 시작<br>
+                            구역: Survey Grid A<br>
+                            샘플링 간격: 60초
+                        </div>
+                        <div class="event-type">Task Started</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">✅</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:15:00</div>
+                        <div class="timeline-event">미션 시작</div>
+                        <div class="timeline-detail">
+                            2개 미션 활성화:<br>
+                            • 해역 모니터링 (priority: 2)<br>
+                            • 지형 데이터 수집 (priority: 2)
+                        </div>
+                        <div class="event-type">Mission Started</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">✅</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:10:00</div>
+                        <div class="timeline-event">모든 무인체 준비 완료</div>
+                        <div class="timeline-detail">
+                            5개 무인체 상태: 모두 ACTIVE<br>
+                            시스템 준비 상태: READY<br>
+                            평균 배터리: 62%
+                        </div>
+                        <div class="event-type">System Ready</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item success">
+                    <div class="timeline-marker">🚀</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">14:00:00</div>
+                        <div class="timeline-event">운영 세션 시작</div>
+                        <div class="timeline-detail">
+                            시스템 초기화 완료<br>
+                            모든 에이전트 온라인<br>
+                            Moth Bridge 연결됨
+                        </div>
+                        <div class="event-type">System Started</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 요약 -->
+        <div class="panel">
+            <h2>📋 주요 사건 (Key Events)</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #f44336;">
+                    <div style="color: #f44336; font-weight: bold; margin-bottom: 5px;">🔴 Critical Event</div>
+                    <div style="font-size: 12px; color: #333;">
+                        14:30:01 - UUV-002 배터리 부족 감지 (18%)<br>
+                        → 즉시 높은 우선도로 복귀 명령 발행
+                    </div>
+                </div>
+
+                <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; border-left: 4px solid #4CAF50;">
+                    <div style="color: #4CAF50; font-weight: bold; margin-bottom: 5px;">✅ Success Event</div>
+                    <div style="font-size: 12px; color: #333;">
+                        14:35:20 - 복귀 Task 진행중으로 상태 변경<br>
+                        → 명령이 정상적으로 실행됨
+                    </div>
+                </div>
+
+                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196F3;">
+                    <div style="color: #2196F3; font-weight: bold; margin-bottom: 5px;">📊 Decision Trail</div>
+                    <div style="font-size: 12px; color: #333;">
+                        3단계 의사결정 완료<br>
+                        Detection → Analysis → Control<br>
+                        총 소요시간: 19초
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
