@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import register_agent
-from .types import Agent
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent
 
 
-def _system_sentinel_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _system_sentinel_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's SystemSentinel Agent.
 
 Role:
@@ -57,7 +57,9 @@ def _system_sentinel_contract() -> dict[str, Any]:
 
 
 @register_agent(name="SystemSentinel Agent", func_name="get_system_sentinel_agent")
-def get_system_sentinel_agent(model: str, **kwargs):
+def get_system_sentinel_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
+
     def monitor_health(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "monitor_health", "args": list(args), "parameters": kwargs}
 
@@ -75,7 +77,7 @@ def get_system_sentinel_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="system_sentinel",
-        port=9113,
+        port=ports.get("system_sentinel", 9113),
         description="Monitors health and anomalies and emits severity-classified events.",
         contract=_system_sentinel_contract(),
     )

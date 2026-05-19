@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import register_agent
-from .toolkit import make_tool
-from .types import Agent
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent
 
 
-def _mission_planner_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _mission_planner_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's MissionPlanner Agent.
 
 Role:
@@ -59,7 +58,9 @@ def _mission_planner_contract() -> dict[str, Any]:
 
 
 @register_agent(name="MissionPlanner Agent", func_name="get_mission_planner_agent")
-def get_mission_planner_agent(model: str, **kwargs):
+def get_mission_planner_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
+
     def generate_proposals(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "generate_proposals", "args": list(args), "parameters": kwargs}
 
@@ -80,7 +81,7 @@ def get_mission_planner_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="mission_planner",
-        port=9111,
+        port=ports.get("mission_planner", 9111),
         description="Designs proposals, tasks, and approval flow for executable missions.",
         contract=_mission_planner_contract(),
     )

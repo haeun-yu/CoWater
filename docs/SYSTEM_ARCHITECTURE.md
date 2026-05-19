@@ -69,7 +69,10 @@ CoWater의 모든 설계는 5가지 핵심 철학을 기반합니다.
 Registry Server (공용 상태 저장소 - 모든 레이어에서 접근)
 ├─ Device 등록 정보 & Agent Endpoint
 ├─ Mission / Task 상태
-├─ Event (모든 의사결정 기록)
+├─ Event (사건 기록) - "무엇이 일어났는가" (고수준)
+│  └─ context_id로 흐름 추적 (USER_COMMAND_RECEIVED, SYS_ANOMALY_DETECTED 등)
+├─ AgentLog (실행 기록) - "어떻게 일어났는가" (상세)
+│  └─ context_id로 Event와 연결 (각 Agent의 판단/행동 과정)
 ├─ AgentConnection (Device 간 협력 정보)
 │  └─ network_type: wired, acoustic, rf, satellite
 │  └─ endpoint, signal_strength, latency_ms 등
@@ -81,18 +84,28 @@ Stream Layer (Moth - 실시간 데이터)
 │     └─ video, lidar, audio, 센서 데이터 등
 │
 ├─ A2A Protocol (HTTP POST)
+│  ├─ 모든 A2A 호출은 context_id 포함 (흐름 추적)
 │  ├─ Device Agent ↔ System Agent (task.assign, task.result)
-│  │  ├─ task.assign (System → Device: Task 할당)
-│  │  └─ task.result (Device → System: Task 결과)
+│  │  ├─ task.assign (System → Device: Task 할당, context_id 포함)
+│  │  └─ task.result (Device → System: Task 결과, context_id 포함)
 │  │
-│  └─ Device Agent ↔ Device Agent (직접 통신, multi-hop relay)
-│     └─ AgentConnection 기반 A2A 통신 (BFS 경로)
+│  └─ System Agent ↔ System Agent (직접 통신)
+│     ├─ RequestHandler → MissionPlanner (context_id로 흐름 연결)
+│     ├─ RequestHandler → PolicyManager
+│     ├─ RequestHandler → DeviceBridge
+│     └─ 모든 호출이 같은 context_id로 추적 가능
 │
 └─ meb 채널 ("agents" - 송수신)
    ├─ DEVICE_HEALTHCHECK (Device 주기적 신호, 배터리/위치/상태 포함)
-   └─ MEB Events (event_type + target_agents)
-      └─ System Layer (System Agent ↔ System Agent)
-         └─ SYS_INTENT_CLASSIFIED, SYS_TASK_DISPATCHED, SYS_POLICY_DECISION, ...
+   ├─ MEB Events (event_type + target_agents + context_id)
+   │  ├─ "무엇이 일어났는가" (고수준 기록)
+   │  ├─ USER_COMMAND_RECEIVED, SYS_ANOMALY_DETECTED, SYS_POLICY_DECISION
+   │  └─ context_id로 흐름 추적 가능
+   │
+   └─ AgentLog (각 Agent의 상세 실행 기록 + context_id)
+      ├─ "어떻게 일어났는가" (저수준 상세)
+      ├─ 입력/출력/판단 이유/소요 시간 기록
+      └─ Event와 같은 context_id로 연결 (전체 흐름 추적)
 ```
 
 ---

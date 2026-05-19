@@ -10,9 +10,17 @@ _SYSTEM_AGENT_ROOT = _AGENT_ROOT.parent / "system-agent"
 _SHARED = _AGENT_ROOT.parent / "shared"
 
 # system-agent runtime first for identical behavior, then shared helpers
-for p in [str(_AGENT_ROOT), str(_SHARED), str(_SYSTEM_AGENT_ROOT)]:
+# Load harness profile first to register agents
+_HARNESS_DIR = _AGENT_ROOT / "harness"
+for p in [str(_HARNESS_DIR), str(_AGENT_ROOT), str(_SHARED), str(_SYSTEM_AGENT_ROOT)]:
     if p not in sys.path:
         sys.path.insert(0, p)
+
+# Load harness profile to trigger @register_agent decorator
+try:
+    import profile as _harness_profile  # noqa: F401
+except ImportError:
+    pass
 
 def _load_runtime_class():
     runtime_path = _SYSTEM_AGENT_ROOT / "agent" / "runtime.py"

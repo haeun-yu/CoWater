@@ -72,7 +72,8 @@ class BaseAgentRuntime(ABC):
         )
         self.registry_client = RegistryClient(self.config.get("registry", {}))
         self.event_publisher = EventPublisher(self.registry_client)
-        self.decision_engine = DecisionEngine(self.agent_config, self.skills)
+        self.agent_profile = self._load_agent_profile()
+        self.decision_engine = DecisionEngine(self.agent_config, self.skills, agent_profile=self.agent_profile)
         self.task_dispatcher = TaskDispatcher(self.registry_client, enable_logging=True)
         self.telemetry_reader = TelemetryReader()
         self.simulator = DeviceSimulator(self.config.get("simulation", {}), self.skills.list_tracks())
@@ -100,7 +101,6 @@ class BaseAgentRuntime(ABC):
         self._policy_action_dedupe: dict[str, float] = {}
         self._command_requests: dict[str, dict[str, Any]] = {}
         self._command_request_tasks: set[asyncio.Task[Any]] = set()
-        self.agent_profile = self._load_agent_profile()
 
     @classmethod
     def _deep_update(cls, target: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
@@ -482,13 +482,15 @@ class BaseAgentRuntime(ABC):
         role = self.state.role
         payload = event.get("payload") or event.get("data") or {}
         try:
-            await self.handle_moth_message(event_type, payload, event)
+            handled = await self.handle_moth_message(event_type, payload, event)
+            if not handled:
+                logger.warning(f"[MEB:UNHANDLED] role={role} event_type={event_type}")
         except Exception as e:
             logger.error(f"[{role}] Moth 이벤트 처리 오류 ({event_type}): {e}")
 
     @abstractmethod
-    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> None:
-        """각 서브클래스가 역할에 맞는 MEB 이벤트 처리를 구현한다."""
+    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> bool:
+        """각 서브클래스가 역할에 맞는 MEB 이벤트 처리를 구현한다. True=처리됨, False=처리 안 됨"""
         ...
 
     async def execute_role_request(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2123,6 +2125,7 @@ class BaseAgentRuntime(ABC):
         proposal_id = str(proposal.get("proposal_id") or proposal.get("id") or "")
         steps = self._mission_steps_from_approval(approval, proposal_id)
         approval_metadata = approval.get("metadata") or {}
+        category_data = proposal.get("category_data") or {}
         timeline = [
             {
                 "timestamp": utc_now(),
@@ -2140,13 +2143,13 @@ class BaseAgentRuntime(ABC):
         return {
             "mission_id": mission_id,
             "title": proposal.get("title") or "Mission",
-            "mission_type": proposal.get("type") or proposal.get("mission_type") or "OPERATION",
+            "mission_type": approval_metadata.get("mission_type") or "OPERATION",
             "status": "READY",
             "priority": proposal.get("priority") or "NORMAL",
-            "source_event_id": proposal.get("source_event_id") or approval_metadata.get("source_event_id"),
+            "source_event_id": category_data.get("source_event_id") or approval_metadata.get("source_event_id"),
             "source_proposal_id": proposal_id,
-            "target_area": proposal.get("target_area"),
-            "target_position": proposal.get("target_position"),
+            "target_area": category_data.get("target_area") or approval_metadata.get("target_area"),
+            "target_position": category_data.get("target_position") or approval_metadata.get("target_position"),
             "created_by": proposal.get("created_by") or {"type": "SYSTEM", "id": self.state.agent_id},
             "approved_by_user_id": approval.get("decided_by"),
             "approval_id": approval_id,
@@ -2432,14 +2435,18 @@ class BaseAgentRuntime(ABC):
                 "metadata": {"goal": goal, "location": location},
             }
         )
-        proposal = self.registry_client.create_mission_proposal(
+        proposal = self.registry_client.create_proposal(
             {
+                "type": "MISSION",
                 "title": payload.get("title") or f"{mission_type.replace('_', ' ').title()} Proposal",
-                "type": mission_type.upper(),
+                "status": "PROPOSED",
                 "priority": str(payload.get("priority") or "NORMAL").upper(),
-                "source_event_id": payload.get("event_id"),
-                "target_area": (location or {}).get("area"),
-                "target_position": location if isinstance(location, dict) and any(k in location for k in ("latitude", "longitude")) else None,
+                "requires_approval": True,
+                "category_data": {
+                    "source_event_id": payload.get("event_id"),
+                    "target_area": (location or {}).get("area"),
+                    "target_position": location if isinstance(location, dict) and any(k in location for k in ("latitude", "longitude")) else None,
+                },
                 "created_by": {"type": "SYSTEM", "id": self.state.agent_id},
                 "limitations": payload.get("limitations"),
             }
@@ -2449,14 +2456,38 @@ class BaseAgentRuntime(ABC):
             self.registry_client.create_proposal_task(proposal_id, task_payload)
             for task_payload in self._proposal_task_payloads(proposal_id, steps)
         ]
+
+        # Event: SYS_PROPOSAL_GENERATED (Proposal 생성됨)
+        request_id = payload.get("request_id")
+        if request_id:
+            self.registry_client.ingest_event({
+                "event_type": "SYS_PROPOSAL_GENERATED",
+                "actor_type": "SYSTEM",
+                "actor_id": self.state.agent_id,
+                "target_type": "PROPOSAL",
+                "target_id": proposal_id,
+                "severity": "INFO",
+                "data": {
+                    "request_id": request_id,
+                    "proposal_id": proposal_id,
+                    "title": proposal.get("title"),
+                    "mission_type": mission_type,
+                    "goal": goal,
+                    "strategy": payload.get("_approach"),
+                    "task_count": len(proposal_tasks),
+                    "timestamp": utc_now()
+                }
+            })
+
         approval = self.registry_client.create_approval(
             {
-                "target_type": "mission_proposal",
+                "target_type": "proposal",
                 "target_id": proposal_id,
                 "summary": f"Approve mission proposal '{proposal.get('title')}'",
-                "requested_action": "approve_mission_proposal",
+                "requested_action": "approve_proposal",
                 "related_insight_id": insight.get("insight_id"),
                 "metadata": {
+                    "request_id": request_id,
                     "mission_type": mission_type,
                     "goal": goal or mission_type,
                     "location": location,
@@ -2569,12 +2600,12 @@ class BaseAgentRuntime(ABC):
             self.registry_client.replace_mission(mission_id, mission)
             mission = await self._start_mission_execution(mission)
             return {"approval": approval, "mission": mission}
-        if str(approval.get("target_type") or "") != "mission_proposal":
+        if str(approval.get("target_type") or "") != "proposal":
             return {"approval": approval, "mission": None}
         proposal_id = str(approval.get("target_id"))
-        proposal = self.registry_client.get_mission_proposal(proposal_id)
+        proposal = self.registry_client.get_proposal(proposal_id)
         proposal["status"] = "APPROVED" if approved else "CANCELLED"
-        proposal = self.registry_client.create_mission_proposal(proposal)
+        proposal = self.registry_client.update_proposal(proposal_id, {"status": proposal["status"]})
         if not approved:
             fingerprint = str((approval.get("metadata") or {}).get("suppression_fingerprint") or "")
             if fingerprint:

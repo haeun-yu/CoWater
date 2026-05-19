@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .mission_planner_agent import get_mission_planner_agent
-from .device_bridge_agent import get_device_bridge_agent
-from .insight_reporter_agent import get_insight_reporter_agent
-from .policy_manager_agent import get_policy_manager_agent
-from .system_sentinel_agent import get_system_sentinel_agent
-from .registry import register_agent
-from .types import Agent, Result
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent, Result
 
 
-def _request_handler_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _request_handler_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's RequestHandler Agent.
 
 Role:
@@ -73,12 +68,8 @@ def _request_handler_contract() -> dict[str, Any]:
 
 
 @register_agent(name="RequestHandler Agent", func_name="get_request_handler_agent")
-def get_request_handler_agent(model: str, **kwargs):
-    mission_planner_profile = kwargs.get("mission_planner_profile") or get_mission_planner_agent(model, **kwargs)
-    device_bridge_profile = kwargs.get("device_bridge_profile") or get_device_bridge_agent(model, **kwargs)
-    insight_reporter_profile = kwargs.get("insight_reporter_profile") or get_insight_reporter_agent(model, **kwargs)
-    policy_manager_profile = kwargs.get("policy_manager_profile") or get_policy_manager_agent(model, **kwargs)
-    system_sentinel_profile = kwargs.get("system_sentinel_profile") or get_system_sentinel_agent(model, **kwargs)
+def get_request_handler_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
 
     def query_devices(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "get_devices", "args": list(args), "parameters": kwargs}
@@ -89,23 +80,23 @@ def get_request_handler_agent(model: str, **kwargs):
     def query_insights(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "get_insights", "args": list(args), "parameters": kwargs}
 
-    def final_answer(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {"tool": "final_answer", "args": list(args), "parameters": kwargs}
-
     def transfer_to_mission_planner(sub_task_description: str) -> Result:
-        return Result(value=sub_task_description, agent=mission_planner_profile)
+        return Result(value=sub_task_description, agent=None)
 
     def transfer_to_device_bridge(sub_task_description: str) -> Result:
-        return Result(value=sub_task_description, agent=device_bridge_profile)
+        return Result(value=sub_task_description, agent=None)
 
     def transfer_to_insight_reporter(sub_task_description: str) -> Result:
-        return Result(value=sub_task_description, agent=insight_reporter_profile)
+        return Result(value=sub_task_description, agent=None)
 
     def transfer_to_policy_manager(sub_task_description: str) -> Result:
-        return Result(value=sub_task_description, agent=policy_manager_profile)
+        return Result(value=sub_task_description, agent=None)
 
     def transfer_to_system_sentinel(sub_task_description: str) -> Result:
-        return Result(value=sub_task_description, agent=system_sentinel_profile)
+        return Result(value=sub_task_description, agent=None)
+
+    def final_answer(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"tool": "final_answer", "args": list(args), "parameters": kwargs}
 
     agent = Agent(
         name="RequestHandler Agent",
@@ -125,32 +116,16 @@ def get_request_handler_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="request_handler",
-        port=9116,
+        port=ports.get("request_handler", 9116),
         description="Receives the user's first request, classifies intent, and routes work to specialist agents.",
         contract=_request_handler_contract(),
         agent_teams={
-            "MissionPlanner Agent": transfer_to_mission_planner,
-            "DeviceBridge Agent": transfer_to_device_bridge,
-            "InsightReporter Agent": transfer_to_insight_reporter,
-            "PolicyManager Agent": transfer_to_policy_manager,
-            "SystemSentinel Agent": transfer_to_system_sentinel,
+            "MissionPlanner": ports.get("mission_planner", 9111),
+            "DeviceBridge": ports.get("device_bridge", 9110),
+            "InsightReporter": ports.get("insight_reporter", 9114),
+            "PolicyManager": ports.get("policy_manager", 9112),
+            "SystemSentinel": ports.get("system_sentinel", 9113),
         },
     )
-
-    def transfer_back_to_request_handler(task_status: str) -> Result:
-        return Result(value=task_status, agent=agent)
-
-    for child_agent in (
-        mission_planner_profile,
-        device_bridge_profile,
-        insight_reporter_profile,
-        policy_manager_profile,
-        system_sentinel_profile,
-    ):
-        if hasattr(child_agent, "functions"):
-            if not any(getattr(func, "__name__", "") == "transfer_back_to_request_handler" for func in child_agent.functions):
-                child_agent.functions.append(transfer_back_to_request_handler)
-        if hasattr(child_agent, "agent_teams"):
-            child_agent.agent_teams[agent.name] = transfer_back_to_request_handler
 
     return agent

@@ -16,7 +16,7 @@ class Agent:
     parallel_tool_calls: bool = False
     examples: Union[list[tuple[dict[str, Any], str]], Callable[[dict[str, Any]], str], None] = field(default_factory=list)
     handle_mm_func: Callable[..., Any] | None = None
-    agent_teams: dict[str, Callable[..., Any]] = field(default_factory=dict)
+    agent_teams: dict[str, int] = field(default_factory=dict)
     role: str = ""
     port: int | None = None
     description: str = ""
@@ -39,10 +39,7 @@ class Agent:
             "parallel_tool_calls": self.parallel_tool_calls,
             "examples": self._serialize_examples(context_variables),
             "handle_mm_func": getattr(self.handle_mm_func, "__name__", None) if self.handle_mm_func else None,
-            "agent_teams": {
-                key: getattr(value, "__name__", repr(value))
-                for key, value in self.agent_teams.items()
-            },
+            "agent_teams": self.agent_teams,
             "role": self.role,
             "port": self.port,
             "description": self.description,

@@ -11,9 +11,9 @@
 
 ## 1. 공통 패턴
 
-### 1.1 BaseAgent 구현
+### 1.1 BaseAgentRuntime 구현
 
-모든 System Agent는 `BaseAgent`를 상속하여 다음을 구현합니다:
+모든 System Agent는 `BaseAgentRuntime`을 상속하여 다음을 구현합니다:
 
 ```python
 from abc import ABC, abstractmethod
@@ -21,10 +21,11 @@ from typing import Any, Dict, Optional
 import asyncio
 import logging
 from datetime import datetime
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-class BaseAgent(ABC):
+class BaseAgentRuntime(ABC):
     """모든 System Agent의 기본 클래스"""
     
     def __init__(self, agent_id: str, agent_name: str, port: int):
@@ -39,7 +40,7 @@ class BaseAgent(ABC):
         """에이전트 시작"""
         logger.info(f"{self.agent_name} starting on port {self.port}")
         
-        # 1. MEB 구독 시작
+        # 1. MEB 구독 시작 (이벤트 수신)
         await self.subscribe_to_meb()
         
         # 2. 에이전트별 초기화
@@ -123,7 +124,138 @@ class BaseAgent(ABC):
         pass
 ```
 
-### 1.2 LLM 호출 베스트 프랙티스
+### 1.2 Event + AgentLog: 실행 기록 및 추적
+
+**설계 원칙**:
+- **Event**: "무엇이 일어났는가" - 주요 사건을 고수준으로 기록 (한 번만 발행)
+- **AgentLog**: "어떻게 일어났는가" - Agent의 상세 실행 과정 기록 (입력, 출력, 판단, 소요 시간)
+- **context_id**: 이 둘을 연결하는 흐름 ID (같은 사용자 명령, 같은 이상징후 등)
+
+**모든 Agent의 _execute_role() 메서드는 다음 패턴을 따름**:
+
+```python
+async def _execute_role(self, parameters: dict[str, Any]) -> dict[str, Any]:
+    from uuid import uuid4
+    import time
+    
+    # 1. context_id 추출 또는 생성
+    context_id = str(parameters.get("context_id") or f"ctx-{uuid4()}")
+    start_time = time.time()
+    
+    # 2. SYS_REQUEST_RECEIVED 이벤트 (A2A 요청 수신 시)
+    if request_id := parameters.get("request_id"):
+        self.registry_client.ingest_event({
+            "event_type": "SYS_REQUEST_RECEIVED",
+            "context_id": context_id,  # ← 흐름 추적 ID
+            "actor_type": "SYSTEM",
+            "actor_id": self.state.agent_id,
+            "target_type": "AGENT_COMMUNICATION",
+            "target_id": request_id,
+            "severity": "INFO",
+            "data": {
+                "request_id": request_id,
+                "from_agent": "RequestHandler",
+                "to_agent": self.__class__.__name__,
+                "timestamp": utc_now()
+            }
+        })
+    
+    # 3. 메인 액션 실행 (시간 측정)
+    try:
+        action = str(parameters.get("action") or "default_action").strip()
+        
+        if action == "specific_action":
+            # 액션 실행
+            result = await self._perform_action(parameters)
+            
+            # AgentLog 기록 (성공)
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,  # ← Event와 같은 흐름 ID
+                "agent_id": self.state.agent_id,
+                "agent_role": "AGENT_NAME",  # REQUEST_HANDLER, MISSION_PLANNER 등
+                "action": "specific_action",  # 실행한 구체적 작업
+                "input": {
+                    "param1": parameters.get("param1"),
+                    "param2": parameters.get("param2"),
+                },
+                "output": result,
+                "status": "SUCCESS",
+                "duration_ms": duration_ms,
+            })
+        else:
+            # 지원하지 않는 액션
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,
+                "agent_id": self.state.agent_id,
+                "agent_role": "AGENT_NAME",
+                "action": "unsupported_action",
+                "input": {"action": action},
+                "output": {},
+                "status": "FAILED",
+                "duration_ms": duration_ms,
+            })
+            
+            result = self._error_response("unsupported_action")
+    
+    except Exception as exc:
+        # 액션 실행 중 오류
+        duration_ms = int((time.time() - start_time) * 1000)
+        self.registry_client.ingest_agent_log({
+            "context_id": context_id,
+            "agent_id": self.state.agent_id,
+            "agent_role": "AGENT_NAME",
+            "action": action,
+            "input": {...},
+            "output": {},
+            "status": "FAILED",
+            "duration_ms": duration_ms,
+        })
+        
+        result = self._error_response(str(exc))
+    
+    # 4. SYS_RESPONSE_SENT 이벤트 (응답 전송 시)
+    if request_id:
+        self.registry_client.ingest_event({
+            "event_type": "SYS_RESPONSE_SENT",
+            "context_id": context_id,  # ← Event와 AgentLog를 연결
+            "actor_type": "SYSTEM",
+            "actor_id": self.state.agent_id,
+            "target_type": "AGENT_COMMUNICATION",
+            "target_id": request_id,
+            "severity": "INFO" if result.get("status") == "ok" else "WARNING",
+            "data": {
+                "request_id": request_id,
+                "from_agent": self.__class__.__name__,
+                "to_agent": "RequestHandler",
+                "response_status": result.get("status"),
+                "timestamp": utc_now()
+            }
+        })
+    
+    return result
+```
+
+**context_id 흐름 예시**:
+
+```
+RequestHandler (사용자 명령 수신)
+  └─ context_id = "ctx-abc-123" 생성
+  ├─ Event: USER_COMMAND_RECEIVED (context_id: "ctx-abc-123")
+  ├─ AgentLog: classify_intent (context_id: "ctx-abc-123")
+  └─ MissionPlanner에 A2A 호출 (payload에 context_id 포함)
+     └─ MissionPlanner 수신
+        ├─ Event: SYS_REQUEST_RECEIVED (context_id: "ctx-abc-123")
+        ├─ AgentLog: generate_proposals (context_id: "ctx-abc-123")
+        └─ Event: SYS_RESPONSE_SENT (context_id: "ctx-abc-123")
+
+사용자는 나중에 context_id "ctx-abc-123"으로 조회하면:
+  - Event들: 전체 흐름의 주요 사건들
+  - AgentLog들: 각 Agent의 상세 실행 과정 (판단 이유, 소요 시간 등)
+```
+
+### 1.3 LLM 호출 베스트 프랙티스
 
 ```python
 class LLMCircuitBreaker:
@@ -171,7 +303,9 @@ class LLMCircuitBreaker:
 
 - 사용자 자연어 명령을 Intent로 분류
 - 해당 System Agent로 라우팅 또는 직접 처리
-- 모든 사용자 요청 로깅
+- USER_COMMAND_RECEIVED Event 발행 (context_id 포함)
+- classify_intent AgentLog 기록
+- 각 A2A 호출 시 context_id 전달 (흐름 추적)
 
 ### 2.2 Intent 분류 알고리즘
 
@@ -437,8 +571,10 @@ async def handle_user_request(self, request: UserRequest) -> ChatResponse:
 ### 3.1 책임
 
 - Device Agent와의 A2A 통신 중개
-- Task 할당 (MissionPlanner → Device Agent)
+- Task 할당 (MissionPlanner → Device Agent, context_id 포함)
 - Device 상태 수신 (Heartbeat, Task Result, Problem Report)
+- SYS_REQUEST_RECEIVED, SYS_RESPONSE_SENT Event 발행 (context_id 포함)
+- relay_healthcheck, collect_result, dispatch_task AgentLog 기록
 - Exponential Backoff 재시도
 
 ### 3.2 Task 전달 알고리즘
@@ -574,10 +710,12 @@ class DeviceBridge(BaseAgent):
 
 ### 4.1 책임
 
-- 사용자 Intent → Proposal 생성 (LLM 기반)
+- 사용자 Intent → Proposal 생성 (LLM 기반, context_id 포함)
 - Proposal → Mission 변환
 - Mission 생명주기 관리 (READY → IN_PROGRESS → COMPLETED/FAILED)
-- Task 분배 (DeviceBridge로 전달)
+- Task 분배 (DeviceBridge로 전달, context_id 포함)
+- SYS_REQUEST_RECEIVED, SYS_RESPONSE_SENT Event 발행 (context_id 포함)
+- generate_proposals AgentLog 기록 (LLM 판단 과정 포함)
 
 ### 4.2 Proposal 생성 알고리즘 (LLM 기반)
 
@@ -797,6 +935,8 @@ Task를 다음 순서대로 생성하세요:
 
 - Policy/Rule 관리 (CRUD)
 - Event 감시 → Rule 평가 → 자동 실행 (auto_execute=true)
+- SYS_REQUEST_RECEIVED, SYS_RESPONSE_SENT Event 발행 (context_id 포함)
+- evaluate_policies AgentLog 기록 (정책 매칭 과정, 의사결정 이유)
 - **RuleEngine을 사용하여 조건 평가 및 액션 실행**
 
 ### 5.2 PolicyManager의 구조
@@ -957,6 +1097,9 @@ class PolicyManager(BaseAgent):
 ### 6.1 책임
 
 - Device 건전성 감시 (Heartbeat 타임아웃, 배터리, 센서 이상)
+- SYS_REQUEST_RECEIVED, SYS_RESPONSE_SENT Event 발행 (context_id 포함)
+- SYS_ANOMALY_DETECTED Event 발행 (이상징후 감지 시)
+- detect_anomalies AgentLog 기록 (감지 내용, 심각도, 이상 유형)
 - AgentConnection 자동 관리 (3단계 필터링)
 - Alert 생성
 
@@ -1074,12 +1217,14 @@ class SystemSentinel(BaseAgent):
 
 ---
 
-## 7. InsightReporter (포ート 9114)
+## 7. InsightReporter (포트 9114)
 
 ### 7.1 책임
 
-- Mission 리포트 자동 생성 (Mission 완료 시)
-- 사용자 요청 시 리포트 생성 (범위 지정)
+- Mission 리포트 자동 생성 (Mission 완료 시, context_id 포함)
+- 사용자 요청 시 리포트 생성 (범위 지정, context_id 포함)
+- SYS_REQUEST_RECEIVED, SYS_RESPONSE_SENT Event 발행 (context_id 포함)
+- generate_report AgentLog 기록 (리포트 생성 과정, 통계)
 - JSON 형식 리포트
 
 ### 7.2 리포트 생성

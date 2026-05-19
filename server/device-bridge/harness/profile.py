@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import register_agent
-from .types import Agent
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent
 
 
-def _device_bridge_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _device_bridge_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's DeviceBridge Agent.
 
 Role:
@@ -59,7 +59,9 @@ def _device_bridge_contract() -> dict[str, Any]:
 
 
 @register_agent(name="DeviceBridge Agent", func_name="get_device_bridge_agent")
-def get_device_bridge_agent(model: str, **kwargs):
+def get_device_bridge_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
+
     def dispatch_task(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "dispatch_task", "args": list(args), "parameters": kwargs}
 
@@ -77,7 +79,7 @@ def get_device_bridge_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="device_bridge",
-        port=9110,
+        port=ports.get("device_bridge", 9110),
         description="Relays tasks and healthchecks between system agents and devices.",
         contract=_device_bridge_contract(),
     )

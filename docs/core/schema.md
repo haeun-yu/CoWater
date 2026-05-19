@@ -282,28 +282,24 @@
 {
   "id": "string (uuid)",
 
-  "source_event_id": "string (uuid)",
+  "type": "MISSION | SYSTEM_CONTROL",
 
   "title": "string",
 
-  "type": "OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY",
-
   "status": "PROPOSED | APPROVED | CANCELLED | EXPIRED",
 
-  "selected": "boolean", // true = 사용자가 이 Proposal을 선택함
+  "selected": "boolean",
 
   "priority": "LOW | NORMAL | HIGH | EMERGENCY",
-
-  "target_area": "string | null",
-  "target_position": {
-    "latitude": "number",
-    "longitude": "number"
-  },
 
   "requires_approval": "boolean",
 
   "reason": "string | null",
   "limitations": "string | null",
+
+  "category_data": {
+    // 타입별로 다른 구조 (아래 참고)
+  },
 
   "created_by": {
     "type": "USER | SYSTEM | DEVICE",
@@ -321,31 +317,49 @@
 }
 ```
 
+**타입별 category_data 구조**:
+
+### MISSION
+```json
+{
+  "source_event_id": "string (uuid)",
+  "target_area": "string | null",
+  "target_position": {
+    "latitude": "number",
+    "longitude": "number"
+  }
+}
+```
+
+### SYSTEM_CONTROL
+```json
+{
+  "action": "restart | stop | emergency_stop | config_reload | ...",
+  "target_system": "string (어떤 시스템을 제어할지)",
+  "source_event_id": "string (uuid) | null"
+}
+```
+
 **특성** (ADR-002):
 
-- Proposal은 **완전한 솔루션 세트**
-- 포함된 모든 ProposalTask가 사전 검증된 상태
-- 사용자는 Proposal 전체를 선택 (개별 Task 조합 불가)
+- Proposal은 **사용자 승인이 필요한 모든 제안**의 통합 엔티티
+- type에 따라 category_data 구조가 다름
+- 각 타입별로 필요한 필드만 채움 (null 허용)
 
 **상태 변이**:
 
 - **PROPOSED**: System Agent가 생성, 사용자 선택 대기 중
-  - → APPROVED: 사용자가 선택(selected=true) → 재검증 완료 → Mission 생성
+  - → APPROVED: 사용자가 선택(selected=true) → 재검증 완료 → 실행
   - → CANCELLED: 사용자가 거절
   - → EXPIRED: 유효기간 만료
-- **APPROVED** (고정 상태): 사용자가 이 Proposal을 선택/승인함. Proposal은 승인 시점까지만 추적하며, 이후에는 상태를 변경하지 않음
-  - **참고**: Mission의 최종 결과(COMPLETED/FAILED/CANCELLED)는 Proposal.status에 반영되지 않음. 실행 결과는 Mission.status만 추적
-- **CANCELLED**: 사용자가 거절 (status_reason에 거절 사유 기록)
-- **EXPIRED**: 장시간 선택 안 됨
+- **APPROVED** (고정 상태): 사용자가 이 Proposal을 선택/승인함
 
 **필드 상세**:
 
-- `selected`: 사용자가 이 Proposal을 선택했는지 여부 (true = 승인 절차 진행 중, false = 미선택)
-- `reason`: Proposal 재생성 또는 거절 사유를 기록하는 보조 필드 (사용자 피드백 요약)
-- `limitations`: 사용자가 반드시 알아야 할 제약 사항이나 잠재적 위험 요소 (조건부 정보로, 최종 판단에 도움)
-- `status_updated_at`: 마지막으로 상태가 변경된 시점 (모든 상태 전이 추적)
-- `status_reason`: 현재 상태에 대한 사유 또는 설명 (취소/거절/재계획 사유 기록)
-- `approved_at`: APPROVED 상태로 처음 전이된 시점 (초기 승인 기록)
+- `selected`: 사용자가 이 Proposal을 선택했는지 여부
+- `reason`: Proposal 재생성 또는 거절 사유
+- `limitations`: 사용자가 반드시 알아야 할 제약 사항
+- `category_data`: type별로 필요한 도메인 데이터 (동적 필드)
 
 ---
 
@@ -1130,6 +1144,132 @@ trigger 일치하는 모든 Rule 찾기
   "created_at": "2026-05-15T10:00:00Z",
   "updated_at": "2026-05-15T10:00:00Z"
 }
+```
+
+---
+
+## 15. Event (시스템 사건 기록)
+
+```json
+{
+  "id": "string (uuid)",
+  
+  "event_type": "string",
+  // 예: USER_COMMAND_RECEIVED, SYS_ANOMALY_DETECTED, SYSTEM_ALERT, etc
+  
+  "context_id": "string (uuid)",
+  // 이 Event가 속한 흐름의 ID (같은 사용자 명령, 같은 이상징후, 같은 task 등)
+  // AgentLog와 함께 조회하여 전체 흐름 추적
+  
+  "actor_type": "SYSTEM | DEVICE | USER",
+  "actor_id": "string (uuid) | null",
+  
+  "target_type": "MISSION | TASK | DEVICE | AGENT | SYSTEM",
+  "target_id": "string (uuid) | null",
+  
+  "severity": "INFO | WARNING | CRITICAL",
+  
+  "data": {
+    // Event 타입별로 다름
+    // 예: { command: "...", user_id: "...", reason: "..." }
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**특징**:
+
+- **event_type**: 무슨 일이 일어났는가 (USER_COMMAND_RECEIVED, SYS_ANOMALY_DETECTED 등)
+- **context_id**: 이 Event와 관련된 "흐름"의 ID
+  - 같은 context_id를 가진 Event들은 같은 사건의 일부
+  - 예: 사용자 명령 하나 → Event 1개, AgentLog 여러 개
+- **actor_type/actor_id**: 누가 이 Event를 발행했는가
+- **target_type/target_id**: 이 Event가 무엇에 대한 것인가
+- **data**: Event 타입별 상세 정보 (JSON, 어떤 필드든 가능)
+
+**설계 원칙**:
+
+- Event는 "**무엇이 일어났는가**"만 기록 (간결함)
+- Agent의 상세 판단/행동은 AgentLog에 기록
+- Event 하나가 여러 AgentLog를 가질 수 있음 (같은 context_id)
+
+---
+
+## 16. AgentLog (Agent 실행 기록)
+
+```json
+{
+  "id": "string (uuid)",
+  
+  "context_id": "string (uuid)",
+  // Event.context_id와 동일 (같은 흐름에 속함)
+  
+  "event_id": "string (uuid) | null",
+  // 이 로그가 직접 기록한 Event (없을 수도 있음)
+  
+  "agent_id": "string (uuid)",
+  "agent_role": "REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER",
+  
+  "action": "string",
+  // Agent가 수행한 행동 (예: "classify_intent", "call_mission_planner", "generate_proposal")
+  
+  "input": {
+    // Agent가 받은 입력 데이터
+  },
+  
+  "output": {
+    // Agent가 생성한 출력 데이터
+  },
+  
+  "reasoning": {
+    // Agent의 판단 과정 (왜 이 선택을 했는가)
+    // 예: { confidence: 0.95, llm_reasoning: "...", keywords_matched: [...] }
+  },
+  
+  "status": "SUCCESS | FAILED | TIMEOUT",
+  
+  "duration_ms": "number | null",
+  // 이 행동이 걸린 시간
+  
+  "error": "string | null",
+  // 실패한 경우 에러 메시지
+  
+  "created_at": "timestamp"
+}
+```
+
+**특징**:
+
+- **context_id**: Event와 같은 흐름의 ID를 공유
+  - `AgentLog.context_id = Event.context_id`로 조회 → 전체 흐름 추적
+- **action**: Agent가 뭘 했는가 (의도 분류, A2A 호출, proposal 생성 등)
+- **input/output**: 상세 데이터 (JSON, 크기 제약 없음)
+- **reasoning**: Agent의 의사결정 과정 (LLM 이유, 신뢰도, 선택 사항 등)
+- **status**: 성공/실패/타임아웃
+- **duration_ms**: 성능 모니터링용
+
+**조회 예시**:
+
+```python
+# 사용자 명령 흐름의 모든 내용 조회
+events = registry_client.list_events(
+    filters={"context_id": "ctx-123"}
+)
+logs = registry_client.list_agent_logs(
+    filters={"context_id": "ctx-123"}
+)
+
+# RequestHandler의 의도 분류 과정 상세 조회
+classify_log = registry_client.list_agent_logs(
+    filters={
+        "context_id": "ctx-123",
+        "agent_role": "REQUEST_HANDLER",
+        "action": "classify_intent"
+    }
+)
+print(classify_log[0]["reasoning"])  # LLM의 판단 이유
 ```
 
 ---

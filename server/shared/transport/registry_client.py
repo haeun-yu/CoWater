@@ -231,6 +231,18 @@ class RegistryClient:
             body["notes"] = notes
         return post_json(f"{self.url}/approvals/{approval_id}/decision", body)
 
+    def create_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return post_json(f"{self.url}/proposals", payload)
+
+    def list_proposals(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        return get_json(f"{self.url}/proposals", params={"limit": limit, "offset": offset})
+
+    def get_proposal(self, proposal_id: str) -> dict[str, Any]:
+        return get_json(f"{self.url}/proposals/{proposal_id}")
+
+    def update_proposal(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return put_json(f"{self.url}/proposals/{proposal_id}", payload)
+
     def create_mission_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
         return post_json(f"{self.url}/mission-proposals", payload)
 
@@ -330,6 +342,36 @@ class RegistryClient:
             )
         except Exception as e:
             logger.debug(f"Event ingestion failed: {e}")
+            return {}
+
+    def ingest_agent_log(self, log: dict[str, Any]) -> dict[str, Any]:
+        """AgentLog 저장 (Registry Server)"""
+        try:
+            return post_json(
+                f"{self.url}/agent-logs/ingest",
+                log,
+            )
+        except Exception as e:
+            logger.debug(f"AgentLog ingestion failed: {e}")
+            return {}
+
+    def list_events(self, *, limit: int | None = None, offset: int = 0, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Event 목록 조회 (request_id 등으로 필터링 가능)"""
+        try:
+            params = {"limit": limit, "offset": offset}
+            if filters:
+                params.update(filters)
+            return get_json(f"{self.url}/events", params=params)
+        except Exception as e:
+            logger.debug(f"Event listing failed: {e}")
+            return []
+
+    def get_event(self, event_id: str) -> dict[str, Any]:
+        """Event 단건 조회"""
+        try:
+            return get_json(f"{self.url}/events/{event_id}")
+        except Exception as e:
+            logger.debug(f"Event retrieval failed: {e}")
             return {}
 
     def update_device_connectivity(self, device_id: str, status: str) -> None:

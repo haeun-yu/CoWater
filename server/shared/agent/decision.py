@@ -66,9 +66,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 
 
 class DecisionEngine:
-    def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog) -> None:
+    def __init__(self, agent_config: dict[str, Any], skills: SkillCatalog, agent_profile: Any = None) -> None:
         self.agent_config = agent_config
         self.skills = skills
+        self.agent_profile = agent_profile
 
         llm_config = agent_config.get("llm", {})
 
@@ -335,6 +336,16 @@ class DecisionEngine:
   5. 복수 임무 필요 시 배터리가 높은 디바이스를 우선 배정하여 fleet 소진 방지"""
 
     # ──────────────────────────────────────────────
+    # Role instructions helper
+    # ──────────────────────────────────────────────
+
+    def _get_role_instructions(self, context: dict[str, Any] | None = None) -> str:
+        """Get role-specific instructions from agent_profile. Falls back to default if not available."""
+        if self.agent_profile and hasattr(self.agent_profile, "render_instructions"):
+            return self.agent_profile.render_instructions(context or {})
+        return "당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다."
+
+    # ──────────────────────────────────────────────
     # Prompt builders
     # ──────────────────────────────────────────────
 
@@ -350,8 +361,8 @@ class DecisionEngine:
             for a in actions
         )
 
-        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다.
-운용자의 명령을 해석하고, 현재 fleet 상태에 맞는 실행 action을 결정합니다.
+        role_instructions = self._get_role_instructions()
+        return f"""{role_instructions}
 
 ## 운용자 명령
 {json.dumps(command, ensure_ascii=False)}
@@ -382,8 +393,8 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         devices: list[dict[str, Any]],
         state: AgentState,
     ) -> str:
-        return f"""당신은 CoWater 해양 통합 운용 플랫폼의 AI 지휘관입니다.
-운용자의 자연어 요청을 분석하여 intent 타입을 분류합니다.
+        role_instructions = self._get_role_instructions()
+        return f"""{role_instructions}
 
 ## 운용자 요청
 "{goal}"

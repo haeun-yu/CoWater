@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import register_agent
-from .types import Agent
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent
 
 
-def _insight_reporter_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _insight_reporter_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's InsightReporter Agent.
 
 Role:
@@ -57,7 +57,9 @@ def _insight_reporter_contract() -> dict[str, Any]:
 
 
 @register_agent(name="InsightReporter Agent", func_name="get_insight_reporter_agent")
-def get_insight_reporter_agent(model: str, **kwargs):
+def get_insight_reporter_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
+
     def generate_report(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "generate_report", "args": list(args), "parameters": kwargs}
 
@@ -75,7 +77,7 @@ def get_insight_reporter_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="insight_reporter",
-        port=9114,
+        port=ports.get("insight_reporter", 9114),
         description="Generates Korean reports and insights from Registry data.",
         contract=_insight_reporter_contract(),
     )

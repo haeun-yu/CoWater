@@ -22,7 +22,25 @@
 | **DeviceBridge** | 9110 | `POST /message:send` | Device로부터 메시지 수신, Device에 메시지 전달 |
 | **Device Agent** | 9201~9215 | `POST /message:send` | System/다른 Device로부터 메시지 수신 |
 
-### 1.3 Device 설정 (DeviceBridge 정보만 필요)
+### 1.3 A2A 호출에서 context_id 전달
+
+**핵심 원칙**: 모든 A2A 호출은 `context_id`를 포함하여 흐름 추적을 가능하게 함
+
+**RequestHandler → MissionPlanner 호출 예**:
+```python
+# RequestHandler가 MissionPlanner에 요청할 때
+payload = {
+    "request_id": "req-uuid-123",    # A2A 추적용
+    "context_id": "ctx-abc-123",      # 흐름 추적용 ← 필수
+    "goal": user_input,
+    "location": {...}
+}
+
+# MissionPlanner는 수신한 context_id를 자신의 Event/AgentLog에 기록
+# → 같은 context_id로 전체 흐름 추적 가능
+```
+
+### 1.4 Device 설정 (DeviceBridge 정보만 필요)
 
 **핵심 원칙**: Device Agent는 **DeviceBridge 연결 정보만 소유**, Registry나 다른 System Agent 정보는 불필요
 
@@ -70,9 +88,16 @@ class A2ASendRequest(BaseModel):
     metadata: dict = {
         "sender_id": str,           # 송신자 에이전트 ID
         "sender_device_id": str,    # 송신자 Device ID (optional)
-        "contextId": str,           # 멱등성 키 (24시간 TTL)
+        "contextId": str,           # 멱등성 키 + 흐름 추적 ID (24시간 TTL)
         "timestamp": int,           # Unix timestamp (ms)
         "urgent": bool = False
+    }
+    
+    # A2A 요청 payload에 포함될 필드들
+    payload: dict = {
+        "request_id": str,          # A2A 요청 추적 ID
+        "context_id": str,          # 흐름 추적 ID (Event/AgentLog와 연결)
+        ...  # 다른 필드들
     }
 ```
 

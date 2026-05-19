@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 from uuid import uuid4
 
 from agent.base_runtime import BaseAgentRuntime
 from agent.state import utc_now
-
-logger = logging.getLogger(__name__)
 
 
 class RequestHandlerRuntime(BaseAgentRuntime):
@@ -22,9 +19,9 @@ class RequestHandlerRuntime(BaseAgentRuntime):
     _MISSION_KEYWORDS = {"미션", "작전", "계획", "수행", "탐지", "제거", "survey", "plan", "mission", "task"}
     _SYSTEM_CONTROL_KEYWORDS = {"재시작", "중지", "정지", "shutdown", "restart", "system_control", "policy", "health", "연결", "connector"}
 
-    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> None:
+    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> bool:
         # RequestHandler는 이벤트 루프에서 구독하지 않는다.
-        self.state.remember({"kind": "request_handler_event_seen", "at": utc_now(), "event_type": event_type, "payload": payload})
+        return False
 
     async def _execute_role(self, parameters: dict[str, Any]) -> dict[str, Any]:
         return await self._execute_request_handler(parameters)
@@ -146,6 +143,9 @@ class RequestHandlerRuntime(BaseAgentRuntime):
         return self._classify_intent(user_input), None
 
     async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        # Context ID 생성 (이 사용자 명령의 흐름 ID)
+        context_id = f"ctx-{uuid4()}"
+
         user_input = self._normalize_text(
             parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or parameters.get("text")
         )
@@ -160,6 +160,19 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                 reasoning=None,
             )
 
+        # Event: USER_COMMAND_RECEIVED (사용자 명령 수신)
+        self.registry_client.ingest_event({
+            "event_type": "USER_COMMAND_RECEIVED",
+            "context_id": context_id,
+            "actor_type": "USER",
+            "actor_id": parameters.get("user_id") or "unknown",
+            "severity": "INFO",
+            "data": {
+                "command": user_input,
+                "timestamp": utc_now()
+            }
+        })
+
         snapshot = self._registry_snapshot()
         intent, intent_meta = await self._analyze_intent(user_input, snapshot)
         self.state.remember({
@@ -170,8 +183,38 @@ class RequestHandlerRuntime(BaseAgentRuntime):
             "intent_meta": intent_meta,
         })
 
+        # AgentLog: 의도 분류
+        self.registry_client.ingest_agent_log({
+            "context_id": context_id,
+            "agent_id": self.state.agent_id,
+            "agent_role": "REQUEST_HANDLER",
+            "action": "classify_intent",
+            "input": user_input,
+            "output": {
+                "intent": intent,
+                "meta": intent_meta
+            },
+            "reasoning": {
+                "confidence": (intent_meta or {}).get("confidence") if isinstance(intent_meta, dict) else None,
+                "method": "llm_analysis" if not intent_meta else "keyword_matching"
+            },
+            "status": "SUCCESS"
+        })
+
         if intent == "QUERY":
             response = self._summarize_query(user_input, snapshot)
+
+            # AgentLog: 쿼리 응답 생성
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,
+                "agent_id": self.state.agent_id,
+                "agent_role": "REQUEST_HANDLER",
+                "action": "summarize_query",
+                "input": user_input,
+                "output": response,
+                "status": "SUCCESS"
+            })
+
             return self._response_envelope(
                 status="ok",
                 intent="QUERY",
@@ -187,20 +230,94 @@ class RequestHandlerRuntime(BaseAgentRuntime):
 
         if intent == "REPORT":
             try:
+                request_id = parameters.get("request_id") or f"req-{uuid4()}"
                 payload = {
-                    "request_id": parameters.get("request_id") or f"req-{uuid4()}",
+                    "request_id": request_id,
+                    "context_id": context_id,
                     "report_request": {"mode": "summary", "time_range": parameters.get("time_range") or {}, "filters": parameters.get("filters") or {}},
                     "registry_snapshot": snapshot,
                     "a2a_envelope": parameters.get("a2a_envelope"),
                 }
-                result = await asyncio.to_thread(self._call_system_agent_sync, 9114, payload)
+
+                # Event: SYS_REQUEST_SENT
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_REQUEST_SENT",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "INFO",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "InsightReporter",
+                        "intent": "REPORT",
+                        "timestamp": utc_now()
+                    }
+                })
+
+                # A2A 호출 (Timeout: 300초)
+                start_time = utc_now()
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self._call_system_agent_sync, 9114, payload),
+                    timeout=300.0
+                )
+                duration_ms = int((utc_now() - start_time).total_seconds() * 1000) if isinstance(start_time, str) else 0
                 report = self._unwrap_agent_response(result)
+
+                # AgentLog: InsightReporter A2A 호출
+                self.registry_client.ingest_agent_log({
+                    "context_id": context_id,
+                    "agent_id": self.state.agent_id,
+                    "agent_role": "REQUEST_HANDLER",
+                    "action": "call_insight_reporter_a2a",
+                    "input": payload,
+                    "output": report,
+                    "status": "SUCCESS",
+                    "duration_ms": duration_ms
+                })
+
                 if not isinstance(report, dict) or not report:
+                    # Event: SYS_RESPONSE_RECEIVED (빈 응답)
+                    self.registry_client.ingest_event({
+                        "event_type": "SYS_RESPONSE_RECEIVED",
+                        "actor_type": "SYSTEM",
+                        "actor_id": self.state.agent_id,
+                        "target_type": "AGENT_COMMUNICATION",
+                        "target_id": request_id,
+                        "severity": "WARNING",
+                        "data": {
+                            "request_id": request_id,
+                            "from_agent": "InsightReporter",
+                            "to_agent": "RequestHandler",
+                            "response_status": "empty_response",
+                            "timestamp": utc_now()
+                        }
+                    })
                     return self._response_envelope(
                         status="error",
                         intent="REPORT",
                         error={"code": "empty_report", "message": "InsightReporter가 비어 있는 결과를 반환했습니다.", "details": result},
                     )
+
+                # Event: SYS_RESPONSE_RECEIVED
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_RESPONSE_RECEIVED",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "INFO",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "InsightReporter",
+                        "to_agent": "RequestHandler",
+                        "response_status": "ok",
+                        "report_id": report.get("report_id") if isinstance(report, dict) else None,
+                        "timestamp": utc_now()
+                    }
+                })
+
                 return self._response_envelope(
                     status="ok",
                     intent="REPORT",
@@ -213,7 +330,47 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                     },
                     reasoning=(intent_meta or {}).get("reasoning") if isinstance(intent_meta, dict) else None,
                 )
+            except asyncio.TimeoutError:
+                request_id = payload.get("request_id")
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_A2A_TIMEOUT",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "WARNING",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "InsightReporter",
+                        "timeout_seconds": 300,
+                        "timestamp": utc_now()
+                    }
+                })
+                return self._response_envelope(
+                    status="needs_clarification",
+                    intent="REPORT",
+                    response={"summary": "리포트 생성이 지연 중입니다"},
+                    error={"code": "report_timeout", "message": "300초 타임아웃", "details": {}},
+                )
             except Exception as exc:
+                request_id = payload.get("request_id")
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_A2A_FAILED",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "ERROR",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "InsightReporter",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "timestamp": utc_now()
+                    }
+                })
                 return self._response_envelope(
                     status="error",
                     intent="REPORT",
@@ -236,14 +393,73 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                     reasoning=(intent_meta or {}).get("reasoning") if isinstance(intent_meta, dict) else None,
                 )
             try:
+                request_id = parameters.get("request_id") or f"req-{uuid4()}"
                 payload = {
-                    "request_id": parameters.get("request_id") or f"req-{uuid4()}",
+                    "request_id": request_id,
+                    "context_id": context_id,
                     "goal": goal,
                     "location": parameters.get("location") or {},
                     "registry_snapshot": snapshot,
                 }
-                result = await asyncio.to_thread(self._call_system_agent_sync, 9111, payload)
+
+                # Event: SYS_REQUEST_SENT (요청 전송)
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_REQUEST_SENT",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "INFO",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "MissionPlanner",
+                        "intent": "MISSION",
+                        "goal": goal,
+                        "timestamp": utc_now()
+                    }
+                })
+
+                # A2A 호출 (Timeout: 300초)
+                import time
+                start_time = time.time()
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self._call_system_agent_sync, 9111, payload),
+                    timeout=300.0
+                )
+                duration_ms = int((time.time() - start_time) * 1000)
                 proposal = self._unwrap_agent_response(result)
+
+                # AgentLog: MissionPlanner A2A 호출
+                self.registry_client.ingest_agent_log({
+                    "context_id": context_id,
+                    "agent_id": self.state.agent_id,
+                    "agent_role": "REQUEST_HANDLER",
+                    "action": "call_mission_planner_a2a",
+                    "input": payload,
+                    "output": proposal,
+                    "status": "SUCCESS",
+                    "duration_ms": duration_ms
+                })
+
+                # Event: SYS_RESPONSE_RECEIVED (응답 수신)
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_RESPONSE_RECEIVED",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "INFO",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "MissionPlanner",
+                        "to_agent": "RequestHandler",
+                        "response_status": "ok",
+                        "proposal_id": proposal.get("id") if isinstance(proposal, dict) else None,
+                        "timestamp": utc_now()
+                    }
+                })
+
                 return self._response_envelope(
                     status="ok",
                     intent="MISSION",
@@ -256,7 +472,54 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                     },
                     reasoning=(intent_meta or {}).get("reasoning") if isinstance(intent_meta, dict) else None,
                 )
+            except asyncio.TimeoutError:
+                request_id = payload.get("request_id")
+                # Event: SYS_A2A_TIMEOUT (요청 타임아웃)
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_A2A_TIMEOUT",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "WARNING",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "MissionPlanner",
+                        "timeout_seconds": 300,
+                        "message": "MissionPlanner 응답 시간 초과 (300초)",
+                        "timestamp": utc_now()
+                    }
+                })
+                return self._response_envelope(
+                    status="needs_clarification",
+                    intent="MISSION",
+                    response={
+                        "summary": "미션 계획 생성이 지연 중입니다",
+                        "answer": "MissionPlanner 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+                        "delegated_to": "MissionPlanner",
+                    },
+                    error={"code": "mission_planner_timeout", "message": "300초 타임아웃", "details": {}},
+                )
             except Exception as exc:
+                request_id = payload.get("request_id")
+                # Event: SYS_A2A_FAILED (요청 실패)
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_A2A_FAILED",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "ERROR",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "RequestHandler",
+                        "to_agent": "MissionPlanner",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "timestamp": utc_now()
+                    }
+                })
                 return self._response_envelope(
                     status="error",
                     intent="MISSION",
@@ -264,26 +527,62 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                 )
 
         if intent == "SYSTEM_CONTROL":
-            port, target = self._route_for_system_control(user_input)
             try:
-                payload = {
-                    "request_id": parameters.get("request_id") or f"req-{uuid4()}",
-                    "user_input": user_input,
-                    "action": parameters.get("action"),
-                    "context": parameters,
-                    "registry_snapshot": snapshot,
+                proposal_payload = {
+                    "type": "SYSTEM_CONTROL",
+                    "title": user_input[:100],
+                    "status": "PROPOSED",
+                    "priority": "NORMAL",
+                    "requires_approval": True,
+                    "category_data": {
+                        "action": parameters.get("action") or "unknown",
+                        "target_system": "cowater_system",
+                    },
+                    "created_by": {
+                        "type": "USER",
+                        "id": "system",
+                    },
                 }
-                result = await asyncio.to_thread(self._call_system_agent_sync, port, payload)
-                response = self._unwrap_agent_response(result)
+                result = self.registry_client.create_proposal(proposal_payload)
+                proposal_id = result.get("id")
+
+                # AgentLog: 시스템 제어 제안 생성
+                self.registry_client.ingest_agent_log({
+                    "context_id": context_id,
+                    "agent_id": self.state.agent_id,
+                    "agent_role": "REQUEST_HANDLER",
+                    "action": "create_system_control_proposal",
+                    "input": proposal_payload,
+                    "output": result,
+                    "status": "SUCCESS"
+                })
+
+                # Event: SYS_PROPOSAL_GENERATED (시스템 제어 제안 생성)
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_PROPOSAL_GENERATED",
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "PROPOSAL",
+                    "target_id": proposal_id,
+                    "severity": "INFO",
+                    "data": {
+                        "proposal_id": proposal_id,
+                        "type": "SYSTEM_CONTROL",
+                        "title": user_input[:100],
+                        "requires_approval": True,
+                        "reasoning": (intent_meta or {}).get("reasoning") if isinstance(intent_meta, dict) else None,
+                        "timestamp": utc_now()
+                    }
+                })
+
                 return self._response_envelope(
-                    status="ok",
+                    status="needs_approval",
                     intent="SYSTEM_CONTROL",
                     response={
-                        "summary": f"{target}에 요청을 전달했습니다.",
-                        "answer": str(response.get("message") or response.get("summary") or "요청이 처리되었습니다."),
-                        "delegated_to": target,
-                        "data": response,
-                        "source": target,
+                        "summary": "시스템 제어 작업은 사용자 승인이 필요합니다.",
+                        "answer": f"다음 작업을 확인해주세요: {user_input}",
+                        "proposal_id": proposal_id,
+                        "requires_approval": True,
                     },
                     reasoning=(intent_meta or {}).get("reasoning") if isinstance(intent_meta, dict) else None,
                 )
@@ -291,7 +590,7 @@ class RequestHandlerRuntime(BaseAgentRuntime):
                 return self._response_envelope(
                     status="error",
                     intent="SYSTEM_CONTROL",
-                    error={"code": "system_control_failed", "message": str(exc), "details": {"target": target, "port": port}},
+                    error={"code": "proposal_creation_failed", "message": str(exc), "details": {}},
                 )
 
         return self._response_envelope(

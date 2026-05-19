@@ -12,9 +12,8 @@ logger = logging.getLogger(__name__)
 class InsightReporterRuntime(BaseAgentRuntime):
     """InsightReporter 역할: Registry 데이터를 바탕으로 한국어 리포트/인사이트 생성"""
 
-    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> None:
+    async def handle_moth_message(self, event_type: str, payload: dict[str, Any], raw_event: dict[str, Any]) -> bool:
         if event_type in {
-            "SYS_INTENT_CLASSIFIED",
             "SYS_TASK_DISPATCHED",
             "SYS_TASK_COMPLETED",
             "SYS_TASK_FAILED",
@@ -25,6 +24,8 @@ class InsightReporterRuntime(BaseAgentRuntime):
             "DEVICE_HEALTHCHECK",
         }:
             await self._generate_insight_from_event(raw_event)
+            return True
+        return False
 
     async def _execute_role(self, parameters: dict[str, Any]) -> dict[str, Any]:
         return await self._execute_insight_reporter(parameters)
@@ -99,6 +100,31 @@ class InsightReporterRuntime(BaseAgentRuntime):
 
     async def _execute_insight_reporter(self, parameters: dict[str, Any]) -> dict[str, Any]:
         """Fleet 전체 현황 한국어 리포트 생성"""
+        from uuid import uuid4
+        import time
+
+        request_id = str(parameters.get("request_id") or "")
+        context_id = str(parameters.get("context_id") or f"ctx-{uuid4()}")
+        start_time = time.time()
+
+        # Event: SYS_REQUEST_RECEIVED (A2A 요청 수신)
+        if request_id:
+            self.registry_client.ingest_event({
+                "event_type": "SYS_REQUEST_RECEIVED",
+                "context_id": context_id,
+                "actor_type": "SYSTEM",
+                "actor_id": self.state.agent_id,
+                "target_type": "AGENT_COMMUNICATION",
+                "target_id": request_id,
+                "severity": "INFO",
+                "data": {
+                    "request_id": request_id,
+                    "from_agent": "RequestHandler",
+                    "to_agent": "InsightReporter",
+                    "timestamp": utc_now()
+                }
+            })
+
         envelope = self._unwrap_a2a_envelope(parameters.get("a2a_envelope"))
         request = parameters.get("report_request") or envelope.get("report_request") or {}
         try:
@@ -106,11 +132,68 @@ class InsightReporterRuntime(BaseAgentRuntime):
             missions = self.registry_client.list_missions()
             insights = self.registry_client.list_insights()
         except Exception as exc:
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,
+                "agent_id": self.state.agent_id,
+                "agent_role": "INSIGHT_REPORTER",
+                "action": "generate_report",
+                "input": {"request_type": "fleet_status"},
+                "output": {},
+                "status": "FAILED",
+                "duration_ms": duration_ms,
+            })
+            if request_id:
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_RESPONSE_SENT",
+                    "context_id": context_id,
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "ERROR",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "InsightReporter",
+                        "to_agent": "RequestHandler",
+                        "response_status": "error",
+                        "error_type": type(exc).__name__,
+                        "timestamp": utc_now()
+                    }
+                })
             return self._response_envelope(
                 status="error",
                 error={"code": "registry_lookup_failed", "message": str(exc), "details": {}},
             )
         if not devices and not missions and not insights:
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,
+                "agent_id": self.state.agent_id,
+                "agent_role": "INSIGHT_REPORTER",
+                "action": "generate_report",
+                "input": {"request_type": "fleet_status"},
+                "output": {"report_status": "no_data"},
+                "status": "SUCCESS",
+                "duration_ms": duration_ms,
+            })
+            if request_id:
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_RESPONSE_SENT",
+                    "context_id": context_id,
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "WARNING",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "InsightReporter",
+                        "to_agent": "RequestHandler",
+                        "response_status": "no_data",
+                        "timestamp": utc_now()
+                    }
+                })
             return self._response_envelope(
                 status="needs_clarification",
                 response={
@@ -124,10 +207,67 @@ class InsightReporterRuntime(BaseAgentRuntime):
             )
         report = self._build_korean_report(devices, missions, insights)
         if not report.get("summary"):
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.registry_client.ingest_agent_log({
+                "context_id": context_id,
+                "agent_id": self.state.agent_id,
+                "agent_role": "INSIGHT_REPORTER",
+                "action": "generate_report",
+                "input": {"request_type": "fleet_status"},
+                "output": {},
+                "status": "FAILED",
+                "duration_ms": duration_ms,
+            })
+            if request_id:
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_RESPONSE_SENT",
+                    "context_id": context_id,
+                    "actor_type": "SYSTEM",
+                    "actor_id": self.state.agent_id,
+                    "target_type": "AGENT_COMMUNICATION",
+                    "target_id": request_id,
+                    "severity": "ERROR",
+                    "data": {
+                        "request_id": request_id,
+                        "from_agent": "InsightReporter",
+                        "to_agent": "RequestHandler",
+                        "response_status": "empty_report",
+                        "timestamp": utc_now()
+                    }
+                })
             return self._response_envelope(
                 status="error",
                 error={"code": "empty_report", "message": "빈 리포트를 생성할 수 없습니다.", "details": {"request": request}},
             )
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        self.registry_client.ingest_agent_log({
+            "context_id": context_id,
+            "agent_id": self.state.agent_id,
+            "agent_role": "INSIGHT_REPORTER",
+            "action": "generate_report",
+            "input": {"request_type": "fleet_status", "devices_count": len(devices), "missions_count": len(missions)},
+            "output": {"report_generated": True, "summary": report.get("summary")},
+            "status": "SUCCESS",
+            "duration_ms": duration_ms,
+        })
+        if request_id:
+            self.registry_client.ingest_event({
+                "event_type": "SYS_RESPONSE_SENT",
+                "context_id": context_id,
+                "actor_type": "SYSTEM",
+                "actor_id": self.state.agent_id,
+                "target_type": "AGENT_COMMUNICATION",
+                "target_id": request_id,
+                "severity": "INFO",
+                "data": {
+                    "request_id": request_id,
+                    "from_agent": "InsightReporter",
+                    "to_agent": "RequestHandler",
+                    "response_status": "ok",
+                    "timestamp": utc_now()
+                }
+            })
         return self._response_envelope(
             status="ok",
             response={

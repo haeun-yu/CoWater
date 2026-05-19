@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .registry import register_agent
-from .types import Agent
+from shared.agents.registry import register_agent
+from shared.agents.types import Agent
 
 
-def _policy_manager_instructions(context_variables: dict[str, Any]) -> str:
-    ports = context_variables.get("ports") or {}
+def _policy_manager_instructions(context: dict[str, Any]) -> str:
+    ports = context.get("ports") or {}
     return f"""You are CoWater's PolicyManager Agent.
 
 Role:
@@ -57,7 +57,9 @@ def _policy_manager_contract() -> dict[str, Any]:
 
 
 @register_agent(name="PolicyManager Agent", func_name="get_policy_manager_agent")
-def get_policy_manager_agent(model: str, **kwargs):
+def get_policy_manager_agent(model: str, **kwargs) -> Agent:
+    ports = kwargs.get("ports") or {}
+
     def evaluate_rules(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"tool": "evaluate_rules", "args": list(args), "parameters": kwargs}
 
@@ -75,7 +77,7 @@ def get_policy_manager_agent(model: str, **kwargs):
         tool_choice="required",
         parallel_tool_calls=False,
         role="policy_manager",
-        port=9112,
+        port=ports.get("policy_manager", 9112),
         description="Evaluates existing policy rules and returns the recommended action.",
         contract=_policy_manager_contract(),
     )

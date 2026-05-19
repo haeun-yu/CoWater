@@ -580,9 +580,6 @@ class AgentRuntime:
         except Exception as e:
             logger.debug(f"Policy evaluation error: {e}")
 
-    async def _process_waiting_queue(self, devices: list[dict[str, Any]], logger: Any) -> None:
-        return
-
     def _build_mission_steps(
         self,
         alert: dict[str, Any],
