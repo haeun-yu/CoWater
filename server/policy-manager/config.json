@@ -1,0 +1,106 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 9112
+  },
+  "registry": {
+    "url": "http://127.0.0.1:8280",
+    "secret_key": "server-secret",
+    "required": false,
+    "healthcheck_interval_seconds": 1
+  },
+  "agent": {
+    "id": "policy-manager-agent",
+    "name": "PolicyManager",
+    "role": "policy_manager",
+    "layer": "system",
+    "device_type": "OTHER",
+    "connectivity": "none",
+    "requires_parent": false,
+    "children_required": false,
+    "description": "Upper-layer request handler for intent classification and routing.",
+    "llm": {
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "gemma4:e2b",
+      "enabled": true,
+      "timeout_seconds": null,
+      "max_retries": 1
+    },
+    "capabilities": {
+      "skills": [
+        "mission_planning",
+        "fleet_supervision",
+        "priority_decision",
+        "response_strategy",
+        "approval_control",
+        "performance_analysis"
+      ],
+      "tools": [
+        "device_registry_reader",
+        "mcp_api_client",
+        "a2a_router",
+        "mission_planner",
+        "alert_response_planner",
+        "fleet_monitor",
+        "analytics_engine"
+      ],
+      "actions": [
+        "mission.plan",
+        "mission.assign",
+        "task.assign",
+        "approve_response",
+        "route_direct",
+        "route_via_middle",
+        "escalate_alert"
+      ],
+      "constraints": [
+        "mcp_only_to_api_server",
+        "direct_route_allowed_when_no_middle_layer",
+        "approval_required_for_destructive_actions"
+      ],
+      "tracks": [
+        {
+          "type": "A2A",
+          "name": "a2a",
+          "frequency_hz": 0
+        }
+      ]
+    }
+  },
+  "moth": {
+    "server_url": "wss://cobot.center:8287"
+  },
+  "event_rules": {
+    "mine_detection": {
+      "severity": "CRITICAL",
+      "recommended_action": "survey_depth"
+    },
+    "collision_risk": {
+      "severity": "CRITICAL",
+      "recommended_action": "escalate_alert"
+    },
+    "distress": {
+      "severity": "CRITICAL",
+      "recommended_action": "escalate_alert"
+    },
+    "battery_low": {
+      "severity": "WARNING",
+      "recommended_action": "return_to_base"
+    },
+    "communication_loss": {
+      "severity": "WARNING",
+      "recommended_action": "escalate_alert"
+    },
+    "tether_warning": {
+      "severity": "WARNING",
+      "recommended_action": "escalate_alert"
+    }
+  },
+  "simulation": {},
+  "cors": {
+    "allow_origins": [
+      "*"
+    ]
+  }
+}
