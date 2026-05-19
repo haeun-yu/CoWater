@@ -26,7 +26,53 @@ class MissionPlannerRuntime(BaseAgentRuntime):
             self.state.remember({"kind": "meb_event_received", "at": utc_now(), "event_type": event_type, "payload": payload})
 
     async def _execute_role(self, parameters: dict[str, Any]) -> dict[str, Any]:
-        return await self.generate_mission_proposal(parameters, allow_suppression=False)
+        goal = str(parameters.get("goal") or parameters.get("mission_request") or parameters.get("user_input") or "").strip()
+        if not goal:
+            return self._response_envelope(
+                status="needs_clarification",
+                response={
+                    "proposal_state": "draft",
+                    "proposals": [],
+                },
+                error={"code": "missing_goal", "message": "미션 목표가 없습니다.", "details": {}},
+            )
+        try:
+            bundle = await self.generate_multiple_mission_proposals({
+                "goal": goal,
+                "location": parameters.get("location") or {},
+                "title": parameters.get("title"),
+                "summary": parameters.get("summary"),
+            })
+        except Exception as exc:
+            return self._response_envelope(
+                status="error",
+                response={
+                    "proposal_state": "not_executable",
+                    "proposals": [],
+                },
+                error={"code": "mission_planning_failed", "message": str(exc), "details": {}},
+            )
+        proposals = bundle.get("proposals") or []
+        approvals = bundle.get("approvals") or []
+        if not proposals:
+            return self._response_envelope(
+                status="needs_clarification",
+                response={
+                    "proposal_state": "not_executable",
+                    "proposals": [],
+                },
+                error={"code": "no_proposal_generated", "message": "생성 가능한 Proposal이 없습니다.", "details": bundle},
+            )
+        return self._response_envelope(
+            status="ok",
+            response={
+                "proposal_state": "awaiting_approval",
+                "proposals": proposals,
+                "approvals": approvals,
+                "insights": bundle.get("insights") or [],
+                "strategy_source": bundle.get("strategy_source"),
+            },
+        )
 
     async def _handle_mission_intent_event(self, payload: dict[str, Any]) -> None:
         """SYS_INTENT_CLASSIFIED (MISSION) 수신 → proposal 생성"""

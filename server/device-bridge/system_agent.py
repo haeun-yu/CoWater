@@ -6,8 +6,6 @@ _HERE = Path(__file__).resolve().parent
 # shared/ must come before the local agent dir to resolve base_runtime etc.
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE.parent / "shared"))
-
-from role.runtime import DeviceBridgeRuntime
 from application.bootstrap import build_agent_runtime
 from controller.api import run
 

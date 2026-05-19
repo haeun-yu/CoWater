@@ -58,6 +58,10 @@ def create_app(runtime: BaseAgentRuntime) -> FastAPI:
     def manifest() -> dict[str, Any]:
         return runtime.manifest_builder.manifest(runtime.state)
 
+    @app.get("/agent-profile")
+    def agent_profile() -> dict[str, Any] | None:
+        return runtime.get_agent_profile() if hasattr(runtime, "get_agent_profile") else None
+
     @app.get("/.well-known/agent-card.json")
     def agent_card() -> dict[str, Any]:
         return runtime.manifest_builder.agent_card(runtime.state)

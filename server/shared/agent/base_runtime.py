@@ -34,6 +34,11 @@ from tools.command_executor import CommandExecutor
 from tools.telemetry_reader import TelemetryReader
 from transport.registry_client import RegistryClient
 
+try:
+    from agents import resolve_agent_profile
+except Exception:
+    resolve_agent_profile = None
+
 logger = logging.getLogger(__name__)
 
 REACT_MAX_STEPS = 4
@@ -95,6 +100,7 @@ class BaseAgentRuntime(ABC):
         self._policy_action_dedupe: dict[str, float] = {}
         self._command_requests: dict[str, dict[str, Any]] = {}
         self._command_request_tasks: set[asyncio.Task[Any]] = set()
+        self.agent_profile = self._load_agent_profile()
 
     @classmethod
     def _deep_update(cls, target: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
@@ -104,6 +110,28 @@ class BaseAgentRuntime(ABC):
             else:
                 target[key] = value
         return target
+
+    def _load_agent_profile(self):
+        if not resolve_agent_profile:
+            return None
+        try:
+            model = str(self.agent_config.get("llm", {}).get("model") or "gpt-4o")
+            context = {
+                "ports": {
+                    "request_handler": 9116,
+                    "mission_planner": 9111,
+                    "device_bridge": 9110,
+                    "insight_reporter": 9114,
+                    "policy_manager": 9112,
+                    "system_sentinel": 9113,
+                },
+                "registry_url": self.config.get("registry", {}).get("url"),
+                "role": self.agent_config.get("role"),
+                "name": self.agent_config.get("name"),
+            }
+            return resolve_agent_profile(str(self.agent_config.get("role") or ""), model, **context)
+        except Exception:
+            return None
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -115,6 +143,30 @@ class BaseAgentRuntime(ABC):
         host = str(self.server.get("public_host") or self.server.get("host") or "127.0.0.1")
         port = int(os.getenv("COWATER_AGENT_PORT") or self.server.get("port") or 9010)
         return f"http://{host}:{port}"
+
+    def get_agent_profile(self) -> dict[str, Any] | None:
+        if self.agent_profile is None:
+            return None
+        try:
+            context = {
+                "ports": {
+                    "request_handler": 9116,
+                    "mission_planner": 9111,
+                    "device_bridge": 9110,
+                    "insight_reporter": 9114,
+                    "policy_manager": 9112,
+                    "system_sentinel": 9113,
+                },
+                "registry_url": self.config.get("registry", {}).get("url"),
+                "role": self.agent_config.get("role"),
+                "name": self.agent_config.get("name"),
+            }
+            to_dict = getattr(self.agent_profile, "to_dict", None)
+            if callable(to_dict):
+                return to_dict(context)
+            return self.agent_profile
+        except Exception:
+            return None
 
     @staticmethod
     def _task_status(value: Any, default: str = "PENDING") -> str:
@@ -534,6 +586,24 @@ class BaseAgentRuntime(ABC):
     def _current_hhmm(self) -> str:
         now = datetime.now()
         return now.strftime("%H:%M")
+
+    def _response_envelope(
+        self,
+        *,
+        status: str,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        envelope = {
+            "status": status,
+            "agent": self.state.role,
+            "agent_id": self.state.agent_id,
+            "response": response,
+            "error": error,
+        }
+        envelope.update(extra)
+        return envelope
 
     def _condition_snapshot(self) -> dict[str, Any]:
         try:
