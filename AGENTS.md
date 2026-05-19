@@ -105,7 +105,7 @@
 - `docs/QUICK_START.md`: 수동 실행 가이드
 - `.claude/projects/-Users-teamgrit-Documents-CoWater/memory/`: 프로젝트 메모리
 
-`.claude/SYSTEM_AGENT_DESIGN.md`, `.claude/IMPLEMENTATION_STATUS_ROADMAP.md` 같은 로드맵이나 설계 문서는 목표 아키텍처 맥락이 꼭 필요할 때만 참고합니다.
+`docs/SYSTEM_AGENT_DESIGN.md`, `.claude/IMPLEMENTATION_STATUS_ROADMAP.md` 같은 로드맵이나 설계 문서는 목표 아키텍처 맥락이 꼭 필요할 때만 참고합니다.
 
 ## 도메인 문서 참조 규칙
 
