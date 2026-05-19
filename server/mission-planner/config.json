@@ -23,7 +23,6 @@
       "provider": "ollama",
       "endpoint": "http://localhost:11434",
       "model": "gemma4:e2b",
-      "enabled": true,
       "timeout_seconds": null,
       "max_retries": 1
     },

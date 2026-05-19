@@ -71,31 +71,13 @@ class DecisionEngine:
         self.skills = skills
 
         llm_config = agent_config.get("llm", {})
-        llm_enabled_in_config = llm_config.get("enabled", True)
 
-        # LLM disabled in config
-        if not llm_enabled_in_config:
-            logger.info("LLM disabled in config, using rule-based decision making")
-            self.llm_client = None
-            self.llm_enabled = False
-            return
-
-        # LLM import unavailable
+        # LLM is required, no fallback
         if not make_llm_client:
-            logger.warning("LLM client factory unavailable, falling back to rule-based mode")
-            self.llm_client = None
-            self.llm_enabled = False
-            return
+            raise RuntimeError("LLM client factory unavailable")
 
-        # Try to initialize LLM
-        try:
-            self.llm_client = make_llm_client(llm_config)
-            logger.info("LLM client initialized successfully")
-            self.llm_enabled = True
-        except Exception as e:
-            logger.warning(f"LLM initialization failed: {e}, falling back to rule-based mode")
-            self.llm_client = None
-            self.llm_enabled = False
+        self.llm_client = make_llm_client(llm_config)
+        logger.info("LLM client initialized successfully")
 
     def _normalize_llm_error(self, error_ctx: Any) -> dict[str, Any]:
         if error_ctx is None:
@@ -173,10 +155,6 @@ class DecisionEngine:
         - If successful: (intent_dict with mission_type/location/priority, None)
         - If failed: (None, error_dict)
         """
-        if not self.llm_enabled or not self.llm_client:
-            logger.debug("LLM disabled, cannot analyze intent")
-            return None, {"error_type": "llm_disabled", "message": "LLM disabled in config"}
-
         try:
             prompt = self._intent_prompt(goal, devices, state)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
@@ -224,10 +202,6 @@ class DecisionEngine:
         Returns: (strategies_list, error_context)
         Each strategy: {"title": str, "approach": str, "summary": str, "priority": str}
         """
-        if not self.llm_enabled or not self.llm_client:
-            logger.debug("LLM disabled, returning rule-based strategies")
-            return self._rule_based_strategies(mission_type), {"error_type": "llm_disabled"}
-
         try:
             prompt = self._strategies_prompt(goal, mission_type, location, devices)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
@@ -235,8 +209,8 @@ class DecisionEngine:
 
             if error_ctx is not None:
                 error_dict = self._normalize_llm_error(error_ctx)
-                logger.warning(f"LLM proposal strategies 생성 실패, rule-based fallback 사용: {error_dict.get('message', '')}")
-                return self._rule_based_strategies(mission_type), error_dict
+                logger.error(f"LLM proposal strategies 생성 실패: {error_dict.get('message', '')}")
+                return None, error_dict
 
             result = self._parse(response) if response else None
             if result:
@@ -245,15 +219,15 @@ class DecisionEngine:
                     logger.info(f"LLM proposal strategies 생성 성공: {len(strategies)} strategies")
                     return strategies[:3], None
                 else:
-                    logger.warning(f"LLM returned {len(strategies)} strategies (need 3), using rule-based fallback")
-                    return self._rule_based_strategies(mission_type), {"error_type": "incomplete_response"}
+                    logger.error(f"LLM returned {len(strategies)} strategies (need 3)")
+                    return None, {"error_type": "incomplete_response", "message": "LLM returned insufficient strategies"}
             else:
-                logger.warning("LLM proposal strategies 응답 파싱 실패, rule-based fallback 사용")
-                return self._rule_based_strategies(mission_type), {"error_type": "parse_error"}
+                logger.error("LLM proposal strategies 응답 파싱 실패")
+                return None, {"error_type": "parse_error", "message": "Failed to parse LLM response"}
 
         except Exception as e:
             logger.error(f"LLM proposal strategies 생성 중 오류: {type(e).__name__}: {e}")
-            return self._rule_based_strategies(mission_type), {
+            return None, {
                 "error_type": "unknown_error",
                 "message": str(e),
             }
@@ -714,8 +688,6 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
         force_final: bool = False,
     ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
         """ReAct 루프 단일 스텝: LLM이 다음 행동(도구 호출 또는 최종 답변)을 결정"""
-        if not self.llm_enabled or not self.llm_client:
-            return None, {"error_type": "llm_disabled", "message": "LLM disabled in config"}
         try:
             prompt = self._react_prompt(user_input, tools, history, force_final=force_final)
             response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
@@ -743,9 +715,6 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
 
         Returns: (analysis_result, error_context)
         """
-        if not self.llm_enabled or not self.llm_client:
-            return self._rule_based_fleet_check(devices, missions), {"error_type": "llm_disabled"}
-
         try:
             prompt = self._fleet_pattern_prompt(devices, missions)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
@@ -753,20 +722,20 @@ JSON 형식으로만 응답하세요. 설명 없이 JSON만:
 
             if error_ctx is not None:
                 error_dict = self._normalize_llm_error(error_ctx)
-                logger.warning(f"LLM fleet pattern 분석 실패, rule-based fallback: {error_dict.get('message', '')}")
-                return self._rule_based_fleet_check(devices, missions), error_dict
+                logger.error(f"LLM fleet pattern 분석 실패: {error_dict.get('message', '')}")
+                return {}, error_dict
 
             result = self._parse(response) if response else None
             if result:
                 logger.info(f"LLM fleet pattern 분석 성공: {result.get('severity', 'normal')}")
                 return result, None
             else:
-                logger.warning("LLM fleet pattern 응답 파싱 실패, rule-based fallback")
-                return self._rule_based_fleet_check(devices, missions), {"error_type": "parse_error"}
+                logger.error("LLM fleet pattern 응답 파싱 실패")
+                return {}, {"error_type": "parse_error", "message": "Failed to parse LLM response"}
 
         except Exception as e:
             logger.error(f"LLM fleet pattern 분석 중 오류: {type(e).__name__}: {e}")
-            return self._rule_based_fleet_check(devices, missions), {
+            return {}, {
                 "error_type": "unknown_error",
                 "message": str(e),
             }
@@ -865,27 +834,26 @@ Fleet 전체의 복합 패턴 이상을 분석합니다.
         state: AgentState,
     ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
         """LLM으로 insight summary + reason_summary 한국어 생성"""
-        if not self.llm_enabled or not self.llm_client:
-            return self._rule_based_insight_summary(mission_type), {"error_type": "llm_disabled"}
-
         try:
             prompt = self._insight_summary_prompt(goal, mission_type, devices, context)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
             response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
 
             if error_ctx is not None:
-                return self._rule_based_insight_summary(mission_type), self._normalize_llm_error(error_ctx)
+                logger.error(f"LLM insight 요약 생성 실패: {error_ctx}")
+                return {}, self._normalize_llm_error(error_ctx)
 
             result = self._parse(response) if response else None
             if result and result.get("summary"):
                 logger.info("LLM insight 요약 생성 성공")
                 return result, None
             else:
-                return self._rule_based_insight_summary(mission_type), {"error_type": "parse_error"}
+                logger.error("LLM insight 요약 응답 파싱 실패")
+                return {}, {"error_type": "parse_error", "message": "Failed to parse LLM response"}
 
         except Exception as e:
             logger.error(f"LLM insight 요약 생성 중 오류: {type(e).__name__}: {e}")
-            return self._rule_based_insight_summary(mission_type), {"error_type": "unknown_error"}
+            return {}, {"error_type": "unknown_error", "message": str(e)}
 
     async def generate_fleet_report(
         self,
@@ -895,27 +863,26 @@ Fleet 전체의 복합 패턴 이상을 분석합니다.
         state: AgentState,
     ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
         """LLM으로 fleet 전체 현황 한국어 리포트 생성"""
-        if not self.llm_enabled or not self.llm_client:
-            return self._rule_based_fleet_report(devices, missions), {"error_type": "llm_disabled"}
-
         try:
             prompt = self._fleet_report_prompt(devices, missions, insights)
             timeout = self.agent_config.get("llm", {}).get("timeout_seconds", 30)
             response, error_ctx = await self.llm_client.generate(prompt=prompt, timeout=timeout)
 
             if error_ctx is not None:
-                return self._rule_based_fleet_report(devices, missions), self._normalize_llm_error(error_ctx)
+                logger.error(f"LLM fleet 리포트 생성 실패: {error_ctx}")
+                return {}, self._normalize_llm_error(error_ctx)
 
             result = self._parse(response) if response else None
             if result and result.get("report"):
                 logger.info("LLM fleet 리포트 생성 성공")
                 return result, None
             else:
-                return self._rule_based_fleet_report(devices, missions), {"error_type": "parse_error"}
+                logger.error("LLM fleet 리포트 응답 파싱 실패")
+                return {}, {"error_type": "parse_error", "message": "Failed to parse LLM response"}
 
         except Exception as e:
             logger.error(f"LLM fleet 리포트 생성 중 오류: {type(e).__name__}: {e}")
-            return self._rule_based_fleet_report(devices, missions), {"error_type": "unknown_error"}
+            return {}, {"error_type": "unknown_error", "message": str(e)}
 
     def _rule_based_insight_summary(self, mission_type: str) -> dict[str, Any]:
         """규칙 기반 insight 요약"""
