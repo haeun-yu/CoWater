@@ -20,13 +20,13 @@
             --accent-magenta: #ff00aa;
             --accent-glow: rgba(0, 255, 204, 0.3);
 
-            --title-size: clamp(2rem, 6vw, 5rem);
-            --h2-size: clamp(1.5rem, 4vw, 3rem);
-            --h3-size: clamp(1.1rem, 2.5vw, 1.8rem);
-            --body-size: clamp(0.85rem, 1.2vw, 1.1rem);
+            --title-size: clamp(1.8rem, 5.5vw, 4.5rem);
+            --h2-size: clamp(1.4rem, 3.5vw, 2.5rem);
+            --h3-size: clamp(0.95rem, 2vw, 1.5rem);
+            --body-size: clamp(0.75rem, 1vw, 1rem);
 
-            --slide-padding: clamp(1.5rem, 4vw, 4rem);
-            --content-gap: clamp(1rem, 2vw, 2rem);
+            --slide-padding: clamp(1.2rem, 3vw, 3rem);
+            --content-gap: clamp(0.6rem, 1.2vw, 1.2rem);
 
             --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
         }
@@ -56,7 +56,6 @@
             position: relative;
         }
 
-        /* Grid background pattern */
         body::before {
             content: '';
             position: fixed;
@@ -94,20 +93,22 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: radial-gradient(ellipse at 20% 80%, rgba(0, 255, 204, 0.1) 0%, transparent 50%),
-                        radial-gradient(ellipse at 80% 20%, rgba(255, 0, 170, 0.05) 0%, transparent 50%);
+            background: none;
             pointer-events: none;
             z-index: 1;
         }
 
         .slide-content {
             width: 100%;
-            max-width: 1100px;
-            max-height: 100%;
+            max-width: min(92vw, 1100px);
+            max-height: 88vh;
             overflow: hidden;
             padding: var(--slide-padding);
             position: relative;
             z-index: 2;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
         /* === TYPOGRAPHY === */
@@ -116,7 +117,7 @@
             font-size: var(--title-size);
             font-weight: 700;
             line-height: 1.1;
-            margin-bottom: var(--content-gap);
+            margin-bottom: calc(var(--content-gap) * 0.8);
             color: var(--text-primary);
             text-transform: uppercase;
             letter-spacing: -1px;
@@ -127,7 +128,7 @@
             font-size: var(--h2-size);
             font-weight: 700;
             line-height: 1.2;
-            margin-bottom: var(--content-gap);
+            margin-bottom: calc(var(--content-gap) * 0.7);
             color: var(--text-primary);
             text-transform: uppercase;
             letter-spacing: -0.5px;
@@ -137,21 +138,21 @@
             font-family: 'Space Grotesk', sans-serif;
             font-size: var(--h3-size);
             font-weight: 600;
-            margin-bottom: calc(var(--content-gap) * 0.75);
+            margin-bottom: calc(var(--content-gap) * 0.6);
             color: var(--accent-cyan);
         }
 
         h4 {
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             color: var(--accent-magenta);
             font-weight: 600;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.4rem;
         }
 
         p, li {
             font-size: var(--body-size);
-            line-height: 1.7;
-            margin-bottom: calc(var(--content-gap) * 0.6);
+            line-height: 1.6;
+            margin-bottom: calc(var(--content-gap) * 0.5);
             color: var(--text-secondary);
         }
 
@@ -192,112 +193,401 @@
         .neon-box {
             border: 2px solid var(--accent-cyan);
             background: rgba(0, 255, 204, 0.02);
-            padding: var(--content-gap);
+            padding: calc(var(--content-gap) * 0.8);
             border-radius: 0;
-            margin: var(--content-gap) auto;
+            margin: calc(var(--content-gap) * 0.6) auto;
             box-shadow: 0 0 20px rgba(0, 255, 204, 0.2), inset 0 0 20px rgba(0, 255, 204, 0.05);
+        }
+
+        .neon-box.small {
+            padding: calc(var(--content-gap) * 0.6);
+            margin: calc(var(--content-gap) * 0.4) auto;
         }
 
         .neon-box.magenta {
             border-color: var(--accent-magenta);
-            background: rgba(255, 0, 170, 0.02);
             box-shadow: 0 0 20px rgba(255, 0, 170, 0.2), inset 0 0 20px rgba(255, 0, 170, 0.05);
-        }
-
-        .neon-box.small {
-            max-width: 700px;
-        }
-
-        .neon-box.wide {
-            max-width: 100%;
         }
 
         .feature-list {
             list-style: none;
-            display: flex;
-            flex-direction: column;
-            gap: calc(var(--content-gap) * 0.75);
-            margin: var(--content-gap) auto;
-            max-width: 800px;
-            text-align: left;
+            padding: 0;
         }
 
         .feature-list li {
-            padding-left: 2.5rem;
+            padding-left: 1.2rem;
             position: relative;
-            font-family: 'Space Grotesk', sans-serif;
+            margin-bottom: calc(var(--content-gap) * 0.6);
         }
 
-        .feature-list li::before {
-            content: "→";
+        .feature-list li:before {
+            content: "•";
             color: var(--accent-cyan);
-            font-weight: bold;
             position: absolute;
             left: 0;
-            font-size: 1.1em;
+            font-weight: bold;
         }
 
-        .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: var(--content-gap);
-            margin: var(--content-gap) auto;
-            max-width: 1050px;
-        }
-
-        .grid-3 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: var(--content-gap);
-            margin: var(--content-gap) auto;
-            max-width: 1050px;
-        }
-
-        @media (max-width: 1024px) {
-            .grid-2 { grid-template-columns: 1fr; }
-            .grid-3 { grid-template-columns: 1fr 1fr; }
-        }
-
-        @media (max-width: 768px) {
-            .grid-3 { grid-template-columns: 1fr; }
-        }
+        /* === GRID === */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--content-gap); }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--content-gap); }
 
         .grid-item {
-            background: rgba(0, 255, 204, 0.02);
+            background: rgba(0, 255, 204, 0.05);
             border: 1px solid rgba(0, 255, 204, 0.3);
-            padding: var(--content-gap);
-            border-radius: 2px;
-            box-shadow: 0 0 15px rgba(0, 255, 204, 0.1);
-        }
-
-        .grid-item h3 {
-            margin-bottom: 0.75rem;
-        }
-
-        .grid-item p {
-            margin-bottom: 0;
-            font-size: calc(var(--body-size) * 0.95);
+            padding: calc(var(--content-gap) * 0.8);
+            border-radius: 0;
         }
 
         .grid-item.magenta {
-            background: rgba(255, 0, 170, 0.02);
+            background: rgba(255, 0, 170, 0.05);
             border-color: rgba(255, 0, 170, 0.3);
         }
 
-        .grid-item.magenta h3 {
-            color: var(--accent-magenta);
+        .grid-item ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
         }
 
-        .two-column {
+        .grid-item li {
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .hero-panel {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1.25fr 0.95fr;
             gap: var(--content-gap);
-            margin: var(--content-gap) auto;
-            max-width: 1050px;
+            align-items: stretch;
+            width: 100%;
         }
 
-        @media (max-width: 1024px) {
-            .two-column { grid-template-columns: 1fr; }
+        .hero-copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 58vh;
+        }
+
+        .eyebrow {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            margin-bottom: 0.8rem;
+        }
+
+        .lead {
+            font-size: clamp(1rem, 2vw, 1.25rem);
+            line-height: 1.75;
+            color: var(--text-secondary);
+            max-width: 42rem;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-top: 1.1rem;
+        }
+
+        .chip {
+            padding: 0.45rem 0.75rem;
+            border: 1px solid rgba(0, 255, 204, 0.35);
+            background: rgba(0, 255, 204, 0.06);
+            font-size: 0.8rem;
+            color: var(--text-primary);
+        }
+
+        .hero-side {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: var(--content-gap);
+            height: 100%;
+        }
+
+        .hero-stat {
+            padding: 1rem 1.1rem;
+            border: 1px solid rgba(0, 255, 204, 0.25);
+            background: linear-gradient(135deg, rgba(0, 255, 204, 0.08), rgba(255, 0, 170, 0.04));
+            min-height: 16vh;
+        }
+
+        .hero-stat .label {
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.35rem;
+        }
+
+        .hero-stat .value {
+            font-size: clamp(1.15rem, 2vw, 1.7rem);
+            color: var(--text-primary);
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .split-layout {
+            display: grid;
+            grid-template-columns: 0.95fr 1.05fr;
+            gap: clamp(1rem, 2vw, 1.8rem);
+            align-items: stretch;
+            width: 100%;
+        }
+
+        .problem-panel {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1.2rem;
+            min-height: 58vh;
+            width: 100%;
+        }
+
+        .problem-panel h3,
+        .solution-panel h3,
+        .story-panel h3,
+        .roadmap-panel h3 {
+            margin-bottom: 0.8rem;
+        }
+
+        .problem-list {
+            display: grid;
+            gap: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .problem-item {
+            padding: 0.9rem 1rem;
+            border-left: 3px solid var(--accent-magenta);
+            background: rgba(255, 0, 170, 0.05);
+        }
+
+        .solution-panel {
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            background: radial-gradient(circle at top right, rgba(0, 255, 204, 0.11), rgba(15, 20, 36, 0.88));
+            padding: 1.2rem;
+            min-height: 58vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 100%;
+        }
+
+        .solution-metric {
+            display: flex;
+            align-items: baseline;
+            gap: 0.6rem;
+            margin-top: 1rem;
+        }
+
+        .solution-metric .value {
+            font-family: 'Space Mono', monospace;
+            font-size: clamp(2rem, 6vw, 4rem);
+            color: var(--accent-cyan);
+            line-height: 1;
+        }
+
+        .solution-metric .desc {
+            max-width: 20rem;
+            color: var(--text-secondary);
+        }
+
+        .pipeline-wrap {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .pipeline {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.75rem;
+            width: 100%;
+        }
+
+        .pipeline-step {
+            padding: 1rem 0.85rem;
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            background: rgba(0, 255, 204, 0.04);
+            text-align: center;
+        }
+
+        .pipeline-step .step-no {
+            font-family: 'Space Mono', monospace;
+            color: var(--accent-cyan);
+            font-size: 0.75rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .pipeline-step .step-title {
+            color: var(--text-primary);
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .pipeline-step .step-desc {
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .role-band {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto 1fr;
+            gap: 0.75rem;
+            align-items: center;
+            width: 100%;
+        }
+
+        .role-card {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            min-height: 9rem;
+        }
+
+        .role-arrow {
+            font-family: 'Space Mono', monospace;
+            color: var(--accent-cyan);
+            font-size: 1.2rem;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.8rem;
+            width: 100%;
+        }
+
+        .metric-tile {
+            padding: 1.1rem 1rem;
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            background: rgba(0, 255, 204, 0.04);
+        }
+
+        .metric-tile .metric-value {
+            font-family: 'Space Mono', monospace;
+            font-size: clamp(1.8rem, 5vw, 3rem);
+            color: var(--accent-cyan);
+            line-height: 1;
+            margin-bottom: 0.45rem;
+        }
+
+        .metric-tile .metric-label {
+            color: var(--text-primary);
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-tile .metric-detail {
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+
+        .roadmap-panel {
+            display: grid;
+            gap: 0.9rem;
+            width: 100%;
+        }
+
+        .roadmap-line {
+            position: relative;
+            padding-left: 1.4rem;
+        }
+
+        .roadmap-line::before {
+            content: '';
+            position: absolute;
+            left: 0.4rem;
+            top: 0.2rem;
+            bottom: -0.1rem;
+            width: 2px;
+            background: linear-gradient(180deg, var(--accent-cyan), transparent);
+        }
+
+        .roadmap-node {
+            position: relative;
+            padding: 0.9rem 1rem 0.9rem 1.1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 0.75rem;
+        }
+
+        .roadmap-node::before {
+            content: '';
+            position: absolute;
+            left: -1.7rem;
+            top: 1rem;
+            width: 0.65rem;
+            height: 0.65rem;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            box-shadow: 0 0 12px rgba(0, 255, 204, 0.8);
+        }
+
+        .closing-panel {
+            min-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            border: 1px solid rgba(0, 255, 204, 0.14);
+            background:
+                radial-gradient(circle at 20% 20%, rgba(0, 255, 204, 0.14), transparent 35%),
+                radial-gradient(circle at 80% 70%, rgba(255, 0, 170, 0.12), transparent 40%),
+                rgba(0, 0, 0, 0.2);
+        }
+
+        .diagram-shell {
+            border: 1px solid rgba(0, 255, 204, 0.18);
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1rem;
+            width: 100%;
+        }
+
+        .architecture-frame {
+            height: min(62vh, 58vw);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .diagram-image {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-height: 100%;
+            border: 1px solid rgba(0, 255, 204, 0.25);
+            background: rgba(0, 0, 0, 0.15);
+            object-fit: contain;
+        }
+
+        .diagram-title {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            margin-bottom: 0.8rem;
+        }
+
+        .responsive-fit {
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .diagram-label {
+            fill: #ffffff;
+            font-size: 12px;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .diagram-sub {
+            fill: #a0aec0;
+            font-size: 10px;
+            font-family: 'Space Grotesk', sans-serif;
         }
 
         /* === COMPARISON TABLE === */
@@ -305,7 +595,7 @@
             width: 100%;
             border-collapse: collapse;
             margin: var(--content-gap) auto;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .comparison-table thead {
@@ -313,7 +603,7 @@
         }
 
         .comparison-table th, .comparison-table td {
-            padding: 0.75rem;
+            padding: 0.5rem 0.6rem;
             text-align: left;
             border-bottom: 1px solid rgba(0, 255, 204, 0.2);
         }
@@ -328,29 +618,24 @@
         }
 
         /* === ACCENT TEXT === */
-        .accent-cyan {
-            color: var(--accent-cyan);
-        }
-
-        .accent-magenta {
-            color: var(--accent-magenta);
-        }
+        .accent-cyan { color: var(--accent-cyan); }
+        .accent-magenta { color: var(--accent-magenta); }
 
         .divider {
-            width: 100px;
+            width: 80px;
             height: 1px;
             background: linear-gradient(90deg, var(--accent-cyan), transparent);
-            margin: var(--content-gap) auto;
+            margin: calc(var(--content-gap) * 0.6) auto;
         }
 
         /* === NAVIGATION === */
         .nav-dots {
             position: fixed;
-            bottom: 2rem;
+            bottom: 1.5rem;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
-            gap: 0.75rem;
+            gap: 0.6rem;
             z-index: 100;
             flex-wrap: wrap;
             max-width: 80vw;
@@ -358,8 +643,8 @@
         }
 
         .nav-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 0;
             background: rgba(0, 255, 204, 0.2);
             cursor: pointer;
@@ -382,7 +667,7 @@
             position: fixed;
             top: 0;
             left: 0;
-            height: 3px;
+            height: 2px;
             background: linear-gradient(90deg, var(--accent-cyan), var(--accent-magenta));
             width: 0%;
             z-index: 101;
@@ -392,51 +677,66 @@
         /* === DIAGRAM === */
         .diagram {
             font-family: 'Space Mono', monospace;
-            font-size: 0.85rem;
-            line-height: 1.8;
+            font-size: 0.8rem;
+            line-height: 1.6;
             color: var(--accent-cyan);
             text-align: center;
             overflow-x: auto;
-        }
-
-        .agent-card {
-            display: inline-block;
-            background: rgba(0, 255, 204, 0.1);
-            border: 1px solid var(--accent-cyan);
-            padding: 0.75rem 1.5rem;
-            margin: 0.5rem;
-            border-radius: 2px;
         }
 
         .stat-box {
             display: inline-block;
             background: rgba(0, 255, 204, 0.1);
             border: 1px solid var(--accent-cyan);
-            padding: 1.5rem;
-            margin: 0.5rem;
-            border-radius: 2px;
-            min-width: 120px;
+            padding: 1rem 1.2rem;
+            margin: 0.4rem;
+            border-radius: 0;
+            min-width: 110px;
             text-align: center;
+            font-size: 0.9rem;
         }
 
         .stat-box .number {
-            font-size: 1.8rem;
+            font-size: 1.6rem;
             color: var(--accent-magenta);
             font-weight: 700;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.3rem;
         }
 
         .stat-box .label {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: var(--text-secondary);
         }
 
         /* === RESPONSIVE === */
         @media (max-height: 700px) {
             :root {
-                --slide-padding: clamp(1rem, 3vw, 2rem);
+                --slide-padding: clamp(0.8rem, 2.5vw, 1.5rem);
                 --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
                 --h2-size: clamp(1rem, 3vw, 1.75rem);
+                --content-gap: clamp(0.4rem, 0.8vw, 0.8rem);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .two-column { grid-template-columns: 1fr; }
+            .hero-panel,
+            .split-layout,
+            .pipeline,
+            .metric-grid,
+            .role-band {
+                grid-template-columns: 1fr;
+            }
+            .role-arrow {
+                display: none;
+            }
+            .slide-content {
+                max-width: 94vw;
+                max-height: 90vh;
+            }
+            .architecture-frame {
+                height: auto;
             }
         }
 
@@ -450,603 +750,457 @@
     <div class="progress-bar"></div>
     <nav class="nav-dots"></nav>
 
-    <!-- SLIDE 1: TITLE -->
+    <!-- S1: TITLE -->
     <section class="slide">
         <div class="slide-content">
-            <h1 class="reveal">CoWater</h1>
-            <div class="divider reveal"></div>
-            <p class="reveal" style="font-size: var(--h3-size); color: var(--accent-cyan); margin-bottom: 1rem; font-family: 'Space Mono', monospace;">
-                AI-DRIVEN AUTONOMOUS MARINE VESSEL MANAGEMENT
-            </p>
-            <p class="reveal" style="max-width: 800px; margin: 0 auto; font-size: 1rem;">
-                다중 에이전트 아키텍처 기반의<br>
-                해양 무인체 통합 운영 플랫폼<br><br>
-                <span style="color: var(--text-secondary); font-size: 0.9rem;">완전한 추적성과 점진적 자동화를 통해<br>안전하고 효율적인 해양 운영 실현</span>
-            </p>
-        </div>
-    </section>
-
-    <!-- SLIDE 2: WHAT IS COWATER -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">CoWater란?</h2>
-            <div class="divider reveal"></div>
-            <ul class="feature-list reveal">
-                <li><strong>사용자 요청</strong>을 AI가 해석하여 여러 실행안(Proposal) 제시</li>
-                <li><strong>사용자 승인</strong을 통해 정책 기반 자동화 수준 결정</li>
-                <li><strong>승인된 안</strong>을 실제 임무(Mission)로 변환 후 실행</li>
-                <li>임무는 <strong>여러 작업(Task)</strong>으로 분해되어 최적 Device에 할당</li>
-                <li>모든 <strong>의사결정의 근거</strong>를 Event로 불변 기록</li>
-                <li><strong>리더 무인체</strong>가 팔로워 무인체와 협력하여 복잡한 임무 수행</li>
-            </ul>
-            <div class="neon-box small reveal" style="margin-top: 1rem;">
-                <p style="margin: 0; font-size: 0.9rem;"><strong>핵심:</strong> 계획(Proposal)과 실행(Mission)을 분리하여 자동화 수준을 정책으로 유연하게 조절</p>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 3: CURRENT STATE VS CHALLENGES -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">현재 상황 vs 과제</h2>
-            <div class="divider reveal"></div>
-            <div style="margin: var(--content-gap) auto; max-width: 1050px;" class="reveal">
-                <table class="comparison-table">
-                    <thead>
-                        <tr>
-                            <th>영역</th>
-                            <th style="color: #ff6b6b;">현재 상황</th>
-                            <th style="color: var(--accent-cyan);">CoWater</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>운영 체계</strong></td>
-                            <td>무인체별 독립적 제어</td>
-                            <td>통합 플랫폼 (통일된 인터페이스)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>의사결정</strong></td>
-                            <td>근거 기록 부재</td>
-                            <td>모든 결정 Event로 추적 가능</td>
-                        </tr>
-                        <tr>
-                            <td><strong>자동화</strong></td>
-                            <td>수동 운영 또는 완전 자동화만 가능</td>
-                            <td>3단계 자동화 (수동 → 정책 → 자율)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>협력 작업</strong></td>
-                            <td>복잡하고 수동 조율 필요</td>
-                            <td>자동 협력 (AgentConnection)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>통신 대응</strong></td>
-                            <td>단절 시 운영 중단</td>
-                            <td>환경 자동 인식, 통신 매체 전환</td>
-                        </tr>
-                        <tr>
-                            <td><strong>확장성</strong></td>
-                            <td>무인체 추가 시 별도 구축 필요</td>
-                            <td>플러그 앤 플레이 (자동 등록)</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 4: 5 CORE PRINCIPLES -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">5가지 핵심 철학</h2>
-            <div class="divider reveal"></div>
-            <div class="grid-3 reveal">
-                <div class="grid-item">
-                    <h4>① Action Abstraction</h4>
-                    <p>하드웨어 종속적 명령 대신 추상화된 행동을 사용해 어떤 무인체든 제어 가능</p>
+            <div class="hero-panel">
+                <div class="hero-copy">
+                    <div class="eyebrow reveal">CoWater Project</div>
+                    <h1 class="reveal">해양 무인체 통합 운영 플랫폼</h1>
+                    <div class="divider reveal" style="margin-left: 0;"></div>
+                    <p class="lead reveal">
+                        CoWater는 해양 무인체와 해양 데이터를 통합하고,
+                        AI Agent가 상황 인식, 위험 판단, 임무 관리, 대응 지원을 수행하는 운영 플랫폼입니다.
+                    </p>
+                    <div class="chip-row reveal">
+                        <span class="chip">상황 인식</span>
+                        <span class="chip">위험 판단</span>
+                        <span class="chip">임무 관리</span>
+                        <span class="chip">제한적 자동 대응</span>
+                    </div>
                 </div>
-                <div class="grid-item magenta">
-                    <h4>② Planning/Execution 분리</h4>
-                    <p>Proposal(계획)과 Mission(실행)을 분리해 자동화 수준을 유연하게 조절</p>
-                </div>
-                <div class="grid-item">
-                    <h4>③ Agent 협업</h4>
-                    <p>AgentConnection으로 무인체 간 동적 협력 관계 정의 (릴레이, 코디네이션)</p>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>④ Event 추적성</h4>
-                    <p>모든 의사결정을 불변 Event로 기록해 감사와 AI 학습 가능</p>
-                </div>
-                <div class="grid-item">
-                    <h4>⑤ 물리적 제약 극복</h4>
-                    <p>통신 단절, 대역폭 제한을 소프트웨어로 보상 (매체 자동 선택)</p>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>+ 분산형 의사결정</h4>
-                    <p>중앙 통제 없이 각 Agent이 책임 범위 내에서 자동 판단</p>
+                <div class="hero-side">
+                    <div class="hero-stat reveal">
+                        <div class="label">핵심 목표</div>
+                        <div class="value">더 안전하고, 더 빠르고, 더 일관된 운영</div>
+                    </div>
+                    <div class="hero-stat reveal">
+                        <div class="label">대상</div>
+                        <div class="value">USV · AUV · ROV</div>
+                    </div>
+                    <div class="hero-stat reveal">
+                        <div class="label">운영 방식</div>
+                        <div class="value">사람과 AI Agent의 협업</div>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- SLIDE 5: PROPOSAL-MISSION FLOW -->
+    <!-- S2: PROJECT OVERVIEW -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">핵심 개념 1: Proposal-Mission 분리</h2>
+            <h2 class="reveal">프로젝트 개요</h2>
             <div class="divider reveal"></div>
-            <div class="neon-box wide reveal" style="font-family: 'Space Mono', monospace; font-size: 0.85rem; text-align: center;">
-                <p style="margin: 0; color: var(--accent-cyan);">
-                    사용자 요청<br>
-                    ↓<br>
-                    AI가 여러 Proposal(실행안) 생성<br>
-                    ↓<br>
-                    사용자가 Proposal 선택 / 정책이 자동 선택<br>
-                    ↓<br>
-                    선택된 Proposal → Mission으로 변환 (이 순간부터 실행 불가역)<br>
-                    ↓<br>
-                    MissionPlanner가 Task로 분해<br>
-                    ↓<br>
-                    각 Device의 Device Agent가 수행 가능 여부 최종 판단<br>
-                    ↓<br>
-                    실행 & 모든 단계를 Event로 기록
-                </p>
-            </div>
-            <div class="two-column reveal" style="margin-top: 1rem; gap: 1rem;">
-                <div class="neon-box">
-                    <h4>장점 1: 투명성</h4>
-                    <p style="margin-bottom: 0;">계획 단계에서 여러 선택지를 제시해 사용자가 최종 결정</p>
+            <div class="split-layout reveal">
+                <div class="problem-panel">
+                    <div class="eyebrow">Project</div>
+                    <h3>CoWater: 해양 무인체 운영 시스템</h3>
+                    <p style="line-height: 1.8;">
+                        해양 무인체와 해양 데이터를 통합하고,
+                        AI Agent를 통해 상황 인식과 대응 지원을 수행합니다.
+                    </p>
+                    <div class="problem-list">
+                        <div class="problem-item">
+                            <strong>목표</strong><br>
+                            해양 무인체 운용을 하나의 운영 흐름으로 묶는 것입니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>목적</strong><br>
+                            효율성, 안전성, 강건성을 함께 높이는 것입니다.
+                        </div>
+                    </div>
                 </div>
-                <div class="neon-box magenta">
-                    <h4>장점 2: 유연한 자동화</h4>
-                    <p style="margin-bottom: 0;">정책 변경으로 자동화 수준 동적 조절 (코드 수정 불필요)</p>
+                <div class="diagram-shell">
+                    <div class="diagram-title">System View</div>
+                    <svg viewBox="0 0 560 520" width="100%" height="100%" role="img" aria-label="CoWater system architecture diagram">
+                        <defs>
+                            <linearGradient id="cwLine" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#00ffcc" />
+                                <stop offset="100%" stop-color="#ff00aa" />
+                            </linearGradient>
+                            <filter id="cwGlow">
+                                <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+                                <feMerge>
+                                    <feMergeNode in="coloredBlur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
+                        </defs>
+                        <rect x="30" y="40" width="500" height="96" rx="14" fill="rgba(0,255,204,0.06)" stroke="rgba(0,255,204,0.45)" />
+                        <text x="280" y="78" text-anchor="middle" class="diagram-label">Human Operator</text>
+                        <text x="280" y="104" text-anchor="middle" class="diagram-sub">목표 설정 · 승인 · 결과 확인</text>
+
+                        <line x1="280" y1="136" x2="280" y2="182" stroke="url(#cwLine)" stroke-width="3" filter="url(#cwGlow)"/>
+
+                        <rect x="120" y="182" width="320" height="112" rx="16" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.5)" />
+                        <text x="280" y="220" text-anchor="middle" class="diagram-label">CoWater Platform</text>
+                        <text x="280" y="246" text-anchor="middle" class="diagram-sub">상황 인식 · 위험 판단 · 임무 관리 · 대응 지원</text>
+                        <text x="280" y="270" text-anchor="middle" class="diagram-sub">Proposal → Mission → Task → Event</text>
+
+                        <line x1="280" y1="294" x2="280" y2="340" stroke="url(#cwLine)" stroke-width="3" filter="url(#cwGlow)"/>
+
+                        <rect x="30" y="340" width="500" height="120" rx="14" fill="rgba(0,255,204,0.05)" stroke="rgba(0,255,204,0.35)" />
+                        <text x="280" y="378" text-anchor="middle" class="diagram-label">Marine Devices</text>
+                        <text x="280" y="404" text-anchor="middle" class="diagram-sub">USV · AUV · ROV</text>
+                        <text x="280" y="432" text-anchor="middle" class="diagram-sub">실제 작업 수행 · 상태 보고 · 제한적 자동 대응</text>
+
+                        <line x1="120" y1="490" x2="440" y2="490" stroke="rgba(0,255,204,0.35)" stroke-dasharray="6 6"/>
+                        <text x="280" y="514" text-anchor="middle" class="diagram-sub">해양 무인체 운영을 하나의 흐름으로 묶는 구조</text>
+                    </svg>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- SLIDE 6: EVENT TRACEABILITY -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">핵심 개념 2: Event 기반 추적성</h2>
-            <div class="divider reveal"></div>
-            <p class="reveal" style="text-align: center; margin-bottom: var(--content-gap);">
-                <strong>모든 의사결정이 불변 Event로 기록되어 감사, 분석, AI 학습의 기반 제공</strong>
-            </p>
-            <div class="grid-3 reveal">
-                <div class="grid-item">
-                    <h4>Device Events</h4>
-                    <p>배터리, 위치, 센서 상태, Healthcheck</p>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>Task Events</h4>
-                    <p>할당, 수락, 시작, 진행, 완료, 실패</p>
-                </div>
-                <div class="grid-item">
-                    <h4>System Events</h4>
-                    <p>Proposal 생성, Approval, 정책 판단, 이상 징후</p>
-                </div>
-            </div>
-            <div class="neon-box small reveal" style="margin-top: 1rem;">
-                <h4>분석 사례</h4>
-                <ul style="list-style: none; padding-left: 1rem;">
-                    <li>✓ <strong>감사:</strong> "왜 이 Task를 A Device에 할당했나?" → Event에서 즉시 추적</li>
-                    <li>✓ <strong>학습:</strong> 성공/실패 Task의 Event 패턴 분석 → AI 모델 개선</li>
-                    <li>✓ <strong>병목:</strong> 각 단계별 소요 시간 분석 → 운영 최적화</li>
-                </ul>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 7: SYSTEM ARCHITECTURE -->
+    <!-- S3: SYSTEM ARCHITECTURE -->
     <section class="slide">
         <div class="slide-content">
             <h2 class="reveal">시스템 아키텍처</h2>
             <div class="divider reveal"></div>
-            <div class="neon-box wide reveal" style="font-family: 'Space Mono', monospace; font-size: 0.8rem;">
-                <p style="margin: 0; color: var(--accent-cyan); line-height: 2;">
-                    ┌─ User Interface (3D 대시보드, 운영 관제)<br>
-                    │<br>
-                    ├─ System Agent Layer (6개 전문 에이전트)<br>
-                    │  ├─ RequestHandler (포트 9116) - 요청 해석<br>
-                    │  ├─ MissionPlanner (포트 9111) - 계획 수립<br>
-                    │  ├─ PolicyManager (포트 9112) - 정책 관리<br>
-                    │  ├─ DeviceBridge (포트 9110) - 장비 통신<br>
-                    │  ├─ SystemSentinel (포트 9113) - 감시<br>
-                    │  └─ InsightReporter (포트 9114) - 분석<br>
-                    │<br>
-                    ├─ Registry Server (포트 8280) - 중앙 상태 저장소<br>
-                    │  └─ Device, Mission, Task, Event, Policy 등<br>
-                    │<br>
-                    ├─ Moth Server (wss://cobot.center:8287) - 실시간 스트림<br>
-                    │  ├─ A2A Protocol (에이전트 간 통신)<br>
-                    │  └─ Telemetry (실시간 데이터)<br>
-                    │<br>
-                    └─ Device Agent Layer (각 무인체마다 1개)<br>
-                       ├─ USV Agent (포트 9201)<br>
-                       ├─ AUV Agent (포트 9202)<br>
-                       └─ ROV Agent (포트 9203)
+            <div class="diagram-shell architecture-frame reveal">
+                <div class="diagram-title">Architecture Image</div>
+                <img class="diagram-image" src="architecture.png" alt="CoWater system architecture diagram" />
+            </div>
+        </div>
+    </section>
+
+    <!-- S4: DESIGN PRINCIPLES -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">설계 원칙</h2>
+            <div class="divider reveal"></div>
+            <div class="split-layout reveal">
+                <div class="problem-panel">
+                    <div class="eyebrow">Principles</div>
+                    <h3>CoWater는 네 가지 원칙 위에 설계됩니다.</h3>
+                    <div class="problem-list">
+                        <div class="problem-item">
+                            <strong>계획과 실행 분리</strong><br>
+                            Proposal은 계획, Mission은 실행입니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>이벤트 기반 추적</strong><br>
+                            중요한 변화는 Event로 남깁니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>분산형 책임</strong><br>
+                            각 Agent는 자기 역할만 책임집니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>물리 제약 대응</strong><br>
+                            통신 환경 변화에 맞게 운영을 바꿉니다.
+                        </div>
+                    </div>
+                </div>
+                <div class="diagram-shell">
+                    <div class="diagram-title">Design Map</div>
+                    <svg viewBox="0 0 560 520" width="100%" height="100%" role="img" aria-label="CoWater design principles diagram">
+                        <defs>
+                            <filter id="cwGlow2">
+                                <feGaussianBlur stdDeviation="5" result="blur"/>
+                                <feMerge>
+                                    <feMergeNode in="blur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
+                        </defs>
+                        <circle cx="280" cy="260" r="86" fill="rgba(0,255,204,0.08)" stroke="rgba(0,255,204,0.55)" stroke-width="2"/>
+                        <text x="280" y="252" text-anchor="middle" class="diagram-label">CoWater</text>
+                        <text x="280" y="276" text-anchor="middle" class="diagram-sub">운영 플랫폼</text>
+
+                        <line x1="280" y1="176" x2="280" y2="104" stroke="rgba(0,255,204,0.45)" stroke-width="2" filter="url(#cwGlow2)"/>
+                        <line x1="364" y1="260" x2="456" y2="260" stroke="rgba(0,255,204,0.45)" stroke-width="2" filter="url(#cwGlow2)"/>
+                        <line x1="280" y1="344" x2="280" y2="436" stroke="rgba(0,255,204,0.45)" stroke-width="2" filter="url(#cwGlow2)"/>
+                        <line x1="196" y1="260" x2="104" y2="260" stroke="rgba(0,255,204,0.45)" stroke-width="2" filter="url(#cwGlow2)"/>
+
+                        <rect x="182" y="36" width="196" height="62" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                        <text x="280" y="63" text-anchor="middle" class="diagram-label">Planning / Execution</text>
+                        <text x="280" y="82" text-anchor="middle" class="diagram-sub">Proposal과 Mission 분리</text>
+
+                        <rect x="474" y="228" width="76" height="64" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                        <text x="512" y="254" text-anchor="middle" class="diagram-label">Event</text>
+                        <text x="512" y="274" text-anchor="middle" class="diagram-sub">Trace</text>
+
+                        <rect x="182" y="438" width="196" height="62" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                        <text x="280" y="465" text-anchor="middle" class="diagram-label">Distributed Responsibility</text>
+                        <text x="280" y="484" text-anchor="middle" class="diagram-sub">각 Agent의 책임 범위 명확화</text>
+
+                        <rect x="12" y="228" width="76" height="64" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                        <text x="50" y="254" text-anchor="middle" class="diagram-label">Physical</text>
+                        <text x="50" y="274" text-anchor="middle" class="diagram-sub">Gap</text>
+
+                        <text x="280" y="155" text-anchor="middle" class="diagram-sub">계획과 실행 분리</text>
+                        <text x="456" y="250" text-anchor="middle" class="diagram-sub">추적성</text>
+                        <text x="280" y="422" text-anchor="middle" class="diagram-sub">책임 분리</text>
+                        <text x="104" y="250" text-anchor="middle" class="diagram-sub">물리 제약 극복</text>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- S5: THE PROBLEM -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">해결하려는 문제</h2>
+            <div class="divider reveal"></div>
+            <div class="split-layout reveal">
+                <div class="problem-panel">
+                    <div class="eyebrow">The Problem</div>
+                    <h3>기존 운영은 너무 분절되어 있습니다.</h3>
+                    <div class="problem-list">
+                        <div class="problem-item">
+                            <strong>방대한 데이터</strong><br>
+                            다수 장비의 센서 데이터가 동시에 들어옵니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>고립된 운영</strong><br>
+                            장비와 시스템이 따로 움직여 협업이 느립니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>느린 의사결정</strong><br>
+                            돌발 상황에서 사람만으로 대응하면 지연과 오류가 생깁니다.
+                        </div>
+                    </div>
+                </div>
+                <div class="solution-panel">
+                    <div class="eyebrow">CoWater Response</div>
+                    <h3>문제는 기술이 아니라 운영 방식입니다.</h3>
+                    <p style="line-height: 1.8;">
+                        CoWater는 상황 인식, 위험 판단, 임무 관리, 제한적 자동 대응을 하나의 운영 체계로 묶어 이 문제를 풀어냅니다.
+                    </p>
+                    <div class="solution-metric">
+                        <div class="value">3</div>
+                        <div class="desc">개별 문제를 하나의 운영 플랫폼으로 통합합니다.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- S6: HOW IT WORKS -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">어떻게 동작하나?</h2>
+            <div class="divider reveal"></div>
+            <div class="pipeline-wrap reveal">
+                <div class="pipeline">
+                    <div class="pipeline-step">
+                        <div class="step-no">01</div>
+                        <div class="step-title">요청</div>
+                        <div class="step-desc">사용자 목표를 입력합니다.</div>
+                    </div>
+                    <div class="pipeline-step">
+                        <div class="step-no">02</div>
+                        <div class="step-title">Proposal</div>
+                        <div class="step-desc">실행 후보를 제안합니다.</div>
+                    </div>
+                    <div class="pipeline-step">
+                        <div class="step-no">03</div>
+                        <div class="step-title">Mission</div>
+                        <div class="step-desc">선택된 계획을 실행합니다.</div>
+                    </div>
+                    <div class="pipeline-step">
+                        <div class="step-no">04</div>
+                        <div class="step-title">Task</div>
+                        <div class="step-desc">작업 단위로 분해합니다.</div>
+                    </div>
+                    <div class="pipeline-step">
+                        <div class="step-no">05</div>
+                        <div class="step-title">Event</div>
+                        <div class="step-desc">판단과 결과를 기록합니다.</div>
+                    </div>
+                </div>
+                <div class="diagram-shell">
+                    <div class="diagram-title">Execution Flow</div>
+                    <svg viewBox="0 0 700 210" width="100%" height="100%" role="img" aria-label="CoWater execution flow">
+                        <defs>
+                            <marker id="arrowHead" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+                                <path d="M0,0 L0,6 L8,3 z" fill="#00ffcc" />
+                            </marker>
+                        </defs>
+                        <g>
+                            <rect x="20" y="66" width="96" height="76" rx="12" fill="rgba(0,255,204,0.08)" stroke="rgba(0,255,204,0.55)" />
+                            <text x="68" y="95" text-anchor="middle" class="diagram-label">Request</text>
+                            <text x="68" y="115" text-anchor="middle" class="diagram-sub">의도 입력</text>
+                        </g>
+                        <line x1="116" y1="104" x2="170" y2="104" stroke="#00ffcc" stroke-width="3" marker-end="url(#arrowHead)" />
+                        <g>
+                            <rect x="170" y="66" width="108" height="76" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                            <text x="224" y="95" text-anchor="middle" class="diagram-label">Proposal</text>
+                            <text x="224" y="115" text-anchor="middle" class="diagram-sub">후보 제안</text>
+                        </g>
+                        <line x1="278" y1="104" x2="332" y2="104" stroke="#00ffcc" stroke-width="3" marker-end="url(#arrowHead)" />
+                        <g>
+                            <rect x="332" y="66" width="104" height="76" rx="12" fill="rgba(0,255,204,0.08)" stroke="rgba(0,255,204,0.55)" />
+                            <text x="384" y="95" text-anchor="middle" class="diagram-label">Mission</text>
+                            <text x="384" y="115" text-anchor="middle" class="diagram-sub">승인된 계획</text>
+                        </g>
+                        <line x1="436" y1="104" x2="490" y2="104" stroke="#00ffcc" stroke-width="3" marker-end="url(#arrowHead)" />
+                        <g>
+                            <rect x="490" y="66" width="92" height="76" rx="12" fill="rgba(255,0,170,0.08)" stroke="rgba(255,0,170,0.55)" />
+                            <text x="536" y="95" text-anchor="middle" class="diagram-label">Task</text>
+                            <text x="536" y="115" text-anchor="middle" class="diagram-sub">작업 분해</text>
+                        </g>
+                        <line x1="582" y1="104" x2="620" y2="104" stroke="#00ffcc" stroke-width="3" marker-end="url(#arrowHead)" />
+                        <g>
+                            <rect x="620" y="66" width="68" height="76" rx="12" fill="rgba(0,255,204,0.08)" stroke="rgba(0,255,204,0.55)" />
+                            <text x="654" y="95" text-anchor="middle" class="diagram-label">Event</text>
+                            <text x="654" y="115" text-anchor="middle" class="diagram-sub">기록</text>
+                        </g>
+                    </svg>
+                    <p style="margin: 0.7rem 0 0 0; font-size: 0.9rem;">
+                        CoWater는 요청을 바로 실행하지 않고, 먼저 후보를 만들고, 승인된 계획만 임무로 바꿉니다.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- S7: WHO DOES WHAT -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">누가 무엇을 하나?</h2>
+            <div class="divider reveal"></div>
+            <div class="role-band reveal">
+                <div class="role-card">
+                    <div class="eyebrow">Human</div>
+                    <h3>사람</h3>
+                    <p style="line-height: 1.8;">목표를 정하고, 제안된 계획을 승인합니다.</p>
+                </div>
+                <div class="role-arrow">→</div>
+                <div class="role-card">
+                    <div class="eyebrow">Platform</div>
+                    <h3>CoWater</h3>
+                    <p style="line-height: 1.8;">계획을 만들고, 실행을 조율하고, 기록을 남깁니다.</p>
+                </div>
+                <div class="role-arrow">→</div>
+                <div class="role-card">
+                    <div class="eyebrow">Device</div>
+                    <h3>장비</h3>
+                    <p style="line-height: 1.8;">실제 해양 환경에서 작업을 수행합니다.</p>
+                </div>
+            </div>
+            <div class="neon-box small reveal" style="margin-top: 1rem;">
+                <p style="margin: 0; font-size: 0.9rem;">
+                    핵심은 사람이 모든 세부 명령을 직접 다루지 않아도 된다는 점입니다.
                 </p>
             </div>
         </div>
     </section>
 
-    <!-- SLIDE 8: 6 SYSTEM AGENTS DETAILED -->
+    <!-- S8: VALUE -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">6개 System Agent 상세</h2>
+            <h2 class="reveal">기대 효과와 가치</h2>
             <div class="divider reveal"></div>
-            <div class="grid-2 reveal">
-                <div class="grid-item">
-                    <h4>RequestHandler</h4>
-                    <p><strong>책임:</strong> 자연어 사용자 요청 해석, 어떤 Agent에 위임할지 경로 결정</p>
-                    <p><strong>입력:</strong> 자연어 명령</p>
-                    <p><strong>출력:</strong> Proposal 또는 직접 응답</p>
+            <div class="metric-grid reveal" style="grid-template-columns: repeat(2, 1fr);">
+                <div class="metric-tile">
+                    <div class="metric-value">↑</div>
+                    <div class="metric-label">효율성 증대</div>
+                    <div class="metric-detail">반복 판단과 상태 확인을 줄입니다.</div>
                 </div>
-                <div class="grid-item magenta">
-                    <h4>MissionPlanner</h4>
-                    <p><strong>책임:</strong> Proposal 기반으로 Mission 생성, Task 분해, 생명주기 관리</p>
-                    <p><strong>입력:</strong> 승인된 Proposal</p>
-                    <p><strong>출력:</strong> Mission, Task 할당</p>
+                <div class="metric-tile magenta">
+                    <div class="metric-value">↓</div>
+                    <div class="metric-label">운영 위험 감소</div>
+                    <div class="metric-detail">위험 징후를 빨리 감지하고 대응합니다.</div>
                 </div>
-                <div class="grid-item">
-                    <h4>DeviceBridge</h4>
-                    <p><strong>책임:</strong> 물리 무인체와 양방향 통신, 상태 동기화, 신호 정규화</p>
-                    <p><strong>입력:</strong> Device로부터 상태, Heartbeat, Problem Report</p>
-                    <p><strong>출력:</strong> Task 전달, Event 발행</p>
+                <div class="metric-tile">
+                    <div class="metric-value">◎</div>
+                    <div class="metric-label">강건성 확보</div>
+                    <div class="metric-detail">통신 장애와 일부 장애에도 버팁니다.</div>
                 </div>
-                <div class="grid-item magenta">
-                    <h4>PolicyManager</h4>
-                    <p><strong>책임:</strong> 정책/규칙 관리, 자동 대응 결정, 기기 생명주기 관리</p>
-                    <p><strong>입력:</strong> Event, System 상태</p>
-                    <p><strong>출력:</strong> 자동 결정, 정책 실행</p>
-                </div>
-                <div class="grid-item">
-                    <h4>SystemSentinel</h4>
-                    <p><strong>책임:</strong> 지속적 이상 징후 감시, Alert 생성, 건전성 체크</p>
-                    <p><strong>입력:</strong> Healthcheck, Event</p>
-                    <p><strong>출력:</strong> Alert, SYS_ANOMALY_DETECTED Event</p>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>InsightReporter</h4>
-                    <p><strong>책임:</strong> 데이터 조회, 통계 분석, 리포트 생성</p>
-                    <p><strong>입력:</strong> Registry의 모든 데이터 (읽기 전용)</p>
-                    <p><strong>출력:</strong> Report, Insight, 통계</p>
+                <div class="metric-tile magenta">
+                    <div class="metric-value">→</div>
+                    <div class="metric-label">미래 확장</div>
+                    <div class="metric-detail">Agentic AI와 Physical AI로 확장됩니다.</div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- SLIDE 9: DEVICE AGENTS & COLLABORATION -->
+    <!-- S9: FUTURE EXPANSION -->
     <section class="slide">
         <div class="slide-content">
-            <h2 class="reveal">Device Agent와 협력</h2>
+            <h2 class="reveal">향후 확장 가능성</h2>
             <div class="divider reveal"></div>
-            <div class="neon-box wide reveal" style="font-family: 'Space Mono', monospace; font-size: 0.85rem;">
-                <h4>계층적 구조</h4>
-                <p style="margin: 0.5rem 0; color: var(--accent-cyan);">
-                    Middle-Layer Agent (Control Ship) → 릴레이<br>
-                    ↓<br>
-                    Lower-Layer Agents (USV, AUV, ROV)<br>
-                    ↓<br>
-                    각 Aagent가 AgentConnection 기반으로 협력
+            <div class="roadmap-panel reveal">
+                <div class="roadmap-line">
+                    <div class="roadmap-node">
+                        <div class="eyebrow">Expansion 01</div>
+                        <h3>CoLand 확장</h3>
+                        <p style="margin-bottom: 0;">해양에서 검증한 구조를 육상 무인체 운영으로 확장합니다.</p>
+                    </div>
+                    <div class="roadmap-node">
+                        <div class="eyebrow">Expansion 02</div>
+                        <h3>AI 모델 고도화</h3>
+                        <p style="margin-bottom: 0;">경량 모델, 대형 모델, 도메인 특화 모델을 조합합니다.</p>
+                    </div>
+                    <div class="roadmap-node">
+                        <div class="eyebrow">Expansion 03</div>
+                        <h3>더 넓은 무인체 환경</h3>
+                        <p style="margin-bottom: 0;">해양을 시작으로 여러 무인체 환경으로 확장할 수 있습니다.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- S10: CURRENT STATUS -->
+    <section class="slide">
+        <div class="slide-content">
+            <h2 class="reveal">현재 진행 상태</h2>
+            <div class="divider reveal"></div>
+            <div class="split-layout reveal">
+                <div class="problem-panel">
+                    <div class="eyebrow">Progress</div>
+                    <h3>문서와 구현을 함께 맞추는 단계입니다.</h3>
+                    <div class="problem-list">
+                        <div class="problem-item">
+                            <strong>설계</strong><br>
+                            핵심 목표와 구조가 문서화되었습니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>구현</strong><br>
+                            핵심 기능은 단계적으로 구현 중입니다.
+                        </div>
+                        <div class="problem-item">
+                            <strong>검증</strong><br>
+                            문서와 구현을 맞추며 안정성을 확인합니다.
+                        </div>
+                    </div>
+                </div>
+                <div class="solution-panel">
+                    <div>
+                        <div class="eyebrow">Status</div>
+                        <h3>현재는 기반을 안정적으로 다듬는 단계입니다.</h3>
+                        <p style="line-height: 1.8;">
+                            소개 자료와 구현 기준을 함께 맞추면서,
+                            다음 단계의 확장을 준비하고 있습니다.
+                        </p>
+                    </div>
+                    <div class="solution-metric">
+                        <div class="value">08</div>
+                        <div class="desc">현재 발표 자료는 흐름 중심으로 정리된 상태입니다.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- S11: CLOSING -->
+    <section class="slide">
+        <div class="slide-content">
+            <div class="closing-panel">
+                <div class="eyebrow reveal">CoWater</div>
+                <h1 class="reveal" style="margin-bottom: 0.7rem;">해양 운영의 새로운 기준</h1>
+                <div class="divider reveal"></div>
+                <p class="reveal" style="max-width: 760px; margin: 0 auto; line-height: 1.75; font-size: 0.98rem;">
+                    CoWater는 해양 무인체 운영의 복잡도를 줄이고,
+                    더 안전하고 더 강건한 운영 흐름을 만드는 플랫폼입니다.
                 </p>
             </div>
-            <ul class="feature-list reveal">
-                <li><strong>독립성:</strong> 각 Device Agent는 자신의 Device만 직접 제어</li>
-                <li><strong>최종 판단:</strong> Task 수신 후 자신의 Capability/Resource/Safety 확인해 수락/거절</li>
-                <li><strong>협력:</strong> AgentConnection으로 물리 통신 매체(유선/RF/음향) 기반 협력 정의</li>
-                <li><strong>환경 적응:</strong> AUV가 수중 진입 → 자동으로 음향 통신으로 전환</li>
-                <li><strong>로컬 안전 행동:</strong> 통신 단절 시에도 로컬 정책에 따라 자율 동작</li>
-            </ul>
-            <div class="neon-box small reveal">
-                <h4>Communication Media Priority</h4>
-                <p style="margin: 0;">1순위: Wired (테더) → 2순위: RF/Internet → 3순위: Acoustic (음향)<br>
-                <span style="font-size: 0.85rem; color: var(--text-secondary);">환경(수상/수중) 자동 감지로 최적 매체 선택</span></p>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 10: TECHNOLOGY STACK -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">기술 스택</h2>
-            <div class="divider reveal"></div>
-            <div class="grid-3 reveal">
-                <div class="grid-item">
-                    <h4>Backend</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• FastAPI (포트 9110-9116)</li>
-                        <li>• SQLite3 (등록)</li>
-                        <li>• Moth Server (RSSP)</li>
-                        <li>• Python 3.10+</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>Frontend</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• React 18</li>
-                        <li>• 3D 시각화 (Babylon.js)</li>
-                        <li>• 실시간 대시보드</li>
-                        <li>• WebSocket 클라이언트</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>Communication</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• A2A Protocol (HTTP POST)</li>
-                        <li>• Moth RSSP (WebSocket)</li>
-                        <li>• Device Agent Bridge</li>
-                        <li>• Event Streaming</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>Phase 2+</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• GraphQL (쿼리 유연성)</li>
-                        <li>• Redis (캐싱, 메시징)</li>
-                        <li>• Next.js (프론트엔드)</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>Deployment</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• Docker (컨테이너화)</li>
-                        <li>• Kubernetes (오케스트레이션)</li>
-                        <li>• 분산 배포 지원</li>
-                        <li>• 자동 장애 복구</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>외부 서비스</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li>• Moth (wss://cobot.center)</li>
-                        <li>• LLM API (Claude)</li>
-                        <li>• 모니터링 (Prometheus)</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 11: KEY FEATURES & CAPABILITIES -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">핵심 기능 & 능력</h2>
-            <div class="divider reveal"></div>
-            <div class="grid-2 reveal">
-                <div class="grid-item">
-                    <h4>🎯 자연어 명령 처리</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ "항만 주변 기뢰 탐지" → AI가 해석</li>
-                        <li>✓ 여러 실행 방법 Proposal 제시</li>
-                        <li>✓ 사용자가 최적 선택</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>✅ 사용자 승인 기반 실행</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ Proposal 검토 후 승인</li>
-                        <li>✓ 정책이 자동 승인 가능</li>
-                        <li>✓ 실행 전 마지막 안전 확인</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>🤖 정책 기반 자동화</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 배터리 부족 시 자동 귀항</li>
-                        <li>✓ 신호 손실 시 자동 절차 시작</li>
-                        <li>✓ 정책 수정으로 자동화 확대 가능</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>📊 실시간 모니터링</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 3D 지도에서 무인체 위치 추적</li>
-                        <li>✓ Mission/Task 진행 상황 실시간</li>
-                        <li>✓ Event 스트림 시각화</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>🌍 통신 환경 자동 대응</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 수상 ↔ 수중 환경 감지</li>
-                        <li>✓ RF → Acoustic 자동 전환</li>
-                        <li>✓ 대역폭 제한 시 정책 적용</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>📈 Event 기반 분석</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 모든 결정의 근거 추적</li>
-                        <li>✓ 성공/실패 패턴 분석</li>
-                        <li>✓ 운영 성과 리포팅</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 12: ROADMAP & VISION -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">로드맵 & 비전</h2>
-            <div class="divider reveal"></div>
-            <div style="margin: var(--content-gap) auto; max-width: 950px;">
-                <div class="neon-box reveal" style="margin-bottom: 1rem;">
-                    <h4 style="margin-top: 0;">Phase 1: 기초 (현재) - 2026 Q3</h4>
-                    <p>✓ Proposal-Mission 분리, Event 추적 기반 수립<br>
-                    ✓ 6개 System Agent 안정화<br>
-                    ✓ Device Agent 기본 협력<br>
-                    ✓ 3D 대시보드 & 운영 관제</p>
-                </div>
-                <div class="neon-box magenta reveal" style="margin-bottom: 1rem;">
-                    <h4 style="margin-top: 0;">Phase 2: 확장 (2026 H2 - 2027 H1)</h4>
-                    <p>• GraphQL 지원 (쿼리 유연성)<br>
-                    • Redis 캐싱 (성능 개선)<br>
-                    • Next.js 마이그레이션 (프론트엔드)<br>
-                    • 고급 정책 엔진 (조건부 규칙)</p>
-                </div>
-                <div class="neon-box reveal">
-                    <h4 style="margin-top: 0;">Phase 3: 자율화 (2027+)</h4>
-                    <p>◆ AI 기반 정책 학습 (Event에서 패턴 도출)<br>
-                    ◆ 완전 자율 운영 (승인 불필요)<br>
-                    ◆ 글로벌 스케줄 최적화<br>
-                    ◆ 다중 함대 조율</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 13: VALUE PROPOSITION -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">제공하는 가치</h2>
-            <div class="divider reveal"></div>
-            <div style="margin: var(--content-gap) auto;">
-                <div class="stat-box reveal">
-                    <div class="number">3배</div>
-                    <div class="label">운영 효율 증가</div>
-                </div>
-                <div class="stat-box magenta reveal">
-                    <div class="number">100%</div>
-                    <div class="label">의사결정 추적성</div>
-                </div>
-                <div class="stat-box reveal">
-                    <div class="number">0</div>
-                    <div class="label">자동화 지연</div>
-                </div>
-                <div class="stat-box magenta reveal">
-                    <div class="number">99.9%</div>
-                    <div class="label">가용성</div>
-                </div>
-            </div>
-            <ul class="feature-list reveal" style="max-width: 900px;">
-                <li><strong>운영 효율성:</strong> 복잡한 협력 임무를 자동화하여 인력 부담 감소, 임무 완료율 향상</li>
-                <li><strong>의사결정 근거:</strong> 모든 결정이 Event로 추적되어 감사, 학습, 개선의 기반 제공</li>
-                <li><strong>점진적 자동화:</strong> 조직의 준비 수준에 맞춰 자동화 수준을 정책으로 확대 (코드 수정 불필요)</li>
-                <li><strong>신뢰성:</strong> 분산형 아키텍처로 통신 장애 상황도 자동 대응 (로컬 안전 행동)</li>
-                <li><strong>확장성:</strong> 새로운 무인체 추가 시 플러그 앤 플레이로 자동 통합</li>
-            </ul>
-        </div>
-    </section>
-
-    <!-- SLIDE 14: SUCCESS SCENARIOS -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">성공 시나리오</h2>
-            <div class="divider reveal"></div>
-            <div class="grid-2 reveal">
-                <div class="neon-box">
-                    <h4>시나리오 1: 항만 기뢰 탐지</h4>
-                    <p><strong>명령:</strong> "항만 주변 300m 기뢰 탐지"</p>
-                    <p><strong>CoWater:</strong></p>
-                    <ol style="margin: 0.5rem 0; padding-left: 1.5rem; font-size: 0.85rem;">
-                        <li>Proposal 3가지 생성 (경로, 깊이, 속도 조합)</li>
-                        <li>사용자가 안전한 옵션 선택</li>
-                        <li>AUV에 Task 할당 → 자동 실행</li>
-                        <li>모든 단계 Event로 기록</li>
-                    </ol>
-                </div>
-                <div class="neon-box magenta">
-                    <h4>시나리오 2: 통신 단절 대응</h4>
-                    <p><strong>상황:</strong> AUV가 수중 진입 → RF 신호 손실</p>
-                    <p><strong>CoWater:</strong></p>
-                    <ol style="margin: 0.5rem 0; padding-left: 1.5rem; font-size: 0.85rem;">
-                        <li>환경 변화 감지 → Event 발행</li>
-                        <li>AgentConnection 재구성 (음향)</li>
-                        <li>AUV가 로컬 정책으로 운영</li>
-                        <li>신호 복구 후 자동 재동기화</li>
-                    </ol>
-                </div>
-                <div class="neon-box">
-                    <h4>시나리오 3: 정책 기반 자동화</h4>
-                    <p><strong>정책:</strong> "배터리 20% 이하 → 자동 귀항"</p>
-                    <p><strong>CoWater:</strong></p>
-                    <ol style="margin: 0.5rem 0; padding-left: 1.5rem; font-size: 0.85rem;">
-                        <li>Healthcheck에서 배터리 20% 감지</li>
-                        <li>Policy 규칙 자동 실행</li>
-                        <li>귀항 Mission 자동 생성</li>
-                        <li>사용자 알림 + Event 기록</li>
-                    </ol>
-                </div>
-                <div class="neon-box magenta">
-                    <h4>시나리오 4: 복합 임무</h4>
-                    <p><strong>명령:</strong> "USV와 AUV가 협력해 수심 측정"</p>
-                    <p><strong>CoWater:</strong></p>
-                    <ol style="margin: 0.5rem 0; padding-left: 1.5rem; font-size: 0.85rem;">
-                        <li>Proposal에서 협력 방식 제시</li>
-                        <li>AgentConnection으로 릴레이 설정</li>
-                        <li>각 Device가 역할 수행</li>
-                        <li>데이터 자동 수집 & 동기화</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 15: COMPETITIVE ADVANTAGE -->
-    <section class="slide">
-        <div class="slide-content">
-            <h2 class="reveal">경쟁 우위</h2>
-            <div class="divider reveal"></div>
-            <div class="grid-2 reveal">
-                <div class="grid-item">
-                    <h4>🎯 기술적 우위</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 유일한 Proposal-Mission 분리 설계</li>
-                        <li>✓ 완전한 Event 추적성</li>
-                        <li>✓ 분산형 Agent 아키텍처</li>
-                        <li>✓ 자동 통신 매체 선택</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>💼 비즈니스 우위</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 운영 비용 30-40% 절감</li>
-                        <li>✓ 임무 완료율 향상</li>
-                        <li>✓ 안전성 극대화</li>
-                        <li>✓ 의사결정 근거 제공</li>
-                    </ul>
-                </div>
-                <div class="grid-item">
-                    <h4>🔐 차별성</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 정책으로 자동화 수준 동적 조절</li>
-                        <li>✓ AI 기반 의사결정 추적</li>
-                        <li>✓ 물리적 제약 자동 대응</li>
-                        <li>✓ 확장 가능한 아키텍처</li>
-                    </ul>
-                </div>
-                <div class="grid-item magenta">
-                    <h4>📈 시장 기회</h4>
-                    <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-                        <li>✓ 글로벌 해양산업 성장</li>
-                        <li>✓ 규제 강화 (감사 추적 필요)</li>
-                        <li>✓ 자동화 수요 증가</li>
-                        <li>✓ 2030년 시장규모 $XXB</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- SLIDE 16: CLOSING -->
-    <section class="slide">
-        <div class="slide-content">
-            <h1 class="reveal" style="margin-bottom: 1rem;">CoWater</h1>
-            <div class="divider reveal" style="margin-bottom: 2rem;"></div>
-            <p class="reveal" style="font-family: 'Space Mono', monospace; font-size: var(--h3-size); color: var(--accent-cyan); margin-bottom: 1.5rem;">
-                &gt; 함께 미래를 만듭니다
-            </p>
-            <p class="reveal" style="max-width: 800px; margin: 0 auto; line-height: 1.8;">
-                더 안전하고, 효율적이며, 투명한<br>
-                해양 무인체 운영의 새로운 표준<br><br>
-                <span style="color: var(--text-secondary); font-size: 0.95rem;">
-                    CoWater와 함께 AI 기반 자율 운영 시대로 나아가세요<br>
-                    기술 문의: tech@cowater.io | 투자 문의: business@cowater.io
-                </span>
-            </p>
         </div>
     </section>
 
@@ -1065,6 +1219,7 @@
 
             setupNavDots() {
                 const container = document.querySelector('.nav-dots');
+                container.innerHTML = '';
                 this.slides.forEach((_, index) => {
                     const dot = document.createElement('button');
                     dot.className = `nav-dot ${index === 0 ? 'active' : ''}`;
