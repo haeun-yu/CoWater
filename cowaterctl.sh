@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PATH="$SCRIPT_DIR/.venv"
-CONFIG_PATH="$SCRIPT_DIR/server/system-agent/config.json"
+CONFIG_PATH="$SCRIPT_DIR/server/request-handler/config.json"
 PID_DIR="$SCRIPT_DIR/.pids"
 SVC_LOG_DIR="$SCRIPT_DIR/.logs/services"
 
@@ -133,8 +133,8 @@ start() {
     # 2. System Agent Layer
     start_service "cowater-system-agent" \
         "System Agent Layer" \
-        "python run_system_agents.py --config $CONFIG_PATH" \
-        "$SCRIPT_DIR/server/system-agent"
+        "python run_system_agents.py" \
+        "$SCRIPT_DIR/server"
 
     sleep 2
 

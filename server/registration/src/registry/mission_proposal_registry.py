@@ -27,8 +27,7 @@ CREATE TABLE IF NOT EXISTS mission_proposals (
 class MissionProposalRecord:
     proposal_id: str
     title: str
-    mission_type: str
-    goal: str
+    type: str
     status: str = "PROPOSED"
     selected: bool = False
     priority: str | None = "NORMAL"
@@ -43,13 +42,6 @@ class MissionProposalRecord:
     approved_at: str | None = None
     status_updated_at: str = field(default_factory=utc_now_iso)
     status_reason: str | None = None
-    steps: list = field(default_factory=list)
-    summary: str | None = None
-    source: str | None = None
-    alert_id: str | None = None
-    event_id: str | None = None
-    insight_id: str | None = None
-    metadata: dict = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -58,9 +50,7 @@ class MissionProposalRecord:
             "proposal_id": self.proposal_id,
             "id": self.proposal_id,
             "title": self.title,
-            "mission_type": self.mission_type,
-            "type": self.mission_type,
-            "goal": self.goal,
+            "type": self.type,
             "status": str(self.status).upper(),
             "selected": self.selected,
             "priority": self.priority,
@@ -75,13 +65,6 @@ class MissionProposalRecord:
             "approved_at": self.approved_at,
             "status_updated_at": self.status_updated_at,
             "status_reason": self.status_reason,
-            "steps": self.steps,
-            "summary": self.summary,
-            "source": self.source,
-            "alert_id": self.alert_id,
-            "event_id": self.event_id,
-            "insight_id": self.insight_id,
-            "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -130,12 +113,11 @@ class MissionProposalRegistry:
 
     def create_mission_proposal(self, payload: dict[str, Any]) -> MissionProposalRecord:
         """Mission Proposal 생성"""
-        proposal_id = str(payload.get("proposal_id") or f"proposal-{uuid4()}")
+        proposal_id = str(payload.get("proposal_id") or uuid4())
         mission_proposal = MissionProposalRecord(
             proposal_id=proposal_id,
             title=str(payload.get("title") or "Mission Proposal"),
-            mission_type=str(payload.get("mission_type") or payload.get("type") or "generic_mission"),
-            goal=str(payload.get("goal") or ""),
+            type=str(payload.get("type") or payload.get("mission_type") or "OPERATION").upper(),
             status=normalize_proposal_status(payload.get("status") or "PROPOSED"),
             selected=bool(payload.get("selected", False)),
             priority=str(payload.get("priority") or "NORMAL").upper(),
@@ -149,13 +131,6 @@ class MissionProposalRegistry:
             approved_by_user_id=payload.get("approved_by_user_id"),
             approved_at=payload.get("approved_at"),
             status_reason=payload.get("status_reason"),
-            steps=list(payload.get("steps") or []),
-            summary=payload.get("summary"),
-            source=payload.get("source"),
-            alert_id=payload.get("alert_id"),
-            event_id=payload.get("event_id"),
-            insight_id=payload.get("insight_id"),
-            metadata=dict(payload.get("metadata") or {}),
         )
         self._persist_mission_proposal(mission_proposal)
         return mission_proposal

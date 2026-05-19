@@ -3,57 +3,24 @@
 **문서 버전**: v0.1 (구현 기반)  
 **최종 업데이트**: 2026-05-13  
 **대상**: Device Agent 개발자  
-**목적**: Device Agent의 구체적인 구현 방법, 알고리즘, 프로토콜 상세화
+**목적**: Device Agent의 구현 방법, 알고리즘, 프로토콜을 설명합니다.
 
-> 💡 **이 문서는 구현 가이드입니다.** 설계는 [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md), [ADR-009](../adr/ADR-009-physical-communication-routing.md)를 참고하세요.
+> 💡 **이 문서는 구현 가이드입니다.** 역할과 책임, 생명주기 개요는 [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md), 등록 절차는 `scenarios/lifecycle.md`, 통신 설계는 [ADR-009](../adr/ADR-009-physical-communication-routing.md)를 참고하세요.
 
 ---
 
-## 1. Device Agent 개요
+## 1. Device Agent 구현 범위
 
-### 1.1 책임 (Responsibilities)
+이 문서는 다음 구현 항목을 설명합니다.
 
-Device Agent는 **개별 물리 장비(USV, AUV, ROV)를 대표하는 소프트웨어 에이전트**입니다.
+- 초기화와 등록
+- Task 수행 가능성 판단
+- 통신 드라이버 선택
+- Heartbeat와 Health Check
+- 로컬 안전 행동
+- A2A 통신
 
-| 책임                   | 설명                                                         |
-| ---------------------- | ------------------------------------------------------------ |
-| **Task 수행 판단**     | System Agent에서 받은 Task가 실행 가능한지 최종 판단         |
-| **Task 실행**          | required_action을 장비의 물리적 능력으로 변환하여 실행       |
-| **상태 보고**          | 정기적 Heartbeat(배터리, 위치, 센서) + 즉각적 Problem Report |
-| **로컬 안전 행동**     | 통신 단절/배터리 부족 시 자동으로 안전한 상태 유지           |
-| **환경 감지**          | SURFACE/UNDERWATER 상태 감지 및 통신 모드 전환               |
-| **Device-Device 협력** | 다른 Device Agent와의 A2A 직접 통신 (릴레이, 데이터 공유)    |
-
-### 1.2 구조
-
-```
-┌─────────────────────────────────────────┐
-│         Device Agent (소프트웨어)         │
-├─────────────────────────────────────────┤
-│  [ Task Handler Layer ]                 │
-│  - Task 수행 판단 (Capability Match)    │
-│  - Task 실행 (Thread/Event 기반)        │
-│  - 상태 보고                             │
-├─────────────────────────────────────────┤
-│  [ Communication Layer ]                │
-│  - System Agent: A2A Protocol (HTTP)    │
-│  - Device-Device: A2A Protocol (직통)   │
-│  - Registry: REST API (상태 동기화)     │
-├─────────────────────────────────────────┤
-│  [ Physical Driver Layer ]              │
-│  - Hardware Abstraction                 │
-│  - Medium Selection (Wired/Acoustic/RF) │
-│  - Low-level Command Execution          │
-├─────────────────────────────────────────┤
-│  [ Local State Management ]             │
-│  - Task Queue                           │
-│  - Heartbeat Scheduler                  │
-│  - Battery/Position/Sensor Cache        │
-└─────────────────────────────────────────┘
-         ↓
-   Physical Devices
-   (Motors, Sensors, Modems)
-```
+구조 개요와 책임 설명은 상위 문서에서 이미 정의되어 있으므로 여기서는 구현 단계만 다룹니다.
 
 ---
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from src.core.models import EventRecord
+from src.core.models import EventRecord, normalize_severity_value
 from src.registry.registry_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -81,12 +81,12 @@ class EventRegistry:
     ) -> EventRecord:
         """새 Event 생성"""
         event = EventRecord(
-            event_id=f"event-{uuid4()}",
+            event_id=str(uuid4()),
             actor_type=actor_type,
             actor_id=actor_id,
-            type=type,
-            severity=severity,
-            status=status,
+            type=str(type).upper(),
+            severity=normalize_severity_value(severity),
+            status=str(status).upper(),
             title=title,
             description=description,
             target_type=target_type,

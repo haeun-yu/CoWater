@@ -88,7 +88,7 @@ class MissionRegistry:
     ) -> MissionRecord:
         """새 Mission 생성"""
         mission = MissionRecord(
-            mission_id=str(uuid4()),
+            mission_id=str(kwargs.get("mission_id") or uuid4()),
             title=title,
             type=type,
             status=normalize_mission_status(status),
@@ -100,9 +100,14 @@ class MissionRegistry:
             created_by=kwargs.get("created_by", {"type": "SYSTEM", "id": "system"}),
             approved_by_user_id=kwargs.get("approved_by_user_id"),
             approved_at=kwargs.get("approved_at"),
+            approval_id=kwargs.get("approval_id"),
             status_updated_at=utc_now_iso(),
             status_reason=kwargs.get("status_reason"),
             result_summary=kwargs.get("result_summary"),
+            steps=list(kwargs.get("steps") or []),
+            timeline=list(kwargs.get("timeline") or []),
+            final_result=dict(kwargs.get("final_result") or {}),
+            metadata=dict(kwargs.get("metadata") or {}),
             created_at=utc_now_iso(),
             updated_at=utc_now_iso(),
         )

@@ -3,9 +3,9 @@
 **문서 버전**: v0.1 (구현 기반)  
 **최종 업데이트**: 2026-05-13  
 **대상**: System Agent(RequestHandler, DeviceBridge, MissionPlanner 등) 개발자  
-**목적**: 6개 System Agent의 구체적인 구현 방법, 알고리즘, 패턴 상세화
+**목적**: 6개 System Agent의 구현 방법, 알고리즘, 패턴을 설명합니다.
 
-> 💡 **이 문서는 구현 가이드입니다.** 전체 아키텍처는 [SYSTEM_AGENT_DESIGN.md](../SYSTEM_AGENT_DESIGN.md), 설계 원칙은 [principles.md](../core/principles.md)를 참고하세요.
+> 💡 **이 문서는 구현 가이드입니다.** 역할 분할과 구조 개요는 [SYSTEM_AGENT_DESIGN.md](../SYSTEM_AGENT_DESIGN.md), 설계 원칙은 [principles.md](../core/principles.md)를 먼저 확인하세요.
 
 ---
 

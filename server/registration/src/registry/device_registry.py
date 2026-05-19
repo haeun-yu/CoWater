@@ -99,7 +99,7 @@ class DeviceRegistry:
                 normalized_healthcheck_endpoint = build_healthcheck_endpoint(device.id)
                 public_id_changed = False
                 if not getattr(device, "public_id", None):
-                    device.public_id = f"id-{uuid4().hex[:12]}"
+                    device.public_id = str(uuid4())
                     public_id_changed = True
 
                 if (
@@ -245,7 +245,7 @@ class DeviceRegistry:
         )
         parent_gateway_agent_id = None
         if request.parent_id is not None:
-            parent_device = self._devices.get(request.parent_id)
+            parent_device = self.get_device(request.parent_id)
             if parent_device is not None:
                 parent_gateway_agent_id = parent_device.agent.agent_id
         gateway_agent_id = request.gateway_agent_id or parent_gateway_agent_id
@@ -260,7 +260,7 @@ class DeviceRegistry:
 
         return DeviceRecord(
             id=device_id,
-            public_id=f"id-{uuid4().hex[:12]}",
+            public_id=str(uuid4()),
             token=token,
             name=device_name,
             connected=False,
@@ -563,7 +563,7 @@ class DeviceRegistry:
         self._persist_device(device)
         return device
 
-    def update_device_location(self, device_id: int, latitude: float, longitude: float) -> DeviceRecord:
+    def update_device_location(self, device_id: Any, latitude: float, longitude: float) -> DeviceRecord:
         """디바이스 위치 정보 업데이트 (POC 01-05 에이전트의 텔레메트리 기반)"""
         device = self.get_device(device_id)
         device.latitude = latitude
@@ -580,7 +580,7 @@ class DeviceRegistry:
             self.notify_assignment(self._routing_assignment(device))
         return device
 
-    def update_device_metadata(self, device_id: int, *, device_type: Optional[str] = None,
+    def update_device_metadata(self, device_id: Any, *, device_type: Optional[str] = None,
                               layer: Optional[str] = None, connectivity: Optional[str] = None) -> DeviceRecord:
         """디바이스 메타데이터 업데이트"""
         device = self.get_device(device_id)
@@ -595,7 +595,7 @@ class DeviceRegistry:
         self._persist_device(device)
         return device
 
-    def update_auv_submersion(self, device_id: int, is_submerged: bool) -> DeviceRecord:
+    def update_auv_submersion(self, device_id: Any, is_submerged: bool) -> DeviceRecord:
         """AUV 수중/수면 상태 업데이트"""
         device = self.get_device(device_id)
         if device.device_type != "AUV":
@@ -623,9 +623,9 @@ class DeviceRegistry:
 
     def update_device_connectivity_state(
         self,
-        device_id: int,
+        device_id: Any,
         *,
-        parent_id: Optional[int] = None,
+        parent_id: Optional[Any] = None,
         force_parent_routing: bool = False
     ) -> DeviceRecord:
         """
