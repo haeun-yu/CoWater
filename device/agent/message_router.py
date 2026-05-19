@@ -22,7 +22,7 @@ async def _execute_and_report_task(
 ) -> None:
     try:
         execution_result = await asyncio.to_thread(runtime.apply_command, command)
-        normalized_status = "completed" if str(execution_result.get("status") or "").lower() in {"ok", "success", "completed"} else "failed"
+        normalized_status = "COMPLETED" if str(execution_result.get("status") or "").lower() in {"ok", "success", "completed"} else "FAILED"
 
         mission_id = str(message_data.get("mission_id") or message_data.get("response_id") or "")
         report_base = str((command.get("params") or {}).get("report_to_endpoint") or "").strip()
@@ -30,18 +30,6 @@ async def _execute_and_report_task(
             report_base = str(runtime.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116").strip()
         report_endpoint = report_base if report_base.endswith("/message:send") else f"{report_base.rstrip('/')}/message:send"
 
-        if mission_id:
-            await _report_mission_result_to_endpoint(
-                runtime=runtime,
-                mission_id=mission_id,
-                alert_id=str(message_data.get("alert_id") or ""),
-                step_id=str(message_data.get("step_id") or ""),
-                task_id=task_id,
-                command=command,
-                execution_result=execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
-                execution_status=normalized_status,
-                endpoint=report_endpoint,
-            )
         await _report_task_result_to_system_agent(
             runtime=runtime,
             task_id=task_id,
@@ -50,12 +38,11 @@ async def _execute_and_report_task(
             execution_status=normalized_status,
             system_agent_url=report_endpoint,
             mission_id=mission_id or None,
-            alert_id=str(message_data.get("alert_id") or ""),
             step_id=str(message_data.get("step_id") or ""),
             response_id=str(message_data.get("response_id") or mission_id or ""),
         )
 
-        if normalized_status == "failed":
+        if normalized_status == "FAILED":
             category = execution_result.get("failure_category", "").lower().strip()
             if not category or category not in {"device", "communication", "sensor", "mission", "policy", "user", "unknown"}:
                 category = "device"
@@ -162,12 +149,11 @@ async def _report_task_result_to_system_agent(
     execution_status: str,
     system_agent_url: str = "http://127.0.0.1:9116/message:send",
     mission_id: str | None = None,
-    alert_id: str | None = None,
     step_id: str | None = None,
     response_id: str | None = None,
 ) -> None:
     try:
-        normalized_status = "completed" if str(execution_status).lower() == "completed" else "failed"
+        normalized_status = "COMPLETED" if str(execution_status).lower() == "completed" else "FAILED"
         result_message = A2AMessage(
             role="device",
             parts=[
@@ -178,7 +164,6 @@ async def _report_task_result_to_system_agent(
                         "task_id": task_id,
                         "mission_id": mission_id,
                         "response_id": response_id or mission_id or task_id,
-                        "alert_id": alert_id,
                         "step_id": step_id,
                         "status": normalized_status,
                         "device_id": runtime.state.registry_id,
@@ -206,112 +191,19 @@ async def _report_task_result_to_system_agent(
         logger.error(f"Failed to report task result to System Agent: {e}")
 
 
-async def _report_mission_result_to_endpoint(
-    runtime: Any,
-    mission_id: str,
-    alert_id: str,
-    step_id: str,
-    task_id: str,
-    command: dict[str, Any],
-    execution_result: dict[str, Any],
-    execution_status: str,
-    endpoint: str,
-) -> None:
-    try:
-        normalized_status = "completed" if str(execution_status).lower() == "completed" else "failed"
-        source_agent_id = str(runtime.state.agent_id or "")
-        source_device_id = str(runtime.state.registry_id or "")
-        result_summary = str(
-            execution_result.get("summary")
-            or execution_result.get("output_summary")
-            or execution_result.get("message")
-            or f"{command.get('action')} {normalized_status}"
-        )
-        location = {
-            "latitude": runtime.state.latitude,
-            "longitude": runtime.state.longitude,
-        }
-        raw_refs = execution_result.get("output_refs") or execution_result.get("raw_data_ref") or execution_result.get("artifacts") or []
-        if isinstance(raw_refs, dict):
-            raw_refs = [raw_refs]
-        if not isinstance(raw_refs, list):
-            raw_refs = [raw_refs]
-        payload = {
-            "message_type": "mission.result",
-            "mission_id": mission_id,
-            "response_id": mission_id,
-            "alert_id": alert_id,
-            "step_id": step_id or "default",
-            "task_id": task_id or "default",
-            "source_agent_id": source_agent_id,
-            "execution_status": normalized_status,
-            "execution_log": {
-                "source_agent_id": source_agent_id,
-                "source_device_id": source_device_id,
-                "step_id": step_id or "default",
-                "task_id": task_id or "default",
-                "action": command.get("action"),
-                "command": command,
-                "result": execution_result,
-                "reported_at": utc_now(),
-                "result_summary": result_summary,
-                "output_refs": raw_refs,
-                "failure_category": execution_result.get("failure_category") or ("UNKNOWN" if normalized_status != "completed" else None),
-                "failure_message": execution_result.get("reason") or execution_result.get("error") or execution_result.get("failure_message"),
-                "location": location,
-                "device_state_changes": {
-                    "last_telemetry": runtime.state.last_telemetry,
-                    "connected": runtime.state.connected,
-                },
-                "agent_judgement": execution_result.get("agent_judgement") or command.get("action"),
-                "payload": {
-                    "response_id": mission_id,
-                    "mission_id": mission_id,
-                    "alert_id": alert_id,
-                    "step_id": step_id or "default",
-                    "task_id": task_id or "default",
-                    "source_agent_id": source_agent_id,
-                    "source_device_id": source_device_id,
-                    "location": location,
-                },
-            },
-        }
-
-        result_message = A2AMessage(role="device", parts=[A2APart(type="data", data=payload)])
-        result_request = A2ASendRequest(
-            message=result_message,
-            taskId=task_id or mission_id,
-            metadata={"sender_id": source_agent_id, "sender_device_id": source_device_id},
-        )
-
-        data = json.dumps(result_request.model_dump()).encode("utf-8")
-        req = urllib.request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=5):
-            logger.info(
-                "Mission result reported: mission_id=%s step_id=%s task_id=%s status=%s endpoint=%s",
-                mission_id,
-                step_id or "default",
-                task_id or "default",
-                normalized_status,
-                endpoint,
-            )
-    except Exception as e:
-        logger.error(
-            "Failed to report mission result: mission_id=%s step_id=%s task_id=%s endpoint=%s error=%s",
-            mission_id,
-            step_id,
-            task_id,
-            endpoint,
-            e,
-        )
-
-
 async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
     data = extract_message_data(request.message)
     runtime.record_inbox(request.taskId, data)
     msg_type = str(data.get("message_type") or data.get("type") or "task.assign")
 
-    VALID_MESSAGE_TYPES = {"child.register", "layer.assignment", "task.assign", "event.report", "mission.result"}
+    VALID_MESSAGE_TYPES = {
+        "task.assign",
+        "task.result",
+        "event.report",
+        "mission.result",
+        "child.register",
+        "layer.assignment",
+    }
 
     if msg_type == "child.register":
         child = data.get("child") or data
@@ -375,6 +267,31 @@ async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
                     request=request,
                 )
             )
+    elif msg_type == "event.report":
+        event_type = str(data.get("event_type") or "UNKNOWN")
+        severity = str(data.get("severity") or "INFO")
+        description = str(data.get("description") or "")
+        logger.warning(f"Event reported: type={event_type}, severity={severity}, description={description}")
+        result = {
+            "received": True,
+            "event_type": event_type,
+            "logged": True,
+        }
+    elif msg_type == "mission.result":
+        mission_id = str(data.get("mission_id") or "")
+        mission_status = str(data.get("status") or "UNKNOWN")
+        logger.info(f"Mission result received: mission_id={mission_id}, status={mission_status}")
+        runtime.state.remember({
+            "kind": "mission_result",
+            "mission_id": mission_id,
+            "status": mission_status,
+            "at": utc_now(),
+        })
+        result = {
+            "received": True,
+            "mission_id": mission_id,
+            "status": mission_status,
+        }
     else:
         if msg_type not in VALID_MESSAGE_TYPES:
             logger.warning(f"Unknown A2A message_type: {msg_type}, task_id: {request.taskId}, data: {data}")
@@ -424,7 +341,7 @@ async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
             or metadata.get("sender_id")
             or data.get("agent_id")
         )
-        if from_device_id is None and msg_type in {"event.report", "mission.result", "task.result"}:
+        if from_device_id is None and msg_type in {"task.result"}:
             from_device_id = data.get("device_id")
         action = str(data.get("action") or data.get("command") or "").strip() or None
         asyncio.create_task(

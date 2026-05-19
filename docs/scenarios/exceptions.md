@@ -1,4 +1,4 @@
-# 예외 및 자동 대응 (Exceptions & Auto-Recovery)
+# 예외와 자동 대응
 
 오류 상황과 시스템의 자동 대응 메커니즘  
 **기반**: [ADR-003](../adr/ADR-003-capability-driven-task-assignment.md), [ADR-005](../adr/ADR-005-event-triggered-rule-execution.md), [ADR-006](../adr/ADR-006-adaptive-autonomy-migration-path.md)
@@ -71,12 +71,12 @@ Event {
 
 ### **2️⃣ SYS_ANOMALY_DETECTED (anomaly_type=LOW_BATTERY): 배터리 부족**
 
-**상황**: Device 배터리가 임계값(`min_battery_percent_for_task = 30%`)을 넘음
+**상황**: Device 배터리가 경고 임계값(`warning_battery_percent = 30%`)에 도달함
 
 **P6 적용 (정책 기반 자동 대응)**:
 
-- Policy가 정의된 경우: `battery < 20%` → 즉시 RETURN_TO_BASE Mission 자동 생성
-- Policy가 없는 경우: 경고만 발행, 사용자 선택 대기
+- Policy가 정의된 경우: `battery < 10%` → 즉시 RETURN_TO_BASE Mission 자동 생성
+- Policy가 없는 경우: `battery < 30%` 구간에서는 경고만 발행, 사용자 선택 대기
 
 **감지**:
 
@@ -86,7 +86,7 @@ Heartbeat 데이터:
   battery_percent: 15%
 
 System Agent 판단:
-  15% < 30% → 임계치 초과 → Event 발행
+  15% < 30% → 경고 임계값 초과 → Event 발행
 ```
 
 **Event 발행**:
@@ -114,7 +114,7 @@ Rule {
   conditions: [
     { field: "event.type", operator: "EQ", value: "SYS_ANOMALY_DETECTED" },
     { field: "event.data.anomaly_type", operator: "EQ", value: "LOW_BATTERY" },
-    { field: "device.battery_percent", operator: "LT", value: 20 }
+    { field: "device.battery_percent", operator: "LT", value: 10 }
   ],
   action: {
     type: "AUTO_CREATE_MISSION",
@@ -125,8 +125,8 @@ Rule {
 
 **자동 대응**:
 
-1. 임계값 < 20% → 즉시 RETURN_TO_BASE Mission 생성 (사용자 승인 X)
-2. 임계값 20-30% → 알림 Event만 발행, 사용자 선택 대기
+1. 임계값 < 10% → 즉시 RETURN_TO_BASE Mission 생성 (사용자 승인 X)
+2. 임계값 10-30% → 알림 Event만 발행, 사용자 선택 대기
 
 **복구**:
 
@@ -144,8 +144,8 @@ Rule {
 
 ```
 마지막 Heartbeat: 2026-05-12 10:00:00
-현재 시간: 2026-05-12 10:10:10
-경과 시간: 10분 10초 > 600초(timeout)
+현재 시간: 2026-05-12 10:00:11
+경과 시간: 11초 > 10초(timeout)
 
 System Agent:
   Device.status: ONLINE → OFFLINE
@@ -162,7 +162,7 @@ Event {
   data: {
     anomaly_type: "DEVICE_OFFLINE",
     last_heartbeat_at: "2026-05-12T10:00:00Z",
-    timeout_sec: 600
+    timeout_sec: 10
   }
 }
 ```
@@ -205,7 +205,7 @@ Rule Engine:
 
 ---
 
-### **4️⃣ SYS_TASK_RESULT (status=FAILED): Task 실행 실패**
+### **4️⃣ SYS_TASK_FAILED (status=FAILED): Task 실행 실패**
 
 **상황**: Device Agent가 Task 실패를 보고하거나 System이 Timeout 감지
 
@@ -221,7 +221,7 @@ Rule Engine:
 
 ```typescript
 Event {
-  type: "SYS_TASK_RESULT",
+  type: "SYS_TASK_FAILED",
   severity: "WARNING",
   target_type: "TASK",
   target_id: "task-2",
@@ -270,7 +270,7 @@ Mission {
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_FAILED" },
     { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "event.severity", operator: "EQ", value: "WARNING" }
   ],
@@ -294,7 +294,7 @@ Rule {
 
 ---
 
-### **4️⃣-2 SYS_TASK_RESULT (status=ABORTED): Device Agent가 Task 거절 (P5 적용)**
+### **4️⃣-2 SYS_TASK_FAILED (status=ABORTED): Device Agent가 Task 거절 (P5 적용)**
 
 **상황**: Device Agent가 Task를 받은 후 실행 불가능하다고 판단해서 거절
 
@@ -310,7 +310,7 @@ Rule {
 
 ```typescript
 Event {
-  type: "SYS_TASK_RESULT",
+  type: "SYS_TASK_FAILED",
   severity: "WARNING",
   target_type: "TASK",
   data: {
@@ -354,7 +354,7 @@ Task-3: CANCELLED (status_reason: "Mission failed due to Task-1 ABORTED", status
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+    { field: "event.type", operator: "EQ", value: "SYS_TASK_FAILED" },
     { field: "event.data.status", operator: "EQ", value: "ABORTED" },
     { field: "event.severity", operator: "EQ", value: "WARNING" }
   ],
@@ -381,7 +381,7 @@ Rule {
 - Device Agent를 강제로 Task 할당 불가
 - 단, 사용자는 P7을 통해 "이 Device에 이 Task를 강제 할당"하라고 override 가능 (그 후 실패 책임은 사용자)
 
-**`SYS_TASK_RESULT(status=FAILED)` vs `SYS_TASK_RESULT(status=ABORTED)` 구분**:
+**`SYS_TASK_FAILED(status=FAILED)` vs `SYS_TASK_FAILED(status=ABORTED)` 구분**:
 | 상황 | 상태 | 이유 | 설명 |
 |------|------|------|------|
 | Task 시작 전 Device가 거절 | ABORTED | P5: 불가능 사전 판단 | Device는 이 Task를 못함 (센서 없음, 범위 초과 등) |
@@ -541,7 +541,7 @@ Event {
 
 ---
 
-## 🔍 Alert Fingerprint & Event Deduplication (중복 방지)
+## 🔍 Alert Fingerprint와 Event 중복 방지
 
 **문제**: 동일한 문제가 반복되면 Event와 Alert가 폭주합니다.
 
@@ -643,11 +643,11 @@ IF user_rejected_recommendation THEN:
 
 ```
 Timeline:
-10:00 - Battery 20% → Event #1 발행
-        → Alert #1 생성 (fingerprint: "device/rov-1/LOW_BATTERY/battery<20")
-        → Proposal: "귀환하겠습니까?" 제시
+10:00 - Battery 30% → Event #1 발행
+        → Alert #1 생성 (fingerprint: "device/rov-1/LOW_BATTERY/battery<30")
+        → Proposal: "경고: 배터리 부족, 계속 진행할까요?" 제시
 
-10:01 - Battery 19% → Event #2 발행
+10:01 - Battery 29% → Event #2 발행
         → Alert #1의 duplicate_count: 1 → 2
         → Alert #1 갱신, 새 Alert X
         → Proposal 재제시 X (사용자가 이미 본 것)
@@ -724,10 +724,10 @@ Table recommendation_suppressions {
 | 예외 | 심각도 | 자동 여부 | 규칙 |
 | --- | --- | --- | --- |
 | `SYS_INTENT_REJECTED` | INFO | ✗ | 사용자에게 이유 전달 |
-| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY < 20%`) | WARNING | ✓ | RETURN_TO_BASE 자동 생성 |
-| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY 20-30%`) | INFO | ✗ | 알림만 전달 |
+| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY < 10%`) | WARNING | ✓ | RETURN_TO_BASE 자동 생성 |
+| `SYS_ANOMALY_DETECTED` (`LOW_BATTERY 10-30%`) | INFO | ✗ | 알림만 전달 |
 | `SYS_ANOMALY_DETECTED` (`DEVICE_OFFLINE`) | WARNING | ✗ | 재연결 대기 또는 재계획 |
-| `SYS_TASK_RESULT` (`status=FAILED`) | WARNING | ✗ | 재시도/대체 Proposal 제시 |
+| `SYS_TASK_COMPLETED` / `SYS_TASK_FAILED` | WARNING | ✗ | 결과 기록 및 필요 시 재시도/대체 Proposal 제시 |
 | `SYS_ANOMALY_DETECTED` (`CRITICAL_HAZARD`) | CRITICAL | ✓ | EMERGENCY_STOP 자동 생성 |
 | `SYS_ANOMALY_DETECTED` (`AGENTCONNECTION_DEGRADED`) | WARNING | ✗ | 대체 경로 탐색 |
 
@@ -747,7 +747,7 @@ Table recommendation_suppressions {
 Rule {
   rule_type: "AUTO_RESPONSE",
   conditions: [
-    { field: "event.type", operator: "EQ", value: "SYS_TASK_RESULT" },
+      { field: "event.type", operator: "EQ", value: "SYS_TASK_FAILED" },
     { field: "event.data.status", operator: "EQ", value: "FAILED" },
     { field: "policy.auto_retry_enabled", operator: "EQ", value: true }
   ],

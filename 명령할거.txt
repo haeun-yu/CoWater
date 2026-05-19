@@ -1,0 +1,11 @@
+_moth_event_loop: name=agents 채널 구독 (현재 name=events)
+Registry ingest_event async 변환은 그대로 유지 (프론트엔드 push 용도)
+이거 되어있어?
+
+moth_publish랑 sub말고도 meb파일을 따로 만들어서 처리하는건 어떠니 그럼 혼란이 좀 덜할거같은데
+meb은 그 하나의 스트림으로 pub도되고 sub도돼
+
+runtime.py가 좀 수상하다 agent 코드에 있는거..
+llm으로 다 처리하고 있는거 맞지?
+
+system agents 아예 파일 분리

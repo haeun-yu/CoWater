@@ -1,7 +1,7 @@
 {
   "server": {
     "host": "127.0.0.1",
-    "port": 9115
+    "port": 9205
   },
   "registry": {
     "url": "http://127.0.0.1:8280",
@@ -28,7 +28,8 @@
     },
     "rules": {
       "critical": {
-        "battery_emergency_percent": 5
+        "battery_warning_percent": 30,
+        "battery_emergency_percent": 10
       }
     },
     "capabilities": {
@@ -41,7 +42,6 @@
       ],
       "tools": [
         "gps_reader",
-        "wired_link_monitor",
         "rov_tether_controller",
         "child_registry",
         "a2a_router",
@@ -72,11 +72,6 @@
           "type": "ODOMETRY",
           "name": "ship_motion",
           "frequency_hz": 1
-        },
-        {
-          "type": "TOPIC",
-          "name": "wired_link",
-          "frequency_hz": 10
         },
         {
           "type": "VIDEO",
@@ -118,6 +113,6 @@
     ]
   },
   "system_agent": {
-    "url": "http://127.0.0.1:9116"
+    "url": "http://127.0.0.1:9110"
   }
 }

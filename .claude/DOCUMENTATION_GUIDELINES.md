@@ -9,25 +9,25 @@
 **규칙**: 상태값이나 데이터 구조의 상세 내용은 `docs/core/schema.md`에 한 번만 정의  
 `docs/scenarios/*.md`에서는 해당 필드명만 언급하거나 링크를 걸기
 
-**Why**: 스키마가 변경되면 `docs/core/schema.md`만 수정하면 전체 문서가 자동으로 일관성 유지
+**이유**: 스키마가 바뀌어도 `docs/core/schema.md`만 수정하면 전체 문서의 일관성을 유지할 수 있습니다.
 
-**How to apply**:
+**적용 방법**:
 - ❌ `scenarios/operation.md`에서 Operation의 구조를 다시 설명하지 않기
 - ✅ `scenarios/operation.md`에서 "자세한 필드는 [schema.md](../core/schema.md#operation) 참고"라고 링크하기
 - ✅ `scenarios/`에서는 **개념과 흐름**만 중심으로 작성
 
 ---
 
-## ② 다이어그램은 텍스트 코드로 (Mermaid.js)
+## ② 다이어그램은 텍스트 코드로 작성
 
 **규칙**: 모든 시퀀스 다이어그램, 플로우 차트는 **이미지 파일이 아니라 Mermaid 코드**로 작성
 
-**Why**: 
+**이유**: 
 - AI가 다이어그램을 직접 수정 가능
 - 마크다운 뷰어에서 자동으로 렌더링
 - 웹 코드 변환 시 쉽게 통합
 
-**How to apply**:
+**적용 방법**:
 ```markdown
 ## 프로세스 플로우
 
@@ -42,22 +42,22 @@ graph TD
 
 ---
 
-## ③ ADR 기반 업데이트
+## ③ ADR 기반으로 업데이트
 
 **규칙**: 새로운 기능 추가 또는 아키텍처 변경 시, **반드시 먼저 ADR에 결정을 기록**한 후 문서 업데이트
 
-**Why**: 
+**이유**: 
 - 왜 그렇게 결정했는지 이력 남김
 - 추후 논의/롤백 시 결정 근거 확인 가능
 - 팀 전체가 의도 이해
 
-**How to apply**:
+**적용 방법**:
 1. `docs/adr/ADR-00X-*.md` 작성 (상황, 결정, 결과)
 2. `docs/adr/ADR-000-index.md`에 등재
 3. 그 결정에 따라 `docs/core/` 및 `docs/scenarios/` 업데이트
 4. 관련 다른 ADR 참고 표시
 
-> **Maintainer 주의**: `docs/adr/ADR-007-data-generalization.md`가 존재하지만
+> **관리자 주의**: `docs/adr/ADR-007-data-generalization.md`가 존재하지만
 > `docs/adr/ADR-000-index.md`에 등재되지 않았습니다.
 > ADR을 추가하거나 편집할 때 반드시 index 파일도 갱신하세요.
 
@@ -68,7 +68,7 @@ graph TD
 대화 중 "그건 추후에 반영할거야"라는 결정이 나오면  
 → **docs/roadmap.md**의 적절한 섹션에 추가하기
 
-**How**:
+**적용 방법**:
 ```markdown
 ## 진행 중
 - [ ] 미션 분리 (ADR-001 검토 중)  
@@ -93,7 +93,7 @@ graph TD
 
 ## 적용 예시
 
-**시나리오**: "Operation에 priority 필드 추가하고 싶어"
+**시나리오**: "Operation에 priority 필드를 추가하고 싶다"
 
 ```
 【PROCESS】
@@ -137,6 +137,6 @@ graph TD
 ---
 
 ## 참고
-- `PROCESS.md` - 기능 구현 프로세스
+- `PROCESS.md` - 기능 구현 절차
 - `COWATER_CONTEXT.md` - 시스템 컨텍스트
 - `GUIDELINES.md` - 일반 개발 가이드라인

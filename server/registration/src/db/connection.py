@@ -15,7 +15,7 @@ class DatabaseConnection:
         """Initialize database connection"""
         if db_path is None:
             # Use default path in workspace
-            db_path = str(Path(__file__).parent.parent.parent.parent.parent / ".data" / "cowater.db")
+            db_path = ".data/policies.db"
         
         self.db_path = db_path
         self.conn: Optional[sqlite3.Connection] = None

@@ -21,10 +21,7 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlunsplit, urlsplit
 
-try:
-    import websockets
-except ImportError:
-    websockets = None
+import websockets
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +43,8 @@ class MothPublisher:
             moth_base_url: Moth 기본 URL (예: wss://cobot.center:8287)
         """
         if websockets is None:
-            logger.warning("websockets not installed - Moth publishing disabled")
-            self.enabled = False
-            return
+            raise ImportError("websockets 패키지가 필요합니다: pip install websockets")
 
-        self.enabled = True
         self.moth_base_url = moth_base_url
         self.connections: dict[str, Any] = {}  # channel -> websocket
         self._lock = asyncio.Lock()
@@ -66,9 +60,6 @@ class MothPublisher:
         Returns:
             성공 여부
         """
-        if not self.enabled:
-            return False
-
         # 비동기 발행 (블로킹 없음)
         asyncio.create_task(self._publish_async(channel, payload))
         return True
@@ -77,19 +68,17 @@ class MothPublisher:
         """비동기 발행 구현"""
         try:
             ws_url = _build_publish_url(self.moth_base_url, channel)
-
+            logger.info(f"[Moth] Publishing to {channel} ({ws_url[:60]}...)")
             async with websockets.connect(ws_url) as ws:
-                # 연결 후 메시지 발행
                 message = {
                     "type": "publish",
                     "channel": channel,
                     "data": payload,
                 }
                 await ws.send(json.dumps(message))
-                logger.debug(f"[Moth] Published to {channel}")
-
+                logger.info(f"[Moth] Published to {channel} OK")
         except Exception as e:
-            logger.debug(f"[Moth] Publish error on {channel}: {e}")
+            logger.warning(f"[Moth] Publish error on {channel}: {e}")
 
     async def close_all(self) -> None:
         """모든 연결 종료"""

@@ -1,4 +1,4 @@
-# ADR-003: Capability-Driven Task Assignment
+# ADR-003: Capability 기반 Task 할당
 
 **상태**: Accepted  
 **작성일**: 2026-05-12  
@@ -6,7 +6,7 @@
 
 ---
 
-## 상황 (Context)
+## 상황
 
 사용자: "A 구역 바닥면을 **고해상도로** 촬영해줘"
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 결정 (Decision)
+## 결정
 
 **System Agent는 '계획가(Planner)'이지 '창조주'가 아닙니다.**
 

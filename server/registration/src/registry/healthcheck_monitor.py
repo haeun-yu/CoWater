@@ -2,10 +2,10 @@
 Healthcheck Monitor: Device 건강 상태 모니터링 (Server 측)
 
 Device들로부터 정기적으로 수신되는 healthcheck를 추적하여:
-1. Offline Device 감지: 30초 이상 healthcheck 없으면 offline 표시
+1. Offline Device 감지: 10초 이상 healthcheck 없으면 offline 표시
 2. 자동 재할당: Middle Agent offline 시, 자식 devices를 다른 parent로 자동 재할당
 
-Moth WebSocket을 통해 device.healthcheck topic을 수신합니다.
+Moth WebSocket을 통해 agents 채널의 DEVICE_HEALTHCHECK 이벤트를 수신합니다.
 """
 
 from __future__ import annotations
@@ -28,15 +28,15 @@ class HealthcheckMonitor:
     3. 자동 재할당: Middle layer agent offline 시, 자식들을 새로운 parent로 자동 재할당
 
     Config:
-    - HEALTHCHECK_INTERVAL_SECONDS: 모니터링 체크 주기 (기본 10초)
-    - HEALTHCHECK_TIMEOUT_SECONDS: Offline 판정 timeout (기본 30초)
+    - HEALTHCHECK_INTERVAL_SECONDS: 모니터링 체크 주기 (기본 1초)
+    - HEALTHCHECK_TIMEOUT_SECONDS: Offline 판정 timeout (기본 10초)
     """
 
     def __init__(
         self,
         registry: Any,
-        interval_seconds: int = 10,
-        timeout_seconds: int = 3,
+        interval_seconds: int = 1,
+        timeout_seconds: int = 10,
         timeout_by_device_type: Optional[dict[str, int]] = None,
         distance_calculator: Optional[Callable] = None,
     ):
@@ -90,11 +90,11 @@ class HealthcheckMonitor:
                     if last_seen < timeout_threshold:
                         logger.warning(
                             f"Device {device.id} ({device.name}) [type={device_type}] "
-                            f"marked as LOST (timeout={timeout_seconds}s, no healthcheck)"
+                            f"marked as OFFLINE (timeout={timeout_seconds}s, no healthcheck)"
                         )
                         device.connected = False
                         device.agent.connected = False
-                        device.connectivity_status = "lost"
+                        device.connectivity_status = "offline"
                         device.last_error = f"Healthcheck timeout at {datetime.now(timezone.utc).isoformat()}"
                         device.updated_at = datetime.now(timezone.utc).isoformat()
                         self.registry._persist_device(device)
@@ -249,7 +249,7 @@ class HealthcheckMonitor:
                 return
             if device:
                 current_status = "online" if device.connected else "offline"
-                new_status = "online" if status == "online" else "offline"
+                new_status = "online" if str(status).strip().lower() == "online" else "offline"
                 battery_changed = False
                 location_changed = False
 
@@ -270,8 +270,7 @@ class HealthcheckMonitor:
                 if current_status != new_status or location_changed or battery_changed:
                     device.connected = (new_status == "online")
                     device.agent.connected = device.connected
-                    if new_status == "online":
-                        device.connectivity_status = "online"
+                    device.connectivity_status = "online" if new_status == "online" else "offline"
                     device.updated_at = datetime.now(timezone.utc).isoformat()
                     self.registry._persist_device(device)
                     if current_status != new_status:

@@ -1,112 +1,82 @@
 # System Agent 아키텍처
 
-**문서 버전**: 1.0  
-**목적**: 6개 전문 에이전트의 책임과 역할 정의
+**목적**: System Agent 계층에서만 필요한 설계 메모를 정리합니다.  
+전체 구조는 `SYSTEM_ARCHITECTURE.md`, 구현 방법은 `implementation/system-agent.md`를 정본으로 봅니다.
 
 ---
 
-## 1. System Agent Layer 개요
+## 이 문서의 범위
 
-CoWater의 System Agent Layer는 6개의 전문 에이전트로 구성됩니다.
+이 문서는 다음만 다룹니다.
 
-### 포트 배정
+- 6개 System Agent의 역할 분할 기준
+- 이벤트 구독 구조
+- 공통 BaseAgent가 가져야 할 최소 인터페이스
+- Agent별 메모리 캐시와 Registry 저장 전략
 
-| 에이전트 | 포트 | 책임 |
-|---------|------|------|
-| **RequestHandler** | 9116 | 사용자 요청 해석 & 라우팅 |
-| **DeviceBridge** | 9110 | Device ↔ System 통신 게이트웨이 |
-| **MissionPlanner** | 9111 | 미션/Task 설계 및 생명주기 관리 |
-| **PolicyManager** | 9112 | 정책 기반 자동 대응 |
-| **SystemSentinel** | 9113 | 시스템 건전성 감시 & AgentConnection 관리 |
-| **InsightReporter** | 9114 | 데이터 조회 & 분석 리포트 생성 |
+이 문서에 두지 않는 내용:
 
----
+- CoWater 전체 아키텍처 개요
+- Proposal → Mission → Task 전체 흐름 설명
+- Device Agent 구조 설명
+- 구현 코드 상세
 
-## 2. 각 에이전트의 책임
+## 6개 Agent 역할 분할
 
-### RequestHandler (포트 9116)
-- 사용자 자연어 명령을 intent (QUERY/MISSION/POLICY/EMERGENCY/DIRECT)로 분류
-- 적절한 System Agent로 라우팅 또는 직접 처리
-- **LLM**: 명령 해석 및 의도 분류
+| 에이전트 | 포트 | 핵심 책임 |
+|---|---:|---|
+| RequestHandler | 9116 | 사용자 요청 해석과 라우팅 |
+| DeviceBridge | 9110 | Device ↔ System 통신 게이트웨이 |
+| MissionPlanner | 9111 | Proposal, Mission, Task 설계와 생명주기 관리 |
+| PolicyManager | 9112 | 정책 기반 자동 대응 |
+| SystemSentinel | 9113 | 건전성 감시와 AgentConnection 상태 관리 |
+| InsightReporter | 9114 | 조회와 리포트 생성 |
 
-### DeviceBridge (포트 9110)
-- Device Agent와의 A2A 통신 (task.assign, task.result)
-- Device healthcheck 수신 및 정규화
-- Task 할당 & 결과 수집
-- **LLM**: Task 전달 실패 시 대체 Device 선택, relay 대상 판단
+## 역할 분리 원칙
 
-### MissionPlanner (포트 9111)
-- 사용자 intent로부터 여러 대안 Proposal 생성 (3단계: 규칙 기반 + LLM + 검증)
-- Mission 생명주기 관리 (READY → IN_PROGRESS → COMPLETED / FAILED / CANCELLED)
-- Task 분배 & 진행 상황 추적
-- **LLM**: 3가지 Proposal 생성 (최적/빠른/안전)
+- RequestHandler는 해석과 라우팅만 담당하고 도메인 상태를 직접 변경하지 않습니다.
+- DeviceBridge는 통신 중개와 상태 정규화만 담당합니다.
+- MissionPlanner는 Proposal, Mission, Task 상태의 정본 소유자입니다.
+- PolicyManager는 Rule 평가와 자동 대응 판단을 담당합니다.
+- SystemSentinel은 이상 탐지와 감시를 담당합니다.
+- InsightReporter는 읽기 전용 조회와 보고를 담당합니다.
 
-### PolicyManager (포트 9112)
-- 등록된 정책 관리 & 자동 대응 결정
-- 이상 징후 → 정책 매칭 → 자동 실행 (if auto_execute=true)
-- **LLM**: 정책 매칭 및 대응 결정
+## MEB 이벤트 구독 구조
 
-### SystemSentinel (포트 9113)
-- Device 건전성 감시 (2초 interval)
-- 규칙 기반: 배터리, Heartbeat timeout, 센서 이상 감지
-- AgentConnection 3단계 필터링 (Gateway, 매체, 환경)
-- AgentConnection CRUD & 상태 관리
-- **LLM**: 복합 패턴 분석 (배터리 급감 + 신호 약화 = 고장 의심)
+- 단일 `agents` 채널을 사용합니다.
+- 각 이벤트는 `event_type`과 `target_agents`로 라우팅합니다.
+- Agent는 자신이 대상인 이벤트만 처리합니다.
 
-### InsightReporter (포트 9114)
-- Stateless: Registry에서 실시간 데이터 조회
-- Mission 이력, Device 상태, Event 로그 분석
-- 한국어 리포트 생성
-- **LLM**: 수치 데이터를 자연어 분석 리포트로 변환
+이벤트 타입 정본은 `core/event-types.md`를 봅니다.
 
----
+## BaseAgent 공통 인터페이스
 
-## 3. MEB 이벤트 구독 구조
+모든 System Agent는 최소한 아래 인터페이스를 공유합니다.
 
-**단일 "agents" meb 채널** (송수신):
-- event_type + target_agents로 라우팅
-- 각 Agent는 자신이 대상인 이벤트만 처리
-
-자세한 이벤트 정의: [Event Types](core/event-types.md)
-
----
-
-## 4. BaseAgent 공통 클래스
-
-모든 에이전트가 상속:
 ```python
 class BaseAgent:
-    async def start()           # 에이전트 시작
-    async def call_llm()        # LLM 호출 (Circuit Breaker + 재시도)
-    async def publish_event()   # MEB 이벤트 발행
-    async def subscribe_to_meb() # MEB 구독
+    async def start()
+    async def call_llm()
+    async def publish_event()
+    async def subscribe_to_meb()
 ```
 
----
+구현 상세는 `implementation/system-agent.md`를 봅니다.
 
-## 5. 상태 관리 전략
+## 상태 관리 전략
 
 | 에이전트 | 메모리 캐시 | Registry 저장 |
-|---------|-----------|------------|
-| RequestHandler | 최근 명령 10개 | Event (ingest) |
-| DeviceBridge | Device 목록 (30초 TTL) | Device 상태 |
+|---|---|---|
+| RequestHandler | 최근 명령 | Event |
+| DeviceBridge | Device 목록 단기 캐시 | Device 상태 |
 | MissionPlanner | 활성 Mission | Mission, Task, Proposal |
-| PolicyManager | Policy 목록 | Policy (변경 시 PUT) |
-| SystemSentinel | heartbeat 타임스탐프 | Alert (ingest) |
-| InsightReporter | 없음 (완전 stateless) | 실시간 조회 |
+| PolicyManager | 활성 Policy 목록 | Policy, Rule, Config |
+| SystemSentinel | heartbeat 타임스탬프 | Alert, Event |
+| InsightReporter | 없음 | 실시간 조회 |
 
----
+## 관련 정본
 
-## 6. 통신 채널 정리
-
-자세한 내용:
-- [A2A Protocol](core/a2a-protocol.md) - Device ↔ System/Device A2A 통신
-- [AgentConnection](core/agent-connection.md) - Device 간 통신 관리
-- [Communication Driver](core/communication-driver.md) - 물리 계층 드라이버 선택 & relay
-
----
-
-**관련 문서**:
-- [Event Types](core/event-types.md) - 13개 MEB 이벤트 정의
-- [A2A Protocol](core/a2a-protocol.md) - 메시지 구조 & 타입
-- [System Architecture](SYSTEM_ARCHITECTURE.md) - 전체 아키텍처
+- 전체 구조: `SYSTEM_ARCHITECTURE.md`
+- 이벤트: `core/event-types.md`
+- 계약: `core/a2a-protocol.md`
+- 구현: `implementation/system-agent.md`

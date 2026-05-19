@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from src.core.models import EventIngestRequest, EventRecord
+from src.core.models import EventRecord, normalize_severity_value
+from src.registry.registry_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +57,7 @@ class EventRegistry:
             return conn.execute("SELECT event_id, data, created_at, updated_at FROM events WHERE event_id = ?", (event_id,)).fetchone()
 
     def _persist_event(self, event: EventRecord) -> None:
-        data = {
-            "event_id": event.event_id,
-            "source_system": event.source_system,
-            "source_agent_id": event.source_agent_id,
-            "source_role": event.source_role,
-            "event_type": event.event_type,
-            "severity": event.severity,
-            "message": event.message,
-            "metadata": event.metadata,
-            "created_at": event.created_at,
-            "updated_at": event.updated_at,
-        }
+        data = event.to_dict()
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO events (event_id, data, created_at, updated_at)
@@ -76,32 +66,43 @@ class EventRegistry:
             )
             conn.commit()
 
-    def ingest_event(self, request: EventIngestRequest) -> EventRecord:
-        event_id = request.event_id or f"event-{uuid4()}"
-        existing_row = self._get_row(event_id)
-        if existing_row is None:
-            event = EventRecord(
-                event_id=event_id,
-                source_system=request.source_system,
-                source_agent_id=request.source_agent_id,
-                source_role=request.source_role,
-                event_type=request.event_type,
-                severity=request.severity,
-                message=request.message,
-                metadata=dict(request.metadata),
-            )
-            self._persist_event(event)
-            return event
+    def create_event(
+        self,
+        actor_type: str,
+        actor_id: str,
+        type: str,
+        severity: str,
+        title: str,
+        description: str,
+        target_type: str,
+        target_id: str,
+        data: dict | None = None,
+        status: str = "OPEN",
+    ) -> EventRecord:
+        """새 Event 생성"""
+        event = EventRecord(
+            event_id=str(uuid4()),
+            actor_type=actor_type,
+            actor_id=actor_id,
+            type=str(type).upper(),
+            severity=normalize_severity_value(severity),
+            status=str(status).upper(),
+            title=title,
+            description=description,
+            target_type=target_type,
+            target_id=target_id,
+            data=data or {},
+            created_at=utc_now_iso(),
+            updated_at=utc_now_iso(),
+        )
+        self._persist_event(event)
+        return event
 
-        event = self._row_to_event(existing_row)
-        event.source_system = request.source_system
-        event.source_agent_id = request.source_agent_id
-        event.source_role = request.source_role
-        event.event_type = request.event_type
-        event.severity = request.severity
-        event.message = request.message
-        event.metadata = dict(request.metadata)
-        event.touch()
+    def update_event_status(self, event_id: str, status: str) -> EventRecord:
+        """Event 상태 업데이트"""
+        event = self.get_event(event_id)
+        event.status = status
+        event.updated_at = utc_now_iso()
         self._persist_event(event)
         return event
 

@@ -148,12 +148,13 @@ class RegistryClient:
             body["location"] = location
         if requires_parent:
             body["requires_parent"] = requires_parent
-        return post_json(f"{self.url}/devices", body)
+        return post_json(f"{self.url}/devices/register", body)
 
     def upsert_agent(
         self,
         registry_id: int,
         *,
+        agent_id: str | None = None,
         endpoint: str,
         command_endpoint: str,
         role: str,
@@ -164,9 +165,13 @@ class RegistryClient:
         latitude: float | None = None,
         longitude: float | None = None,
         battery_percent: float | None = None,
+        gateway_agent_id: str | None = None,
+        environment_state: str | None = None,
+        active_mediums: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "secretKey": self.secret_key,
+            "agent_id": agent_id,
             "endpoint": endpoint,
             "commandEndpoint": command_endpoint,
             "role": role,
@@ -183,8 +188,15 @@ class RegistryClient:
             payload["longitude"] = longitude
         if battery_percent is not None:
             payload["battery_percent"] = battery_percent
-        return put_json(
-            f"{self.url}/devices/{registry_id}/agent",
+        if gateway_agent_id is not None:
+            payload["gateway_agent_id"] = gateway_agent_id
+        if environment_state is not None:
+            payload["environment_state"] = environment_state
+        if active_mediums is not None:
+            payload["active_mediums"] = active_mediums
+        payload["device_id"] = registry_id
+        return post_json(
+            f"{self.url}/agents/register",
             payload,
         )
 
@@ -196,13 +208,6 @@ class RegistryClient:
 
     def rename_device(self, registry_id: int, name: str) -> dict[str, Any]:
         return patch_json(f"{self.url}/devices/{registry_id}", {"name": name})
-
-    def ingest_alert(self, alert: dict[str, Any]) -> None:
-        """Critical rule 발동 시 서버 alert registry에 등록"""
-        try:
-            post_json(f"{self.url}/alerts/ingest", alert, timeout=3)
-        except Exception as e:
-            logger.debug(f"Alert 전송 실패 (non-critical): {e}")
 
     def log_a2a_message(
         self,

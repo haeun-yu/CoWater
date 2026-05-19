@@ -2,8 +2,7 @@
 Moth Healthcheck Subscriber: Device Registration Server 측 healthcheck 수신
 
 Moth meb (broadcast) 채널을 통해 모든 디바이스의 healthcheck를 수신합니다:
-- device.healthcheck: 모든 디바이스 상태 신호를 통합 수신
-- 하위 호환: device.healthcheck 채널도 함께 구독
+- agents: DEVICE_HEALTHCHECK 이벤트를 통합 수신
 """
 
 from __future__ import annotations
@@ -14,10 +13,7 @@ import logging
 from typing import Any, Optional, TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
-try:
-    import websockets
-except ImportError:
-    websockets = None
+import websockets
 
 if TYPE_CHECKING:
     from src.registry.device_registry import DeviceRegistry
@@ -25,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 MOTH_HEALTHCHECK_PATH = "/pang/ws/meb"
-MOTH_HEALTHCHECK_QUERY = "channel=instant&name=healthcheck&source=base&track=base"
+MOTH_HEALTHCHECK_QUERY = "channel=instant&name=agents&source=base&track=base"
 DEFAULT_MOTH_URL = f"wss://cobot.center:8287{MOTH_HEALTHCHECK_PATH}?{MOTH_HEALTHCHECK_QUERY}"
 
 
@@ -93,10 +89,6 @@ class MothHealthcheckSubscriber:
 
     async def connect(self) -> None:
         """Moth WebSocket 서버에 연결"""
-        if websockets is None:
-            logger.info("websockets 미설치 - Moth 구독 비활성화")
-            return
-
         if self.ws is not None and not self._ws_is_closed():
             return
 
@@ -128,21 +120,14 @@ class MothHealthcheckSubscriber:
             return
 
         try:
-            # 기본: healthcheck 채널 구독
+            # docs/core/event-types.md: 모든 에이전트 이벤트는 단일 "agents" MEB 채널을 사용한다.
             subscribe_msg = {
                 "type": "subscribe",
-                "channel": "device.healthcheck",
+                "channel": "agents",
                 "channel_type": "meb",
             }
             await self.ws.send(json.dumps(subscribe_msg))
-            # 하위 호환: legacy healthcheck 채널도 구독
-            legacy_subscribe_msg = {
-                "type": "subscribe",
-                "channel": "device.healthcheck",
-                "channel_type": "meb",
-            }
-            await self.ws.send(json.dumps(legacy_subscribe_msg))
-            logger.info("Moth meb 채널 구독 완료: device.healthcheck (+ legacy device.healthcheck)")
+            logger.info("Moth meb 채널 구독 완료: agents")
         except Exception as e:
             logger.error(f"meb 채널 구독 실패: {e}")
             self.is_connected = False
@@ -186,7 +171,7 @@ class MothHealthcheckSubscriber:
         메시지 형식:
         {
             "type": "publish",
-            "channel": "device.healthcheck",
+            "channel": "agents",
             "payload": {
                 "device_id": int,
                 "agent_id": str,
@@ -251,6 +236,8 @@ class MothHealthcheckSubscriber:
         payload = data.get("payload")
 
         if isinstance(payload, dict):
+            if payload.get("event_type") == "DEVICE_HEALTHCHECK" and isinstance(payload.get("payload"), dict):
+                return payload["payload"], channel, msg_type
             return payload, channel, msg_type
 
         nested = data.get("data")
@@ -285,10 +272,6 @@ class MothHealthcheckSubscriber:
 
     async def start(self) -> None:
         """Moth 구독 시작"""
-        if websockets is None:
-            logger.info("websockets 미설치 - Moth 구독 스킵")
-            return
-
         self.is_running = True
         logger.info(f"MothHealthcheckSubscriber 시작: {self.moth_server_url}")
 
@@ -311,5 +294,3 @@ class MothHealthcheckSubscriber:
             except Exception as e:
                 logger.error(f"WebSocket 종료 오류: {e}")
         logger.info("MothHealthcheckSubscriber 중지")
-
-

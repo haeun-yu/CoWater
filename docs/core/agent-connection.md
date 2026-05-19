@@ -1,4 +1,4 @@
-# AgentConnection Specification (Device 간 통신 관리)
+# AgentConnection 명세
 
 **문서 버전**: 1.0  
 **목적**: Device 간 통신 가능성을 관리하는 AgentConnection의 3단계 필터링, CRUD, soft-delete 기반 활성 관리
@@ -33,7 +33,7 @@ class AgentConnection:
 
 AgentConnection 생성 시 SystemSentinel이 다음 3단계 검증을 수행합니다.
 
-### Stage 1: Gateway 검증
+### 1단계: Gateway 검증
 
 **목적**: 통신 가능한 Gateway를 통해서만 연결
 
@@ -46,8 +46,8 @@ def check_gateway(source: Device, target: Device) -> bool:
         return True
     
     # 규칙 2: 계층 관계 (Parent → Child)
-    # source가 target의 parent gateway인 경우
-    if source.device_id == target.gateway_agent_id:
+    # source의 Agent가 target의 gateway Agent인 경우
+    if source.device_agent_id == target.gateway_agent_id:
         return True
     
     return False
@@ -55,7 +55,7 @@ def check_gateway(source: Device, target: Device) -> bool:
 
 **의의**: 같은 Gateway를 통해서만 신뢰할 수 있는 경로 확보
 
-### Stage 2: 매체 교집합 확인
+### 2단계: 매체 교집합 확인
 
 **목적**: 양쪽 Device 모두 지원하는 통신 매체 찾기
 
@@ -90,7 +90,7 @@ def select_primary_medium(compatible_mediums: list[str]) -> str:
 - Target (AUV): Acoustic, Inertial
 - **결과**: Acoustic만 호환 → primary_medium = "Acoustic"
 
-### Stage 3: 환경별 필터링
+### 3단계: 환경별 필터링
 
 **목적**: 현재 환경 상태에서 연결이 활성 가능한가?
 
@@ -129,7 +129,7 @@ UNDERWATER:
 
 SystemSentinel이 AgentConnection의 전체 생명주기를 관리합니다.
 
-### 3.1 생성 (Create)
+### 3.1 생성
 
 **발동 지점**: Device healthcheck 수신 시 새 Device 감지
 
@@ -180,7 +180,7 @@ async def on_device_detected(device: Device):
 
 **MEB 이벤트**: `SYS_AGENT_CONNECTION_CREATED`
 
-### 3.2 삭제 (Delete) - Soft Delete
+### 3.2 삭제 - Soft Delete
 
 | 상황 | 작업 | 타입 |
 |------|------|------|

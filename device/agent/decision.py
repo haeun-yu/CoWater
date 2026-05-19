@@ -95,7 +95,7 @@ class DecisionEngine:
         device_type = str(state.device_type or "").upper()
 
         # 배터리 긴급 (모든 디바이스)
-        if battery <= float(cfg.get("battery_emergency_percent", 5)):
+        if battery <= float(cfg.get("battery_emergency_percent", 10)):
             action = self._pick_action(
                 device_type, actions,
                 auv_rov_preferred=["emergency_ascent", "surface", "move_up"],
@@ -348,17 +348,17 @@ class DecisionEngine:
             "USV": (
                 "1순위 안전: 장애물 30m 이내면 slow_down, 5m 이내면 emergency_stop\n"
                 "2순위 항법: roll >5° 지속 시 slow_down으로 안정화\n"
-                "3순위 배터리: 20~30%는 임무 진행률 보고 판단, 10% 이하면 return_to_base\n"
+                "3순위 배터리: 30% 이하는 경고, 10% 이하면 return_to_base\n"
                 "4순위 임무: 배터리·안전 여유 있으면 route_move 또는 임무 지속"
             ),
             "AUV": (
                 "1순위 안전: 통신 신호 <0.3이면 surface, 수심 한계 접근 시 hold_depth\n"
-                "2순위 배터리: 25% 이하 + 수중이면 surface 후 귀환 판단\n"
+                "2순위 배터리: 30% 이하 경고, 10% 이하면 surface 후 귀환 판단\n"
                 "3순위 임무: 통신·배터리 여유 있으면 scan_area 또는 follow_route"
             ),
             "ROV": (
                 "1순위 안전: 테더 장력 위험 시 move_up, 수심 한계 시 move_up\n"
-                "2순위 배터리: 20% 이하면 move_up 후 abort_mission\n"
+                "2순위 배터리: 30% 이하면 경고, 10% 이하면 move_up 후 abort_mission\n"
                 "3순위 임무: 정상 상태면 현재 작업 지속"
             ),
             "CONTROL_SHIP": (

@@ -45,9 +45,9 @@ class DeviceRegistry:
         agent_command_scheme: str,
         agent_command_path_prefix: str,
         healthcheck_interval_seconds: int = 1,
-        healthcheck_timeout_seconds: int = 3,
+        healthcheck_timeout_seconds: int = 10,
         healthcheck_timeout_by_device_type: Optional[Dict[str, int]] = None,
-        healthcheck_topic_template: str = "device.healthcheck",
+        healthcheck_topic_template: str = "agents",
         telemetry_topic_template: str = "device.telemetry.{device_id}.{track_type}",
         db_path: Optional[Path] = None,
     ) -> None:
@@ -95,11 +95,11 @@ class DeviceRegistry:
                 # 재시작 후 연결 상태는 offline으로 초기화
                 device.connected = False
                 device.agent.connected = False
-                normalized_healthcheck_topic = "device.healthcheck"
+                normalized_healthcheck_topic = "agents"
                 normalized_healthcheck_endpoint = build_healthcheck_endpoint(device.id)
                 public_id_changed = False
                 if not getattr(device, "public_id", None):
-                    device.public_id = f"id-{uuid4().hex[:12]}"
+                    device.public_id = str(uuid4())
                     public_id_changed = True
 
                 if (
@@ -235,6 +235,20 @@ class DeviceRegistry:
         # Moth topics 생성 (템플릿 사용) 및 healthcheck endpoint
         healthcheck_topic = self._healthcheck_topic_template.format(device_id=device_id)
         healthcheck_endpoint = build_healthcheck_endpoint(device_id)
+        is_submerged = bool(
+            request.device_type == "AUV" and isinstance(altitude, (int, float)) and altitude < 0
+        )
+        environment_state = str(request.environment_state or ("UNDERWATER" if is_submerged else "SURFACE"))
+        active_mediums = list(
+            request.active_mediums
+            or (["ACOUSTIC"] if is_submerged else ["RF", "INTERNET", "ACOUSTIC"])
+        )
+        parent_gateway_agent_id = None
+        if request.parent_id is not None:
+            parent_device = self.get_device(request.parent_id)
+            if parent_device is not None:
+                parent_gateway_agent_id = parent_device.agent.agent_id
+        gateway_agent_id = request.gateway_agent_id or parent_gateway_agent_id
         telemetry_topics = [
             {
                 "track_type": track.type,
@@ -246,7 +260,7 @@ class DeviceRegistry:
 
         return DeviceRecord(
             id=device_id,
-            public_id=f"id-{uuid4().hex[:12]}",
+            public_id=str(uuid4()),
             token=token,
             name=device_name,
             connected=False,
@@ -260,6 +274,13 @@ class DeviceRegistry:
                 path_prefix=self._agent["path_prefix"],
                 endpoint=agent_endpoint,
                 command_endpoint=agent_command_endpoint,
+                agent_id=None,
+                latitude=latitude,
+                longitude=longitude,
+                battery_percent=getattr(request, "battery_percent", None),
+                gateway_agent_id=gateway_agent_id,
+                environment_state=environment_state,
+                active_mediums=active_mediums,
             ),
             tracks=tracks,
             actions=DeviceActionsRecord(
@@ -274,10 +295,12 @@ class DeviceRegistry:
             longitude=longitude,
             parent_id=request.parent_id,
             last_location_update=now if (latitude is not None or longitude is not None) else None,
+            target_type=None,
+            target_id=None,
             healthcheck_topic=healthcheck_topic,
             healthcheck_endpoint=healthcheck_endpoint,
             telemetry_topics=telemetry_topics,
-            is_submerged=bool(request.device_type == "AUV" and isinstance(altitude, (int, float)) and altitude < 0),
+            is_submerged=is_submerged,
             force_parent_routing=bool(request.device_type == "ROV"),
         )
 
@@ -305,16 +328,23 @@ class DeviceRegistry:
         if device.layer != "lower":
             device.parent_id = None
             device.force_parent_routing = False
+            device.agent.gateway_agent_id = None
             return
 
         if device.device_type == "AUV" and not device.is_submerged:
             device.parent_id = None
             device.force_parent_routing = False
+            device.agent.gateway_agent_id = None
+            device.agent.environment_state = "SURFACE"
+            device.agent.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
             return
 
         parent = self._find_middle_parent(device)
         device.parent_id = parent.id if parent else None
         device.force_parent_routing = device.device_type == "ROV"
+        device.agent.gateway_agent_id = parent.agent.agent_id if parent and parent.agent.agent_id else None
+        device.agent.environment_state = "UNDERWATER" if device.is_submerged else "SURFACE"
+        device.agent.active_mediums = ["ACOUSTIC"] if device.is_submerged else ["RF", "INTERNET", "ACOUSTIC"]
 
     def _routing_assignment(self, device: DeviceRecord) -> dict[str, Any]:
         parent = self._devices.get(device.parent_id) if device.parent_id is not None else None
@@ -329,9 +359,13 @@ class DeviceRegistry:
             "device_name": device.name,
             "device_type": device.device_type,
             "layer": device.layer,
+            "environment_state": device.agent.environment_state,
+            "active_mediums": list(device.agent.active_mediums or []),
+            "gateway_agent_id": device.agent.gateway_agent_id,
             "route_mode": route_mode,
             "parent_id": parent.id if parent else None,
             "parent_name": parent.name if parent else None,
+            "parent_agent_id": parent.agent.agent_id if parent and parent.agent.agent_id else None,
             "parent_endpoint": parent.agent.endpoint if parent else None,
             "parent_command_endpoint": parent.agent.command_endpoint if parent else None,
             "force_parent_routing": device.force_parent_routing,
@@ -380,6 +414,7 @@ class DeviceRegistry:
                 parent = self._find_middle_parent(device, exclude_id=exclude_parent_id)
             device.parent_id = parent.id if parent else None
             device.force_parent_routing = device.device_type == "ROV"
+            device.agent.gateway_agent_id = parent.agent.agent_id if parent and parent.agent.agent_id else None
             if previous_parent_id != device.parent_id or previous_force != device.force_parent_routing:
                 device.updated_at = utc_now_iso()
                 self._persist_device(device)
@@ -466,6 +501,8 @@ class DeviceRegistry:
         self._validate_secret_key(request.secretKey)
         device = self.get_device(device_id)
         now = utc_now_iso()
+        if request.agent_id:
+            device.agent.agent_id = request.agent_id
         if request.endpoint:
             device.agent.endpoint = request.endpoint
         if request.commandEndpoint:
@@ -498,6 +535,12 @@ class DeviceRegistry:
             device.agent.battery_percent = request.battery_percent
             device.last_battery_percent = request.battery_percent
             device.last_battery_update = now
+        if request.gateway_agent_id is not None:
+            device.agent.gateway_agent_id = request.gateway_agent_id
+        if request.environment_state is not None:
+            device.agent.environment_state = request.environment_state
+        if request.active_mediums:
+            device.agent.active_mediums = list(request.active_mediums)
         
         device.updated_at = now
         self._persist_device(device)
@@ -520,7 +563,7 @@ class DeviceRegistry:
         self._persist_device(device)
         return device
 
-    def update_device_location(self, device_id: int, latitude: float, longitude: float) -> DeviceRecord:
+    def update_device_location(self, device_id: Any, latitude: float, longitude: float) -> DeviceRecord:
         """디바이스 위치 정보 업데이트 (POC 01-05 에이전트의 텔레메트리 기반)"""
         device = self.get_device(device_id)
         device.latitude = latitude
@@ -537,7 +580,7 @@ class DeviceRegistry:
             self.notify_assignment(self._routing_assignment(device))
         return device
 
-    def update_device_metadata(self, device_id: int, *, device_type: Optional[str] = None,
+    def update_device_metadata(self, device_id: Any, *, device_type: Optional[str] = None,
                               layer: Optional[str] = None, connectivity: Optional[str] = None) -> DeviceRecord:
         """디바이스 메타데이터 업데이트"""
         device = self.get_device(device_id)
@@ -552,7 +595,7 @@ class DeviceRegistry:
         self._persist_device(device)
         return device
 
-    def update_auv_submersion(self, device_id: int, is_submerged: bool) -> DeviceRecord:
+    def update_auv_submersion(self, device_id: Any, is_submerged: bool) -> DeviceRecord:
         """AUV 수중/수면 상태 업데이트"""
         device = self.get_device(device_id)
         if device.device_type != "AUV":
@@ -564,9 +607,15 @@ class DeviceRegistry:
             device.submerged_at = now
             parent = self._find_middle_parent(device)
             device.parent_id = parent.id if parent else None
+            device.agent.environment_state = "UNDERWATER"
+            device.agent.active_mediums = ["ACOUSTIC"]
+            device.agent.gateway_agent_id = parent.agent.agent_id if parent and parent.agent.agent_id else None
         else:
             device.surfaced_at = now
             device.parent_id = None
+            device.agent.environment_state = "SURFACE"
+            device.agent.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
+            device.agent.gateway_agent_id = None
         device.force_parent_routing = False
         device.updated_at = now
         self._persist_device(device)
@@ -574,9 +623,9 @@ class DeviceRegistry:
 
     def update_device_connectivity_state(
         self,
-        device_id: int,
+        device_id: Any,
         *,
-        parent_id: Optional[int] = None,
+        parent_id: Optional[Any] = None,
         force_parent_routing: bool = False
     ) -> DeviceRecord:
         """
@@ -598,6 +647,9 @@ class DeviceRegistry:
                 raise ValueError("ROV parent must be a middle layer device")
             device.parent_id = parent_id
             device.force_parent_routing = True
+            device.agent.gateway_agent_id = parent_device.agent.agent_id if parent_device.agent.agent_id else None
+            device.agent.environment_state = "UNDERWATER" if device.is_submerged else "SURFACE"
+            device.agent.active_mediums = ["WIRED"]
 
         # AUV: 수중 시만 parent 연결
         elif device.device_type == "AUV":
@@ -605,18 +657,31 @@ class DeviceRegistry:
                 if parent_id is None:
                     parent = self._find_middle_parent(device)
                     device.parent_id = parent.id if parent else None
+                    parent_device = parent
                 else:
                     parent_device = self.get_device(parent_id)
                     if parent_device.layer != "middle":
                         raise ValueError("AUV acoustic parent must be a middle layer device")
                     device.parent_id = parent_id
+                device.agent.gateway_agent_id = parent_device.agent.agent_id if parent_device.agent.agent_id else None
+                device.agent.environment_state = "UNDERWATER"
+                device.agent.active_mediums = ["ACOUSTIC"]
             else:
                 device.parent_id = None
+                device.agent.gateway_agent_id = None
+                device.agent.environment_state = "SURFACE"
+                device.agent.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
 
         # 기타 디바이스
         else:
             if parent_id is not None:
                 device.parent_id = parent_id
+                parent_device = self.get_device(parent_id)
+                device.agent.gateway_agent_id = parent_device.agent.agent_id if parent_device.agent.agent_id else None
+            else:
+                device.agent.gateway_agent_id = None
+            device.agent.environment_state = "SURFACE"
+            device.agent.active_mediums = ["RF", "INTERNET", "ACOUSTIC"]
 
         if device.device_type != "ROV":
             device.force_parent_routing = force_parent_routing

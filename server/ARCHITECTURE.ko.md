@@ -1,10 +1,10 @@
-# Backend Architecture
+# 백엔드 아키텍처
 
 이 저장소의 서버는 두 개의 큰 축으로 나뉩니다.
 
 ## `registration`
 
-시스템의 원장(source of truth)입니다.
+시스템의 원장 정본입니다.
 
 - `src/api.py`: HTTP API와 lifespan, 웹소켓, 외부 발행 진입점
 - `src/application/`: 런타임 조립과 구성요소 생성

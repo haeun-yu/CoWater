@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from agent.decision import DecisionEngine
+from agent.decision import DecisionEngine, TOOL_DEFINITIONS
+
+REACT_MAX_STEPS = 4  # 불필요한 루프 방지
+
 from agent.event_system import (
     EventPublisher,
     create_step_evaluation_event,
@@ -38,9 +41,11 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
-    def __init__(self, config_path: Path) -> None:
+    def __init__(self, config_path: Path, overrides: dict[str, Any] | None = None) -> None:
         self.config_path = config_path
         self.config = json.loads(config_path.read_text(encoding="utf-8"))
+        if overrides:
+            self._deep_update(self.config, overrides)
         self.server = self.config.get("server", {})
         self.agent_config = self.config.get("agent", {})
         self.capabilities = self.agent_config.get("capabilities", {})
@@ -88,8 +93,18 @@ class AgentRuntime:
             "return_to_base": ["return_to_base", "surface", "hold_position"],
         }
         self._recommendation_suppressions: dict[str, str] = {}
+        self._policy_action_dedupe: dict[str, float] = {}
         self._command_requests: dict[str, dict[str, Any]] = {}
         self._command_request_tasks: set[asyncio.Task[Any]] = set()
+
+    @classmethod
+    def _deep_update(cls, target: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                cls._deep_update(target[key], value)
+            else:
+                target[key] = value
+        return target
 
     def _resolve_instance_id(self) -> str:
         explicit = os.getenv("COWATER_INSTANCE_ID") or self.agent_config.get("instance_id")
@@ -101,6 +116,36 @@ class AgentRuntime:
         host = str(self.server.get("public_host") or self.server.get("host") or "127.0.0.1")
         port = int(os.getenv("COWATER_AGENT_PORT") or self.server.get("port") or 9010)
         return f"http://{host}:{port}"
+
+    @staticmethod
+    def _task_status(value: Any, default: str = "PENDING") -> str:
+        normalized = str(value or default).strip().upper()
+        aliases = {
+            "SUCCESS": "COMPLETED",
+            "OK": "COMPLETED",
+            "DONE": "COMPLETED",
+            "REJECTED": "ABORTED",
+            "DISPATCHED": "ASSIGNED",
+            "RUNNING": "IN_PROGRESS",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"PENDING", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
+            return normalized
+        return default
+
+    @staticmethod
+    def _mission_status(value: Any, default: str = "IN_PROGRESS") -> str:
+        normalized = str(value or default).strip().upper()
+        aliases = {
+            "PENDING": "READY",
+            "PLANNED": "READY",
+            "RUNNING": "IN_PROGRESS",
+            "ABORTED": "CANCELLED",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"READY", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"}:
+            return normalized
+        return default
 
     def register(self) -> None:
         if self.identity.get("registry_id") and self.identity.get("token"):
@@ -159,7 +204,7 @@ class AgentRuntime:
         for mission in missions:
             if not isinstance(mission, dict):
                 continue
-            if str(mission.get("status") or "") not in {"approved", "running", "needs_review"}:
+            if str(mission.get("status") or "").upper() not in {"READY", "IN_PROGRESS", "FAILED"}:
                 continue
             dispatch_state = ((mission.get("metadata") or {}).get("dispatch_state") or {})
             if not isinstance(dispatch_state, dict):
@@ -167,12 +212,12 @@ class AgentRuntime:
             for step_state in dispatch_state.get("steps") or []:
                 if not isinstance(step_state, dict):
                     continue
-                if str(step_state.get("status") or "") in {"completed", "failed"}:
+                if self._task_status(step_state.get("status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
                     continue
                 for task_state in step_state.get("tasks") or []:
                     if not isinstance(task_state, dict):
                         continue
-                    if str(task_state.get("execution_status") or "") in {"completed", "failed"}:
+                    if self._task_status(task_state.get("execution_status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}:
                         continue
                     try:
                         device_id = int(task_state.get("target_device_id") or 0)
@@ -205,12 +250,18 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_agent_id"),
+            "environment_state": assignment.get("environment_state"),
+            "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
             "force_parent_routing": bool(assignment.get("force_parent_routing", False)),
         }
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_agent_id")
+        self.state.environment_state = assignment.get("environment_state")
+        self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
         self.state.force_parent_routing = bool(signature["force_parent_routing"])
         if self._last_assignment_signature != signature:
@@ -230,6 +281,7 @@ class AgentRuntime:
             raise RuntimeError("agent identity is not registered")
         self.registry_client.upsert_agent(
             self.state.registry_id,
+            agent_id=self.state.agent_id,
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
@@ -237,16 +289,18 @@ class AgentRuntime:
             skills=self.skills.list_skills(),
             actions=self.skills.list_actions(),
             last_seen_at=self.state.last_seen_at,
+            gateway_agent_id=self.state.gateway_agent_id,
+            environment_state=self.state.environment_state,
+            active_mediums=list(self.state.active_mediums or []),
         )
 
     async def simulation_loop(self) -> None:
         if self.state.layer == "system":
-            await asyncio.gather(
-                self._alert_processing_loop(),
-                self._operation_plan_loop(),
-                self._registry_keepalive_loop(),
-                self._state_cleanup_loop(),
-            )
+            tasks = [self._registry_keepalive_loop(), self._state_cleanup_loop()]
+            # request_handler는 이벤트 발행자 역할만 하므로 구독 루프 불필요
+            if self.state.role != "request_handler":
+                tasks.append(self._moth_event_loop())
+            await asyncio.gather(*tasks)
         else:
             await self._telemetry_processing_loop()
 
@@ -263,7 +317,7 @@ class AgentRuntime:
                     # 완료/실패 상태인 task만 제거 대상
                     removable = [
                         k for k, v in self.state.tasks.items()
-                        if isinstance(v, dict) and str(v.get("status") or "").lower() in {"completed", "failed"}
+                        if isinstance(v, dict) and self._task_status(v.get("status")) in {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}
                     ]
                     for k in removable[:len(self.state.tasks) - max_tasks]:
                         self.state.tasks.pop(k, None)
@@ -300,89 +354,212 @@ class AgentRuntime:
             decision = self.decision_engine.decide(self.state, telemetry)
             self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
-    async def _alert_processing_loop(self) -> None:
-        """System-layer agent alert processing loop"""
-        logger = logging.getLogger(__name__)
-        poll_interval = 2
-        all_devices: list[dict[str, Any]] = []
+    async def _moth_event_loop(self) -> None:
+        """Moth 'agents' MEB 채널 구독 → role별 이벤트 핸들러로 디스패치"""
+        import websockets as _ws
+        from urllib.parse import urlsplit, urlunsplit
+
+        moth_cfg = self.config.get("moth", {})
+        raw_url = str(moth_cfg.get("server_url") or "wss://cobot.center:8287")
+        parsed = urlsplit(raw_url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+        role = self.state.role
+        # 모든 에이전트 이벤트는 "agents" MEB 채널 단일 채널 사용 (docs/core/event-types.md)
+        ws_url = f"{base}/pang/ws/meb?channel=instant&name=agents&source={role}&track={role}"
+        agent_name = str(self.state.name or role)
 
         while True:
             try:
-                await asyncio.sleep(poll_interval)
-                self.state.last_seen_at = utc_now()
-
-                try:
-                    all_devices = self.registry_client.list_devices()
-                    # P3 (보고 기반): Agent가 보고한 위치/배터리 정보를 device dict에 반영
-                    all_devices = [self._normalize_device_from_registry(d) for d in all_devices]
-                except Exception as e:
-                    logger.debug(f"Failed to fetch device list: {e}")
-
-                # Fetch all alerts from registry
-                try:
-                    alerts = self.registry_client.list_alerts()
-                except Exception as e:
-                    logger.debug(f"Failed to fetch alerts: {e}")
-                    continue
-
-                # handle_event_report에서 처리 못 한 registered 상태 alert만 폴백 처리
-                now_ts = time.time()
-                stale_cutoff = now_ts - 30 * 60
-                waiting_alerts = [
-                    alert for alert in alerts
-                    if alert.get("status") == "registered"
-                    and self._parse_iso_ts(str(alert.get("created_at") or "")) > stale_cutoff
-                ]
-                waiting_alerts.sort(
-                    key=lambda alert: (
-                        self._severity_rank(str(alert.get("severity") or "INFORMATION")),
-                        -self._parse_iso_ts(str(alert.get("created_at") or "")),
-                    ),
-                    reverse=False,
-                )
-                # 루프당 최대 3개 처리 (백로그가 많아도 신규 alert가 빠르게 처리되도록)
-                for alert in waiting_alerts[:3]:
-                    alert_id = alert.get("alert_id")
-
-                    logger.info(f"Processing alert {alert_id}: {alert.get('alert_type')}")
+                async with _ws.connect(ws_url, ping_interval=None) as ws:
+                    await ws.send(json.dumps({
+                        "type": "subscribe",
+                        "channel": "agents",
+                        "channel_type": "meb",
+                    }))
+                    logger.info(f"[{role}] Moth 'agents' MEB 채널 구독 시작")
+                    ping_task = asyncio.create_task(self._moth_ping_loop(ws))
                     try:
-                        self.registry_client.acknowledge_alert(
-                            str(alert_id),
-                            approved=True,
-                            notes="system-agent claimed alert for processing",
-                        )
-                    except Exception as exc:
-                        logger.debug(f"Failed to claim alert {alert_id}: {exc}")
-                    await self._process_alert(alert, all_devices, logger)
-
-                await self._process_waiting_queue(all_devices, logger)
-
-                # ✅ Policy 평가 및 자동 대응 (Ch.17.1)
-                await self._evaluate_and_apply_policies(all_devices, logger)
-
+                        while True:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=90)
+                            if isinstance(msg, (bytes, bytearray)):
+                                continue
+                            data = json.loads(msg)
+                            # Moth가 전달하는 payload 추출
+                            event = data.get("payload") or data.get("data") or {}
+                            if not isinstance(event, dict):
+                                continue
+                            # target_agents 필터 — 자신이 수신자가 아니면 무시
+                            target_agents = event.get("target_agents") or []
+                            if target_agents and agent_name not in target_agents:
+                                continue
+                            asyncio.create_task(self._handle_moth_event(event))
+                    except Exception:
+                        ping_task.cancel()
+                        raise
             except Exception as e:
-                logger.error(f"Alert processing loop error: {e}")
-                await asyncio.sleep(1)
+                logger.warning(f"[{role}] Moth event loop 재연결 중 ({type(e).__name__}): {e}")
+                await asyncio.sleep(5)
+
+    async def _moth_ping_loop(self, ws: Any) -> None:
+        """Moth WebSocket 연결 유지용 바이너리 ping"""
+        while True:
+            try:
+                await ws.send(b"ping")
+                await asyncio.sleep(10)
+            except Exception:
+                break
+
+    async def _publish_to_meb(self, event_type: str, payload: dict[str, Any], target_agents: list[str]) -> None:
+        """Moth 'agents' MEB 채널에 이벤트 직접 publish"""
+        import websockets as _ws
+        from urllib.parse import urlsplit, urlunsplit
+
+        moth_cfg = self.config.get("moth", {})
+        raw_url = str(moth_cfg.get("server_url") or "wss://cobot.center:8287")
+        parsed = urlsplit(raw_url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+        role = self.state.role
+        ws_url = f"{base}/pang/ws/meb?channel=instant&name=agents&source={role}&track={role}"
+        message = {
+            "event_type": event_type,
+            "source_role": role,
+            "source_agent_id": self.state.agent_id,
+            "target_agents": target_agents,
+            "payload": payload,
+        }
+        try:
+            async with _ws.connect(ws_url, ping_interval=None) as ws:
+                await ws.send(json.dumps({"type": "publish", "channel": "agents", "data": message}))
+                logger.info(f"[MEB] Published {event_type} → {target_agents}")
+        except Exception as e:
+            logger.warning(f"[MEB] Publish 실패 ({event_type}): {e}")
+
+    async def _handle_moth_event(self, event: dict[str, Any]) -> None:
+        """수신한 Moth MEB 이벤트를 역할별 핸들러로 라우팅
+        MEB 메시지 구조: {event_type, source_role, target_agents, payload}
+        """
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        role = self.state.role
+        payload = event.get("payload") or event.get("data") or {}
+        try:
+            if role == "mission_planner":
+                if event_type == "SYS_INTENT_CLASSIFIED":
+                    await self._handle_mission_intent_event(payload)
+                elif event_type in {
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                    "SYS_ANOMALY_DETECTED",
+                    "SYS_POLICY_DECISION",
+                    "SYS_AGENT_CONNECTION_CREATED",
+                    "SYS_AGENT_CONNECTION_DELETED",
+                }:
+                    self.state.remember({"kind": "meb_event_received", "at": utc_now(), "event_type": event_type, "payload": payload})
+            elif role == "policy_manager":
+                if event_type in {"SYS_INTENT_CLASSIFIED", "SYS_ANOMALY_DETECTED"}:
+                    await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
+            elif role == "system_sentinel":
+                if event_type in {
+                    "DEVICE_HEALTHCHECK",
+                    "ENV_STATE_CHANGED",
+                    "SYS_TASK_DISPATCHED",
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                }:
+                    await self._evaluate_and_apply_policies(self.registry_client.list_devices(), logger)
+            elif role == "insight_reporter":
+                if event_type in {
+                    "SYS_INTENT_CLASSIFIED",
+                    "SYS_TASK_DISPATCHED",
+                    "SYS_TASK_COMPLETED",
+                    "SYS_TASK_FAILED",
+                    "SYS_ANOMALY_DETECTED",
+                    "SYS_POLICY_DECISION",
+                    "SYS_MISSION_UPDATED",
+                    "SYS_MISSION_COMPLETED",
+                    "DEVICE_HEALTHCHECK",
+                }:
+                    await self._generate_insight_from_event(event)
+        except Exception as e:
+            logger.error(f"[{role}] Moth 이벤트 처리 오류 ({event_type}): {e}")
+
+    async def _handle_mission_intent_event(self, payload: dict[str, Any]) -> None:
+        """MissionPlanner: SYS_INTENT_CLASSIFIED (MISSION) 수신 → proposal 생성"""
+        goal = str(payload.get("user_input") or payload.get("goal") or "")
+        if not goal:
+            logger.warning("[MissionPlanner] SYS_INTENT_CLASSIFIED: goal 없음, 스킵")
+            return
+        logger.info(f"[MissionPlanner] 미션 intent 수신: {goal[:60]}")
+        try:
+            async with self._mission_lock:
+                await self.generate_mission_proposal({"goal": goal}, allow_suppression=False)
+            logger.info(f"[MissionPlanner] Proposal 생성 완료: {goal[:40]}")
+        except Exception as e:
+            logger.error(f"[MissionPlanner] Proposal 생성 실패: {e}")
+            self.registry_client.ingest_event({
+                "event_type": "SYS_MISSION_UPDATED",
+                "source_system": "mission_planner",
+                "source_agent_id": self.state.agent_id,
+                "source_role": "mission_planner",
+                "severity": "WARNING",
+                "title": "미션 계획 실패",
+                "message": f"Proposal 생성 실패: {e}",
+                "data": {"goal": goal, "error": str(e)},
+            })
+
+    async def _generate_insight_from_event(self, event: dict[str, Any]) -> None:
+        """InsightReporter: 이벤트 수신 시 fleet 리포트 생성 및 Insight 저장"""
+        event_id = str(event.get("event_id") or "")
+        event_type = str(event.get("type") or event.get("event_type") or "")
+        logger.info(f"[InsightReporter] 이벤트 처리: {event_id} ({event_type})")
+        try:
+            devices = self.registry_client.list_devices()
+            missions = self.registry_client.list_missions()
+            insights = self.registry_client.list_insights()
+            report, error = await self.decision_engine.generate_fleet_report(
+                devices, missions, insights, self.state
+            )
+            if report:
+                self.registry_client.create_insight({
+                    "title": f"{event_type} 분석 리포트",
+                    "summary": report.get("report", ""),
+                    "highlights": report.get("highlights", []),
+                    "recommendations": report.get("recommendations", []),
+                    "source": "event_triggered_report",
+                    "related_event_id": event_id,
+                    "created_at": utc_now(),
+                })
+                logger.info(f"[InsightReporter] Insight 생성 완료 (event: {event_id})")
+            elif error:
+                logger.warning(f"[InsightReporter] 리포트 생성 실패: {error}")
+        except Exception as e:
+            logger.error(f"[InsightReporter] Insight 생성 오류: {e}")
 
     async def _evaluate_and_apply_policies(self, devices: list[dict[str, Any]], logger: Any) -> None:
         """Policy를 평가하고 Critical 상황 시 자동 대응 (Ch.17.1)"""
         try:
-            # Critical 상황 감지 (예: device lost)
+            # Critical 상황 감지 (예: device offline)
             for device in devices:
                 connectivity_status = device.get("connectivity_status", "offline")
+                device_layer = str(device.get("layer") or "").lower()
+                device_id = str(device.get("id") or device.get("registry_id") or "")
 
-                # Device LOST 상황
-                if connectivity_status == "lost":
-                    # auto_rtb_on_lost 정책 검사
-                    policy = self.registry_client.get_policy("auto_rtb_on_lost")
+                # Device OFFLINE 상황
+                if connectivity_status == "offline" and device_layer != "system" and device_id:
+                    # auto_rtb_on_offline 정책 검사
+                    policy = self.registry_client.get_policy("auto_rtb_on_offline")
                     if policy and policy.get("enabled"):
+                        dedupe_key = f"auto_rtb_on_offline:{device_id}"
+                        now = time.time()
+                        if self._policy_action_dedupe.get(dedupe_key, 0) > now - 600:
+                            continue
+                        self._policy_action_dedupe[dedupe_key] = now
                         logger.info(f"🚨 Policy triggered: {policy.get('policy_name')} for device {device.get('id')}")
                         # 자동 Mission 생성: Return to Base
                         mission = {
                             "mission_id": str(uuid4()),
                             "title": f"Auto Recovery: {device.get('name')} - Return to Base",
                             "trigger_type": "policy",
-                            "trigger_policy_id": "auto_rtb_on_lost",
+                            "trigger_policy_id": "auto_rtb_on_offline",
                             "target_device_id": device.get("id"),
                             "steps": [
                                 {
@@ -392,7 +569,7 @@ class AgentRuntime:
                                     "params": {},
                                 }
                             ],
-                            "status": "pending_approval",
+                            "status": "READY",
                             "created_at": utc_now(),
                         }
                         try:
@@ -405,90 +582,6 @@ class AgentRuntime:
 
     async def _process_waiting_queue(self, devices: list[dict[str, Any]], logger: Any) -> None:
         return
-
-    async def _process_alert(self, alert: dict[str, Any], devices: list[dict[str, Any]], logger: Any) -> dict[str, Any]:
-        """단일 alert를 insight/proposal/approval 흐름으로 처리한다."""
-        # Critical 긴급 상황 — LLM 없이 즉각 에스컬레이션
-        if self.decision_engine.is_critical_urgent(alert):
-            critical = self.decision_engine.critical_response(alert)
-            self.state.remember({"kind": "alert_critical_urgent", "at": utc_now(), "alert": alert.get("alert_type"), "decision": critical})
-            logger.warning(f"CRITICAL URGENT alert: {alert.get('alert_type')} — 즉각 에스컬레이션")
-            try:
-                self.registry_client.acknowledge_alert(str(alert.get("alert_id")), approved=True, notes="Critical urgent — auto escalated")
-            except Exception:
-                pass
-            proposal_bundle = self.generate_mission_proposal(
-                {
-                    "title": f"{str(alert.get('alert_type') or 'Critical').replace('_', ' ').title()} Critical Response",
-                    "goal": str(alert.get("message") or alert.get("alert_type") or "Critical mission"),
-                    "alert_id": str(alert.get("alert_id") or ""),
-                    "event_id": str(alert.get("event_id") or ""),
-                    "severity": str(alert.get("severity") or "CRITICAL"),
-                    "source": "critical_policy",
-                    "summary": "Policy-based critical response was generated automatically.",
-                    "reason_summary": critical.get("reasoning") or "Critical policy auto response.",
-                    "insight_summary": f"Critical policy response for {alert.get('alert_type') or 'alert'}",
-                }
-            )
-            auto_decision = None
-            approval_id = (proposal_bundle.get("approval") or {}).get("approval_id")
-            if approval_id:
-                auto_decision = await self.decide_approval_flow(
-                    str(approval_id),
-                    True,
-                    decided_by="system_policy",
-                    notes="Critical policy auto approval",
-                )
-            return {
-                **critical,
-                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
-                "approval_id": approval_id,
-                "mission_id": ((auto_decision or {}).get("mission") or {}).get("mission_id"),
-            }
-
-        # LLM 분석을 Lock 외부에서 먼저 수행 (최대 120초 블로킹이 Lock 밖에서 일어남)
-        decision = self.decision_engine.decide(self.state, alert)
-        llm_result, llm_error = await self.decision_engine.analyze_alert(alert, devices, self.state)
-        
-        # LLM 결과 처리
-        if llm_result:
-            decision["llm_analysis"] = llm_result
-        if llm_error:
-            # LLM 오류 발생 - Event 기록
-            self.event_publisher.publish(
-                create_device_status_change_event(
-                    source_agent_id=self.state.agent_id,
-                    device_id=0,  # System-level event
-                    device_name="system",
-                    old_status="operational",
-                    new_status="degraded",
-                    reason=f"LLM error: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
-                )
-            )
-            decision["llm_error"] = llm_error
-            logger.warning(f"Alert {alert.get('alert_id')} processing with LLM error: {llm_error}")
-
-        async with self._mission_lock:
-            alert_id = alert.get("alert_id")
-
-            self.state.remember({"kind": "alert_processed", "at": utc_now(), "alert_id": alert_id, "decision": decision})
-            logger.info(f"Alert {alert_id} decision: {decision.get('mode')} | llm={'success' if llm_result else ('error' if llm_error else 'disabled')}")
-            proposal_bundle = self.generate_mission_proposal(
-                {
-                    "title": f"{str(alert.get('alert_type') or 'Alert').replace('_', ' ').title()} Proposal",
-                    "goal": str(alert.get("message") or alert.get("alert_type") or "Mission proposal"),
-                    "alert_id": str(alert_id or ""),
-                    "event_id": alert.get("event_id") or (alert.get("metadata") or {}).get("event_id"),
-                    "severity": alert.get("severity") or "INFORMATION",
-                    "source": "alert_processing_loop",
-                    "summary": f"Proposal generated from alert {alert_id}.",
-                }
-            )
-            return {
-                "alert_id": alert_id,
-                "decision": decision,
-                **proposal_bundle,
-            }
 
     def _build_mission_steps(
         self,
@@ -591,7 +684,7 @@ class AgentRuntime:
                 {
                     "step_id": step["step_id"],
                     "depends_on": list(step.get("depends_on") or []),
-                    "status": "pending",
+                    "status": "PENDING",
                     "tasks": [
                         {
                             "task_id": task["task_id"],
@@ -603,8 +696,8 @@ class AgentRuntime:
                             "target_device_name": task["target_device_name"],
                             "route_agent_id": task["route_agent_id"],
                             "route_agent_name": task["route_agent_name"],
-                            "dispatch_status": "pending",
-                            "execution_status": "pending",
+                            "dispatch_status": "PENDING",
+                            "execution_status": "PENDING",
                         }
                         for task in step.get("tasks") or []
                     ],
@@ -686,7 +779,8 @@ class AgentRuntime:
         for mission in missions:
             if not isinstance(mission, dict):
                 continue
-            if str(mission.get("status") or "") != "needs_review":
+            mission_status = str(mission.get("status") or "").upper()
+            if mission_status != "FAILED":
                 continue
             dispatch_result = ((mission.get("metadata") or {}).get("dispatch_state") or {})
             if not isinstance(dispatch_result, dict):
@@ -703,7 +797,7 @@ class AgentRuntime:
                 {
                     "mission_id": mission.get("mission_id"),
                     "alert_id": mission.get("alert_id"),
-                    "status": mission.get("status"),
+                    "status": mission_status,
                     "reason": (mission.get("final_result") or {}).get("reason"),
                     "notes": mission.get("summary"),
                     "manual_intervention": intervention,
@@ -712,138 +806,386 @@ class AgentRuntime:
         items.sort(key=lambda item: str((item.get("manual_intervention") or {}).get("at") or ""), reverse=True)
         return items
 
-    def recommend_device_roles(self, goal: str = "") -> dict[str, Any]:
-        devices = self.registry_client.list_devices()
-        recommendations: list[dict[str, Any]] = []
-        for device in devices:
-            device_type = str(device.get("device_type") or "").upper()
-            layer = str(device.get("layer") or "")
-            role_name = "support"
-            responsibility = "General support role."
-            if device_type == "AUV":
-                role_name = "underwater_survey"
-                responsibility = "Performs underwater scanning, anomaly survey, and area mapping."
-            elif device_type == "ROV":
-                role_name = "precision_intervention"
-                responsibility = "Performs close inspection and manipulation tasks at target locations."
-            elif device_type == "USV":
-                role_name = "surface_patrol"
-                responsibility = "Maintains surface patrol, relay, and safety positioning."
-            elif device_type == "CONTROL_SHIP" and layer == "middle":
-                role_name = "relay_and_safety_host"
-                responsibility = "Relays tasks/results for downstream devices and maintains local failsafe control."
-            elif layer == "middle":
-                role_name = "middle_layer_relay"
-                responsibility = "Relays mission tasks and state between System Agent and downstream devices."
-            recommendations.append(
-                {
-                    "device_id": str(device.get("id") or device.get("registry_id") or ""),
-                    "device_name": device.get("name"),
-                    "device_type": device_type,
-                    "role_name": role_name,
-                    "responsibility": responsibility,
-                    "goal_alignment": goal or None,
+    async def execute_role_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        role = self.state.role
+        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else payload
+        if role == "request_handler":
+            return await self._execute_request_handler(parameters)
+        if role == "mission_planner":
+            return await self.generate_mission_proposal(parameters, allow_suppression=False)
+        if role == "policy_manager":
+            return self._execute_policy_manager(parameters)
+        if role == "device_bridge":
+            # MissionPlanner에서 전달된 미션 스텝을 Device Agent로 A2A 디스패치
+            steps = list(parameters.get("steps") or [])
+            mission_id = str(parameters.get("mission_id") or "")
+            if steps and mission_id:
+                devices = self.registry_client.list_devices()
+                response_like = {
+                    "response_id": mission_id,
+                    "mission_id": mission_id,
+                    "alert_id": parameters.get("alert_id"),
+                    "reason": parameters.get("reason") or "DeviceBridge task dispatch",
+                    "dispatch_result": {"steps": []},
                 }
-            )
-        return {
-            "goal": goal,
-            "recommended_at": utc_now(),
-            "recommendations": recommendations,
-        }
-
-    def assign_device_role(self, payload: dict[str, Any], *, decided_by: str = "user") -> dict[str, Any]:
-        device_id = str(payload.get("device_id") or "")
-        if not device_id:
-            raise ValueError("device_id is required")
-        approval = self.registry_client.create_approval(
-            {
-                "target_type": "device_role_assignment",
-                "target_id": device_id,
-                "summary": f"Apply device role to {device_id}",
-                "requested_action": "apply_device_role",
-                "status": "pending",
-                "requested_by": "system_agent",
-                "metadata": {
-                    "role_name": payload.get("role_name"),
-                    "responsibility": payload.get("responsibility"),
-                    "status": payload.get("status") or "active",
-                    "notes": payload.get("notes"),
-                    "metadata": payload.get("metadata") or {},
-                },
+                dispatch = await self._dispatch_next_step(
+                    response_like, steps, devices, logging.getLogger(__name__)
+                )
+                return {
+                    "type": "COMMAND",
+                    "status": "SUCCESS",
+                    "delivered": dispatch.get("delivered"),
+                    "dispatch": dispatch,
+                }
+            # 단순 명령 처리 (레거시)
+            command = {
+                "action": parameters.get("action") or parameters.get("command") or "hold_position",
+                "params": parameters.get("params") or {},
+                "reason": parameters.get("reason") or "DeviceBridge execute request",
             }
-        )
-        return {"approval": approval, "device_role": None}
+            result = await self.handle_command_with_llm(command)
+            return {"type": "COMMAND", "status": "SUCCESS", "result": result}
+        if role == "system_sentinel":
+            return {
+                "type": "STATE",
+                "status": "SUCCESS",
+                "devices": self.registry_client.list_devices(),
+            }
+        if role == "insight_reporter":
+            return await self._execute_insight_reporter(parameters)
+        return {"type": "RESPONSE", "status": "ERROR", "message": f"unsupported role: {role}"}
 
-    def activate_operation_plan(self, operation_plan_id: str, *, activated_by: str = "user") -> dict[str, Any]:
-        plan = self.registry_client.activate_operation_plan(operation_plan_id)
-        generated: list[dict[str, Any]] = []
-        for trigger in plan.get("triggers") or []:
-            if not isinstance(trigger, dict):
+    def _summarize_tool_result(self, tool_name: str, raw: Any) -> Any:
+        """LLM 히스토리에 넣을 도구 결과를 핵심 필드만 추려 간결하게 정리"""
+        if tool_name == "get_devices" and isinstance(raw, list):
+            return [
+                {
+                    "id": d.get("id"),
+                    "name": d.get("name"),
+                    "type": d.get("device_type"),
+                    "status": d.get("connectivity_status"),
+                    "battery": d.get("last_battery_percent"),
+                    "lat": d.get("latitude"),
+                    "lon": d.get("longitude"),
+                    "layer": d.get("layer"),
+                    "actions": (d.get("actions") or [])[:5],
+                    "submerged": d.get("is_submerged"),
+                }
+                for d in raw
+                if d.get("layer") != "system"  # 내부 시스템 에이전트 제외
+            ]
+        if tool_name == "get_missions" and isinstance(raw, list):
+            if not raw:
+                return {"message": "현재 진행 중인 미션 없음", "count": 0}
+            return [
+                {
+                    "id": m.get("mission_id"),
+                    "title": m.get("title"),
+                    "status": m.get("status"),
+                    "type": m.get("type"),
+                    "priority": m.get("priority"),
+                }
+                for m in raw
+            ]
+        if tool_name == "get_insights" and isinstance(raw, list):
+            if not raw:
+                return {"message": "현재 인사이트 없음", "count": 0}
+            return [
+                {
+                    "id": ins.get("insight_id") or ins.get("id"),
+                    "summary": ins.get("summary"),
+                    "severity": ins.get("severity"),
+                    "recommended_action": ins.get("recommended_action"),
+                    "confidence_level": ins.get("confidence_level"),
+                }
+                for ins in raw
+            ]
+        if tool_name == "plan_mission" and isinstance(raw, dict):
+            proposal = raw.get("proposal") or {}
+            approval = raw.get("approval") or {}
+            # approval_id: raw > approval > proposal 순으로 찾기
+            approval_id = (
+                raw.get("approval_id")
+                or approval.get("approval_id")
+                or proposal.get("approval_id")
+            )
+            return {
+                "proposal_id": proposal.get("proposal_id") or proposal.get("id"),
+                "title": proposal.get("title"),
+                "mission_type": proposal.get("type") or proposal.get("mission_type"),
+                "steps_count": int(proposal.get("proposal_tasks_count") or 0),
+                "approval_id": approval_id,
+            }
+        return raw
+
+    async def _execute_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
+        if tool_name == "get_devices":
+            return self._summarize_tool_result("get_devices", self.registry_client.list_devices())
+        if tool_name == "get_missions":
+            return self._summarize_tool_result("get_missions", self.registry_client.list_missions())
+        if tool_name == "get_insights":
+            return self._summarize_tool_result("get_insights", self.registry_client.list_insights())
+        if tool_name == "approve_mission":
+            approval_id = str(tool_input.get("approval_id") or "")
+            if not approval_id:
+                return {"error": "approval_id가 필요합니다. plan_mission을 먼저 실행하세요."}
+            try:
+                result = await asyncio.wait_for(
+                    self.decide_approval_flow(approval_id, approved=True, decided_by="user"),
+                    timeout=60.0,
+                )
+                mission = result.get("mission") or {}
+                return {
+                    "approved": True,
+                    "mission_id": mission.get("mission_id"),
+                    "title": mission.get("title"),
+                    "status": mission.get("status"),
+                    "message": "미션이 승인되어 실행을 시작했습니다.",
+                }
+            except asyncio.TimeoutError:
+                return {"error": "미션 실행 시작 시간이 초과됐습니다. 잠시 후 상태를 확인하세요."}
+            except Exception as e:
+                return {"error": f"미션 승인 실패: {str(e)}"}
+
+        if tool_name == "plan_mission":
+            goal = str(tool_input.get("goal") or "")
+            devices_raw = self.registry_client.list_devices()
+            devices = self._summarize_tool_result("get_devices", devices_raw)
+            feasibility = self._check_area_feasibility(goal, devices)
+            if not feasibility["feasible"]:
+                return {
+                    "feasible": False,
+                    "reason": feasibility["reason"],
+                    "reason_code": feasibility.get("reason_code"),
+                    "clarification_needed": False,
+                }
+            try:
+                raw = await asyncio.wait_for(
+                    self.generate_mission_proposal({"goal": goal}, allow_suppression=False),
+                    timeout=80.0,
+                )
+            except asyncio.TimeoutError:
+                return {
+                    "feasible": False,
+                    "reason": "미션 계획 생성에 실패했습니다. LLM 응답 시간이 초과됐습니다. 잠시 후 다시 시도해 주세요.",
+                }
+            return self._summarize_tool_result("plan_mission", raw)
+        return {"error": f"알 수 없는 도구: {tool_name}"}
+
+    def _check_area_feasibility(self, goal: str, devices: list) -> dict:
+        """해역 하드코딩 없이, 현재 연결된 실행 가능 장치 유무만 확인한다."""
+        available_devices = [
+            d for d in devices
+            if str(d.get("layer") or "") in {"lower", "middle"}
+        ]
+        if not available_devices:
+            return {
+                "feasible": False,
+                "reason_code": "no_available_device",
+                "reason": "현재 미션을 수행할 수 있는 연결 장치가 없습니다.",
+            }
+        return {"feasible": True}
+
+    def _proposal_task_payloads(self, proposal_id: str, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        sequence = 1
+        for step in steps:
+            if not isinstance(step, dict):
                 continue
-            trigger_type = str(trigger.get("type") or trigger.get("trigger_type") or "").upper()
-            if trigger_type != "MANUAL":
-                continue
-            generated.append(
-                self.generate_mission_proposal(
+            for task in step.get("tasks") or []:
+                if not isinstance(task, dict):
+                    continue
+                payloads.append(
                     {
-                        **self._build_plan_proposal_payload(plan, source="operation_plan_manual_trigger"),
-                        "summary": f"Manual trigger activated by {activated_by}.",
+                        "proposal_id": proposal_id,
+                        "title": str(task.get("title") or task.get("action") or f"Proposal Task {sequence}"),
+                        "type": "DEVICE_TASK",
+                        "required_action": str(task.get("action") or ""),
+                        "sequence": sequence,
+                        "target_area": (task.get("params") or {}).get("area"),
+                        "target_position": (task.get("params") or {}).get("location"),
+                        "recommended_device_id": task.get("target_device_id"),
+                        "recommended_agent_id": task.get("route_agent_id"),
+                        "alternative_device_ids": list(task.get("attempted_device_ids") or []),
+                        "recommendation_reason": str(step.get("step_type") or ""),
+                        "parameters": dict(task.get("params") or {}),
                     }
                 )
+                sequence += 1
+        return payloads
+
+    def _mission_steps_from_approval(self, approval: dict[str, Any], proposal_id: str) -> list[dict[str, Any]]:
+        metadata = approval.get("metadata") or {}
+        plan = metadata.get("execution_plan") or {}
+        if isinstance(plan, dict):
+            steps = plan.get("steps") or []
+            if isinstance(steps, list):
+                return steps
+        proposal_tasks = self.registry_client.list_proposal_tasks(proposal_id)
+        mission_steps: list[dict[str, Any]] = []
+        for item in proposal_tasks:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id") or item.get("id") or uuid4())
+            mission_steps.append(
+                self._build_step(
+                    f"step-{item.get('sequence') or len(mission_steps) + 1}",
+                    step_type="generic_action",
+                    evaluation_policy="all_tasks_success_v1",
+                    tasks=[
+                        {
+                            "task_id": task_id,
+                            "logical_task_id": task_id,
+                            "attempt": 0,
+                            "attempted_device_ids": [],
+                            "title": item.get("title") or item.get("required_action") or "Task",
+                            "action": item.get("required_action"),
+                            "target_device_id": item.get("recommended_device_id"),
+                            "target_device_name": "",
+                            "route_agent_id": item.get("recommended_agent_id"),
+                            "route_agent_name": "",
+                            "params": dict(item.get("parameters") or {}),
+                        }
+                    ],
+                )
             )
-        return {"operation_plan": plan, "generated": generated}
+        return mission_steps
 
-    def recommend_operation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        goal = str(payload.get("goal") or "").strip()
-        roles = payload.get("device_roles")
-        if not isinstance(roles, list) or not roles:
-            roles = self.registry_client.list_device_roles()
-        normalized_roles = [role for role in roles if isinstance(role, dict)]
-        mission_type = self._infer_mission_type(goal, payload.get("alert_type"))
-        triggers = payload.get("triggers")
-        if not isinstance(triggers, list) or not triggers:
-            triggers = [{"type": "MANUAL", "summary": "Operator-triggered execution"}]
-            if mission_type == "mine_clearance":
-                triggers.append({"type": "EVENT", "event_type": "mine_detection", "summary": "Generate proposal when a mine-like object is detected"})
-        summary = payload.get("summary") or f"Plan for {goal or mission_type}"
-        mission_template = {
-            "mission_type": mission_type,
-            "goal": goal,
-            "location": payload.get("location") or {},
-            "requires_approval": True,
-        }
-        return {
-            "name": payload.get("name") or f"{mission_type.replace('_', ' ').title()} Plan",
-            "goal": goal,
-            "status": payload.get("status") or "draft",
-            "summary": summary,
-            "triggers": triggers,
-            "device_roles": normalized_roles,
-            "mission_templates": [mission_template],
-            "recommended_by": "system_agent",
-            "metadata": payload.get("metadata") or {},
-        }
+    async def _execute_request_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """
+        RequestHandler 역할:
+        - analyze_intent로 MISSION/QUERY/REPORT 분류 (단순하고 안정적)
+        - MISSION → SYS_INTENT_CLASSIFIED 이벤트 발행 후 PENDING 반환 (MissionPlanner가 처리)
+        - QUERY/REPORT → InsightReporter(9114) A2A 호출 후 즉시 응답
+        """
+        user_input = str(
+            parameters.get("user_input") or parameters.get("goal") or parameters.get("message") or ""
+        ).strip()
 
-    def generate_mission_proposal(self, payload: dict[str, Any], *, allow_suppression: bool = True) -> dict[str, Any]:
+        if not user_input:
+            return {"type": "RESPONSE", "status": "ERROR", "message": "사용자 명령이 비어 있습니다."}
+
+        timeout = self.decision_engine.agent_config.get("llm", {}).get("timeout_seconds") or 60
+        devices_raw = self.registry_client.list_devices()
+        devices = self._summarize_tool_result("get_devices", devices_raw)
+
+        # Step 1: analyze_intent로 intent_type 분류 (MISSION/QUERY/REPORT/SYSTEM_CONTROL)
+        intent_result, error = await self.decision_engine.analyze_intent(
+            user_input, devices_raw, self.state
+        )
+
+        if error:
+            error_msg = f"{error.get('error_type', 'unknown')}: {error.get('message', 'LLM 호출 실패')}"
+            return {"type": "RESPONSE", "status": "ERROR", "message": f"처리 실패: {error_msg}"}
+
+        intent_type = str((intent_result or {}).get("intent_type") or "QUERY").upper()
+        logger.info(f"[RequestHandler] intent_type={intent_type} | {(intent_result or {}).get('reasoning', '')[:80]}")
+
+        # ── MISSION 의도: SYS_INTENT_CLASSIFIED 이벤트 발행 → MissionPlanner가 처리 ──
+        if intent_type == "MISSION":
+            goal = user_input
+            devices = self._summarize_tool_result("get_devices", self.registry_client.list_devices())
+            feasibility = self._check_area_feasibility(goal, devices)
+            if not feasibility["feasible"]:
+                return {
+                    "type": "RESPONSE",
+                    "status": "INFEASIBLE",
+                    "message": f"미션 수행 불가: {feasibility['reason']}",
+                    "reason_code": feasibility.get("reason_code"),
+                    "clarification_needed": False,
+                }
+            # Moth 'agents' MEB 채널에 직접 publish (Registry는 저장용으로만 별도 기록)
+            intent_id = f"intent-{uuid4()}"
+            meb_payload = {
+                "intent_type": "MISSION",
+                "user_input": user_input,
+                "goal": goal,
+                "intent_id": intent_id,
+                "devices_summary": devices,
+            }
+            asyncio.create_task(self._publish_to_meb(
+                "SYS_INTENT_CLASSIFIED", meb_payload, ["MissionPlanner"]
+            ))
+            # Registry에 감사 로그 저장 (비동기, 실패해도 무관)
+            try:
+                self.registry_client.ingest_event({
+                    "event_type": "SYS_INTENT_CLASSIFIED",
+                    "source_system": "request_handler",
+                    "source_agent_id": self.state.agent_id,
+                    "source_role": "request_handler",
+                    "severity": "INFORMATION",
+                    "title": "사용자 미션 요청",
+                    "message": user_input,
+                    "data": meb_payload,
+                })
+            except Exception:
+                pass
+            logger.info(f"[RequestHandler] SYS_INTENT_CLASSIFIED MEB 발행 (intent_id={intent_id})")
+            return {
+                "type": "RESPONSE",
+                "status": "PENDING",
+                "message": (
+                    "미션 계획 요청이 MissionPlanner로 전달됐습니다.\n"
+                    "장치 역량 분석 후 실행 가능한 Proposal이 생성됩니다.\n"
+                    "UI의 Proposals 목록에서 원하는 계획을 승인해 주세요."
+                ),
+                "intent_id": intent_id,
+            }
+
+        # ── QUERY/REPORT 의도: InsightReporter(9114) A2A 동기 호출 ──
+        try:
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._call_system_agent_sync(
+                        9114, {"user_input": user_input, "intent_type": intent_type}
+                    ),
+                ),
+                timeout=float(timeout),
+            )
+            report_obj = result.get("report") or {}
+            message = report_obj.get("report") or result.get("message") or "리포트를 생성할 수 없습니다."
+            return {"type": "RESPONSE", "status": "SUCCESS", "message": message}
+        except asyncio.TimeoutError:
+            return {"type": "RESPONSE", "status": "ERROR", "message": "InsightReporter 응답 시간 초과."}
+        except Exception as e:
+            return {"type": "RESPONSE", "status": "ERROR", "message": f"리포트 생성 실패: {e}"}
+
+    def _execute_policy_manager(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        policy_id = str(parameters.get("policy_id") or parameters.get("id") or "").strip()
+        if policy_id:
+            policy = self.registry_client.update_policy(policy_id, parameters)
+        else:
+            policy = self.registry_client.create_policy(parameters)
+        return {"type": "RESPONSE", "status": "SUCCESS", "policy": policy}
+
+    async def generate_mission_proposal(
+        self,
+        payload: dict[str, Any],
+        *,
+        allow_suppression: bool = True,
+        _preset_mission_type: str | None = None,
+        _preset_location: dict | None = None,
+    ) -> dict[str, Any]:
         devices = self.registry_client.list_devices()
         goal = str(payload.get("goal") or "").strip()
-        operation_plan_id = payload.get("operation_plan_id")
-        plan = None
-        if operation_plan_id:
-            try:
-                plan = self.registry_client.get_operation_plan(str(operation_plan_id))
-            except Exception:
-                plan = None
-        alert = None
-        alert_id = payload.get("alert_id")
-        if alert_id:
-            try:
-                alert = self.registry_client.get_alert(str(alert_id))
-            except Exception:
-                alert = None
-        mission_type = self._infer_mission_type(goal or (plan or {}).get("goal") or "", (alert or {}).get("alert_type"))
-        location = payload.get("location") or ((plan or {}).get("mission_templates") or [{}])[0].get("location") or ((alert or {}).get("metadata") or {}).get("location") or {}
-        suppression_fingerprint = f"{mission_type}:{goal or (plan or {}).get('goal') or ''}:{(alert or {}).get('alert_id') or ''}"
+
+        # Mission type 결정: preset이 있으면 사용, 없으면 LLM 필수
+        if _preset_mission_type:
+            mission_type = _preset_mission_type
+            location = _preset_location or payload.get("location") or {}
+        else:
+            # LLM으로 mission_type 분석 (필수, fallback 없음)
+            llm_intent, llm_error = await self.decision_engine.analyze_intent(goal, devices, self.state)
+
+            if llm_error or not llm_intent or not llm_intent.get("mission_type"):
+                # LLM 호출 실패 → ERROR 반환 (규칙 기반 fallback 없음)
+                error_msg = llm_error.get("message", "LLM 호출 실패") if llm_error else "LLM 응답 형식 오류"
+                raise RuntimeError(f"Mission type 분석 실패: {error_msg}")
+
+            mission_type = llm_intent.get("mission_type")
+            location = llm_intent.get("location") or payload.get("location") or {}
+        suppression_fingerprint = f"{mission_type}:{goal}:{payload.get('alert_id') or ''}"
         suppressed_until = self._recommendation_suppressions.get(suppression_fingerprint)
         if allow_suppression and suppressed_until and self._parse_iso_ts(suppressed_until) > time.time():
             return {
@@ -860,53 +1202,119 @@ class AgentRuntime:
         if not steps:
             fallback_step = self._build_generic_steps_for_goal(goal or mission_type, devices, location)
             steps = fallback_step
+
+        # Phase 4: LLM으로 한국어 insight 요약 생성
+        insight_texts, insight_err = await self.decision_engine.generate_insight_summary(
+            goal, mission_type, devices, {"location": location}, self.state
+        )
+
         insight = self.registry_client.create_insight(
             {
-                "summary": payload.get("insight_summary") or f"Mission proposal prepared for {mission_type}",
-                "reason_summary": payload.get("reason_summary") or "Current device availability, roles, and routing support execution.",
-                "severity": str(payload.get("severity") or ((alert or {}).get("severity") or "INFORMATION")).upper(),
+                "summary": payload.get("insight_summary") or insight_texts.get("summary") or f"'{mission_type.replace('_', ' ').title()}' 미션이 준비되었습니다.",
+                "reason_summary": payload.get("reason_summary") or insight_texts.get("reason_summary") or "현재 디바이스 가용성 및 라우팅을 고려하여 실행 가능합니다.",
+                "severity": str(payload.get("severity") or "INFORMATION").upper(),
                 "recommended_action": "review_and_approve_mission",
                 "confidence_level": "medium",
-                "related_event_id": payload.get("event_id") or (alert or {}).get("event_id"),
-                "related_alert_id": (alert or {}).get("alert_id"),
+                "related_event_id": payload.get("event_id"),
+                "related_alert_id": payload.get("alert_id"),
                 "metadata": {"goal": goal, "location": location},
             }
         )
         proposal = self.registry_client.create_mission_proposal(
             {
                 "title": payload.get("title") or f"{mission_type.replace('_', ' ').title()} Proposal",
-                "mission_type": mission_type,
-                "goal": goal or (plan or {}).get("goal") or mission_type,
-                "summary": payload.get("summary") or f"Proposal with {len(steps)} step(s) for operator review.",
-                "source": payload.get("source") or ("operation_plan" if plan else "system_agent"),
-                "alert_id": (alert or {}).get("alert_id"),
-                "event_id": payload.get("event_id") or (alert or {}).get("event_id"),
-                "operation_plan_id": operation_plan_id,
-                "insight_id": insight.get("insight_id"),
-                "steps": steps,
-                "metadata": {"location": location, "fingerprint": suppression_fingerprint},
+                "type": mission_type.upper(),
+                "priority": str(payload.get("priority") or "NORMAL").upper(),
+                "source_event_id": payload.get("event_id"),
+                "target_area": (location or {}).get("area"),
+                "target_position": location if isinstance(location, dict) and any(k in location for k in ("latitude", "longitude")) else None,
+                "created_by": {"type": "SYSTEM", "id": self.state.agent_id},
+                "limitations": payload.get("limitations"),
             }
         )
+        proposal_id = str(proposal.get("proposal_id") or proposal.get("id") or "")
+        proposal_tasks = [
+            self.registry_client.create_proposal_task(proposal_id, task_payload)
+            for task_payload in self._proposal_task_payloads(proposal_id, steps)
+        ]
         approval = self.registry_client.create_approval(
             {
                 "target_type": "mission_proposal",
-                "target_id": proposal.get("proposal_id"),
+                "target_id": proposal_id,
                 "summary": f"Approve mission proposal '{proposal.get('title')}'",
                 "requested_action": "approve_mission_proposal",
                 "related_insight_id": insight.get("insight_id"),
                 "metadata": {
                     "mission_type": mission_type,
-                    "goal": proposal.get("goal"),
+                    "goal": goal or mission_type,
                     "location": location,
+                    "source_event_id": payload.get("event_id"),
+                    "suppression_fingerprint": suppression_fingerprint,
+                    "execution_plan": {"steps": steps},
                 },
             }
         )
         proposal["approval_id"] = approval.get("approval_id")
-        proposal = self.registry_client.create_mission_proposal(proposal)
+        proposal["proposal_tasks_count"] = len(proposal_tasks)
         return {
             "insight": insight,
             "proposal": proposal,
             "approval": approval,
+        }
+
+    async def generate_multiple_mission_proposals(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        사용자 대화 전용: 3개의 mission proposal을 생성하여 반환
+        각 proposal은 서로 다른 전략(표준/신속/정밀)을 기반으로 함
+
+        최적화: analyze_intent는 한 번만 호출하고 결과를 재사용
+
+        Returns: {
+            "proposals": [proposal1, proposal2, proposal3],
+            "approvals": [approval1, approval2, approval3],
+            "insights": [insight1, insight2, insight3],
+            "strategy_source": "llm" | "rule_based"
+        }
+        """
+        devices = self.registry_client.list_devices()
+        goal = str(payload.get("goal") or "").strip()
+
+        # Step 1: LLM으로 mission_type 분류 (한 번만!)
+        llm_intent, _ = await self.decision_engine.analyze_intent(goal, devices, self.state)
+        if llm_intent and llm_intent.get("mission_type"):
+            mission_type = llm_intent["mission_type"]
+            location = llm_intent.get("location") or payload.get("location") or {}
+        else:
+            mission_type = self._infer_mission_type(goal, None)
+            location = payload.get("location") or {}
+
+        # Step 2: LLM으로 3가지 전략 생성
+        strategies, strategy_error = await self.decision_engine.generate_proposal_strategies(
+            goal, mission_type, location, devices, self.state
+        )
+
+        # Step 3: 각 전략으로 proposal/approval/insight 생성 (이미 분석된 mission_type 재사용)
+        results = []
+        for strategy in strategies:
+            bundle = await self.generate_mission_proposal(
+                {
+                    **payload,
+                    "title": strategy.get("title") or f"{mission_type} Proposal",
+                    "summary": strategy.get("summary") or f"{strategy.get('approach', 'strategy')} approach",
+                    "_approach": strategy.get("approach"),  # 메타데이터용
+                },
+                allow_suppression=False,
+                _preset_mission_type=mission_type,  # 분석 결과 재사용
+                _preset_location=location,
+            )
+            if not bundle.get("suppressed"):
+                results.append(bundle)
+
+        return {
+            "proposals": [r["proposal"] for r in results],
+            "approvals": [r["approval"] for r in results],
+            "insights": [r["insight"] for r in results],
+            "strategy_source": "llm" if not strategy_error else "rule_based",
         }
 
     def _command_proposal_title(self, goal: str, mission_type: str) -> str:
@@ -928,35 +1336,19 @@ class AgentRuntime:
             decided_by=decided_by,
             notes=notes,
         )
-        if str(approval.get("target_type") or "") == "device_role_assignment":
-            if approved:
-                metadata = dict(approval.get("metadata") or {})
-                role = self.registry_client.upsert_device_role(
-                    str(approval.get("target_id") or ""),
-                    {
-                        "device_id": str(approval.get("target_id") or ""),
-                        "role_name": metadata.get("role_name"),
-                        "responsibility": metadata.get("responsibility"),
-                        "assigned_by": decided_by,
-                        "status": metadata.get("status") or "active",
-                        "metadata": metadata.get("metadata") or {},
-                    },
-                )
-                return {"approval": approval, "device_role": role, "mission": None}
-            return {"approval": approval, "device_role": None, "mission": None}
         if str(approval.get("target_type") or "") == "mission_reapproval":
             mission_id = str(approval.get("target_id") or "")
             mission = self.registry_client.get_mission(mission_id)
             mission.setdefault("timeline", []).append(
                 {
                     "timestamp": utc_now(),
-                    "type": "user_reapproval",
+                    "type": "USER_REAPPROVAL",
                     "message": "User reapproval recorded.",
                     "data": {"approval_id": approval_id, "approved": approved},
                 }
             )
             # ✅ Record mission reapproval decision timeline event (Ch.18-20)
-            event_type = "mission_approved" if approved else "mission_rejected"
+            event_type = "MISSION_APPROVED" if approved else "MISSION_REJECTED"
             try:
                 self.registry_client.append_mission_timeline_event(
                     mission_id=mission_id,
@@ -972,9 +1364,9 @@ class AgentRuntime:
             except Exception as e:
                 logger.debug(f"Failed to record reapproval timeline: {e}")
             if not approved:
-                mission["status"] = "failed"
+                mission["status"] = "FAILED"
                 mission["completed_at"] = utc_now()
-                mission["final_result"] = {"status": "failed", "reason": "user rejected mission reapproval"}
+                mission["final_result"] = {"status": "FAILED", "reason": "user rejected mission reapproval"}
                 self.registry_client.replace_mission(mission_id, mission)
                 return {"approval": approval, "mission": mission}
             dispatch_state = dict((mission.get("metadata") or {}).get("dispatch_state") or self._build_dispatch_result_from_steps(mission.get("steps") or []))
@@ -991,7 +1383,7 @@ class AgentRuntime:
             )
             if isinstance(current_step_def, dict) and isinstance(current_step_state, dict):
                 self._prepare_step_recovery(current_step_def, current_step_state, devices, mode=recovery_mode)
-            mission["status"] = "running"
+            mission["status"] = "IN_PROGRESS"
             mission["completed_at"] = None
             mission["final_result"] = {}
             mission = self._sync_mission_from_dispatch_state(mission, dispatch_state)
@@ -1000,21 +1392,31 @@ class AgentRuntime:
             return {"approval": approval, "mission": mission}
         if str(approval.get("target_type") or "") != "mission_proposal":
             return {"approval": approval, "mission": None}
-        proposal = self.registry_client.get_mission_proposal(str(approval.get("target_id")))
-        proposal["status"] = "approved" if approved else "rejected"
+        proposal_id = str(approval.get("target_id"))
+        proposal = self.registry_client.get_mission_proposal(proposal_id)
+        proposal["status"] = "APPROVED" if approved else "CANCELLED"
         proposal = self.registry_client.create_mission_proposal(proposal)
         if not approved:
-            fingerprint = str((proposal.get("metadata") or {}).get("fingerprint") or "")
+            fingerprint = str((approval.get("metadata") or {}).get("suppression_fingerprint") or "")
             if fingerprint:
                 self._recommendation_suppressions[fingerprint] = datetime.fromtimestamp(time.time() + 3600, tz=timezone.utc).isoformat()
             return {"approval": approval, "proposal": proposal, "mission": None}
-        mission = self._mission_from_proposal(proposal, approval_id=str(approval.get("approval_id") or approval_id))
-        mission = self.registry_client.create_mission(mission)
+        mission = self._mission_from_proposal(
+            proposal,
+            approval,
+            approval_id=str(approval.get("approval_id") or approval_id),
+        )
+        created = self.registry_client.create_mission(mission)
+        # registry 응답은 최소 필드만 포함 → mission_id만 업데이트하고 나머지는 보존
+        if created.get("mission_id"):
+            mission["mission_id"] = created["mission_id"]
+        mission["created_at"] = created.get("created_at") or mission.get("created_at")
+        mission["updated_at"] = created.get("updated_at") or mission.get("updated_at")
         # ✅ Record mission approval timeline event (Ch.18-20)
         try:
             self.registry_client.append_mission_timeline_event(
                 mission_id=mission.get("mission_id", ""),
-                event_type="mission_approved",
+                event_type="MISSION_APPROVED",
                 actor=f"user_{decided_by}",
                 details={
                     "approval_id": str(approval.get("approval_id") or approval_id),
@@ -1036,21 +1438,15 @@ class AgentRuntime:
         except Exception:
             devices = []
         try:
-            alerts = self.registry_client.list_alerts()
-        except Exception:
-            alerts = []
-        try:
             missions = self.registry_client.list_missions()
         except Exception:
             missions = []
         return {
             "devices": devices,
-            "alerts": alerts,
             "missions": missions,
             "devices.connected_count": len([device for device in devices if bool(device.get("connected"))]),
-            "alerts.waiting_count": len([alert for alert in alerts if str(alert.get("status") or "") in {"waiting", "registered", "processing"}]),
-            "missions.running_count": len([mission for mission in missions if str(mission.get("status") or "") == "running"]),
-            "missions.needs_review_count": len([mission for mission in missions if str(mission.get("status") or "") == "needs_review"]),
+            "missions.in_progress_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "IN_PROGRESS"]),
+            "missions.failed_count": len([mission for mission in missions if str(mission.get("status") or "").upper() == "FAILED"]),
         }
 
     def _value_at_path(self, source: dict[str, Any], field_name: str) -> Any:
@@ -1126,48 +1522,6 @@ class AgentRuntime:
             return self._condition_clause_matches(trigger, source)
         return False
 
-    def _build_plan_proposal_payload(self, plan: dict[str, Any], *, source: str, event: dict[str, Any] | None = None) -> dict[str, Any]:
-        mission_template = ((plan.get("mission_templates") or [{}])[0] if isinstance(plan.get("mission_templates"), list) else {}) or {}
-        metadata = dict(plan.get("metadata") or {})
-        return {
-            "title": f"{plan.get('name') or 'Operation Plan'} Proposal",
-            "goal": mission_template.get("goal") or plan.get("goal") or "",
-            "operation_plan_id": plan.get("operation_plan_id"),
-            "location": mission_template.get("location") or metadata.get("location") or ((event or {}).get("metadata") or {}).get("location") or {},
-            "alert_id": (event or {}).get("alert_id"),
-            "event_id": (event or {}).get("event_id"),
-            "severity": (event or {}).get("severity") or "INFORMATION",
-            "source": source,
-            "summary": f"Proposal generated from operation plan {plan.get('operation_plan_id')}.",
-        }
-
-    async def _operation_plan_loop(self) -> None:
-        logger = logging.getLogger(__name__)
-        last_triggered: dict[str, str] = {}
-        while True:
-            await asyncio.sleep(30)
-            try:
-                plans = self.registry_client.list_operation_plans()
-            except Exception as exc:
-                logger.debug(f"Failed to fetch operation plans: {exc}")
-                continue
-            snapshot = self._condition_snapshot()
-            current_slot = self._current_hhmm()
-            for plan in plans:
-                if str(plan.get("status") or "") != "active":
-                    continue
-                for idx, trigger in enumerate(plan.get("triggers") or []):
-                    if not isinstance(trigger, dict):
-                        continue
-                    if not self._trigger_matches(trigger, snapshot=snapshot):
-                        continue
-                    dedupe_key = f"{plan.get('operation_plan_id')}:{idx}:{current_slot}"
-                    if last_triggered.get(dedupe_key) == current_slot:
-                        continue
-                    self.generate_mission_proposal(self._build_plan_proposal_payload(plan, source="operation_plan_time_trigger"))
-                    last_triggered[dedupe_key] = current_slot
-                    self.state.remember({"kind": "operation_plan_triggered", "at": utc_now(), "operation_plan_id": plan.get("operation_plan_id"), "trigger": trigger})
-
     def _infer_mission_type(self, goal: str, alert_type: Any) -> str:
         goal_text = str(goal or "").lower()
         alert_text = str(alert_type or "").lower()
@@ -1198,18 +1552,21 @@ class AgentRuntime:
             )
         ]
 
-    def _mission_from_proposal(self, proposal: dict[str, Any], *, approval_id: str) -> dict[str, Any]:
-        mission_id = f"mission-{uuid4()}"
+    def _mission_from_proposal(self, proposal: dict[str, Any], approval: dict[str, Any], *, approval_id: str) -> dict[str, Any]:
+        mission_id = str(uuid4())
+        proposal_id = str(proposal.get("proposal_id") or proposal.get("id") or "")
+        steps = self._mission_steps_from_approval(approval, proposal_id)
+        approval_metadata = approval.get("metadata") or {}
         timeline = [
             {
                 "timestamp": utc_now(),
-                "type": "mission_created",
+                "type": "MISSION_CREATED",
                 "message": "Mission created from approved proposal.",
-                "data": {"proposal_id": proposal.get("proposal_id"), "approval_id": approval_id},
+                "data": {"proposal_id": proposal_id, "approval_id": approval_id},
             },
             {
                 "timestamp": utc_now(),
-                "type": "user_approval",
+                "type": "USER_APPROVAL",
                 "message": "User approval recorded.",
                 "data": {"approval_id": approval_id},
             },
@@ -1217,25 +1574,21 @@ class AgentRuntime:
         return {
             "mission_id": mission_id,
             "title": proposal.get("title") or "Mission",
-            "mission_type": proposal.get("mission_type") or "generic_mission",
-            "goal": proposal.get("goal") or "",
-            "status": "approved",
-            "summary": proposal.get("summary") or "",
-            "source": proposal.get("source") or "system_agent",
-            "alert_id": proposal.get("alert_id"),
-            "event_id": proposal.get("event_id"),
-            "operation_plan_id": proposal.get("operation_plan_id"),
-            "proposal_id": proposal.get("proposal_id"),
+            "mission_type": proposal.get("type") or proposal.get("mission_type") or "OPERATION",
+            "status": "READY",
+            "priority": proposal.get("priority") or "NORMAL",
+            "source_event_id": proposal.get("source_event_id") or approval_metadata.get("source_event_id"),
+            "source_proposal_id": proposal_id,
+            "target_area": proposal.get("target_area"),
+            "target_position": proposal.get("target_position"),
+            "created_by": proposal.get("created_by") or {"type": "SYSTEM", "id": self.state.agent_id},
+            "approved_by_user_id": approval.get("decided_by"),
             "approval_id": approval_id,
-            "insight_id": proposal.get("insight_id"),
-            "steps": proposal.get("steps") or [],
+            "steps": steps,
             "timeline": timeline,
-            "logs": list(timeline),
-            "device_execution_results": [],
             "final_result": {},
             "metadata": {
-                **dict(proposal.get("metadata") or {}),
-                "dispatch_state": self._build_dispatch_result_from_steps(proposal.get("steps") or []),
+                "dispatch_state": self._build_dispatch_result_from_steps(steps),
             },
             "approved_at": utc_now(),
         }
@@ -1248,19 +1601,18 @@ class AgentRuntime:
             step_state = next((item for item in step_states if isinstance(item, dict) and str(item.get("step_id") or "") == step_id), None)
             if not isinstance(step_state, dict):
                 continue
-            mission_step["status"] = step_state.get("status") or mission_step.get("status") or "pending"
+            mission_step["status"] = self._task_status(step_state.get("status") or mission_step.get("status"))
             task_states = step_state.get("tasks") or []
             for mission_task in mission_step.get("tasks") or []:
                 state = next((item for item in task_states if isinstance(item, dict) and str(item.get("logical_task_id") or item.get("task_id") or "") == str(mission_task.get("logical_task_id") or mission_task.get("task_id") or "")), None)
                 if not isinstance(state, dict):
                     continue
-                mission_task["dispatch_status"] = state.get("dispatch_status")
-                mission_task["execution_status"] = state.get("execution_status")
+                mission_task["dispatch_status"] = self._task_status(state.get("dispatch_status"))
+                mission_task["execution_status"] = self._task_status(state.get("execution_status"))
                 mission_task["attempt"] = state.get("attempt", mission_task.get("attempt", 0))
                 mission_task["attempted_device_ids"] = state.get("attempted_device_ids") or mission_task.get("attempted_device_ids") or []
                 mission_task["completed_at"] = state.get("completed_at")
         mission.setdefault("metadata", {})["dispatch_state"] = dispatch_state
-        mission["device_execution_results"] = list(dispatch_state.get("execution_results") or [])
         return mission
 
     def _append_dispatch_timeline_entries(self, mission: dict[str, Any], dispatch: dict[str, Any], mission_steps: list[dict[str, Any]]) -> None:
@@ -1274,7 +1626,7 @@ class AgentRuntime:
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "step_started",
+                "type": "STEP_STARTED",
                 "message": f"Step {step_id} started.",
                 "data": {
                     "step_id": step_id,
@@ -1289,7 +1641,7 @@ class AgentRuntime:
             mission.setdefault("timeline", []).append(
                 {
                     "timestamp": utc_now(),
-                    "type": "task_started",
+                    "type": "TASK_STARTED",
                     "message": f"Task {task_id} dispatched for execution.",
                     "data": {
                         "step_id": step_id,
@@ -1335,10 +1687,10 @@ class AgentRuntime:
             "acceptance_status": raw_result.get("acceptance_status"),
             "started_at": raw_result.get("started_at") or raw_result.get("accepted_at"),
             "finished_at": raw_result.get("finished_at") or raw_result.get("reported_at"),
-            "success": normalized_status == "completed",
+            "success": normalized_status == "COMPLETED",
             "failure_reason": raw_result.get("reason") or raw_result.get("error") or raw_result.get("failure_message"),
             "failure_category": self._standardize_failure_category(
-                raw_result.get("failure_category") or execution_log.get("failure_category") or ("unknown" if normalized_status != "completed" else None)
+                raw_result.get("failure_category") or execution_log.get("failure_category") or ("unknown" if normalized_status != "COMPLETED" else None)
             ),
             "location": (
                 raw_result.get("location")
@@ -1355,26 +1707,32 @@ class AgentRuntime:
         }
 
     async def _start_mission_execution(self, mission: dict[str, Any]) -> dict[str, Any]:
+        mission_id = mission.get("mission_id")
+        if not mission_id:
+            logger.error("_start_mission_execution: mission_id 없음, 실행 불가")
+            mission["status"] = "FAILED"
+            mission["final_result"] = {"status": "FAILED", "reason": "mission_id_missing"}
+            return mission
         devices = self.registry_client.list_devices()
         steps = mission.get("steps") or []
         if not steps:
-            mission["status"] = "failed"
+            mission["status"] = "FAILED"
             mission["completed_at"] = utc_now()
-            mission["final_result"] = {"status": "failed", "reason": "no_steps_generated"}
+            mission["final_result"] = {"status": "FAILED", "reason": "no_steps_generated"}
             mission.setdefault("timeline", []).append({
                 "timestamp": utc_now(),
-                "type": "dispatch_failed",
+                "type": "DISPATCH_FAILED",
                 "message": "Mission has no steps — no capable device found.",
                 "data": {"mission_id": mission.get("mission_id")},
             })
-            self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+            self._try_update_mission_status(mission.get("mission_id"), "FAILED", "no_steps_generated")
             return mission
-        mission["status"] = "running"
+        mission["status"] = "IN_PROGRESS"
         mission["started_at"] = utc_now()
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "mission_started",
+                "type": "MISSION_STARTED",
                 "message": "Mission execution started.",
                 "data": {"mission_id": mission.get("mission_id")},
             }
@@ -1388,23 +1746,79 @@ class AgentRuntime:
             "dispatch_result": dispatch_state,
             "params": {"steps": steps},
         }
-        dispatch = await self._dispatch_next_step(response_like, steps, devices, logging.getLogger(__name__))
+        # MissionPlanner 역할일 때는 DeviceBridge(9110) 경유, 아니면 직접 dispatch
+        if self.state.role == "mission_planner":
+            dispatch = await self._dispatch_via_device_bridge(mission, steps)
+        else:
+            dispatch = await self._dispatch_next_step(response_like, steps, devices, logging.getLogger(__name__))
         mission = self._sync_mission_from_dispatch_state(mission, dispatch)
         self._append_dispatch_timeline_entries(mission, dispatch, steps)
+        delivered = bool(dispatch.get("delivered"))
         mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "task_dispatched" if dispatch.get("delivered") else "dispatch_failed",
-                "message": "Initial mission step dispatched." if dispatch.get("delivered") else "Initial mission dispatch failed.",
-                "data": dispatch,
+                "type": "TASK_DISPATCHED" if delivered else "DISPATCH_FAILED",
+                "message": "Initial mission step dispatched." if delivered else "Initial mission dispatch failed.",
+                "data": {"delivered": delivered, "error": dispatch.get("error")},
             }
         )
-        if not dispatch.get("delivered"):
-            mission["status"] = "failed"
-            mission["completed_at"] = utc_now()
-            mission["final_result"] = {"status": "failed", "reason": dispatch.get("error") or "dispatch_failed"}
-        self.registry_client.replace_mission(str(mission.get("mission_id")), mission)
+        if not delivered:
+            mission["status"] = "FAILED"
+            mission["final_result"] = {"status": "FAILED", "reason": dispatch.get("error") or "dispatch_failed"}
+            self._try_update_mission_status(mission.get("mission_id"), "FAILED", dispatch.get("error") or "dispatch_failed")
+        else:
+            self._try_update_mission_status(mission.get("mission_id"), "IN_PROGRESS")
         return mission
+
+    def _try_update_mission_status(self, mission_id: str | None, status: str, reason: str | None = None) -> None:
+        """registry에 미션 상태만 업데이트 (실패해도 무시)"""
+        if not mission_id:
+            return
+        try:
+            payload: dict[str, Any] = {"status": status}
+            if reason:
+                payload["status_reason"] = reason
+            self.registry_client.replace_mission(str(mission_id), payload)
+        except Exception as e:
+            logger.warning(f"미션 상태 registry 업데이트 실패 (mission_id={mission_id}): {e}")
+
+    async def _dispatch_via_device_bridge(self, mission: dict[str, Any], steps: list) -> dict[str, Any]:
+        """MissionPlanner → DeviceBridge(9110) A2A → Device Agent"""
+        payload = {
+            "mission_id": mission.get("mission_id"),
+            "alert_id": mission.get("alert_id"),
+            "reason": mission.get("title") or "MissionPlanner dispatch",
+            "steps": steps,
+        }
+        try:
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._call_system_agent_sync(9110, payload)
+                ),
+                timeout=30.0,
+            )
+            delivered = bool((result or {}).get("delivered"))
+            logger.info(f"[MissionPlanner→DeviceBridge] delivered={delivered}")
+            return {"delivered": delivered, "result": result}
+        except Exception as e:
+            logger.error(f"[MissionPlanner→DeviceBridge] 오류: {e}")
+            return {"delivered": False, "error": str(e)}
+
+    def _call_system_agent_sync(self, port: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """다른 System Agent의 /execute 엔드포인트에 동기 HTTP POST"""
+        url = f"http://127.0.0.1:{port}/execute"
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                return json.loads(resp.read())
+        except Exception as e:
+            logger.warning(f"[A2A] {url} 호출 실패: {e}")
+            return {"error": str(e)}
 
     def _build_task(
         self,
@@ -1599,7 +2013,7 @@ class AgentRuntime:
         
         Scoring Factors:
         - Distance (25%): 목표까지의 거리
-        - Battery (20%): 배터리 수준
+        - Battery (30% 경고 / 10% 자동 복귀): 배터리 수준
         - Capability (20%): action 수행 능력
         - Reliability (15%): 역사적 성공률
         - Workload (15%): 현재 작업 부하
@@ -1685,7 +2099,12 @@ class AgentRuntime:
         return raw
 
     def _device_supported_actions(self, device: dict[str, Any]) -> set[str]:
-        actions = set(str(v).lower() for v in (device.get("actions") or {}).get("custom", []))
+        actions_payload = device.get("actions") or []
+        if isinstance(actions_payload, dict):
+            action_values = list(actions_payload.get("custom", []) or []) + list(actions_payload.get("core", []) or [])
+        else:
+            action_values = list(actions_payload or [])
+        actions = set(str(v).lower() for v in action_values)
         agent = device.get("agent") or {}
         if isinstance(agent, dict):
             actions.update(str(v).lower() for v in agent.get("available_actions") or [])
@@ -1787,7 +2206,7 @@ class AgentRuntime:
 
             # Device 상태를 "online"으로 복원
             device = self.registry_client.get_device(device_id)
-            if device and device.get("connectivity_status") == "lost":
+            if device and device.get("connectivity_status") == "offline":
                 # Connectivity status를 online으로 변경
                 self.registry_client.update_device_connectivity(device_id, "online")
                 logger.info(f"✅ Device {device_id} marked as online")
@@ -1806,7 +2225,7 @@ class AgentRuntime:
                                 for task in step.get("tasks", []):
                                     if task.get("task_id") == task_id:
                                         # Task 상태 업데이트
-                                        task["execution_status"] = task_result.get("status", "completed")
+                                        task["execution_status"] = self._task_status(task_result.get("status"), "COMPLETED")
                                         task["result"] = task_result
                                         if mission not in missions_to_update:
                                             missions_to_update.append(mission)
@@ -1837,8 +2256,8 @@ class AgentRuntime:
         task_states = [task for task in (step_state.get("tasks") or []) if isinstance(task, dict)]
         if not task_states:
             return False
-        terminal_statuses = {"completed", "failed"}
-        return all(str(task.get("execution_status") or "pending") in terminal_statuses for task in task_states)
+        terminal_statuses = {"COMPLETED", "FAILED", "CANCELLED", "ABORTED"}
+        return all(self._task_status(task.get("execution_status")) in terminal_statuses for task in task_states)
 
     def _evaluate_step(
         self,
@@ -1874,7 +2293,7 @@ class AgentRuntime:
         # P9 (기록 가능성): 평가 결과를 Event로 기록
         try:
             event = create_step_evaluation_event(
-                source_agent_id=self.state.registry_id or self.state.agent_id,
+                source_agent_id=self.state.agent_id,
                 response_id=response.get("response_id", ""),
                 step_id=step.get("step_id", ""),
                 policy=evaluation.get("policy", ""),
@@ -1906,7 +2325,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             if int(task_state.get("attempt") or 0) < max_retries:
                 return True
@@ -1921,7 +2340,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             logical_task_id = str(task_state.get("logical_task_id") or task_state.get("task_id") or "")
             task_def = next(
@@ -1975,7 +2394,7 @@ class AgentRuntime:
         for task_state in step_state.get("tasks") or []:
             if not isinstance(task_state, dict):
                 continue
-            if str(task_state.get("execution_status") or "") != "failed":
+            if self._task_status(task_state.get("execution_status")) != "FAILED":
                 continue
             logical_task_id = str(task_state.get("logical_task_id") or task_state.get("task_id") or "")
             task_def = next(
@@ -2035,8 +2454,8 @@ class AgentRuntime:
                     "target_device_name": rebuilt["target_device_name"],
                     "route_agent_id": rebuilt["route_agent_id"],
                     "route_agent_name": rebuilt["route_agent_name"],
-                    "dispatch_status": "pending",
-                    "execution_status": "pending",
+                    "dispatch_status": "PENDING",
+                    "execution_status": "PENDING",
                     "dispatch": None,
                     "execution_result": None,
                     "completed_at": None,
@@ -2046,7 +2465,7 @@ class AgentRuntime:
             recovered_any = True
 
         if recovered_any:
-            step_state["status"] = "pending"
+            step_state["status"] = "PENDING"
         return recovered_any
 
     async def _dispatch_next_step(
@@ -2060,6 +2479,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         dispatch_result = dict(response.get("dispatch_result") or {})
         step_states = dispatch_result.get("steps") or []
+        mission_id = str(response.get("mission_id") or response.get("response_id") or "")
         if not isinstance(step_states, list):
             step_states = []
         for step in mission_steps:
@@ -2070,14 +2490,14 @@ class AgentRuntime:
                 ),
                 None,
             )
-            if step_state and step_state.get("status") in {"dispatched", "completed"}:
+            if step_state and self._task_status(step_state.get("status")) in {"ASSIGNED", "IN_PROGRESS", "COMPLETED"}:
                 continue
             depends_on = [str(dep) for dep in (step.get("depends_on") or [])]
             if any(
                 not any(
                     isinstance(state, dict)
                     and str(state.get("step_id")) == dep_step_id
-                    and state.get("status") == "completed"
+                    and self._task_status(state.get("status")) == "COMPLETED"
                     for state in step_states
                 )
                 for dep_step_id in depends_on
@@ -2087,7 +2507,7 @@ class AgentRuntime:
             try:
                 self.registry_client.append_mission_timeline_event(
                     mission_id=mission_id,
-                    event_type="step_started",
+                    event_type="STEP_STARTED",
                     actor="system",
                     details={
                         "step_type": step.get("step_type", "unknown"),
@@ -2129,7 +2549,6 @@ class AgentRuntime:
                 ]
             )
             delivery_failed = False
-            mission_id = str(response.get("mission_id") or response.get("response_id") or "")
             for (task, _task_response), dispatch in zip(task_requests, dispatches):
                 task_results.append(
                     {
@@ -2157,7 +2576,7 @@ class AgentRuntime:
                                 try:
                                     self.registry_client.append_mission_timeline_event(
                                         mission_id=mission_id,
-                                        event_type="task_assigned",
+                                        event_type="TASK_ASSIGNED",
                                         actor="system",
                                         details={
                                             "action": task["action"],
@@ -2169,8 +2588,33 @@ class AgentRuntime:
                                     )
                                 except Exception as e:
                                     logger.debug(f"Failed to record task_assigned timeline: {e}")
+                                try:
+                                    self.registry_client.ingest_event(
+                                        {
+                                            "source_system": "system_agent",
+                                            "source_agent_id": str(self.state.agent_id),
+                                            "source_role": str(self.state.role or "mission_planner"),
+                                            "event_type": "SYS_TASK_DISPATCHED",
+                                            "severity": "INFO",
+                                            "title": f"Task {task['task_id']} dispatched",
+                                            "description": f"Task {task['task_id']} dispatched to device {task['target_device_id']}.",
+                                            "target_type": "TASK",
+                                            "target_id": str(task["task_id"]),
+                                            "data": {
+                                                "mission_id": mission_id,
+                                                "step_id": str(step["step_id"]),
+                                                "task_id": str(task["task_id"]),
+                                                "action": task["action"],
+                                                "target_device_id": str(task["target_device_id"]),
+                                                "route_agent_id": str(task["route_agent_id"]),
+                                            },
+                                            "target_agents": ["SystemSentinel", "InsightReporter"],
+                                        }
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Failed to record task dispatched event: {e}")
                             task_state["dispatch"] = dispatch
-                            task_state["dispatch_status"] = "dispatched" if dispatch.get("delivered") else "failed"
+                            task_state["dispatch_status"] = "ASSIGNED" if dispatch.get("delivered") else "FAILED"
                             task_state["acceptance_status"] = dispatch.get("acceptance_status")
                             task_state["failure_message"] = dispatch.get("reason")
                             task_state["dispatched_task_id"] = (
@@ -2178,19 +2622,19 @@ class AgentRuntime:
                             )
                             break
             if isinstance(step_state, dict):
-                step_state["status"] = "failed" if delivery_failed else "dispatched"
+                step_state["status"] = "FAILED" if delivery_failed else "ASSIGNED"
             dispatch_result["steps"] = step_states
             if delivery_failed:
                 # ✅ Record failed task dispatch as task_failed timeline event (Ch.18-20)
                 for (task, _task_response), dispatch in zip(task_requests, dispatches):
                     if not dispatch.get("delivered"):
                         try:
-                            self.registry_client.append_mission_timeline_event(
-                                mission_id=mission_id,
-                                event_type="task_failed",
-                                actor="system",
-                                details={
-                                    "dispatch_error": dispatch.get("error", "unknown"),
+                                self.registry_client.append_mission_timeline_event(
+                                    mission_id=mission_id,
+                                    event_type="TASK_FAILED",
+                                    actor="system",
+                                    details={
+                                        "dispatch_error": dispatch.get("error", "unknown"),
                                     "failure_category": "communication",
                                     "failure_message": f"Task dispatch failed: {dispatch.get('error', 'unknown')}",
                                 },
@@ -2456,14 +2900,14 @@ class AgentRuntime:
             return
 
         started_at = utc_now()
-        request["status"] = "running"
+        request["status"] = "IN_PROGRESS"
         request["started_at"] = started_at
         request["updated_at"] = started_at
 
         try:
             result = await self.handle_command_with_llm(command)
             finished_at = utc_now()
-            request["status"] = "completed"
+            request["status"] = "COMPLETED"
             request["result"] = result
             request["updated_at"] = finished_at
             request["finished_at"] = finished_at
@@ -2476,7 +2920,7 @@ class AgentRuntime:
             )
         except Exception as exc:
             finished_at = utc_now()
-            request["status"] = "failed"
+            request["status"] = "FAILED"
             request["error"] = str(exc)
             request["updated_at"] = finished_at
             request["finished_at"] = finished_at
@@ -2507,8 +2951,8 @@ class AgentRuntime:
                     source_agent_id=self.state.agent_id,
                     device_id=0,  # System-level event
                     device_name="system",
-                    old_status="operational",
-                    new_status="degraded",
+                    old_status="OPERATIONAL",
+                    new_status="DEGRADED",
                     reason=f"LLM error during command: {llm_error.get('error_type')} - {llm_error.get('message')[:50]}"
                 )
             )
@@ -2584,14 +3028,13 @@ class AgentRuntime:
             mission_type = self._infer_mission_type(goal, None)
             if mission_type == "generic_mission" and params_mission_type:
                 mission_type = self._infer_mission_type(params_mission_type, None)
-            proposal_bundle = self.generate_mission_proposal(
+            proposal_bundle = await self.generate_mission_proposal(
                 {
                     "title": command.get("title") or self._command_proposal_title(goal, mission_type),
                     "goal": goal,
                     "summary": f"LLM interpreted operator command as {command_action}.",
                     "reason_summary": llm_result.get("reasoning") if llm_result else "Operator command interpreted by system agent.",
                     "source": "user_command",
-                    "operation_plan_id": command.get("operation_plan_id"),
                     "location": (command.get("params") or {}).get("location") or {},
                     "insight_summary": f"Command-driven response for {command_action}",
                     "severity": "INFORMATION",
@@ -2660,91 +3103,46 @@ class AgentRuntime:
             return "escalate_alert"
         return None
 
-    def handle_event_report(self, event: dict[str, Any]) -> dict[str, Any]:
+    async def handle_event_report(self, event: dict[str, Any]) -> dict[str, Any]:
         severity = self.classify_event_severity(event)
         event_type = str(event.get("event_type") or event.get("type") or "unknown")
-        event_id = str(event.get("event_id") or f"event-{uuid4()}")
-        source_agent_id = event.get("source_agent_id") or event.get("detected_by") or event.get("agent_id")
-        source_role = event.get("source_role") or event.get("role")
-        message = str(event.get("message") or f"{event_type} reported")
-        metadata = dict(event.get("metadata") or {})
-        if "location" in event and "location" not in metadata:
-            metadata["location"] = event["location"]
-        metadata.setdefault("raw_event", dict(event))
+        event_id = str(event.get("event_id") or uuid4())
+        actor_id = event.get("source_agent_id") or event.get("detected_by") or event.get("agent_id") or "system"
+        description = str(event.get("description") or event.get("message") or f"{event_type} reported")
+        event_data = dict(event.get("data") or {})
+        if "location" in event and "location" not in event_data:
+            event_data["location"] = event["location"]
+        event_data.setdefault("raw_event", dict(event))
 
         event_record = {
             "event_id": event_id,
-            "source_system": "a2a",
-            "source_agent_id": source_agent_id,
-            "source_role": source_role,
+            "actor_type": "SYSTEM",
+            "actor_id": actor_id,
             "event_type": event_type,
             "severity": severity,
-            "message": message,
-            "metadata": metadata,
+            "title": str(event.get("title") or event_type.replace("_", " ").title()),
+            "description": description,
+            "target_type": event.get("target_type"),
+            "target_id": event.get("target_id"),
+            "data": event_data,
         }
         stored_event = self.registry_client.ingest_event(event_record)
+        stored_event_id = stored_event.get("event_id") or stored_event.get("id") or event_id
 
-        alert_record = {
-            "event_id": event_id,
-            "source_system": "system_agent",
-            "source_agent_id": source_agent_id,
-            "source_role": source_role,
-            "alert_type": event_type,
-            "severity": severity,
-            "message": message,
-            "recommended_action": self.recommended_action_for_event(event_type, severity),
-            "metadata": metadata,
-        }
-        stored_alert = self.registry_client.ingest_alert(alert_record)
-        alert_id = stored_alert.get("alert_id")
-        try:
-            self.registry_client.acknowledge_alert(str(alert_id), approved=True, notes="System Agent processing")
-        except Exception:
-            pass
-        proposal_bundle = self.generate_mission_proposal(
+        proposal_bundle = await self.generate_mission_proposal(
             {
                 "title": f"{event_type.replace('_', ' ').title()} Mission Proposal",
-                "goal": message,
-                "alert_id": stored_alert.get("alert_id"),
-                "event_id": stored_event.get("event_id"),
+                "goal": description,
+                "event_id": stored_event_id,
                 "severity": severity,
-                "source": "event_report",
-                "summary": f"Proposal generated from alert {stored_alert.get('alert_id')}.",
             }
         )
-        try:
-            plans = self.registry_client.list_operation_plans()
-        except Exception:
-            plans = []
-        for plan in plans:
-            if str(plan.get("status") or "") != "active":
-                continue
-            matched = any(
-                isinstance(trigger, dict) and self._trigger_matches(trigger, event={"event_type": event_type, "type": event_type, "metadata": metadata, "event_id": stored_event.get("event_id"), "alert_id": stored_alert.get("alert_id"), "severity": severity})
-                for trigger in (plan.get("triggers") or [])
-            )
-            if matched:
-                self.generate_mission_proposal(
-                    self._build_plan_proposal_payload(
-                        plan,
-                        source="operation_plan_event_trigger",
-                        event={
-                            "event_type": event_type,
-                            "event_id": stored_event.get("event_id"),
-                            "alert_id": stored_alert.get("alert_id"),
-                            "metadata": metadata,
-                            "severity": severity,
-                        },
-                    )
-                )
-
         self.state.remember(
             {
                 "kind": "event_report_processed",
                 "at": utc_now(),
                 "event_id": event_id,
-                "alert_id": stored_alert.get("alert_id"),
-                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+                "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id") or (proposal_bundle.get("proposal") or {}).get("id"),
                 "event_type": event_type,
                 "severity": severity,
             }
@@ -2752,9 +3150,8 @@ class AgentRuntime:
         return {
             "received": True,
             "message_type": "event.report",
-            "event_id": stored_event.get("event_id"),
-            "alert_id": stored_alert.get("alert_id"),
-            "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id"),
+            "event_id": stored_event_id,
+            "proposal_id": (proposal_bundle.get("proposal") or {}).get("proposal_id") or (proposal_bundle.get("proposal") or {}).get("id"),
             "approval_id": (proposal_bundle.get("approval") or {}).get("approval_id"),
             "severity": severity,
         }
@@ -2765,7 +3162,7 @@ class AgentRuntime:
         mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         device_id = str(payload.get("device_id") or "")
         agent_id = str(payload.get("agent_id") or "")
-        status = str(payload.get("status") or "failed").lower()
+        status = self._task_status(payload.get("status"), "FAILED")
         error = str(payload.get("error") or "Unknown error")
         command = payload.get("command") or {}
         execution_result = payload.get("execution_result") or {}
@@ -2812,7 +3209,7 @@ class AgentRuntime:
                 "note": "No related mission found - failure logged"
             }
 
-        if status in {"completed", "success", "ok"}:
+        if status == "COMPLETED":
             mission_result_payload = {
                 "mission_id": mission_id,
                 "response_id": mission_id,
@@ -2820,7 +3217,7 @@ class AgentRuntime:
                 "step_id": str(payload.get("step_id") or "default"),
                 "task_id": task_id,
                 "source_agent_id": agent_id or device_id or "unknown",
-                "execution_status": "completed",
+                "execution_status": "COMPLETED",
                 "execution_log": {
                     "source_agent_id": agent_id or device_id or "unknown",
                     "source_device_id": device_id,
@@ -2858,14 +3255,14 @@ class AgentRuntime:
             "reporter": agent_id or device_id or "unknown",
             "step_id": str(payload.get("step_id") or "default"),
             "task_id": task_id,
-            "status": "failed" if status != "rejected" else "rejected",
+            "status": "ABORTED" if status == "ABORTED" else "FAILED",
             "payload": execution_result,
             "received_at": utc_now(),
             "error": error,
         }
         execution_results.append(failure_entry)
-        retry_count = len([e for e in execution_results if str(e.get("task_id") or "") == task_id and str(e.get("status") or "") in {"failed", "rejected"}])
-        decision = "abort_mission" if retry_count >= 2 or status == "rejected" else "retry_step"
+        retry_count = len([e for e in execution_results if str(e.get("task_id") or "") in {task_id} and str(e.get("status") or "") in {"FAILED", "ABORTED"}])
+        decision = "abort_mission" if retry_count >= 2 or status == "ABORTED" else "retry_step"
         dispatch_state["execution_results"] = execution_results
         dispatch_state["last_failure"] = {
             "task_id": task_id,
@@ -2880,15 +3277,15 @@ class AgentRuntime:
                 if not isinstance(task_state, dict):
                     continue
                 if str(task_state.get("task_id") or "") == task_id:
-                    task_state["execution_status"] = "failed" if status != "rejected" else "rejected"
+                    task_state["execution_status"] = "ABORTED" if status == "ABORTED" else "FAILED"
                     task_state["failure_message"] = error
                     task_state["completed_at"] = utc_now()
-                    step_state["status"] = "failed"
+                    step_state["status"] = "FAILED"
         current_mission["metadata"] = {**dict(current_mission.get("metadata") or {}), "dispatch_state": dispatch_state}
         current_mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "warning",
+                "type": "WARNING",
                 "message": f"Warning raised for task {task_id}.",
                 "data": {"task_id": task_id, "error": error, "decision": decision},
             }
@@ -2896,15 +3293,40 @@ class AgentRuntime:
         current_mission.setdefault("timeline", []).append(
             {
                 "timestamp": utc_now(),
-                "type": "task_failure",
+                "type": "TASK_FAILURE",
                 "message": f"Task {task_id} reported {status}.",
                 "data": {"task_id": task_id, "error": error, "decision": decision},
             }
         )
-        current_mission["status"] = "failed" if decision == "abort_mission" else "running"
+        try:
+            self.registry_client.ingest_event(
+                {
+                    "source_system": "system_agent",
+                    "source_agent_id": str(self.state.agent_id),
+                    "source_role": str(self.state.role or "mission_planner"),
+                    "event_type": "SYS_TASK_FAILED",
+                    "severity": "WARNING",
+                    "title": f"Task {task_id} failed",
+                    "description": f"Task {task_id} reported {status}.",
+                    "target_type": "TASK",
+                    "target_id": task_id,
+                    "data": {
+                        "mission_id": mission_id,
+                        "step_id": str(payload.get("step_id") or "default"),
+                        "task_id": task_id,
+                        "status": status,
+                        "error": error,
+                        "decision": decision,
+                    },
+                    "target_agents": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
+                }
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to record task failed event: {exc}")
+        current_mission["status"] = "FAILED" if decision == "abort_mission" else "IN_PROGRESS"
         if decision == "abort_mission":
             current_mission["completed_at"] = utc_now()
-            current_mission["final_result"] = {"status": "failed", "reason": error}
+            current_mission["final_result"] = {"status": "FAILED", "reason": error}
         current_mission = self._sync_mission_from_dispatch_state(current_mission, dispatch_state)
         self.registry_client.replace_mission(mission_id, current_mission)
         
@@ -2931,13 +3353,13 @@ class AgentRuntime:
         mission_id = str(payload.get("mission_id") or payload.get("response_id") or "")
         reporter = str(payload.get("source_agent_id") or payload.get("reporter") or "unknown")
         step_id = str(payload.get("step_id") or "")
-        execution_status = str(payload.get("execution_status") or "completed").lower()
+        execution_status = self._task_status(payload.get("execution_status"), "COMPLETED")
         execution_log = payload.get("execution_log") or {}
 
         if not mission_id:
             return {"received": False, "message_type": "mission.result", "error": "mission_id required"}
 
-        normalized_status = "completed" if execution_status == "completed" else "failed"
+        normalized_status = "COMPLETED" if execution_status == "COMPLETED" else "FAILED"
         async with self._mission_lock:
             devices = self.registry_client.list_devices()
             try:
@@ -3036,7 +3458,7 @@ class AgentRuntime:
                                 self._release_device(int(task_state.get("target_device_id") or 0), reason="task_result_received")
                                 # ✅ Record task completion/failure timeline event (Ch.18-20)
                                 try:
-                                    event_type = "task_completed" if normalized_status == "completed" else "task_failed"
+                                    event_type = "TASK_COMPLETED" if normalized_status == "COMPLETED" else "TASK_FAILED"
                                     self.registry_client.append_mission_timeline_event(
                                         mission_id=mission_id,
                                         event_type=event_type,
@@ -3053,17 +3475,17 @@ class AgentRuntime:
                                 except Exception as e:
                                     logging.getLogger(__name__).debug(f"Failed to record task completion timeline: {e}")
                         task_statuses = [
-                            str(task_state.get("execution_status") or "pending")
+                            self._task_status(task_state.get("execution_status"))
                             for task_state in item.get("tasks") or []
                             if isinstance(task_state, dict)
                         ]
-                        if any(status == "failed" for status in task_statuses):
-                            item["status"] = "failed"
-                        elif task_statuses and all(status == "completed" for status in task_statuses):
-                            item["status"] = "completed"
+                        if any(status in {"FAILED", "ABORTED", "CANCELLED"} for status in task_statuses):
+                            item["status"] = "FAILED"
+                        elif task_statuses and all(status == "COMPLETED" for status in task_statuses):
+                            item["status"] = "COMPLETED"
                             item["completed_at"] = utc_now()
                         else:
-                            item["status"] = "dispatched"
+                            item["status"] = "IN_PROGRESS"
                         break
 
                 current_step_def = next(
@@ -3103,7 +3525,7 @@ class AgentRuntime:
                         mission.setdefault("timeline", []).append(
                             {
                                 "timestamp": utc_now(),
-                                "type": "plan_changed",
+                                "type": "PLAN_CHANGED",
                                 "message": f"Mission plan changed after step {step_id}.",
                                 "data": {
                                     "step_id": step_id,
@@ -3134,10 +3556,32 @@ class AgentRuntime:
                                 },
                             }
                         )
+                        try:
+                            self.registry_client.ingest_event(
+                                {
+                                    "source_system": "system_agent",
+                                    "source_agent_id": str(self.state.agent_id),
+                                    "source_role": str(self.state.role or "mission_planner"),
+                                    "event_type": "SYS_MISSION_REPLAN_REQUESTED",
+                                    "severity": "INFO",
+                                    "title": "Mission replan requested",
+                                    "description": f"Mission {mission_id} requires replan or reapproval.",
+                                    "target_type": "MISSION",
+                                    "target_id": mission_id,
+                                    "data": {
+                                        "approval_id": reapproval.get("approval_id"),
+                                        "step_id": step_id,
+                                        "reason": step_evaluation.get("reason"),
+                                    },
+                                    "target_agents": ["MissionPlanner", "InsightReporter"],
+                                }
+                            )
+                        except Exception as exc:
+                            logger.debug(f"Failed to record SYS_MISSION_REPLAN_REQUESTED event: {exc}")
                         mission.setdefault("timeline", []).append(
                             {
                                 "timestamp": utc_now(),
-                                "type": "user_reapproval_requested",
+                                "type": "USER_REAPPROVAL_REQUESTED",
                                 "message": "Mission reapproval requested.",
                                 "data": {
                                     "approval_id": reapproval.get("approval_id"),
@@ -3184,7 +3628,7 @@ class AgentRuntime:
                             ),
                             None,
                         )
-                        if step_state and step_state.get("status") in {"dispatched", "completed"}:
+                        if step_state and self._task_status(step_state.get("status")) in {"ASSIGNED", "IN_PROGRESS", "COMPLETED"}:
                             continue
                         next_step = candidate
                         break
@@ -3233,7 +3677,7 @@ class AgentRuntime:
                         self._append_dispatch_timeline_entries(mission, retry_dispatch, mission_steps)
 
                 all_step_states_completed = bool(step_states) and all(
-                    isinstance(item, dict) and str(item.get("status") or "").lower() == "completed"
+                    isinstance(item, dict) and self._task_status(item.get("status")) == "COMPLETED"
                     for item in step_states
                 )
                 planned_step_ids = [
@@ -3246,25 +3690,28 @@ class AgentRuntime:
                     for step_key, evaluation in step_evaluations.items()
                     if isinstance(evaluation, dict) and evaluation.get("decision") == "proceed_next_step"
                 }
-                aggregate_status = "running"
-                if step_evaluation and step_evaluation.get("decision") == "manual_intervention_required":
-                    aggregate_status = "needs_review"
+                aggregate_status = "IN_PROGRESS"
+                manual_intervention_required = bool(
+                    step_evaluation and step_evaluation.get("decision") == "manual_intervention_required"
+                )
+                if manual_intervention_required:
+                    aggregate_status = "FAILED"
                 elif step_evaluation and step_evaluation.get("decision") == "abort_mission":
-                    aggregate_status = "failed"
+                    aggregate_status = "FAILED"
                 elif all_step_states_completed:
-                    aggregate_status = "completed"
+                    aggregate_status = "COMPLETED"
                 elif planned_step_ids and all(step in proceed_step_ids for step in planned_step_ids):
-                    aggregate_status = "completed"
+                    aggregate_status = "COMPLETED"
 
-                if aggregate_status in {"failed", "needs_review"}:
+                if aggregate_status == "FAILED":
                     self._release_response_devices(dispatch_state, reason=aggregate_status)
-                elif aggregate_status == "completed":
+                elif aggregate_status == "COMPLETED":
                     self._release_response_devices(dispatch_state, reason="mission_completed")
 
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "device_result_reported",
+                        "type": "DEVICE_RESULT_REPORTED",
                         "message": f"Task result reported by {reporter}.",
                         "data": {
                             "step_id": step_id,
@@ -3278,10 +3725,10 @@ class AgentRuntime:
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "task_completed" if normalized_status == "completed" else "warning",
+                        "type": "TASK_COMPLETED" if normalized_status == "COMPLETED" else "WARNING",
                         "message": (
                             f"Task {task_id} completed."
-                            if normalized_status == "completed"
+                            if normalized_status == "COMPLETED"
                             else f"Task {task_id} reported non-success status."
                         ),
                         "data": {
@@ -3293,45 +3740,86 @@ class AgentRuntime:
                         },
                     }
                 )
+                try:
+                    self.registry_client.ingest_event(
+                        {
+                            "source_system": "system_agent",
+                            "source_agent_id": str(self.state.agent_id),
+                            "source_role": str(self.state.role or "mission_planner"),
+                            "event_type": "SYS_TASK_COMPLETED" if normalized_status == "COMPLETED" else "SYS_TASK_FAILED",
+                            "severity": "INFO" if normalized_status == "COMPLETED" else "WARNING",
+                            "title": f"Task {task_id} {normalized_status.lower()}",
+                            "description": f"Task {task_id} reported {normalized_status}.",
+                            "target_type": "TASK",
+                            "target_id": task_id,
+                            "data": {
+                                "mission_id": mission_id,
+                                "step_id": step_id,
+                                "task_id": task_id,
+                                "status": normalized_status,
+                                "device_id": execution_entry.get("device_id"),
+                                "failure_reason": execution_entry.get("failure_reason"),
+                            },
+                            "target_agents": ["MissionPlanner", "SystemSentinel", "InsightReporter"],
+                        }
+                    )
+                except Exception as exc:
+                    logger.debug(f"Failed to record task event: {exc}")
                 mission.setdefault("timeline", []).append(
                     {
                         "timestamp": utc_now(),
-                        "type": "agent_judgement",
+                        "type": "AGENT_JUDGEMENT",
                         "message": "System Agent updated mission evaluation.",
                         "data": step_evaluation or {"status": aggregate_status},
                     }
                 )
                 mission["status"] = aggregate_status
-                if aggregate_status == "completed":
+                if aggregate_status == "COMPLETED":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
-                        "status": "completed",
+                        "status": "COMPLETED",
                         "summary": f"Mission completed after step {step_id}.",
                     }
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "mission_completed",
+                            "type": "MISSION_COMPLETED",
                             "message": "Mission completed.",
                             "data": {"mission_id": mission_id},
                         }
                     )
-                    alert_id = str(mission.get("alert_id") or "")
-                    if alert_id:
-                        try:
-                            self.registry_client.complete_alert(alert_id, notes="Mission completed")
-                        except Exception as exc:
-                            logger.debug(f"Failed to complete alert {alert_id}: {exc}")
-                elif aggregate_status == "failed":
+                    try:
+                        self.registry_client.ingest_event(
+                            {
+                                "source_system": "system_agent",
+                                "source_agent_id": str(self.state.agent_id),
+                                "source_role": str(self.state.role or "mission_planner"),
+                                "event_type": "SYS_MISSION_COMPLETED",
+                                "severity": "INFO",
+                                "title": "Mission completed",
+                                "description": f"Mission {mission_id} completed.",
+                                "target_type": "MISSION",
+                                "target_id": mission_id,
+                                "data": {
+                                    "mission_id": mission_id,
+                                    "step_id": step_id,
+                                    "status": "COMPLETED",
+                                },
+                                "target_agents": ["InsightReporter", "SystemSentinel"],
+                            }
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to record mission completed event: {exc}")
+                elif aggregate_status == "FAILED":
                     mission["completed_at"] = utc_now()
                     mission["final_result"] = {
-                        "status": "failed",
+                        "status": "FAILED",
                         "reason": (step_evaluation or {}).get("reason") or "task execution failure",
                     }
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "mission_failed",
+                            "type": "MISSION_FAILED",
                             "message": "Mission failed.",
                             "data": {
                                 "mission_id": mission_id,
@@ -3339,17 +3827,34 @@ class AgentRuntime:
                             },
                         }
                     )
-                    alert_id = str(mission.get("alert_id") or "")
-                    if alert_id:
-                        try:
-                            self.registry_client.acknowledge_alert(alert_id, approved=False, notes="Mission failed")
-                        except Exception as exc:
-                            logger.debug(f"Failed to mark alert {alert_id} as failed: {exc}")
-                elif aggregate_status == "needs_review":
+                    try:
+                        self.registry_client.ingest_event(
+                            {
+                                "source_system": "system_agent",
+                                "source_agent_id": str(self.state.agent_id),
+                                "source_role": str(self.state.role or "mission_planner"),
+                                "event_type": "SYS_MISSION_UPDATED",
+                                "severity": "WARNING",
+                                "title": "Mission failed",
+                                "description": f"Mission {mission_id} failed.",
+                                "target_type": "MISSION",
+                                "target_id": mission_id,
+                                "data": {
+                                    "mission_id": mission_id,
+                                    "step_id": step_id,
+                                    "status": "FAILED",
+                                    "reason": mission["final_result"].get("reason"),
+                                },
+                                "target_agents": ["InsightReporter", "SystemSentinel"],
+                            }
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to record mission failed event: {exc}")
+                if manual_intervention_required:
                     mission.setdefault("timeline", []).append(
                         {
                             "timestamp": utc_now(),
-                            "type": "warning",
+                            "type": "WARNING",
                             "message": "Mission requires manual review.",
                             "data": {
                                 "mission_id": mission_id,
@@ -3395,4 +3900,26 @@ class AgentRuntime:
                 "task_id": task_id,
                 "reporter": reporter,
             },
+        }
+
+    # ──────────────────────────────────────────────
+    # Phase 4: InsightReporter
+    # ──────────────────────────────────────────────
+
+    async def _execute_insight_reporter(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Fleet 전체 현황 한국어 리포트 생성"""
+        devices = self.registry_client.list_devices()
+        missions = self.registry_client.list_missions()
+        insights = self.registry_client.list_insights()
+
+        report, error = await self.decision_engine.generate_fleet_report(
+            devices, missions, insights, self.state
+        )
+
+        return {
+            "type": "RESPONSE",
+            "status": "SUCCESS",
+            "data": {"devices": devices, "missions": missions, "insights": insights},
+            "report": report,
+            "report_source": "llm" if not error else "rule_based",
         }

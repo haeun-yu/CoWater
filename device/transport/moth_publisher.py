@@ -2,8 +2,8 @@
 Moth Publisher: Real-time Telemetry & Healthcheck Streaming
 
 엔드포인트 규칙:
-    Healthcheck: /pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base
-                             → 모든 디바이스가 동일 MEB 채널에 publish, Registry가 구독
+    Healthcheck: /pang/ws/meb?channel=instant&name=agents&source=base&track=base
+                             → 모든 디바이스가 단일 agents MEB 채널에 DEVICE_HEALTHCHECK 발행
     Telemetry  : /pang/ws/pub?channel=instant&name={device_id}&source=base&track=telemetry
                              → 디바이스별 pub 스트림, 클라이언트는 sub로 구독
 """
@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_MOTH_BASE_URLS = {"ws://cobot.center:8286", "wss://cobot.center:8287"}
 DEFAULT_MOTH_BASE_URL = "wss://cobot.center:8287"
 
-HEALTHCHECK_MEB_PATH = "/pang/ws/meb?channel=instant&name=healthcheck&source=base&track=base"
-HEALTHCHECK_CHANNEL  = "device.healthcheck"
+HEALTHCHECK_MEB_PATH = "/pang/ws/meb?channel=instant&name=agents&source=base&track=base"
+HEALTHCHECK_CHANNEL = "agents"
 
 
 def _env_bool(name: str) -> bool | None:
@@ -199,7 +199,7 @@ class MothPublisher:
             self._log_throttled(
                 "healthcheck_connect_failed",
                 logging.WARNING,
-                "Healthcheck Moth 연결 실패, degraded 모드 유지: %s",
+                "Healthcheck Moth 연결 실패: %s",
                 e,
             )
             self.healthcheck_connected = False
@@ -278,7 +278,13 @@ class MothPublisher:
             msg = json.dumps({
                 "type": "publish",
                 "channel": HEALTHCHECK_CHANNEL,
-                "payload": payload,
+                "payload": {
+                    "event_type": "DEVICE_HEALTHCHECK",
+                    "target_agents": ["SystemSentinel", "InsightReporter"],
+                    "payload": payload,
+                    "timestamp": payload.get("timestamp"),
+                    "source_agent": self.state.agent_id,
+                },
             })
             await self.healthcheck_ws.send(msg)
             logger.info(
@@ -291,11 +297,12 @@ class MothPublisher:
 
     def _healthcheck_payload(self) -> dict[str, Any]:
         hb: dict[str, Any] = {
+            "event_type": "DEVICE_HEALTHCHECK",
             "device_id": self.state.registry_id,
             "agent_id": self.state.agent_id,
             "layer": self.state.layer,
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": "online" if self.state.connected else "offline",
+            "status": "ONLINE" if self.state.connected else "OFFLINE",
             "timeout_seconds": 3,
             "route_mode": self.state.route_mode,
             "parent_id": self.state.parent_id,

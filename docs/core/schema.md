@@ -1,7 +1,13 @@
-# 공통 데이터 스키마 (Common Schema)
+# 공통 데이터 스키마
 
 주요 데이터 모델의 JSON/SQL 상세 정의  
 **기반**: [ADR-001~006](../adr/)
+
+**표기 규칙**:
+
+- 본 문서는 각 엔티티의 **정본 canonical 필드**를 `id` 기준으로 설명합니다.
+- 현재 Registry/API 구현은 점진적 전환을 위해 `event_id`, `proposal_id`, `mission_id`, `task_id` 같은 **별칭 필드**를 함께 반환할 수 있습니다.
+- Device 응답은 외부 식별자인 `id`(UUID)와 별도로 내부 라우팅용 `registry_id`(numeric)를 포함할 수 있습니다. 외부 참조는 `id`를 기준으로 사용합니다.
 
 ---
 
@@ -67,6 +73,13 @@
   "updated_at": "timestamp"
 }
 ```
+
+**운영 확장 필드**:
+
+- 현재 Device Registry 응답은 운영/라우팅 동기화를 위해 `connected`, `connectivity_status`, `main_video_track_name`, `server`, `agent`, `tracks`, `action_catalog`를 함께 포함합니다.
+- 현재 Device Registry 응답은 위치/라우팅 추적을 위해 `device_type`, `layer`, `connectivity`, `latitude`, `longitude`, `last_battery_percent`, `last_battery_update`, `parent_id`, `last_location_update`를 함께 포함합니다.
+- 현재 Device Registry 응답은 Moth/A2A 연계를 위해 `healthcheck_topic`, `healthcheck_endpoint`, `telemetry_topics`를 함께 포함합니다.
+- 현재 Device Registry 응답은 수중 운용 상태를 위해 `is_submerged`, `submerged_at`, `surfaced_at`, `force_parent_routing`를 함께 포함합니다.
 
 **중요**:
 
@@ -227,7 +240,7 @@
 {
   "id": "string (uuid)",
 
-  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
+  "type": "string", // SYS_INTENT_CLASSIFIED, SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED, SYS_MISSION_COMPLETED, DEVICE_HEALTHCHECK, ENV_STATE_CHANGED 등
 
   "severity": "INFO | WARNING | CRITICAL",
   "status": "OPEN | HANDLED | RESOLVED",
@@ -245,7 +258,7 @@
     // Event 타입별로 다름
     // 예: { original_request: "...", capability_gap: {...} }
     // 예: SYS_ANOMALY_DETECTED -> { anomaly_type: "LOW_BATTERY", ... }
-    // 예: SYS_TASK_RESULT -> { status: "FAILED", error_type: "...", ... }
+    // 예: SYS_TASK_FAILED -> { status: "FAILED", error_type: "...", ... }
     // 중요: 전체 Proposal/Mission/Task 데이터 저장 금지
   },
 
@@ -275,7 +288,7 @@
 
   "type": "OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY",
 
-  "status": "PROPOSED | REPLANNING | APPROVED | CANCELLED | EXPIRED",
+  "status": "PROPOSED | APPROVED | CANCELLED | EXPIRED",
 
   "selected": "boolean", // true = 사용자가 이 Proposal을 선택함
 
@@ -318,19 +331,17 @@
 
 - **PROPOSED**: System Agent가 생성, 사용자 선택 대기 중
   - → APPROVED: 사용자가 선택(selected=true) → 재검증 완료 → Mission 생성
-  - → REPLANNING: 이전 Proposal 불채택으로 재계획 필요
   - → CANCELLED: 사용자가 거절
   - → EXPIRED: 유효기간 만료
 - **APPROVED** (고정 상태): 사용자가 이 Proposal을 선택/승인함. Proposal은 승인 시점까지만 추적하며, 이후에는 상태를 변경하지 않음
   - **참고**: Mission의 최종 결과(COMPLETED/FAILED/CANCELLED)는 Proposal.status에 반영되지 않음. 실행 결과는 Mission.status만 추적
-- **REPLANNING**: 이전 Proposal이 채택되지 않았으므로 재계획 중 (status_reason 필드에 불채택 이유 기록)
 - **CANCELLED**: 사용자가 거절 (status_reason에 거절 사유 기록)
 - **EXPIRED**: 장시간 선택 안 됨
 
 **필드 상세**:
 
 - `selected`: 사용자가 이 Proposal을 선택했는지 여부 (true = 승인 절차 진행 중, false = 미선택)
-- `reason`: REPLANNING 상태일 때, 이전 Proposal이 왜 채택되지 않았는지 기록 (사용자 피드백 요약)
+- `reason`: Proposal 재생성 또는 거절 사유를 기록하는 보조 필드 (사용자 피드백 요약)
 - `limitations`: 사용자가 반드시 알아야 할 제약 사항이나 잠재적 위험 요소 (조건부 정보로, 최종 판단에 도움)
 - `status_updated_at`: 마지막으로 상태가 변경된 시점 (모든 상태 전이 추적)
 - `status_reason`: 현재 상태에 대한 사유 또는 설명 (취소/거절/재계획 사유 기록)
@@ -391,7 +402,7 @@
 
   "type": "OPERATION | RESPONSE | RECOVERY | SURVEY | INSPECTION | MONITORING | RETURN | EMERGENCY",
 
-  "status": "READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED",
+  "status": "READY | IN_PROGRESS | COMPLETED | FAILED | CANCELLED | EXPIRED",
 
   "priority": "LOW | NORMAL | HIGH | EMERGENCY",
 
@@ -408,11 +419,44 @@
 
   "approved_by_user_id": "string (uuid) | null",
   "approved_at": "timestamp | null",
+  "approval_id": "string (uuid) | null",
 
   "status_updated_at": "timestamp",
   "status_reason": "string | null",
 
   "result_summary": "string | null",
+
+  "steps": [
+    {
+      "step_id": "string",
+      "step_type": "string",
+      "evaluation_policy": "string",
+      "depends_on": ["string"],
+      "tasks": ["Task 실행 정의"]
+    }
+  ],
+
+  "timeline": [
+    {
+      "timestamp": "timestamp",
+      "type": "string",
+      "message": "string",
+      "data": {}
+    }
+  ],
+
+  "final_result": {
+    "status": "string",
+    "reason": "string | null",
+    "summary": "string | null"
+  },
+
+  "metadata": {
+    "dispatch_state": {
+      "steps": ["Dispatch 상태"],
+      "execution_results": ["실행 결과 집계"]
+    }
+  },
 
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -430,6 +474,12 @@
   - → CANCELLED: 사용자가 취소 (진행 중/대기 중 Task도 함께 취소)
 - **COMPLETED** (완료): 모든 Task COMPLETED
 - **FAILED** (실패): 하나 이상의 Task FAILED, 이후 Task들 CANCELLED (status_reason에 실패 사유 기록)
+- **EXPIRED** (만료): 승인 이후 유효 시간이 지나 자동 종료된 상태
+
+**구현 메모**:
+
+- Mission은 문서상의 핵심 상태 엔티티이면서, 현재 구현에서는 실행 orchestration을 위한 `steps`, `timeline`, `final_result`, `metadata.dispatch_state`를 함께 보관합니다.
+- `logs`, `device_execution_results` 같은 중복 실행 기록 필드는 정본 Mission 스키마에서 제외합니다.
 - **CANCELLED** (취소): 사용자 명령 (status_reason에 취소 사유 기록)
 
 **개념 정의** (ADR-002):
@@ -581,8 +631,8 @@
 
 ```
 Policy: "Low Battery Auto-Return"
-  ├─ Rule-1: conditions=[battery<20%] → action=AUTO_CREATE_MISSION
-  └─ Rule-2: conditions=[battery 20-30%] → action=CREATE_EVENT
+  ├─ Rule-1: conditions=[battery<10%] → action=AUTO_CREATE_MISSION
+  └─ Rule-2: conditions=[battery 10-30%] → action=CREATE_EVENT
 ```
 
 ---
@@ -755,6 +805,149 @@ Policy: "Low Battery Auto-Return"
 
 ---
 
+## 13a. Policy (정책 - 고수준)
+
+```json
+{
+  "id": "string (uuid)",
+  "name": "string",
+  "description": "string | null",
+  
+  "enabled": "boolean",
+  "priority": "number",  // 1(높음) ~ 100(낮음)
+  
+  "scope": "SYSTEM | DEVICE_TYPE | DEVICE_ID",
+  "target_device_type": "USV | AUV | ROV | null",  // scope=DEVICE_TYPE인 경우
+  "target_device_id": "string (uuid) | null",      // scope=DEVICE_ID인 경우
+  
+  "rules": ["string (uuid)"],  // 포함된 Rule 목록
+  
+  "created_by": {
+    "type": "USER | SYSTEM",
+    "id": "string (uuid)"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**특성** (`docs/implementation/system-agent.md` 참고):
+
+- **scope**: Policy 적용 범위
+  - `SYSTEM`: 모든 Device에 적용
+  - `DEVICE_TYPE`: 특정 Device 타입에만 적용 (예: AUV만)
+  - `DEVICE_ID`: 특정 Device 하나에만 적용
+- **rules[]**: 이 Policy가 포함하는 Rule ID 목록
+  - Rule은 Policy와는 독립적으로 존재 가능 (여러 Policy에서 재사용 가능)
+- **priority**: 여러 Policy가 동시에 트리거될 때 실행 순서
+
+---
+
+## 13b. Rule (규칙 - 저수준, Event 기반)
+
+```json
+{
+  "id": "string (uuid)",
+  "policy_id": "string (uuid) | null",  // 소속 Policy (optional)
+  
+  "name": "string",
+  "description": "string | null",
+  "enabled": "boolean",
+  "priority": "number",  // 1(높음) ~ 100(낮음), Policy 내 실행 순서
+  
+  "trigger": {
+    "event_type": "string"  // DEVICE_HEALTHCHECK, SYS_TASK_DISPATCHED, SYS_ALERT 등
+  },
+  
+  "condition": "string",  // SQL WHERE 스타일
+  // 예: "device.battery < 30 AND device.status = 'ONLINE'"
+  // 연산자: ==, !=, <, >, <=, >=, IN, BETWEEN, LIKE
+  // 피연산자: device.*, task.*, system.*
+  
+  "action": {
+    "type": "ALERT | AUTO_TASK | DEVICE_STATE_CHANGE | POLICY_EXECUTE | NOTIFY",
+    
+    // type=ALERT
+    "severity": "INFO | WARNING | CRITICAL",
+    "message": "string",  // 템플릿 변수 가능: {{ device.battery }}
+    
+    // type=AUTO_TASK
+    "task_title": "string",
+    "required_action": "string",
+    "parameters": {},
+    "timeout_sec": "number",
+    "auto_create_mission": "boolean",
+    
+    // type=DEVICE_STATE_CHANGE
+    "target_device_id": "string (uuid)",
+    "new_status": "OFFLINE | DEGRADED | REMOVED",
+    
+    // type=POLICY_EXECUTE
+    "target_policy_id": "string (uuid)",
+    
+    // type=NOTIFY
+    "channels": ["slack", "email", "sms"],
+    "recipients": ["email@example.com"]
+  },
+  
+  "created_by": {
+    "type": "USER | SYSTEM",
+    "id": "string (uuid)"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**특성** (`docs/implementation/rule-engine.md` 참고):
+
+- **trigger**: Rule을 발동하는 Event 타입
+  - 예: `DEVICE_HEALTHCHECK` (Device Heartbeat), `SYS_TASK_DISPATCHED` (Task 할당)
+- **condition**: 실행 조건 (SQL WHERE 스타일)
+  - 조건이 없으면 (null/empty) trigger만 일치해도 실행
+  - 조건이 있으면 AND/OR로 복합 조건 가능
+- **action**: 조건 일치 시 실행할 동작
+  - **ALERT**: 경고 메시지 발행 (severity 수준 다름)
+  - **AUTO_TASK**: 자동으로 새 Task 생성 (Mission 생성 옵션)
+  - **DEVICE_STATE_CHANGE**: Device 상태 강제 변경 (OFFLINE 처리 등)
+  - **POLICY_EXECUTE**: 다른 Policy 실행 (연쇄 실행)
+  - **NOTIFY**: 사용자 알림 (Slack, Email, SMS)
+- **priority**: 같은 Event에 여러 Rule이 매칭될 때 실행 순서
+  - 숫자가 작을수록 먼저 실행
+
+**action.message의 템플릿 변수**:
+
+```
+{{ device.device_id }}      # Device ID
+{{ device.battery_percent }} # 배터리 %
+{{ device.status }}          # Device 상태
+{{ task.task_id }}           # Task ID
+{{ task.required_action }}   # Task 액션
+{{ system.time }}            # 현재 시간
+```
+
+**Rule 평가 흐름** (`docs/implementation/rule-engine.md` 참고):
+
+```
+Event 발생
+  ↓
+PolicyManager.handle_event(event)
+  ↓
+RuleEngine.process_event(event)
+  ↓
+trigger 일치하는 모든 Rule 찾기
+  ↓
+각 Rule의 condition 평가
+  ↓
+조건 일치 Rule을 priority 순서로 정렬
+  ↓
+각 Rule의 action 실행
+```
+
+---
+
 ## 14. Sensor (센서)
 
 ```json
@@ -801,6 +994,143 @@ Policy: "Low Battery Auto-Return"
 - ~~sample_rate~~ (용도별로 다르므로 Config로 관리)
 - ~~last_value~~ (스트림 데이터는 센서 측에서 관리)
 - ~~metadata~~ (필요시 stream_endpoint 문서에 포함)
+
+---
+
+## 14. Agent Card (.well-known/agent-card.json)
+
+**정의**: 에이전트의 메타데이터 및 통신 정보를 담은 JSON 파일
+
+**경로**: `/.well-known/agent-card.json`
+
+**목적**:
+- 에이전트 자동 발견 (Agent Discovery)
+- 통신 가능 메서드 명시 (JSON-RPC)
+- 에이전트의 역할, 능력, 엔드포인트 정보 제공
+- 외부 클라이언트와의 A2A 호환성
+
+**포맷**:
+
+```json
+{
+  "version": "v0.3.0",
+  
+  "name": "string",
+  "type": "DEVICE_AGENT | SYSTEM_AGENT",
+  
+  "role": "DEVICE_CONTROL | REQUEST_HANDLER | DEVICE_BRIDGE | MISSION_PLANNER | POLICY_MANAGER | SYSTEM_SENTINEL | INSIGHT_REPORTER",
+  
+  "endpoint": {
+    "host": "string",
+    "port": "number",
+    "protocol": "HTTP",
+    "path": "string"
+  },
+  
+  "capabilities": ["string"],  // 지원 능력 (예: ["scan_area", "remove_mine"])
+  
+  "supported_methods": [
+    "message/send",
+    "tasks/get",
+    "tasks/cancel"
+  ],
+  
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result",
+    "child.register",
+    "layer.assignment"
+  ],
+  
+  "authentication": {
+    "type": "none | token | oauth2",
+    "details": "object | null"
+  },
+  
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+**필드 설명**:
+
+| 필드 | 설명 |
+|------|------|
+| **version** | A2A 프로토콜 버전 (Google A2A v0.3.0 기준) |
+| **name** | 에이전트 이름 |
+| **type** | 에이전트 타입 (Device vs System) |
+| **role** | 에이전트의 구체적 역할 |
+| **endpoint** | HTTP 통신 주소 (host, port, path) |
+| **capabilities** | 지원 능력 목록 (Device Agent의 경우 actions[]) |
+| **supported_methods** | JSON-RPC 메서드 목록 |
+| **supported_message_types** | A2A 메시지 타입 목록 |
+| **authentication** | 인증 방식 (향후 확장) |
+
+**예시 (Device Agent)**:
+
+```json
+{
+  "version": "v0.3.0",
+  "name": "AUV-01 Agent",
+  "type": "DEVICE_AGENT",
+  "role": "DEVICE_CONTROL",
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 9201,
+    "protocol": "HTTP",
+    "path": "/message:send"
+  },
+  "capabilities": ["scan_area", "remove_mine", "return_to_base"],
+  "supported_methods": ["message/send"],
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result"
+  ],
+  "authentication": {
+    "type": "token",
+    "details": null
+  },
+  "created_at": "2026-05-15T10:00:00Z",
+  "updated_at": "2026-05-15T10:00:00Z"
+}
+```
+
+**예시 (System Agent - DeviceBridge)**:
+
+```json
+{
+  "version": "v0.3.0",
+  "name": "DeviceBridge Agent",
+  "type": "SYSTEM_AGENT",
+  "role": "DEVICE_BRIDGE",
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 9110,
+    "protocol": "HTTP",
+    "path": "/message:send"
+  },
+  "capabilities": ["task.assign", "task.result.aggregate", "event.logging"],
+  "supported_methods": ["message/send"],
+  "supported_message_types": [
+    "task.assign",
+    "task.result",
+    "event.report",
+    "mission.result",
+    "child.register",
+    "layer.assignment"
+  ],
+  "authentication": {
+    "type": "none",
+    "details": null
+  },
+  "created_at": "2026-05-15T10:00:00Z",
+  "updated_at": "2026-05-15T10:00:00Z"
+}
+```
 
 ---
 

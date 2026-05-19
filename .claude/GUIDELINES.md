@@ -1,10 +1,10 @@
-# Claude Development Guidelines
+# Claude 개발 가이드라인
 
 > 코드를 작성할 때 따를 일반적인 가이드라인
 
 ---
 
-## 1️⃣ Think Before Coding
+## 1️⃣ 코딩 전에 먼저 생각하기
 
 **구현 전에 이해부터:**
 
@@ -24,7 +24,7 @@
 
 ---
 
-## 2️⃣ Simplicity First
+## 2️⃣ 단순함 우선
 
 **최소 코드로 요구사항 충족:**
 
@@ -57,7 +57,7 @@ def create_message(message_type, content):
 
 ---
 
-## 3️⃣ Surgical Changes
+## 3️⃣ 필요한 만큼만 정확하게 변경하기
 
 **필요한 것만, 정확히:**
 
@@ -85,7 +85,7 @@ def create_message(message_type, content):
 
 ---
 
-## 4️⃣ Goal-Driven Execution
+## 4️⃣ 목표 중심으로 실행하기
 
 **성공 기준을 먼저 정의:**
 
@@ -108,7 +108,7 @@ def create_message(message_type, content):
 
 ---
 
-## 5️⃣ Code Style
+## 5️⃣ 코드 스타일
 
 **기존 프로젝트 스타일 유지:**
 
@@ -138,7 +138,7 @@ function calculateTotalPrice(items: Item[]): number {
 }
 ```
 
-**Git Commit:**
+**Git 커밋:**
 ```
 type(scope): short description
 
@@ -154,7 +154,7 @@ Examples:
 
 ---
 
-## 6️⃣ Comments & Documentation
+## 6️⃣ 주석과 문서화
 
 **주의: 코멘트는 필요할 때만**
 
@@ -175,7 +175,7 @@ adjusted_hour = hour + 1
 
 ---
 
-## 7️⃣ Testing
+## 7️⃣ 테스트
 
 **테스트로 검증:**
 
@@ -192,7 +192,7 @@ adjusted_hour = hour + 1
 
 ---
 
-## 8️⃣ What NOT to Do
+## 8️⃣ 하지 말아야 할 것
 
 ```
 ❌ 추측하고 구현하기
@@ -222,7 +222,7 @@ adjusted_hour = hour + 1
 
 ---
 
-## ✅ Best Practices Summary
+## ✅ 베스트 프랙티스 요약
 
 | 상황 | 행동 |
 |------|------|
@@ -237,9 +237,9 @@ adjusted_hour = hour + 1
 
 ---
 
-## 🎯 Remember
+## 🎯 기억할 점
 
-**좋은 코드 = 명확한 의도 + 최소한의 코드 + 동료 존중**
+**좋은 코드 = 명확한 의도 + 최소한의 코드 + 동료를 배려하는 구성**
 
 - 코드는 다른 사람(또는 미래의 당신)이 읽습니다
 - 간단한 것이 강력합니다

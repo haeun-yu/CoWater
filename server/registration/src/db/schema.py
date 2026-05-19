@@ -1,25 +1,101 @@
 """SQLite Schema definitions for CoWater Mission Tracking"""
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
-# Mission 테이블 스키마
+# User 테이블
+USERS_TABLE = """
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+# Agent 테이블
+AGENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+# Mission 테이블 (수정: response_id, alert_id 제거 → source_proposal_id, source_event_id 추가)
 MISSIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS missions (
     mission_id TEXT PRIMARY KEY,
-    response_id TEXT NOT NULL UNIQUE,
-    alert_id TEXT NOT NULL,
-    event_id TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    step_states TEXT DEFAULT '[]',
-    completion_report TEXT DEFAULT '{}',
-    metadata TEXT DEFAULT '{}',
+    source_event_id TEXT,
+    source_proposal_id TEXT,
+    data TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    started_at TEXT,
-    completed_at TEXT,
+    updated_at TEXT NOT NULL
+);
+"""
+
+# ProposalTask 테이블
+PROPOSAL_TASKS_TABLE = """
+CREATE TABLE IF NOT EXISTS proposal_tasks (
+    task_id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (response_id) REFERENCES responses(response_id),
-    FOREIGN KEY (alert_id) REFERENCES alerts(alert_id),
-    FOREIGN KEY (event_id) REFERENCES events(event_id)
+    FOREIGN KEY (proposal_id) REFERENCES domain_records(record_id)
+);
+"""
+
+# Task 테이블
+TASKS_TABLE = """
+CREATE TABLE IF NOT EXISTS tasks (
+    task_id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (mission_id) REFERENCES missions(mission_id)
+);
+"""
+
+# Report 테이블
+REPORTS_TABLE = """
+CREATE TABLE IF NOT EXISTS reports (
+    report_id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+# Rule 테이블
+RULES_TABLE = """
+CREATE TABLE IF NOT EXISTS rules (
+    rule_id TEXT PRIMARY KEY,
+    policy_id TEXT,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (policy_id) REFERENCES policies(policy_id)
+);
+"""
+
+# Config 테이블
+CONFIGS_TABLE = """
+CREATE TABLE IF NOT EXISTS configs (
+    key TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+# Sensor 테이블
+SENSORS_TABLE = """
+CREATE TABLE IF NOT EXISTS sensors (
+    sensor_id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -34,10 +110,25 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 # 인덱스 생성 (성능 최적화)
 MISSIONS_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_missions_response_id ON missions(response_id);
-CREATE INDEX IF NOT EXISTS idx_missions_alert_id ON missions(alert_id);
-CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
+CREATE INDEX IF NOT EXISTS idx_missions_source_event_id ON missions(source_event_id);
+CREATE INDEX IF NOT EXISTS idx_missions_source_proposal_id ON missions(source_proposal_id);
 CREATE INDEX IF NOT EXISTS idx_missions_created_at ON missions(created_at);
+"""
+
+PROPOSAL_TASKS_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_proposal_tasks_proposal_id ON proposal_tasks(proposal_id);
+"""
+
+TASKS_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_tasks_mission_id ON tasks(mission_id);
+"""
+
+RULES_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_rules_policy_id ON rules(policy_id);
+"""
+
+SENSORS_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_sensors_device_id ON sensors(device_id);
 """
 
 DOMAIN_RECORDS_TABLE = """
@@ -74,7 +165,7 @@ def init_schema(conn):
     cursor = conn.cursor()
 
     cursor.execute(SCHEMA_VERSION_TABLE)
-    
+
     # Check schema version
     cursor.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
     result = cursor.fetchone()
@@ -83,9 +174,24 @@ def init_schema(conn):
     if current_version < SCHEMA_VERSION:
         # Apply schema updates
         cursor.execute("PRAGMA foreign_keys = ON")
+
+        # Create new domain tables (v4)
+        cursor.execute(USERS_TABLE)
+        cursor.execute(AGENTS_TABLE)
         cursor.execute(MISSIONS_TABLE)
         cursor.executescript(MISSIONS_INDEXES)
+        cursor.execute(PROPOSAL_TASKS_TABLE)
+        cursor.executescript(PROPOSAL_TASKS_INDEXES)
+        cursor.execute(TASKS_TABLE)
+        cursor.executescript(TASKS_INDEXES)
+        cursor.execute(REPORTS_TABLE)
+        cursor.execute(RULES_TABLE)
+        cursor.executescript(RULES_INDEXES)
+        cursor.execute(CONFIGS_TABLE)
+        cursor.execute(SENSORS_TABLE)
+        cursor.executescript(SENSORS_INDEXES)
 
+        # Create generic domain records table
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='domain_records'")
         has_domain_records = cursor.fetchone() is not None
         if has_domain_records and current_version < 3:
@@ -114,7 +220,7 @@ def init_schema(conn):
             (SCHEMA_VERSION, datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
-        
+
         return True
-    
+
     return False

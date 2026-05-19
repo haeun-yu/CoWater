@@ -1,4 +1,4 @@
-# 미션 생명주기 (Mission Lifecycle)
+# 미션 생명주기
 
 Proposal 승인부터 완료/취소까지의 전체 상태 전이  
 **기반**: [ADR-002](../adr/ADR-002-proposal-as-solution-set.md), [ADR-004](../adr/ADR-004-agent-endpoint-management.md), [ADR-008](../adr/ADR-008-multi-agent-system-architecture.md)
@@ -28,24 +28,188 @@ graph TD
 
 ---
 
-## Device Agent 등록 (Prerequisites)
+## Device Agent 등록 전제조건
 
-Mission이 생성되기 전, Device Agent가 먼저 등록되어야 합니다.
+Mission이 생성되기 전, **Device Agent가 먼저 System과 통신하기 위해 초기화 및 등록**되어야 합니다.
 
 **준수 원칙**: [P1](../core/principles.md#p1-🔴-agent-직접-제어-원칙-agent-direct-control) (Agent 직접 제어)
 
+### Device Agent 초기화 흐름
+
 ```mermaid
 graph TD
-    A["Device Agent<br/>시스템 등록"] -->|agent_id, endpoint 포함| B["System이<br/>Agent 테이블 저장"]
-    B -->|endpoint 자동 조회| C["AgentConnection<br/>생성/갱신 가능"]
-    C -->|협력 관계| D["RELAY, COORDINATE<br/>등 설정 가능"]
+    A["Device Agent 시작<br/>(device_agent.py --type auv)"] -->|1️⃣ 설정 로드| B["config.json<br/>읽음"]
+    B -->|device_id, capabilities| C{"2️⃣ IdentityStore<br/>확인"}
+    C -->|캐시 있음<br/>(재기동)| D["로컬 저장 정보 사용<br/>(device_id, agent_id)"]
+    C -->|캐시 없음<br/>(첫 실행)| E["3️⃣ DeviceBridge를 통해<br/>등록"]
+    E -->|register_device| F["Device 등록<br/>(device_id, endpoint)"]
+    F -->|upsert_agent| G["Agent 등록<br/>(agent_id, role, endpoint)"]
+    G -->|응답| H["4️⃣ IdentityStore 저장<br/>(.runtime/{instance_id}.json)"]
+    D -->|5️⃣ 준비 완료| I["DeviceBridge와 통신 시작<br/>(Task 수신, Heartbeat 송신)"]
+    H -->|5️⃣ 준비 완료| I
 ```
 
-**변경 (ADR-004)**:
-- Agent 등록 시 `endpoint` 정보 필수
-- AgentConnection이 이를 기반으로 profile 자동 구성
+### 단계별 상세
 
-**P1 적용**: 각 Device Agent는 자신의 등록 정보(endpoint, actions[], status)를 관리하며, 다른 Agent을 직접 제어하지 않습니다. AgentConnection은 협력 관계만 정의할 뿐 실제 통신 중계는 해당 Agent이 수행합니다.
+**1단계: 설정 파일 로드**
+- `configs/{type}-{layer}.json` 읽음
+- 필수 정보: 
+  - `agent.device_type`, `agent.layer`, `agent.role`
+  - `device_bridge.url` (DeviceBridge 주소)
+- 예: `AUV`, `lower`, `device_agent`, `http://127.0.0.1:9110`
+
+**2단계: IdentityStore 확인**
+- 로컬 저장소 위치: `.runtime/{instance_id}.json`
+- **있으면**: 기존 `device_id`, `agent_id` 등 재사용 → 재등록 불필요
+- **없으면**: DeviceBridge를 통해 새로 등록
+
+**3단계: DeviceBridge를 통해 등록 (캐시 없을 때만)**
+
+Device Agent는 DeviceBridge에 등록 요청을 보냅니다. DeviceBridge가 Device Registration Server에 대신 등록합니다.
+
+```python
+# Device Agent → DeviceBridge (포트 9110)
+device_bridge_client = DeviceBridgeClient(
+    endpoint="http://127.0.0.1:9110"
+)
+
+# DeviceBridge를 통해 등록 요청
+response = device_bridge_client.register(
+    device_info={
+        "name": "aauv-01",
+        "type": "AUV",
+        "layer": "lower",
+        "tracks": [...],  # VIDEO, SONAR 등
+        "actions": [...]
+    },
+    agent_endpoint="http://device-ip:9201"  # Device Agent의 HTTP 주소
+)
+
+# → 응답: registry_id, agent_id, tracks, telemetry_topics, healthcheck_topic
+```
+
+DeviceBridge가 다음을 수행합니다:
+1. Device Registration Server(포트 8280)에 Device 등록
+2. Device 정보를 기반으로 Agent 등록
+3. Device Agent에게 등록 응답 반환
+
+**4단계: IdentityStore 저장**
+
+Device와 Agent 등록이 완료되면, 응답 데이터를 로컬에 저장합니다:
+
+```json
+{
+  "device_id": "aauv-01",
+  "device_type": "AUV",
+  "layer": "lower",
+  
+  "registry_id": 1,
+  "token": "device-token-xxx",
+  "agent_id": "agent-uuid-xxx",
+  "registered_at": "2026-05-13T10:30:45.123Z",
+  
+  "tracks": [
+    {
+      "type": "VIDEO",
+      "name": "camera-01",
+      "endpoint": "ws://localhost:8002/stream/aauv-01/camera-01"
+    },
+    {
+      "type": "SONAR",
+      "name": "sonar-01",
+      "endpoint": "ws://localhost:8002/stream/aauv-01/sonar-01"
+    }
+  ],
+  
+  "telemetry_topics": [
+    {
+      "track_type": "VIDEO",
+      "track_name": "camera-01",
+      "topic": "device.telemetry.aauv-01.VIDEO"
+    },
+    {
+      "track_type": "SONAR",
+      "track_name": "sonar-01",
+      "topic": "device.telemetry.aauv-01.SONAR"
+    }
+  ],
+  
+  "healthcheck_topic": "agents",
+  "healthcheck_endpoint": "/healthcheck/aauv-01",
+  
+  "is_submerged": false,
+  "environment_state": "SURFACE",
+  "active_mediums": ["RF", "INTERNET", "ACOUSTIC"],
+  "force_parent_routing": false
+}
+```
+
+#### Tracks (센서 스트림) vs Telemetry Topics (Moth 채널)
+
+**Tracks**: 센서에서 데이터를 **읽는 주소**
+```
+Device Agent → [tracks endpoint] → 센서 스트림 읽음
+예: ws://localhost:8002/stream/aauv-01/camera-01
+```
+
+**Telemetry Topics**: 읽은 데이터를 **발행하는 Moth 채널**
+```
+센서 데이터 → [Moth publisher] → topic으로 발행
+예: device.telemetry.aauv-01.VIDEO
+```
+
+**두 가지가 모두 필요한 이유**:
+- Device Agent가 센서에서 데이터를 읽으려면 **track endpoint 필요**
+- 읽은 데이터를 System에 보내려면 **telemetry_topic 필요** (Moth pub/sub 사용)
+- 이 둘은 별도의 외부 시스템 (센서 스트리밍, Moth pub/sub) 이므로 Device Agent가 알아야 함
+```
+
+**5단계: 준비 완료**
+- `heartbeat` 송신 시작 (1초 주기)
+- System Agent로부터 Task 할당 수신 가능
+- Device-Device 협력 가능
+
+### IdentityStore 캐싱의 이점
+
+| 시나리오 | 동작 | 효과 |
+|---------|------|------|
+| **첫 실행** | 설정파일 → 새로 등록 → 저장 | 새로운 agent_id 획득 |
+| **재기동** | 설정파일 → IdentityStore 로드 | 기존 agent_id 재사용 (재등록 불필요) |
+| **네트워크 단절** | IdentityStore 에서 메타데이터 읽음 | 오프라인 상태에서도 agent_id/endpoint 유지 |
+| **설정 파일 변경** | 새로운 device_id → 재등록 | 새로운 agent_id 획득 |
+
+### DeviceBridge의 역할
+
+등록 완료 후 Device Agent는 **DeviceBridge**라는 System Agent 계층의 Agent를 통해 System과 통신합니다:
+
+| 책임 | 주체 | 시점 |
+|------|------|------|
+| **Task 할당** | DeviceBridge (System Agent) | Task 결정 후 즉시 |
+| **Heartbeat/Result 수신** | DeviceBridge (System Agent) | 정기적 + 즉각적 |
+| **Event 발행** | DeviceBridge (System Agent) | 정보 수신 후 정규화 |
+| **Task 수행 판단** | Device Agent | Task 수신 후 (Capability, Resource, Safety Check) |
+| **정책 관리** | PolicyManager (System Agent) | Rule/Config로 **전역 정책** 정의 |
+
+**흐름:**
+```
+1. Task 결정 (MissionPlanner)
+   ↓
+2. DeviceBridge → Device에 Task 전달 (A2A Protocol)
+   ↓
+3. Device Agent가 수신
+   ├─ Capability Check (내 actions에 있나?)
+   ├─ Resource Check (배터리, 위치 충분한가?)
+   ├─ Safety Check (물리적 제약 위반하나?)
+   └─ ACCEPT or ABORT 응답
+   ↓
+4. DeviceBridge가 결과 수신 → Event 발행
+```
+
+> **핵심**: 
+> - DeviceBridge는 **통신 중개 + Event 발행** 담당
+> - Task 할당 **전**에는 정책 검증을 하지 않음
+> - **최종 판단**은 Device Agent가 함 (자신이 할 수 있는지 확인)
+> - PolicyManager는 Rule/Config로 전역 정책을 정의하지만, Task 전달 전에 미리 검증하지 않음
 
 ---
 
@@ -55,7 +219,7 @@ Device를 시스템에서 완전히 제거하는 프로세스입니다.
 
 **준수 원칙**: [P1](../core/principles.md#p1-🔴-agent-직접-제어-원칙-agent-direct-control) (각 Agent의 협력 관계 재정의)
 
-### **Prerequisites: Device 제거 조건**
+### **전제조건: Device 제거 조건**
 
 ```
 Device 제거 전 확인:
@@ -303,7 +467,7 @@ Task-1 {
 
 **P5 적용 (Device Agent의 최종 판단)**:
 - Device Agent는 Task 수행 중 문제 발생 시 즉시 중단 가능
-- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_RESULT(status=FAILED)` 보고 가능
+- "배터리 부족", "장애물 충돌", "센서 오류" 등을 이유로 `SYS_TASK_FAILED(status=FAILED)` 보고 가능
 - System Agent는 Device Agent의 판단을 존중하고 대체안 제시 (거절 불가)
 
 **Device/Agent 문제 발생 시**:
@@ -338,7 +502,7 @@ Task-3: COMPLETED
 **액션**:
 - Mission 결과 요약 저장
 - Report 생성
-- Event 발행: `SYS_MISSION_UPDATED` (`status=COMPLETED`)
+- Event 발행: `SYS_MISSION_COMPLETED` (`status=COMPLETED`)
 
 **다음**:
 - Report 조회 가능
@@ -369,7 +533,7 @@ Task-3: CANCELLED  // 남은 Task 자동 취소
 **액션**:
 - 현재 Task 중단
 - 남은 Task 모두 CANCELLED
-- `SYS_TASK_RESULT(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
+- `SYS_TASK_FAILED(status=FAILED)` 또는 `SYS_MISSION_UPDATED(status=FAILED)` Event 발행
 - Rule Engine이 자동 대응 결정 (재시도, 다른 Device로 재실행 등)
 
 **P7 적용 (사용자 결정 우선)**:
@@ -591,8 +755,8 @@ Device Agent {
     
     // 로컬에서 발생한 모든 Event
     local_events: [
-      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-1", ... },
-      { type: "SYS_TASK_RESULT", status: "COMPLETED", task_id: "task-2", ... },
+      { type: "SYS_TASK_COMPLETED", status: "COMPLETED", task_id: "task-1", ... },
+      { type: "SYS_TASK_COMPLETED", status: "COMPLETED", task_id: "task-2", ... },
       { type: "SYS_ANOMALY_DETECTED", anomaly_type: "LOW_BATTERY", battery_percent: 45, ... }
     ]
   }
@@ -769,7 +933,7 @@ Table mission_timeline {
   id: UUID,
   mission_id: string,
   
-  event_type: enum,  // SYS_TASK_RESULT, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
+  event_type: enum,  // SYS_TASK_COMPLETED, SYS_TASK_FAILED, SYS_ANOMALY_DETECTED, SYS_MISSION_UPDATED 등
   occurred_at: timestamp,
   recorded_at: timestamp,
   

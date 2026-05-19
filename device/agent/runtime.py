@@ -296,12 +296,18 @@ class AgentRuntime:
             "parent_id": assignment.get("parent_id"),
             "parent_endpoint": assignment.get("parent_endpoint"),
             "parent_command_endpoint": assignment.get("parent_command_endpoint"),
+            "gateway_agent_id": assignment.get("gateway_agent_id") or assignment.get("parent_agent_id"),
+            "environment_state": assignment.get("environment_state"),
+            "active_mediums": tuple(assignment.get("active_mediums") or []),
             "route_mode": str(assignment.get("route_mode") or "direct_to_system"),
             "force_parent_routing": bool(assignment.get("force_parent_routing", False)),
         }
         self.state.parent_id = assignment.get("parent_id")
         self.state.parent_endpoint = assignment.get("parent_endpoint")
         self.state.parent_command_endpoint = assignment.get("parent_command_endpoint")
+        self.state.gateway_agent_id = assignment.get("gateway_agent_id") or assignment.get("parent_agent_id")
+        self.state.environment_state = assignment.get("environment_state")
+        self.state.active_mediums = list(assignment.get("active_mediums") or self.state.active_mediums or [])
         self.state.route_mode = str(signature["route_mode"])
         self.state.force_parent_routing = bool(signature["force_parent_routing"])
         if self._last_assignment_signature != signature:
@@ -331,6 +337,7 @@ class AgentRuntime:
         
         self.registry_client.upsert_agent(
             self.state.registry_id,
+            agent_id=self.state.agent_id,
             endpoint=self.base_url(),
             command_endpoint=f"{self.base_url()}/agents/{self.state.token}/command",
             role=self.state.role,
@@ -341,6 +348,9 @@ class AgentRuntime:
             latitude=self.state.latitude,
             longitude=self.state.longitude,
             battery_percent=battery_percent,
+            gateway_agent_id=self.state.gateway_agent_id,
+            environment_state=self.state.environment_state,
+            active_mediums=list(self.state.active_mediums or []),
         )
 
     def register_child(self, child: dict[str, Any]) -> dict[str, Any]:
@@ -514,6 +524,15 @@ class AgentRuntime:
                     if "longitude" in pos:
                         self.state.longitude = float(pos["longitude"])
 
+                depth_value = telemetry.get("depth")
+                altitude_value = telemetry.get("altitude")
+                underwater = False
+                if isinstance(depth_value, (int, float)):
+                    underwater = float(depth_value) > 0.0
+                elif isinstance(altitude_value, (int, float)):
+                    underwater = float(altitude_value) < 0.0
+                self.state.environment_state = "UNDERWATER" if underwater else "SURFACE"
+                self.state.active_mediums = ["ACOUSTIC"] if underwater else ["RF", "INTERNET", "ACOUSTIC"]
                 # 2️⃣ [ENHANCED] Telemetry 기반으로 Tool 상태 동기화
                 # GPS, Battery, IMU 등이 현재 시뮬레이션 상태를 반영하도록 업데이트
                 self._update_tools_from_telemetry(telemetry)
@@ -525,9 +544,9 @@ class AgentRuntime:
                 self.state.last_decision = decision
                 self.state.remember({"kind": "telemetry", "at": utc_now(), "decision": decision})
 
-                # 3-b️⃣ Critical rule 발동 시 서버 alert registry에 전송
+                # 3-b️⃣ Critical rule 발동 시 SYS_ANOMALY_DETECTED 이벤트 전송
                 if decision.get("mode") == "critical_rule":
-                    self._post_critical_alert(decision, telemetry)
+                    self._post_critical_event(decision, telemetry)
 
                 # 4️⃣ [ENHANCED] Decision 권장사항을 Tools에 적용
                 # 의사결정 결과가 실제로 motor_control 등에 반영됨
@@ -640,26 +659,29 @@ class AgentRuntime:
                 # 기지 복귀: 최대 전진 thrust
                 self.tools["motor_control"].set_thrust(1.0, 0.0)
 
-    def _post_critical_alert(self, decision: dict[str, Any], telemetry: dict[str, Any]) -> None:
-        """Critical rule 발동 시 서버 alert registry에 비동기 전송 (non-blocking)"""
+    def _post_critical_event(self, decision: dict[str, Any], telemetry: dict[str, Any]) -> None:
+        """Critical rule 발동 시 SYS_ANOMALY_DETECTED 이벤트를 Registry에 전송 (non-blocking)"""
         try:
             rec = (decision.get("recommendations") or [{}])[0]
             reason = rec.get("params", {}).get("reason", "critical_rule")
-            self.registry_client.ingest_alert({
+            self.registry_client.ingest_event({
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "source_system": "device_agent",
-                "event_id": f"critical-{uuid4().hex[:8]}",
                 "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "alert_type": reason,
                 "severity": "CRITICAL",
+                "title": f"[{self.state.device_type}] {self.state.name}: {reason}",
                 "message": (
                     f"[{self.state.device_type}] {self.state.name}: "
                     f"{reason} — action={rec.get('action')}, "
                     f"battery={telemetry.get('battery_percent', '?')}%"
                 ),
-                "recommended_action": rec.get("action"),
-                "auto_remediated": True,
-                "metadata": {
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "data": {
+                    "anomaly_type": reason,
+                    "recommended_action": rec.get("action"),
+                    "auto_remediated": True,
                     "device_id": self.state.registry_id,
                     "device_type": self.state.device_type,
                     "layer": self.state.layer,
@@ -668,7 +690,7 @@ class AgentRuntime:
                 },
             })
         except Exception as e:
-            logger.debug(f"Critical alert 전송 실패: {e}")
+            logger.debug(f"Critical event 전송 실패: {e}")
 
     def _build_decision_context(self, telemetry: dict[str, Any]) -> dict[str, Any]:
         """
@@ -698,12 +720,13 @@ class AgentRuntime:
     def apply_command(self, command: dict[str, Any]) -> dict[str, Any]:
         execution_result = self.command_controller.execute(command)
         simulation_result: dict[str, Any] = {}
-        if execution_result.get("status") != "failed" and execution_result.get("delivered", True):
+        execution_status = str(execution_result.get("status") or "").upper()
+        if execution_status != "FAILED" and execution_result.get("delivered", True):
             try:
                 simulation_result = self.simulator.apply_command(self.state, command, self.tools)
             except Exception as exc:
                 simulation_result = {
-                    "status": "failed",
+                    "status": "FAILED",
                     "delivered": False,
                     "usable_output": False,
                     "failure_reason": f"simulation_apply_failed:{exc}",
@@ -712,7 +735,7 @@ class AgentRuntime:
                 }
         else:
             simulation_result = {
-                "status": "failed",
+                "status": "FAILED",
                 "delivered": False,
                 "usable_output": False,
                 "failure_reason": execution_result.get("error") or execution_result.get("failure_reason") or "command_execution_failed",
@@ -720,6 +743,8 @@ class AgentRuntime:
                 "mission_state": dict(self.state.mission_state),
             }
         result = {**execution_result, **simulation_result}
+        if "status" in result:
+            result["status"] = "COMPLETED" if str(result.get("status") or "").upper() in {"OK", "SUCCESS", "COMPLETED"} else "FAILED"
         self.state.last_command = dict(command)
         self.state.mission_state = dict(simulation_result.get("mission_state") or self.state.mission_state)
         self.state.remember({
@@ -745,16 +770,25 @@ class AgentRuntime:
         last_level = self._last_sensor_check.get("battery_level", current_level)
 
         # 배터리 상태 변화 감지
-        if current_level < 20 and last_level >= 20:
+        if current_level < 30 and last_level >= 30:
             # ✅ Event를 Registry에 보고 (Ch.15)
             event = {
                 "event_id": str(uuid4()),
                 "source_system": "device_agent",
-                "source_agent_id": self.state.registry_id,
+                "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "event_type": "sensor_status_changed",
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "severity": "WARNING",
                 "message": f"Battery low: {current_level}%",
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "title": "Low battery warning",
+                "description": f"Battery dropped below warning threshold: {current_level}%",
+                "data": {
+                    "anomaly_type": "LOW_BATTERY",
+                    "battery_percent": current_level,
+                    "threshold": 30,
+                },
                 "metadata": {
                     "sensor_type": "battery",
                     "sensor_id": "battery_main",
@@ -779,11 +813,21 @@ class AgentRuntime:
             event = {
                 "event_id": str(uuid4()),
                 "source_system": "device_agent",
-                "source_agent_id": self.state.registry_id,
+                "source_agent_id": self.state.agent_id,
                 "source_role": self.state.role,
-                "event_type": "sensor_status_changed",
+                "event_type": "SYS_ANOMALY_DETECTED",
                 "severity": "CRITICAL",
                 "message": f"Depth exceeded: {depth_m}m > {max_depth}m",
+                "target_type": "DEVICE",
+                "target_id": str(self.state.registry_id or self.state.agent_id),
+                "title": "Depth limit exceeded",
+                "description": f"Depth exceeded maximum limit: {depth_m}m > {max_depth}m",
+                "data": {
+                    "anomaly_type": "CRITICAL_HAZARD",
+                    "hazard": "DEPTH_LIMIT_EXCEEDED",
+                    "depth_m": depth_m,
+                    "threshold_m": max_depth,
+                },
                 "metadata": {
                     "sensor_type": "depth",
                     "sensor_id": "depth_main",
