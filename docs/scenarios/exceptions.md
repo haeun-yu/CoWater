@@ -71,12 +71,12 @@ Event {
 
 ### **2️⃣ SYS_ANOMALY_DETECTED (anomaly_type=LOW_BATTERY): 배터리 부족**
 
-**상황**: Device 배터리가 경고 임계값(`warning_battery_percent = 30%`)에 도달함
+**상황**: Device 배터리가 경고 임계값(`warning_battery_percent = 20%`)에 도달함
 
 **P6 적용 (정책 기반 자동 대응)**:
 
 - Policy가 정의된 경우: `battery < 10%` → 즉시 RETURN_TO_BASE Mission 자동 생성
-- Policy가 없는 경우: `battery < 30%` 구간에서는 경고만 발행, 사용자 선택 대기
+- Policy가 없는 경우: `battery < 20%` 구간에서는 경고만 발행, 사용자 선택 대기
 
 **감지**:
 

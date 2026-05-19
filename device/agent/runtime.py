@@ -558,6 +558,10 @@ class AgentRuntime:
 
                 # 6️⃣ ✅ Sensor health monitoring (Ch.15)
                 self._check_sensor_health(telemetry)
+
+                # 7️⃣ 실행 중 태스크 중단 감시
+                await self._check_task_interrupt_conditions(telemetry)
+
                 self._persist_runtime_state()
 
         except Exception as e:
@@ -769,8 +773,8 @@ class AgentRuntime:
             current_level = float(telemetry.get("battery_percent", 100.0))
         last_level = self._last_sensor_check.get("battery_level", current_level)
 
-        # 배터리 상태 변화 감지
-        if current_level < 30 and last_level >= 30:
+        # 배터리 상태 변화 감지 (임계값 20%)
+        if current_level < self._BATTERY_THRESHOLD and last_level >= self._BATTERY_THRESHOLD:
             # ✅ Event를 Registry에 보고 (Ch.15)
             event = {
                 "event_id": str(uuid4()),
@@ -787,7 +791,7 @@ class AgentRuntime:
                 "data": {
                     "anomaly_type": "LOW_BATTERY",
                     "battery_percent": current_level,
-                    "threshold": 30,
+                    "threshold": self._BATTERY_THRESHOLD,
                 },
                 "metadata": {
                     "sensor_type": "battery",
@@ -837,6 +841,66 @@ class AgentRuntime:
             }
             self.registry_client.ingest_event(event)
             logger.critical(f"⚠️ Depth exceeded event reported: {depth_m}m")
+
+    async def _check_task_interrupt_conditions(self, telemetry: dict[str, Any]) -> None:
+        """실행 중 태스크의 지속 가능 여부를 확인하고, 불가하면 중단 보고 후 미션 상태를 리셋한다."""
+        mission_mode = (self.state.mission_state or {}).get("mode", "idle")
+        if mission_mode in {"idle", "ready", "completed", "returned", "aborted", "stopped"}:
+            return  # 실행 중인 태스크 없음
+
+        active_action = str((self.state.mission_state or {}).get("active_action") or "").lower()
+        is_safe = active_action in self._SAFE_ACTIONS
+
+        if is_safe:
+            return  # 안전 복귀 명령은 중단하지 않음
+
+        battery = telemetry.get("battery", {})
+        if isinstance(battery, dict):
+            current_level = float(battery.get("charge_percent", 100.0))
+        else:
+            current_level = float(telemetry.get("battery_percent", 100.0))
+
+        if current_level < self._BATTERY_THRESHOLD:
+            logger.warning(
+                f"Task interrupted: battery {current_level:.1f}% < {self._BATTERY_THRESHOLD}% "
+                f"(action={active_action}, mode={mission_mode})"
+            )
+            # 미션 상태를 aborted로 전환
+            if hasattr(self.simulator, "mission_state"):
+                self.simulator.mission_state.update({
+                    "mode": "aborted",
+                    "status": "aborted",
+                    "active_action": None,
+                    "target_position": None,
+                })
+                self.state.mission_state = dict(self.simulator.mission_state)
+
+            # 현재 처리 중인 태스크 ID를 찾아 결과 보고
+            last_task_id = getattr(self.state, "_executing_task_id", None)
+            if last_task_id:
+                from agent.message_router import _report_task_result_to_system_agent
+                system_url = str(self.config.get("system_agent", {}).get("url") or "http://127.0.0.1:9116")
+                report_endpoint = f"{system_url.rstrip('/')}/message:send"
+                await _report_task_result_to_system_agent(
+                    runtime=self,
+                    task_id=last_task_id,
+                    command={"action": active_action},
+                    execution_result={
+                        "status": "FAILED",
+                        "failure_reason": f"battery_insufficient:{current_level:.1f}%",
+                        "abort_type": "BATTERY_INSUFFICIENT",
+                    },
+                    execution_status="FAILED",
+                    system_agent_url=report_endpoint,
+                )
+                self.state._executing_task_id = None  # type: ignore[attr-defined]
+
+            self.state.remember({
+                "kind": "task_interrupted",
+                "at": utc_now(),
+                "reason": f"battery_insufficient:{current_level:.1f}%",
+                "action": active_action,
+            })
 
     async def _report_recovery_to_system(self) -> None:
         """Report device recovery to System Agent (Ch.16)"""
@@ -895,13 +959,48 @@ class AgentRuntime:
         except Exception as e:
             logger.error(f"Error in recovery reporting: {e}", exc_info=True)
 
+    # 배터리가 부족해도 반드시 허용해야 하는 안전 복귀 명령
+    _SAFE_ACTIONS: frozenset[str] = frozenset({
+        "return_to_base", "surface", "hold_position",
+        "emergency_stop", "abort_mission", "rtb",
+    })
+    _BATTERY_THRESHOLD: int = 20
+
+    def _get_battery_percent(self) -> float | None:
+        telemetry = self.state.last_telemetry or {}
+        battery = telemetry.get("battery")
+        if isinstance(battery, dict):
+            val = battery.get("charge_percent")
+        else:
+            val = telemetry.get("battery_percent")
+        try:
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
     def can_accept_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
         action = str(command.get("action") or "").strip().lower()
         if not action:
             return False, "missing_action"
+
         supported = {str(item).strip().lower() for item in self.skills.list_actions()}
         if action not in supported:
             return False, "unsupported_action"
+
         if not self.state.connected and self.registry_client.required:
             return False, "device_not_connected"
+
+        is_safe = action in self._SAFE_ACTIONS
+
+        # 이미 다른 태스크 실행 중 — 안전 복귀 명령은 항상 허용
+        mission_mode = (self.state.mission_state or {}).get("mode", "idle")
+        if not is_safe and mission_mode not in {"idle", "ready", "completed", "returned", "aborted", "stopped"}:
+            return False, f"already_executing:{mission_mode}"
+
+        # 배터리 부족 — 안전 복귀 명령은 항상 허용
+        if not is_safe:
+            battery = self._get_battery_percent()
+            if battery is not None and battery < self._BATTERY_THRESHOLD:
+                return False, f"battery_insufficient:{battery:.1f}%"
+
         return True, None

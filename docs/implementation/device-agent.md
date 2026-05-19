@@ -424,7 +424,7 @@ def can_perform_task(task: Task, device: Device) -> tuple[bool, str]:
 
 **리소스**:
 
-- Battery: 권장 최소 임계값 (예: 30%, 사용자 override 가능)
+- Battery: 권장 최소 임계값 (예: 20%, 사용자 override 가능)
 - Position: 목표 위치 도달 가능성 (GPS/SLAM 기반)
 - Communication: 필요한 매체 가용성
 - Time: Task 완료까지 필요한 시간 vs 배터리 남은 시간
@@ -436,7 +436,7 @@ def check_resources(task: Task, device: Device) -> tuple[bool, str]:
     """
 
     # 배터리 확인
-    if device.battery_percent < BATTERY_THRESHOLD:  # e.g., 30%, user override 가능
+    if device.battery_percent < BATTERY_THRESHOLD:  # e.g., 20%, user override 가능
         return False, f"Low battery: {device.battery_percent}%"
 
     # 위치 확인 (target_area가 있는 경우)
@@ -482,25 +482,26 @@ def check_safety_rules(task: Task, device: Device) -> tuple[bool, str]:
 ### 2.5 Task 상태 전이
 
 ```
-[Task 할당] (System Agent → Device Agent)
+[task.assign 수신] (System Agent → Device Agent)
     ↓
-[Device Agent 수신]
-    ↓
-┌─ Capability Check ─┐
-│ required_action    │
-│ ∈ device.actions?  │
-└───────┬────────────┘
-        ├─ NO → return ABORTED (reason: "Capability not available")
-        │
-        └─ YES → Resource Check
-               ├─ NO → return ABORTED (reason: "Low battery" / "Unreachable")
-               │
-               └─ YES → Safety Check
-                      ├─ NO → return ABORTED (reason: "Safety rule violated")
-                      │
-                      └─ YES → [Execute Task]
-                             ├─ Success → COMPLETED
-                             ├─ Failure → FAILED (error_type, logs)
+[3단계 수행 가능 여부 판단]
+    ├─ Capability Check 실패 → status: "ABORTED" 즉시 반환
+    ├─ Already Assigned 실패 → status: "ABORTED" 즉시 반환
+    └─ Battery Check 실패   → status: "ABORTED" 즉시 반환
+
+[모두 통과]
+    → status: "OK" 반환 (수락 알림)
+    → 백그라운드 실행 시작 (_execute_task_in_background)
+
+[실행 중 — 텔레메트리 루프가 주기적으로 조건 감시]
+    ├─ 배터리 < 임계값 감지
+    │       → _abort_active_task()
+    │       → task.result FAILED 부모에 전송 (중단 알림)
+    │       → 실행 중단
+    │
+    └─ 실행 완료 (duration_sec 경과)
+            → task.result COMPLETED 부모에 전송
+            → _active_task 클리어
 ```
 
 ### 2.6 ABORTED vs FAILED 차이
@@ -750,78 +751,107 @@ def check_device_heartbeat(device_id: str):
 
 ---
 
-## 6. 로컬 안전 행동
+## 6. 실행 중 중단 (Mid-Execution Abort)
 
-### 5.1 배터리 부족 시
+텔레메트리 루프가 주기적으로 `_check_task_interrupt_conditions()`를 호출하여 실행 중인 태스크의 지속 가능 여부를 감시한다.
+
+### 5.1 중단 조건 감시 루프
 
 ```python
-def handle_low_battery():
-    """배터리가 임계값 아래로 떨어졌을 때"""
+async def _check_task_interrupt_conditions(self) -> None:
+    """텔레메트리 갱신마다 호출 — 실행 중 태스크의 지속 가능 여부 확인."""
+    active = self._active_task  # 현재 실행 중인 태스크
+    if active is None:
+        return
+    if active["is_safe"]:
+        return  # return_to_base 등 안전 복귀 명령은 중단하지 않음
 
-    if self.battery_percent <= CRITICAL_THRESHOLD:  # e.g., 10%
-        # 1. 진행 중인 Task 중지
-        cancel_current_task("Battery critical")
-
-        # 2. 안전한 위치로 복귀
-        execute_return_to_base()
-
-        # 3. 통신 전용 모드로 전환 (센서 끔)
-        disable_sensors()
-        enable_minimal_communication()
-
-        # 4. System Agent에 알림
-        send_problem_report(
-            problem_type="CRITICAL_BATTERY",
-            details={"battery_percent": self.battery_percent}
+    battery = self._battery_percent()
+    if battery is not None and battery < BATTERY_THRESHOLD:  # 20%
+        await self._abort_active_task(
+            reason=f"Battery dropped to {battery:.1f}% during task execution",
+            abort_type="BATTERY_INSUFFICIENT",
         )
 ```
 
-### 5.2 통신 단절 시
+### 5.2 태스크 중단 처리
+
+중단이 결정되면 `_abort_active_task()`가 호출된다:
+
+```python
+async def _abort_active_task(self, *, reason: str, abort_type: str) -> None:
+    # 1. _active_task 클리어 (중복 트리거 방지)
+    active = self._active_task
+    self._active_task = None
+
+    # 2. 중단 이력 기록
+    self.state.remember({"kind": "task_interrupted", ...})
+
+    # 3. 부모 에이전트에 task.result FAILED 전송 (중단 알림)
+    await self._report_task_result_to_parent(
+        task_id=active["task_id"],
+        mission_id=active["mission_id"],
+        status="FAILED",
+        error=reason,
+        abort_type=abort_type,
+    )
+```
+
+### 5.3 부모 에이전트로 결과 보고
+
+중단 또는 완료 시 `task.result` A2A 메시지를 부모(`parent_command_endpoint`)로 전송한다.
+
+**중단 보고**:
+
+```json
+{
+  "message_type": "task.result",
+  "task_id": "task-123",
+  "mission_id": "mission-456",
+  "status": "FAILED",
+  "error": "Battery dropped to 18.5% during task execution",
+  "abort_type": "BATTERY_INSUFFICIENT",
+  "device_id": "42",
+  "agent_id": "agent-uuid-xxx",
+  "reported_at": "2026-05-20T10:35:30Z"
+}
+```
+
+**완료 보고**:
+
+```json
+{
+  "message_type": "task.result",
+  "task_id": "task-123",
+  "mission_id": "mission-456",
+  "status": "COMPLETED",
+  "device_id": "42",
+  "agent_id": "agent-uuid-xxx",
+  "reported_at": "2026-05-20T10:35:30Z"
+}
+```
+
+### 5.4 통신 단절 시
 
 ```python
 def handle_communication_loss():
     """System Agent와 통신 불가 상태"""
 
-    # 로컬 정책에 따라 자동 행동
     if self.mission_is_critical():
         # 중요 미션: 계속 진행 (로컬 판단)
-        logger.warning("Offline mode: continuing critical mission")
         execute_local_mission_plan()
     else:
-        # 일반 미션: 일시 정지 및 안전 위치 유지
-        pause_current_task()
+        # 일반 미션: 안전 위치 유지 후 복구 대기
         hold_position()
-        logger.warning("Offline mode: holding position")
 
-    # 통신 복귀 후:
+    # 통신 복구 후:
     # - System Agent에 현재 상태 보고
     # - 미처리 Task 확인 및 계속
 ```
 
-### 5.3 배터리 부족 (낮음) 시
-
-```python
-def handle_low_battery_warning():
-    """배터리가 WARNING 임계값 아래로 떨어졌을 때"""
-
-    if self.battery_percent <= WARNING_THRESHOLD:  # e.g., 30%
-        # 1. System Agent에 경고 알림
-        send_problem_report(
-            problem_type="LOW_BATTERY",
-            severity="WARNING",
-            details={"battery_percent": self.battery_percent}
-        )
-        
-        # 2. 로깅 및 상태 저장
-        logger.warning(f"Battery low: {self.battery_percent}%")
-        
-        # 3. 진행 중인 Task 계속 수행 (System Agent의 Policy가 결정)
-        # Device Agent는 상태만 보고하고, 결정은 System Agent에 위임
-```
-
 **배터리 상태 보고 타이밍**:
 - **정기**: Heartbeat 발송 시 (1초마다) battery_percent 포함
-- **즉각**: WARNING/CRITICAL 임계값 도달 시 Problem Report 발송
+- **즉각 중단**: 배터리 < 20% 도달 시 → task.result FAILED 전송
 
 ---
 
@@ -917,32 +947,38 @@ def get_active_mediums(self) -> List[str]:
 ```json
 {
   "message_type": "task.assign",
-  "task": {
-    "task_id": "task-123",
-    "mission_id": "mission-456",
-    "title": "High-resolution scan area A",
-    "type": "DEVICE_TASK",
-    "required_action": "HIGH_RES_SCAN",
-    "sequence": 1,
-    "target_position": {
-      "latitude": 37.5555,
-      "longitude": 126.9999
-    },
-    "parameters": {
-      "resolution": "high",
-      "duration_sec": 300
-    }
-  }
+  "action": "HIGH_RES_SCAN",
+  "task_id": "task-123",
+  "mission_id": "mission-456",
+  "step_id": "step-1",
+  "params": {
+    "resolution": "high",
+    "duration_sec": 300
+  },
+  "reason": "Mine detection survey"
 }
 ```
 
-**응답**:
+**응답 — 수락**:
 
 ```json
 {
-  "status": "OK" | "ABORTED",
+  "status": "OK",
+  "acceptance_status": "ACCEPTED",
   "task_id": "task-123",
-  "reason": "null or ABORTED reason"
+  "delivered": true
+}
+```
+
+**응답 — 거절**:
+
+```json
+{
+  "status": "ABORTED",
+  "acceptance_status": "REJECTED",
+  "abort_type": "BATTERY_INSUFFICIENT | ALREADY_ASSIGNED | SENSOR_MISSING",
+  "task_id": "task-123",
+  "reason": "Battery too low: 15.0% (threshold 20%)"
 }
 ```
 

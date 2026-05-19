@@ -2790,7 +2790,7 @@ class AgentRuntime:
             except Exception:
                 artifact_data = {}
             acceptance = str(artifact_data.get("acceptance_status") or artifact_data.get("status") or "").upper()
-            accepted = acceptance != "REJECTED"
+            accepted = acceptance not in {"REJECTED", "ABORTED"}  # ABORTED는 디바이스 거절 응답
             logger.info(f"A2A task sent to {target_agent_id}: accepted={accepted} status={acceptance or 'unknown'}")
 
             # ✅ Record task acceptance/rejection timeline event (Ch.18-20)

@@ -61,6 +61,9 @@ async def _execute_and_report_task(
                 "execution_result": execution_result if isinstance(execution_result, dict) else {"status": "unknown", "raw": execution_result},
             }
             runtime.task_id_store.record(task_id, result_to_store)
+            # 태스크 완료 — 중단 감시 참조 클리어
+            if getattr(runtime.state, "_executing_task_id", None) == task_id:
+                runtime.state._executing_task_id = None  # type: ignore[attr-defined]
 
         logger.info(f"Task {task_id} executed and reported: {normalized_status}")
     except Exception as e:
@@ -245,16 +248,17 @@ async def handle_a2a(runtime: Any, request: A2ASendRequest) -> dict[str, Any]:
         accepted, reject_reason = runtime.can_accept_command(command)
         if not accepted:
             result = {
-                "status": "REJECTED",
-                "reason": reject_reason or "task_rejected",
+                "status": "ABORTED",
                 "acceptance_status": "REJECTED",
                 "task_id": str(data.get("task_id") or request.taskId or ""),
-                "failure_category": "policy",
-                "failure_message": f"Task rejected: {reject_reason or 'device not ready'}",
+                "reason": reject_reason or "task_rejected",
             }
         else:
             task_id = str(data.get("task_id") or request.taskId or "")
+            # 중단 감시가 task_id를 참조할 수 있도록 저장
+            runtime.state._executing_task_id = task_id  # type: ignore[attr-defined]
             result = {
+                "status": "OK",
                 "acceptance_status": "ACCEPTED",
                 "task_id": task_id,
             }
